@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { 
   categorizeDerivatives, 
   formatOptionDescription,
@@ -19,6 +20,7 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
+  const [deRiskingOpen, setDeRiskingOpen] = useState(false);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -75,13 +77,13 @@ export function Derivatives() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* Section 1: Covered Call / De-Risking Covered Call */}
+      <main className="container mx-auto px-4 py-8 space-y-6">
+        {/* Section 1: Covered Call */}
         <Card className="border-border bg-card">
-          <CardHeader>
+          <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <Shield className="w-5 h-5 text-primary" />
-              <CardTitle className="text-xl">Covered Call / De-Risking Covered Call</CardTitle>
+              <CardTitle className="text-xl">Covered Call</CardTitle>
             </div>
             <p className="text-sm text-muted-foreground">
               CALL vendute con sottostante in portafoglio
@@ -89,24 +91,52 @@ export function Derivatives() {
           </CardHeader>
           <CardContent>
             {categories.coveredCalls.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Shield className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p>Nessuna Covered Call presente</p>
-                <p className="text-sm">Le CALL vendute verranno abbinate ai sottostanti posseduti</p>
+              <div className="text-center py-8 text-muted-foreground">
+                <Shield className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">Nessuna Covered Call presente</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-1">
                 {categories.coveredCalls.map((cc, index) => (
-                  <CoveredCallCard key={index} coveredCall={cc} />
+                  <CoveredCallRow key={index} coveredCall={cc} />
                 ))}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Section 2: Strategie */}
+        {/* Section 2: De-Risking Covered Call (Collapsible) */}
+        <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
+                    <Badge variant="secondary" className="text-xs">0</Badge>
+                  </div>
+                  {deRiskingOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                <div className="text-center py-6 text-muted-foreground">
+                  <p className="text-sm">Nessuna strategia De-Risking presente</p>
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Section 3: Strategie */}
         <Card className="border-border bg-card">
-          <CardHeader>
+          <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <Target className="w-5 h-5 text-primary" />
               <CardTitle className="text-xl">Strategie</CardTitle>
@@ -117,15 +147,14 @@ export function Derivatives() {
           </CardHeader>
           <CardContent>
             {categories.strategies.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Target className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p>Nessuna strategia presente</p>
-                <p className="text-sm">Le opzioni non coperte appariranno qui</p>
+              <div className="text-center py-8 text-muted-foreground">
+                <Target className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">Nessuna strategia presente</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-1">
                 {categories.strategies.map((strategy, index) => (
-                  <StrategyCard key={index} strategy={strategy} />
+                  <StrategyRow key={index} strategy={strategy} />
                 ))}
               </div>
             )}
@@ -136,66 +165,74 @@ export function Derivatives() {
   );
 }
 
-function CoveredCallCard({ coveredCall }: { coveredCall: CoveredCallPosition }) {
+function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contractsCovered, sharesCovered, isFullyCovered } = coveredCall;
   const profitLoss = option.profit_loss || 0;
   const isProfitable = profitLoss >= 0;
   
   return (
-    <div className="p-4 rounded-lg border border-border bg-background/50 space-y-3">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-lg">
-              {formatOptionDescription(option)}
-            </span>
-            <Badge variant={isFullyCovered ? "default" : "secondary"}>
-              {isFullyCovered ? 'Completamente coperta' : 'Parzialmente coperta'}
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge variant={isFullyCovered ? "default" : "secondary"} className="text-xs shrink-0">
+              {isFullyCovered ? 'Coperta' : 'Parziale'}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {contractsCovered} contratti × 100 = {sharesCovered} azioni coperte
-          </p>
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-sm text-muted-foreground">
+              {contractsCovered} × 100
+            </span>
+            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              <span className="font-semibold text-sm">{formatCurrency(profitLoss)}</span>
+            </div>
+          </div>
         </div>
-        <div className="text-right">
-          <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-            {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-            <span className="font-semibold">{formatCurrency(profitLoss)}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Sottostante</p>
+              <p className="font-medium">{underlying.description}</p>
+              <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Strike</p>
+              <p className="font-medium">${option.strike_price}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Scadenza</p>
+              <p className="font-medium">
+                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Premio</p>
+              <p className="font-medium">{formatCurrency(option.market_value || 0)}</p>
+            </div>
           </div>
           {option.profit_loss_pct !== null && (
-            <span className="text-xs text-muted-foreground">
-              {formatPercentage(option.profit_loss_pct)}
-            </span>
+            <div className="text-xs text-muted-foreground">
+              P/L: {formatPercentage(option.profit_loss_pct)}
+            </div>
           )}
         </div>
-      </div>
-      
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <p className="text-muted-foreground">Sottostante</p>
-          <p className="font-medium">{underlying.description}</p>
-          <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Strike</p>
-          <p className="font-medium">${option.strike_price}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Scadenza</p>
-          <p className="font-medium">
-            {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Premio</p>
-          <p className="font-medium">{formatCurrency(option.market_value || 0)}</p>
-        </div>
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
-function StrategyCard({ strategy }: { strategy: StrategyPosition }) {
+function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
   const position = strategy.positions[0];
   if (!position) return null;
   
@@ -217,65 +254,72 @@ function StrategyCard({ strategy }: { strategy: StrategyPosition }) {
   };
   
   return (
-    <div className="p-4 rounded-lg border border-border bg-background/50 space-y-3">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-lg">
-              {formatOptionDescription(position)}
-            </span>
-            <Badge variant={getStrategyBadgeVariant()}>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{formatOptionDescription(position)}</span>
+            <Badge variant={getStrategyBadgeVariant()} className="text-xs shrink-0">
               {strategy.description}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {Math.abs(position.quantity)} contratto/i {isSold ? 'venduto/i' : 'comprato/i'}
-          </p>
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-sm text-muted-foreground">
+              {Math.abs(position.quantity)} {isSold ? 'V' : 'C'}
+            </span>
+            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              <span className="font-semibold text-sm">{formatCurrency(profitLoss)}</span>
+            </div>
+          </div>
         </div>
-        <div className="text-right">
-          <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-            {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-            <span className="font-semibold">{formatCurrency(profitLoss)}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Tipo</p>
+              <p className="font-medium">{position.option_type?.toUpperCase() || '-'}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Strike</p>
+              <p className="font-medium">${position.strike_price || '-'}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Scadenza</p>
+              <p className="font-medium">
+                {position.expiry_date ? new Date(position.expiry_date).toLocaleDateString('it-IT') : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Valore</p>
+              <p className="font-medium">{formatCurrency(position.market_value || 0)}</p>
+            </div>
           </div>
           {position.profit_loss_pct !== null && (
-            <span className="text-xs text-muted-foreground">
-              {formatPercentage(position.profit_loss_pct)}
-            </span>
+            <div className="text-xs text-muted-foreground">
+              P/L: {formatPercentage(position.profit_loss_pct)}
+            </div>
           )}
         </div>
-      </div>
-      
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <p className="text-muted-foreground">Tipo</p>
-          <p className="font-medium">{position.option_type?.toUpperCase() || '-'}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Strike</p>
-          <p className="font-medium">${position.strike_price || '-'}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Scadenza</p>
-          <p className="font-medium">
-            {position.expiry_date ? new Date(position.expiry_date).toLocaleDateString('it-IT') : '-'}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Valore</p>
-          <p className="font-medium">{formatCurrency(position.market_value || 0)}</p>
-        </div>
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
 function DerivativesSkeleton() {
   return (
     <div className="min-h-screen bg-background p-8">
-      <div className="container mx-auto space-y-8">
+      <div className="container mx-auto space-y-6">
         <Skeleton className="h-12 w-64 rounded-lg" />
-        <Skeleton className="h-[300px] rounded-lg" />
-        <Skeleton className="h-[300px] rounded-lg" />
+        <Skeleton className="h-[200px] rounded-lg" />
+        <Skeleton className="h-[60px] rounded-lg" />
+        <Skeleton className="h-[200px] rounded-lg" />
       </div>
     </div>
   );
