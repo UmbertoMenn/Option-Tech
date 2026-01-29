@@ -1,0 +1,222 @@
+import { useState } from 'react';
+import { Position, AssetType, ASSET_TYPE_LABELS, DerivativePosition } from '@/types/portfolio';
+import { formatCurrency, formatPercentage, formatProfitLoss, formatDate } from '@/lib/formatters';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ChevronDown, ChevronUp, BarChart2, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { OptionPayoffDialog } from './OptionPayoffDialog';
+
+interface PositionsTableProps {
+  positions: Position[];
+}
+
+const assetTabs: { value: AssetType | 'all'; label: string }[] = [
+  { value: 'all', label: 'Tutte' },
+  { value: 'bond', label: 'Obbligazioni' },
+  { value: 'stock', label: 'Azioni' },
+  { value: 'etf', label: 'ETF' },
+  { value: 'derivative', label: 'Derivati' },
+  { value: 'commodity', label: 'Commodities' },
+];
+
+export function PositionsTable({ positions }: PositionsTableProps) {
+  const [selectedTab, setSelectedTab] = useState<AssetType | 'all'>('all');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' } | null>(null);
+  const [selectedDerivatives, setSelectedDerivatives] = useState<DerivativePosition[]>([]);
+  const [showPayoffDialog, setShowPayoffDialog] = useState(false);
+
+  const filteredPositions = selectedTab === 'all' 
+    ? positions 
+    : positions.filter(p => p.asset_type === selectedTab);
+
+  const sortedPositions = [...filteredPositions].sort((a, b) => {
+    if (!sortConfig) return 0;
+    
+    const aVal = a[sortConfig.key];
+    const bVal = b[sortConfig.key];
+    
+    if (aVal === null || aVal === undefined) return 1;
+    if (bVal === null || bVal === undefined) return -1;
+    
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+    
+    return sortConfig.direction === 'asc' 
+      ? String(aVal).localeCompare(String(bVal))
+      : String(bVal).localeCompare(String(aVal));
+  });
+
+  const handleSort = (key: keyof Position) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev?.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const SortIcon = ({ columnKey }: { columnKey: keyof Position }) => {
+    if (sortConfig?.key !== columnKey) return null;
+    return sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />;
+  };
+
+  const derivatives = positions.filter(p => p.asset_type === 'derivative' && p.option_type) as DerivativePosition[];
+  const underlyings = [...new Set(derivatives.map(d => d.underlying).filter(Boolean))];
+
+  const handleShowPayoff = (underlying: string) => {
+    const derivs = derivatives.filter(d => d.underlying === underlying);
+    setSelectedDerivatives(derivs);
+    setShowPayoffDialog(true);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as AssetType | 'all')}>
+        <TabsList className="bg-background-tertiary border border-border">
+          {assetTabs.map(tab => {
+            const count = tab.value === 'all' 
+              ? positions.length 
+              : positions.filter(p => p.asset_type === tab.value).length;
+            
+            if (count === 0 && tab.value !== 'all') return null;
+            
+            return (
+              <TabsTrigger 
+                key={tab.value} 
+                value={tab.value}
+                className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                {tab.label}
+                <Badge variant="secondary" className="ml-2 text-xs">
+                  {count}
+                </Badge>
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
+
+      {/* Derivative Payoff Buttons */}
+      {selectedTab === 'derivative' && underlyings.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {underlyings.map(underlying => (
+            <Button
+              key={underlying}
+              variant="outline"
+              size="sm"
+              onClick={() => handleShowPayoff(underlying!)}
+              className="border-primary/30 hover:bg-primary/10"
+            >
+              <BarChart2 className="w-4 h-4 mr-2" />
+              Payoff {underlying}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('description')}>
+                  <div className="flex items-center gap-1">
+                    Titolo <SortIcon columnKey="description" />
+                  </div>
+                </th>
+                <th>Tipo</th>
+                <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('quantity')}>
+                  <div className="flex items-center justify-end gap-1">
+                    Quantità <SortIcon columnKey="quantity" />
+                  </div>
+                </th>
+                <th className="text-right">Prezzo</th>
+                <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('market_value')}>
+                  <div className="flex items-center justify-end gap-1">
+                    Controvalore <SortIcon columnKey="market_value" />
+                  </div>
+                </th>
+                <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('profit_loss')}>
+                  <div className="flex items-center justify-end gap-1">
+                    P/L <SortIcon columnKey="profit_loss" />
+                  </div>
+                </th>
+                <th className="text-right">Peso</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedPositions.map((position, index) => (
+                <tr 
+                  key={position.id || index}
+                  className="animate-fade-in"
+                  style={{ animationDelay: `${index * 20}ms` }}
+                >
+                  <td>
+                    <div className="max-w-[300px]">
+                      <p className="font-medium truncate">{position.description}</p>
+                      {position.isin && (
+                        <p className="text-xs text-muted-foreground font-mono">{position.isin}</p>
+                      )}
+                      {position.option_type && position.strike_price && (
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge 
+                            variant="outline" 
+                            className={position.option_type === 'call' ? 'border-profit text-profit' : 'border-loss text-loss'}
+                          >
+                            {position.option_type.toUpperCase()} {position.strike_price}
+                          </Badge>
+                          {position.expiry_date && (
+                            <span className="text-xs text-muted-foreground">
+                              Exp: {formatDate(position.expiry_date)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <Badge variant="secondary" className="text-xs">
+                      {ASSET_TYPE_LABELS[position.asset_type]}
+                    </Badge>
+                  </td>
+                  <td className="text-right font-mono">
+                    {position.quantity.toLocaleString('it-IT')}
+                  </td>
+                  <td className="text-right font-mono text-muted-foreground">
+                    {position.current_price ? formatCurrency(position.current_price, position.currency) : '-'}
+                  </td>
+                  <td className="text-right font-mono font-medium">
+                    {position.market_value ? formatCurrency(position.market_value) : '-'}
+                  </td>
+                  <td className="text-right">
+                    {position.profit_loss !== undefined && position.profit_loss !== null ? (
+                      <div className="flex items-center justify-end gap-1">
+                        {position.profit_loss >= 0 ? (
+                          <ArrowUpRight className="w-4 h-4 text-profit" />
+                        ) : (
+                          <ArrowDownRight className="w-4 h-4 text-loss" />
+                        )}
+                        <span className={`font-mono ${position.profit_loss >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {formatProfitLoss(position.profit_loss)}
+                        </span>
+                      </div>
+                    ) : '-'}
+                  </td>
+                  <td className="text-right font-mono text-muted-foreground">
+                    {position.weight_pct ? `${position.weight_pct.toFixed(1)}%` : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <OptionPayoffDialog
+        open={showPayoffDialog}
+        onOpenChange={setShowPayoffDialog}
+        positions={selectedDerivatives}
+      />
+    </div>
+  );
+}
