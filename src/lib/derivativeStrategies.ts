@@ -130,7 +130,96 @@ export function categorizeDerivatives(
 }
 
 /**
- * Finds the underlying stock for an option
+ * Company alias database for intelligent matching
+ * Maps common names, tickers, and variations to canonical identifiers
+ */
+const COMPANY_ALIASES: Record<string, string[]> = {
+  // Format: 'canonical_key': ['all', 'possible', 'variations']
+  'ALPHABET': ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
+  'AMAZON': ['AMZN', 'AMAZON', 'AMAZON.COM', 'AMAZON COM', 'AMAZON INC'],
+  'APPLE': ['AAPL', 'APPLE', 'APPLE INC'],
+  'NVIDIA': ['NVDA', 'NVIDIA', 'NVIDIA CORP', 'NVIDIA CORPORATION'],
+  'TESLA': ['TSLA', 'TESLA', 'TESLA INC', 'TESLA MOTORS'],
+  'MICROSOFT': ['MSFT', 'MICROSOFT', 'MICROSOFT CORP', 'MICROSOFT CORPORATION'],
+  'AMD': ['AMD', 'ADVANCED MICRO', 'ADVANCED MICRO DEVICES'],
+  'PALANTIR': ['PLTR', 'PALANTIR', 'PALANTIR TECHNOLOGIES'],
+  'COREWEAVE': ['CRWV', 'COREWEAVE', 'CORE WEAVE'],
+  'UNITEDHEALTH': ['UNH', 'UNITEDHEALTH', 'UNITED HEALTH', 'UNITEDHEALTH GROUP'],
+  'META': ['META', 'FB', 'FACEBOOK', 'META PLATFORMS'],
+  'NETFLIX': ['NFLX', 'NETFLIX', 'NETFLIX INC'],
+  'COINBASE': ['COIN', 'COINBASE', 'COINBASE GLOBAL'],
+  'INTEL': ['INTC', 'INTEL', 'INTEL CORP', 'INTEL CORPORATION'],
+  'BROADCOM': ['AVGO', 'BROADCOM', 'BROADCOM INC'],
+  'QUALCOMM': ['QCOM', 'QUALCOMM', 'QUALCOMM INC'],
+  'UBER': ['UBER', 'UBER TECHNOLOGIES'],
+  'AIRBNB': ['ABNB', 'AIRBNB', 'AIRBNB INC'],
+  'DISNEY': ['DIS', 'DISNEY', 'WALT DISNEY'],
+  'JPMORGAN': ['JPM', 'JPMORGAN', 'JP MORGAN', 'JPMORGAN CHASE'],
+  'GOLDMAN': ['GS', 'GOLDMAN', 'GOLDMAN SACHS'],
+  'BERKSHIRE': ['BRK.A', 'BRK.B', 'BERKSHIRE', 'BERKSHIRE HATHAWAY'],
+  'VISA': ['V', 'VISA', 'VISA INC'],
+  'MASTERCARD': ['MA', 'MASTERCARD', 'MASTERCARD INC'],
+  'PAYPAL': ['PYPL', 'PAYPAL', 'PAYPAL HOLDINGS'],
+  'ORACLE': ['ORCL', 'ORACLE', 'ORACLE CORP', 'ORACLE CORPORATION'],
+  'SALESFORCE': ['CRM', 'SALESFORCE', 'SALESFORCE INC'],
+  'ADOBE': ['ADBE', 'ADOBE', 'ADOBE INC', 'ADOBE SYSTEMS'],
+  'SNOWFLAKE': ['SNOW', 'SNOWFLAKE', 'SNOWFLAKE INC'],
+  'CROWDSTRIKE': ['CRWD', 'CROWDSTRIKE', 'CROWDSTRIKE HOLDINGS'],
+  'SHOPIFY': ['SHOP', 'SHOPIFY', 'SHOPIFY INC'],
+};
+
+/**
+ * Gets the canonical company key for any variation
+ */
+function getCanonicalKey(text: string): string | null {
+  const upperText = text.toUpperCase().trim();
+  
+  for (const [canonical, aliases] of Object.entries(COMPANY_ALIASES)) {
+    if (aliases.some(alias => upperText.includes(alias) || alias.includes(upperText))) {
+      return canonical;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Normalizes text for fuzzy matching
+ */
+function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
+    .replace(/\s+/g, ' ')          // Normalize spaces
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK)\b/g, '') // Remove common suffixes
+    .trim();
+}
+
+/**
+ * Calculates similarity between two strings (0-1)
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const s1 = normalizeForMatching(str1);
+  const s2 = normalizeForMatching(str2);
+  
+  if (s1 === s2) return 1;
+  if (s1.includes(s2) || s2.includes(s1)) return 0.9;
+  
+  // Check for word overlap
+  const words1 = new Set(s1.split(' ').filter(w => w.length > 1));
+  const words2 = new Set(s2.split(' ').filter(w => w.length > 1));
+  
+  let matches = 0;
+  for (const word of words1) {
+    if (words2.has(word)) matches++;
+  }
+  
+  const totalWords = Math.max(words1.size, words2.size);
+  return totalWords > 0 ? matches / totalWords : 0;
+}
+
+/**
+ * Finds the underlying stock for an option using intelligent matching
  */
 function findUnderlyingStock(
   underlying: string,
@@ -138,43 +227,45 @@ function findUnderlyingStock(
 ): Position | undefined {
   const underlyingUpper = underlying.toUpperCase().trim();
   
-  return stocks.find(stock => {
-    // Match by ticker
-    if (stock.ticker?.toUpperCase() === underlyingUpper) return true;
+  // First, try exact ticker match
+  const exactMatch = stocks.find(stock => 
+    stock.ticker?.toUpperCase() === underlyingUpper
+  );
+  if (exactMatch) return exactMatch;
+  
+  // Second, try canonical company matching
+  const optionCanonical = getCanonicalKey(underlyingUpper);
+  if (optionCanonical) {
+    const canonicalMatch = stocks.find(stock => {
+      const stockCanonical = getCanonicalKey(stock.description) || 
+                              getCanonicalKey(stock.ticker || '');
+      return stockCanonical === optionCanonical;
+    });
+    if (canonicalMatch) return canonicalMatch;
+  }
+  
+  // Third, try fuzzy matching on description
+  let bestMatch: Position | undefined;
+  let bestScore = 0;
+  
+  for (const stock of stocks) {
+    // Check description similarity
+    const descScore = calculateSimilarity(underlyingUpper, stock.description);
     
-    // Match by description containing the underlying name
-    const desc = stock.description.toUpperCase();
+    // Check ticker similarity if available
+    const tickerScore = stock.ticker 
+      ? calculateSimilarity(underlyingUpper, stock.ticker) 
+      : 0;
     
-    // Common patterns: "NVIDIA CORP", "APPLE INC", etc.
-    if (desc.includes(underlyingUpper)) return true;
+    const score = Math.max(descScore, tickerScore);
     
-    // Try matching company name variations
-    const companyMappings: Record<string, string[]> = {
-      'NVDA': ['NVIDIA', 'NVIDIA CORP'],
-      'NVIDIA': ['NVDA', 'NVIDIA CORP'],
-      'AAPL': ['APPLE', 'APPLE INC'],
-      'AMD': ['AMD', 'ADVANCED MICRO'],
-      'PLTR': ['PALANTIR'],
-      'PALANTIR': ['PLTR'],
-      'CRWV': ['COREWEAVE', 'CORE WEAVE'],
-      'COREWEAVE': ['CRWV'],
-      'UNH': ['UNITEDHEALTH', 'UNITED HEALTH'],
-      'UNITEDHEALTH': ['UNH'],
-      'TSLA': ['TESLA'],
-      'TESLA': ['TSLA'],
-      'GOOGL': ['GOOGLE', 'ALPHABET'],
-      'MSFT': ['MICROSOFT'],
-      'AMZN': ['AMAZON'],
-    };
-    
-    const mappings = companyMappings[underlyingUpper] || [];
-    for (const mapping of mappings) {
-      if (desc.includes(mapping)) return true;
-      if (stock.ticker?.toUpperCase() === mapping) return true;
+    if (score > bestScore && score >= 0.5) {
+      bestScore = score;
+      bestMatch = stock;
     }
-    
-    return false;
-  });
+  }
+  
+  return bestMatch;
 }
 
 /**
