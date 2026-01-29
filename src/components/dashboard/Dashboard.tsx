@@ -107,6 +107,7 @@ export function Dashboard() {
                 initialDate={portfolio?.initial_date ?? null}
                 deposits={portfolio?.deposits ?? null}
                 averageBalance={portfolio?.average_balance ?? null}
+                averageBalanceDate={portfolio?.average_balance_date ?? null}
                 onSave={(data) => updateInitialValue(data)}
                 isLoading={isUpdatingInitialValue}
               />

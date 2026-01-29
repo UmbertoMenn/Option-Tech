@@ -30,12 +30,14 @@ export function usePortfolio() {
       initialValue, 
       initialDate, 
       deposits, 
-      averageBalance 
+      averageBalance,
+      averageBalanceDate,
     }: { 
       initialValue: number; 
       initialDate: string; 
       deposits: number; 
       averageBalance: number;
+      averageBalanceDate: string;
     }) => {
       if (!portfolioQuery.data?.id) throw new Error('Portfolio non trovato');
       
@@ -46,6 +48,7 @@ export function usePortfolio() {
           initial_date: initialDate,
           deposits: deposits,
           average_balance: averageBalance,
+          average_balance_date: averageBalanceDate,
         })
         .eq('id', portfolioQuery.data.id);
       

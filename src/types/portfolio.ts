@@ -36,6 +36,7 @@ export interface Portfolio {
   initial_date: string | null;
   deposits: number | null;
   average_balance: number | null;
+  average_balance_date: string | null;
 }
 
 export interface PortfolioSummary {

@@ -12,6 +12,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
   const deposits = portfolio?.deposits || 0;
   const averageBalance = portfolio?.average_balance || 0;
   const initialDate = portfolio?.initial_date;
+  const averageBalanceDate = portfolio?.average_balance_date;
   const initialPlusDeposits = initialValue + deposits;
   
   const hasInitialData = initialValue > 0;
@@ -49,11 +50,9 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       icon: Landmark,
       change: null,
       dimmed: !hasAverageBalance,
-      subtext: initialDate && portfolio?.last_updated 
-        ? `dal ${formatDate(initialDate)} al ${formatDate(portfolio.last_updated)}` 
-        : initialDate 
-          ? `dal ${formatDate(initialDate)}` 
-          : null,
+      subtext: initialDate && averageBalanceDate 
+        ? `dal ${formatDate(initialDate)} al ${formatDate(averageBalanceDate)}` 
+        : null,
     },
     {
       label: 'Profitto/Perdita',

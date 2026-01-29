@@ -15,11 +15,13 @@ interface InitialValueFormProps {
   initialDate: string | null;
   deposits: number | null;
   averageBalance: number | null;
+  averageBalanceDate: string | null;
   onSave: (data: { 
     initialValue: number; 
     initialDate: string; 
     deposits: number; 
     averageBalance: number;
+    averageBalanceDate: string;
   }) => void;
   isLoading?: boolean;
 }
@@ -29,6 +31,7 @@ export function InitialValueForm({
   initialDate,
   deposits,
   averageBalance,
+  averageBalanceDate,
   onSave, 
   isLoading 
 }: InitialValueFormProps) {
@@ -39,6 +42,9 @@ export function InitialValueForm({
   const [avgBalanceValue, setAvgBalanceValue] = useState<string>(averageBalance?.toString() || '0');
   const [date, setDate] = useState<Date | undefined>(
     initialDate ? new Date(initialDate) : undefined
+  );
+  const [avgBalanceEndDate, setAvgBalanceEndDate] = useState<Date | undefined>(
+    averageBalanceDate ? new Date(averageBalanceDate) : undefined
   );
 
   // Calculate the sum of initial value + deposits
@@ -51,19 +57,21 @@ export function InitialValueForm({
     setDepositsValue(deposits?.toString() || '0');
     setAvgBalanceValue(averageBalance?.toString() || '0');
     setDate(initialDate ? new Date(initialDate) : undefined);
-  }, [initialValue, deposits, averageBalance, initialDate]);
+    setAvgBalanceEndDate(averageBalanceDate ? new Date(averageBalanceDate) : undefined);
+  }, [initialValue, deposits, averageBalance, initialDate, averageBalanceDate]);
 
   const handleSave = () => {
     const numValue = parseFloat(value.replace(/[^\d.,]/g, '').replace(',', '.'));
     const numDeposits = parseFloat(depositsValue.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
     const numAvgBalance = parseFloat(avgBalanceValue.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
     
-    if (!isNaN(numValue) && numValue > 0 && date) {
+    if (!isNaN(numValue) && numValue > 0 && date && avgBalanceEndDate) {
       onSave({
         initialValue: numValue,
         initialDate: format(date, 'yyyy-MM-dd'),
         deposits: numDeposits,
         averageBalance: numAvgBalance,
+        averageBalanceDate: format(avgBalanceEndDate, 'yyyy-MM-dd'),
       });
       setIsEditing(false);
     }
@@ -78,6 +86,9 @@ export function InitialValueForm({
             <div>
               <p className="text-xs text-muted-foreground">Patrimonio Iniziale</p>
               <p className="text-lg font-bold font-mono">{formatCurrency(initialValue || 0)}</p>
+              <p className="text-xs text-muted-foreground">
+                al {format(new Date(initialDate), 'dd MMMM yyyy', { locale: it })}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Versamenti</p>
@@ -90,10 +101,12 @@ export function InitialValueForm({
             <div>
               <p className="text-xs text-muted-foreground">Giacenza Media</p>
               <p className="text-lg font-bold font-mono">{formatCurrency(averageBalance || 0)}</p>
+              {initialDate && averageBalanceDate && (
+                <p className="text-xs text-muted-foreground">
+                  dal {format(new Date(initialDate), 'dd/MM/yyyy')} al {format(new Date(averageBalanceDate), 'dd/MM/yyyy')}
+                </p>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              al {format(new Date(initialDate), 'dd MMMM yyyy', { locale: it })}
-            </p>
           </div>
           <Button 
             variant="ghost" 
@@ -119,6 +132,34 @@ export function InitialValueForm({
           onChange={(e) => setValue(e.target.value)}
           className="font-mono"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Data Patrimonio Iniziale</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "w-full justify-start text-left font-normal",
+                !date && "text-muted-foreground"
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {date ? format(date, "dd MMMM yyyy", { locale: it }) : "Seleziona data"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={date}
+              onSelect={setDate}
+              disabled={(d) => d > new Date()}
+              initialFocus
+              className="pointer-events-auto"
+            />
+          </PopoverContent>
+        </Popover>
       </div>
 
       <div className="space-y-2">
@@ -153,28 +194,28 @@ export function InitialValueForm({
           className="font-mono"
         />
       </div>
-      
+
       <div className="space-y-2">
-        <Label>Data Riferimento</Label>
+        <Label>Data Giacenza Media</Label>
         <Popover>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               className={cn(
                 "w-full justify-start text-left font-normal",
-                !date && "text-muted-foreground"
+                !avgBalanceEndDate && "text-muted-foreground"
               )}
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
-              {date ? format(date, "dd MMMM yyyy", { locale: it }) : "Seleziona data"}
+              {avgBalanceEndDate ? format(avgBalanceEndDate, "dd MMMM yyyy", { locale: it }) : "Seleziona data"}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
             <Calendar
               mode="single"
-              selected={date}
-              onSelect={setDate}
-              disabled={(d) => d > new Date()}
+              selected={avgBalanceEndDate}
+              onSelect={setAvgBalanceEndDate}
+              disabled={(d) => d > new Date() || (date && d < date)}
               initialFocus
               className="pointer-events-auto"
             />
@@ -184,7 +225,7 @@ export function InitialValueForm({
 
       <Button 
         onClick={handleSave} 
-        disabled={!value || !date || isLoading}
+        disabled={!value || !date || !avgBalanceEndDate || isLoading}
         className="w-full"
       >
         <Save className="w-4 h-4 mr-2" />
