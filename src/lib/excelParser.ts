@@ -225,10 +225,12 @@ function parsePositionRow(
   if (!description && !isin) return null;
   
   // Determine if it's an ETF based on description
+  // Use word boundary regex to avoid false positives like "NETFLIX" containing "ETF"
   let finalAssetType = assetType;
   if (assetType === 'stock' && description) {
     const descUpper = description.toUpperCase();
-    if (descUpper.includes('ETF') || descUpper.includes('UCITS')) {
+    // Match ETF or UCITS as whole words only, not as substrings
+    if (/\bETF\b/.test(descUpper) || /\bUCITS\b/.test(descUpper)) {
       finalAssetType = 'etf';
     }
   }
