@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { AdminPanel } from "@/components/admin/AdminPanel";
+import { Derivatives } from "@/pages/Derivatives";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Dashboard />} />
+      <Route path="/derivatives" element={<Derivatives />} />
       <Route path="/admin" element={<AdminPanel />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

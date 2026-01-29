@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Position, AssetType, ASSET_TYPE_LABELS, DerivativePosition } from '@/types/portfolio';
 import { formatCurrency, formatPercentage, formatProfitLoss, formatDate } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronDown, ChevronUp, BarChart2, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, BarChart2, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
 import { OptionPayoffDialog } from './OptionPayoffDialog';
 
 interface PositionsTableProps {
@@ -97,8 +98,8 @@ export function PositionsTable({ positions }: PositionsTableProps) {
       </Tabs>
 
       {/* Derivative Payoff Buttons */}
-      {selectedTab === 'derivative' && underlyings.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+      {selectedTab === 'derivative' && (
+        <div className="flex flex-wrap gap-2 items-center">
           {underlyings.map(underlying => (
             <Button
               key={underlying}
@@ -111,6 +112,16 @@ export function PositionsTable({ positions }: PositionsTableProps) {
               Payoff {underlying}
             </Button>
           ))}
+          <Button
+            variant="default"
+            size="sm"
+            asChild
+          >
+            <Link to="/derivatives">
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Visualizza Strategie
+            </Link>
+          </Button>
         </div>
       )}
 
