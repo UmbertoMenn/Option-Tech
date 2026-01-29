@@ -1,5 +1,5 @@
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
-import { formatCurrency, formatProfitLoss, formatPercentage } from '@/lib/formatters';
+import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
 import { TrendingUp, TrendingDown, Wallet, Landmark, Target } from 'lucide-react';
 
 interface StatsCardsProps {
@@ -11,6 +11,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
   const initialValue = portfolio?.initial_value || 0;
   const deposits = portfolio?.deposits || 0;
   const averageBalance = portfolio?.average_balance || 0;
+  const initialDate = portfolio?.initial_date;
   const initialPlusDeposits = initialValue + deposits;
   
   const hasInitialData = initialValue > 0;
@@ -32,6 +33,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       value: formatCurrency(summary.totalValue),
       icon: Wallet,
       change: null,
+      subtext: null,
     },
     {
       label: 'Patrimonio Iniziale + Versamenti',
@@ -39,6 +41,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       icon: Target,
       change: null,
       dimmed: !hasInitialData,
+      subtext: initialDate ? `al ${formatDate(initialDate)}` : null,
     },
     {
       label: 'Giacenza Media',
@@ -46,6 +49,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       icon: Landmark,
       change: null,
       dimmed: !hasAverageBalance,
+      subtext: initialDate ? `dal ${formatDate(initialDate)}` : null,
     },
     {
       label: 'Profitto/Perdita',
@@ -54,6 +58,7 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       change: hasAverageBalance ? formatPercentage(percentPL) : null,
       isProfit: absolutePL >= 0,
       dimmed: !hasInitialData,
+      subtext: null,
     },
   ];
 
@@ -79,6 +84,11 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
               }`}>
                 {stat.value}
               </p>
+              {stat.subtext && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {stat.subtext}
+                </p>
+              )}
               {stat.change && (
                 <p className={`text-xs font-mono mt-1 ${
                   stat.isProfit ? 'text-profit' : 'text-loss'

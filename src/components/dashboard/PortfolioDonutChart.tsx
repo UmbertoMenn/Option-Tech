@@ -1,18 +1,36 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { PortfolioSummary, ASSET_TYPE_LABELS, ASSET_TYPE_COLORS } from '@/types/portfolio';
+import { PortfolioSummary, Portfolio, ASSET_TYPE_LABELS, ASSET_TYPE_COLORS } from '@/types/portfolio';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
 interface PortfolioDonutChartProps {
   summary: PortfolioSummary;
+  portfolio: Portfolio | null;
 }
 
-export function PortfolioDonutChart({ summary }: PortfolioDonutChartProps) {
+export function PortfolioDonutChart({ summary, portfolio }: PortfolioDonutChartProps) {
   const data = summary.byAssetType.map(item => ({
     name: ASSET_TYPE_LABELS[item.type],
     value: item.value,
     percentage: item.percentage,
     color: ASSET_TYPE_COLORS[item.type],
   }));
+
+  // Calculate the same P/L percentage as StatsCards
+  const initialValue = portfolio?.initial_value || 0;
+  const deposits = portfolio?.deposits || 0;
+  const averageBalance = portfolio?.average_balance || 0;
+  const initialPlusDeposits = initialValue + deposits;
+  
+  const hasInitialData = initialValue > 0;
+  const hasAverageBalance = averageBalance > 0;
+  
+  const absolutePL = hasInitialData 
+    ? summary.totalValue - initialPlusDeposits 
+    : summary.totalProfitLoss;
+  
+  const percentPL = hasAverageBalance 
+    ? (absolutePL / averageBalance) * 100 
+    : summary.totalProfitLossPct;
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -54,8 +72,8 @@ export function PortfolioDonutChart({ summary }: PortfolioDonutChartProps) {
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <p className="text-sm text-muted-foreground">Patrimonio Totale</p>
         <p className="text-2xl font-bold font-mono">{formatCurrency(summary.totalValue)}</p>
-        <p className={`text-sm font-mono ${summary.totalProfitLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
-          {formatPercentage(summary.totalProfitLossPct)}
+        <p className={`text-sm font-mono ${absolutePL >= 0 ? 'text-profit' : 'text-loss'}`}>
+          {formatPercentage(percentPL)}
         </p>
       </div>
     </div>

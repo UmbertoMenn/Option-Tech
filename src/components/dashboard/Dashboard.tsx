@@ -85,7 +85,7 @@ export function Dashboard() {
             <CardContent>
               {summary && positions.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <PortfolioDonutChart summary={summary} />
+                  <PortfolioDonutChart summary={summary} portfolio={portfolio} />
                   <AssetAllocationLegend summary={summary} />
                 </div>
               ) : (
