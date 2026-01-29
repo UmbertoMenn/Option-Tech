@@ -3,15 +3,32 @@ import { usePortfolio } from '@/hooks/usePortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, ArrowLeft } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { DerivativePosition } from '@/types/portfolio';
+import { Position } from '@/types/portfolio';
+import { useMemo } from 'react';
+import { 
+  categorizeDerivatives, 
+  formatOptionDescription,
+  CoveredCallPosition,
+  StrategyPosition 
+} from '@/lib/derivativeStrategies';
+import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
 
-  const derivatives = positions.filter(p => p.asset_type === 'derivative') as DerivativePosition[];
+  const derivatives = useMemo(() => 
+    positions.filter(p => p.asset_type === 'derivative'),
+    [positions]
+  );
+
+  const categories = useMemo(() => 
+    categorizeDerivatives(derivatives, positions),
+    [derivatives, positions]
+  );
 
   if (isLoading) {
     return <DerivativesSkeleton />;
@@ -35,7 +52,7 @@ export function Derivatives() {
               <div>
                 <h1 className="text-lg font-bold">Strategie Derivati</h1>
                 <p className="text-xs text-muted-foreground">
-                  {portfolio?.name}
+                  {portfolio?.name} • {derivatives.length} posizioni
                 </p>
               </div>
             </div>
@@ -62,17 +79,26 @@ export function Derivatives() {
         {/* Section 1: Covered Call / De-Risking Covered Call */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <CardTitle className="text-xl">Covered Call / De-Risking Covered Call</CardTitle>
+            <div className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-primary" />
+              <CardTitle className="text-xl">Covered Call / De-Risking Covered Call</CardTitle>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              CALL vendute con sottostante in portafoglio
+            </p>
           </CardHeader>
           <CardContent>
-            {derivatives.length === 0 ? (
+            {categories.coveredCalls.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
-                <p>Nessuna strategia Covered Call presente</p>
-                <p className="text-sm">Carica le posizioni per visualizzare le strategie</p>
+                <Shield className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                <p>Nessuna Covered Call presente</p>
+                <p className="text-sm">Le CALL vendute verranno abbinate ai sottostanti posseduti</p>
               </div>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                <p>Sezione in attesa di configurazione</p>
+              <div className="space-y-4">
+                {categories.coveredCalls.map((cc, index) => (
+                  <CoveredCallCard key={index} coveredCall={cc} />
+                ))}
               </div>
             )}
           </CardContent>
@@ -81,22 +107,164 @@ export function Derivatives() {
         {/* Section 2: Strategie */}
         <Card className="border-border bg-card">
           <CardHeader>
-            <CardTitle className="text-xl">Strategie</CardTitle>
+            <div className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-primary" />
+              <CardTitle className="text-xl">Strategie</CardTitle>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Opzioni singole e strategie combinate
+            </p>
           </CardHeader>
           <CardContent>
-            {derivatives.length === 0 ? (
+            {categories.strategies.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
+                <Target className="w-12 h-12 mx-auto mb-4 opacity-20" />
                 <p>Nessuna strategia presente</p>
-                <p className="text-sm">Carica le posizioni per visualizzare le strategie</p>
+                <p className="text-sm">Le opzioni non coperte appariranno qui</p>
               </div>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                <p>Sezione in attesa di configurazione</p>
+              <div className="space-y-4">
+                {categories.strategies.map((strategy, index) => (
+                  <StrategyCard key={index} strategy={strategy} />
+                ))}
               </div>
             )}
           </CardContent>
         </Card>
       </main>
+    </div>
+  );
+}
+
+function CoveredCallCard({ coveredCall }: { coveredCall: CoveredCallPosition }) {
+  const { option, underlying, contractsCovered, sharesCovered, isFullyCovered } = coveredCall;
+  const profitLoss = option.profit_loss || 0;
+  const isProfitable = profitLoss >= 0;
+  
+  return (
+    <div className="p-4 rounded-lg border border-border bg-background/50 space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-lg">
+              {formatOptionDescription(option)}
+            </span>
+            <Badge variant={isFullyCovered ? "default" : "secondary"}>
+              {isFullyCovered ? 'Completamente coperta' : 'Parzialmente coperta'}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {contractsCovered} contratti × 100 = {sharesCovered} azioni coperte
+          </p>
+        </div>
+        <div className="text-right">
+          <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+            {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+            <span className="font-semibold">{formatCurrency(profitLoss)}</span>
+          </div>
+          {option.profit_loss_pct !== null && (
+            <span className="text-xs text-muted-foreground">
+              {formatPercentage(option.profit_loss_pct)}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <p className="text-muted-foreground">Sottostante</p>
+          <p className="font-medium">{underlying.description}</p>
+          <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Strike</p>
+          <p className="font-medium">${option.strike_price}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Scadenza</p>
+          <p className="font-medium">
+            {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Premio</p>
+          <p className="font-medium">{formatCurrency(option.market_value || 0)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StrategyCard({ strategy }: { strategy: StrategyPosition }) {
+  const position = strategy.positions[0];
+  if (!position) return null;
+  
+  const profitLoss = position.profit_loss || 0;
+  const isProfitable = profitLoss >= 0;
+  const isSold = position.quantity < 0;
+  
+  const getStrategyBadgeVariant = () => {
+    switch (strategy.strategyType) {
+      case 'naked_put':
+      case 'naked_call':
+        return 'destructive';
+      case 'long_call':
+      case 'long_put':
+        return 'default';
+      default:
+        return 'secondary';
+    }
+  };
+  
+  return (
+    <div className="p-4 rounded-lg border border-border bg-background/50 space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-lg">
+              {formatOptionDescription(position)}
+            </span>
+            <Badge variant={getStrategyBadgeVariant()}>
+              {strategy.description}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {Math.abs(position.quantity)} contratto/i {isSold ? 'venduto/i' : 'comprato/i'}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+            {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+            <span className="font-semibold">{formatCurrency(profitLoss)}</span>
+          </div>
+          {position.profit_loss_pct !== null && (
+            <span className="text-xs text-muted-foreground">
+              {formatPercentage(position.profit_loss_pct)}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <p className="text-muted-foreground">Tipo</p>
+          <p className="font-medium">{position.option_type?.toUpperCase() || '-'}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Strike</p>
+          <p className="font-medium">${position.strike_price || '-'}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Scadenza</p>
+          <p className="font-medium">
+            {position.expiry_date ? new Date(position.expiry_date).toLocaleDateString('it-IT') : '-'}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Valore</p>
+          <p className="font-medium">{formatCurrency(position.market_value || 0)}</p>
+        </div>
+      </div>
     </div>
   );
 }
