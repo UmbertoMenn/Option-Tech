@@ -49,7 +49,11 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       icon: Landmark,
       change: null,
       dimmed: !hasAverageBalance,
-      subtext: initialDate ? `dal ${formatDate(initialDate)}` : null,
+      subtext: initialDate && portfolio?.last_updated 
+        ? `dal ${formatDate(initialDate)} al ${formatDate(portfolio.last_updated)}` 
+        : initialDate 
+          ? `dal ${formatDate(initialDate)}` 
+          : null,
     },
     {
       label: 'Profitto/Perdita',
