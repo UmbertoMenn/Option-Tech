@@ -50,7 +50,7 @@ export function categorizeDerivatives(
     if (!call.underlying) continue;
     
     // Find matching stock position
-    const underlyingStock = findUnderlyingStock(call.underlying, stockPositions);
+    const underlyingStock = findUnderlyingStock(call, stockPositions);
     
     if (underlyingStock && underlyingStock.quantity > 0) {
       const contractsSold = Math.abs(call.quantity);
@@ -130,47 +130,11 @@ export function categorizeDerivatives(
 }
 
 /**
- * Company alias database for intelligent matching
- * Maps common names, tickers, and variations to canonical identifiers
+ * Special-case aliasing
+ * Only keep the explicit GOOGLE ↔ ALPHABET equivalence requested.
  */
-const COMPANY_ALIASES: Record<string, string[]> = {
-  'ALPHABET': ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
-  'AMAZON': ['AMZN', 'AMAZON', 'AMAZON.COM', 'AMAZON COM', 'AMAZON INC', 'AMAZON.COM.INC'],
-  'APPLE': ['AAPL', 'APPLE', 'APPLE INC'],
-  'NVIDIA': ['NVDA', 'NVIDIA', 'NVIDIA CORP', 'NVIDIA CORPORATION'],
-  'TESLA': ['TSLA', 'TESLA', 'TESLA INC', 'TESLA MOTORS'],
-  'MICROSOFT': ['MSFT', 'MICROSOFT', 'MICROSOFT CORP', 'MICROSOFT CORPORATION'],
-  'AMD': ['AMD', 'ADVANCED MICRO', 'ADVANCED MICRO DEVICES'],
-  'PALANTIR': ['PLTR', 'PALANTIR', 'PALANTIR TECHNOLOGIES'],
-  'COREWEAVE': ['CRWV', 'COREWEAVE', 'CORE WEAVE', 'CORWEAVE INC'],
-  'UNITEDHEALTH': ['UNH', 'UNITEDHEALTH', 'UNITED HEALTH', 'UNITEDHEALTH GROUP'],
-  'META': ['META', 'FB', 'FACEBOOK', 'META PLATFORMS'],
-  'NETFLIX': ['NFLX', 'NETFLIX', 'NETFLIX INC'],
-  'COINBASE': ['COIN', 'COINBASE', 'COINBASE GLOBAL'],
-  'INTEL': ['INTC', 'INTEL', 'INTEL CORP', 'INTEL CORPORATION'],
-  'BROADCOM': ['AVGO', 'BROADCOM', 'BROADCOM INC'],
-  'QUALCOMM': ['QCOM', 'QUALCOMM', 'QUALCOMM INC'],
-  'UBER': ['UBER', 'UBER TECHNOLOGIES'],
-  'AIRBNB': ['ABNB', 'AIRBNB', 'AIRBNB INC'],
-  'DISNEY': ['DIS', 'DISNEY', 'WALT DISNEY'],
-  'JPMORGAN': ['JPM', 'JPMORGAN', 'JP MORGAN', 'JPMORGAN CHASE'],
-  'GOLDMAN': ['GS', 'GOLDMAN', 'GOLDMAN SACHS'],
-  'BERKSHIRE': ['BRK.A', 'BRK.B', 'BERKSHIRE', 'BERKSHIRE HATHAWAY'],
-  'VISA': ['V', 'VISA', 'VISA INC'],
-  'MASTERCARD': ['MA', 'MASTERCARD', 'MASTERCARD INC'],
-  'PAYPAL': ['PYPL', 'PAYPAL', 'PAYPAL HOLDINGS'],
-  'ORACLE': ['ORCL', 'ORACLE', 'ORACLE CORP', 'ORACLE CORPORATION'],
-  'SALESFORCE': ['CRM', 'SALESFORCE', 'SALESFORCE INC'],
-  'ADOBE': ['ADBE', 'ADOBE', 'ADOBE INC', 'ADOBE SYSTEMS'],
-  'SNOWFLAKE': ['SNOW', 'SNOWFLAKE', 'SNOWFLAKE INC'],
-  'CROWDSTRIKE': ['CRWD', 'CROWDSTRIKE', 'CROWDSTRIKE HOLDINGS'],
-  'SHOPIFY': ['SHOP', 'SHOPIFY', 'SHOPIFY INC'],
-  'PROGRESSIVE': ['PGR', 'PROGRESSIVE', 'PROGRESSIVE CORP', 'PROGRESSIVE OHIO'],
-  'ALLSTATE': ['ALL', 'ALLSTATE', 'ALLSTATE CORP'],
-  'CONSTELLATION': ['CEG', 'CONSTELLATION', 'CONSTELLATION ENERGY'],
-  'ALIBABA': ['BABA', 'ALIBABA', 'ALIBABA GROUP'],
-  'FIRST_REPUBLIC': ['FRC', 'FIRST REPUBLIC', 'FIRST REPUBLIC BANK'],
-  'LVMH': ['MC', 'LVMH'],
+const SPECIAL_ALIASES: Record<string, string[]> = {
+  ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
 };
 
 /**
@@ -193,7 +157,7 @@ function normalizeForMatching(text: string): string {
 function getCanonicalKey(text: string): string | null {
   const normalized = normalizeForMatching(text);
   
-  for (const [canonical, aliases] of Object.entries(COMPANY_ALIASES)) {
+  for (const [canonical, aliases] of Object.entries(SPECIAL_ALIASES)) {
     for (const alias of aliases) {
       const normalizedAlias = normalizeForMatching(alias);
       // Check for exact match or if normalized text contains the alias
@@ -209,57 +173,53 @@ function getCanonicalKey(text: string): string | null {
 }
 
 /**
- * Finds the underlying stock for an option using intelligent matching
- * IMPORTANT: Only matches stocks, never ETFs
+ * Finds the underlying stock for an option.
+ *
+ * Rule (as requested): if the option text contains the name of one of the stock
+ * positions, match them. Only exception: GOOGLE/ALPHABET which are treated as
+ * the same company.
+ *
+ * IMPORTANT: Only matches stocks, never ETFs.
  */
-function findUnderlyingStock(
-  underlying: string,
-  stocks: Position[]
-): Position | undefined {
-  // CRITICAL: Filter to only stocks, never match with ETFs
+function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined {
   const stocksOnly = stocks.filter(s => s.asset_type === 'stock');
-  
-  const underlyingNormalized = normalizeForMatching(underlying);
-  
-  // First, try canonical company matching (most reliable)
-  const optionCanonical = getCanonicalKey(underlying);
+
+  const optionText = `${option.underlying ?? ''} ${option.description ?? ''} ${option.ticker ?? ''}`;
+  const optionNormalized = normalizeForMatching(optionText);
+
+  // 1) Special-case GOOGLE/ALPHABET equivalence
+  const optionCanonical = getCanonicalKey(optionText);
   if (optionCanonical) {
     const canonicalMatch = stocksOnly.find(stock => {
-      const stockCanonical = getCanonicalKey(stock.description) || 
-                              getCanonicalKey(stock.ticker || '');
+      const stockCanonical = getCanonicalKey(stock.description) || getCanonicalKey(stock.ticker || '');
       return stockCanonical === optionCanonical;
     });
     if (canonicalMatch) return canonicalMatch;
   }
-  
-  // Second, try exact ticker match
-  const exactMatch = stocksOnly.find(stock => 
-    stock.ticker?.toUpperCase() === underlyingNormalized
-  );
-  if (exactMatch) return exactMatch;
-  
-  // Third, try normalized description matching
+
+  // 2) Simple containment: if option contains stock ticker or normalized name
+  const optionTokens = optionNormalized.split(' ').filter(w => w.length > 2);
+
   for (const stock of stocksOnly) {
-    const stockNormalized = normalizeForMatching(stock.description);
-    
-    // Check if key words match
-    if (underlyingNormalized === stockNormalized) return stock;
-    
-    // Check for significant word overlap
-    const underlyingWords = underlyingNormalized.split(' ').filter(w => w.length > 2);
-    const stockWords = stockNormalized.split(' ').filter(w => w.length > 2);
-    
-    // If the first significant word matches and they share multiple words, it's a match
-    if (underlyingWords.length > 0 && stockWords.length > 0) {
-      const firstWordMatch = underlyingWords[0] === stockWords[0];
-      const sharedWords = underlyingWords.filter(w => stockWords.includes(w)).length;
-      
-      if (firstWordMatch && sharedWords >= 1) {
-        return stock;
-      }
+    const stockName = normalizeForMatching(stock.description);
+    const stockTokens = stockName.split(' ').filter(w => w.length > 2);
+
+    // Ticker containment (when available)
+    if (stock.ticker) {
+      const t = normalizeForMatching(stock.ticker);
+      if (t && optionNormalized.includes(t)) return stock;
+    }
+
+    // Name containment / token overlap
+    if (stockName && optionNormalized.includes(stockName)) return stock;
+
+    if (stockTokens.length > 0) {
+      const shared = stockTokens.filter(t => optionTokens.includes(t)).length;
+      const required = Math.min(2, stockTokens.length); // 1 token for single-word names, 2 when possible
+      if (shared >= required) return stock;
     }
   }
-  
+
   return undefined;
 }
 
