@@ -44,28 +44,36 @@ function parsePortfolioData(rows: any[][]): {
   let cashValue = 0;
   let currentSection: AssetType | null = null;
   let headerRow: string[] = [];
+  let isDerivativeSection = false;
   
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length === 0) continue;
     
     const firstCell = String(row[0] || '').toUpperCase();
+    const secondCell = String(row[1] || '').toUpperCase();
+    const thirdCell = String(row[2] || '').toUpperCase();
     
     // Detect section headers
     if (firstCell.includes('LIQUIDIT')) {
       currentSection = 'cash';
+      isDerivativeSection = false;
       continue;
     } else if (firstCell.includes('TITOLI DI STATO')) {
       currentSection = 'bond';
+      isDerivativeSection = false;
       continue;
     } else if (firstCell.includes('AZIONI ED ETF') || firstCell.includes('AZIONI E ETF')) {
       currentSection = 'stock';
+      isDerivativeSection = false;
       continue;
     } else if (firstCell.includes('DERIVATI')) {
       currentSection = 'derivative';
+      isDerivativeSection = true;
       continue;
     } else if (firstCell.includes('ALTRO') || firstCell.includes('MATERIE PRIME') || firstCell.includes('COMMODIT')) {
       currentSection = 'commodity';
+      isDerivativeSection = false;
       continue;
     }
     
@@ -76,7 +84,7 @@ function parsePortfolioData(rows: any[][]): {
     }
     
     // Skip totals and empty rows
-    if (firstCell.includes('TOTALE') || firstCell === '' || !currentSection) {
+    if (firstCell.includes('TOTALE') || !currentSection) {
       continue;
     }
     
@@ -89,7 +97,20 @@ function parsePortfolioData(rows: any[][]): {
       continue;
     }
     
-    // Parse position data
+    // Special handling for derivatives - description might be in column 2 (index 2) without ISIN
+    if (isDerivativeSection) {
+      // Check if this row contains an option (look for OPTION CALL/PUT pattern in any cell)
+      const rowStr = row.map(cell => String(cell || '')).join(' ').toUpperCase();
+      if (rowStr.includes('OPTION CALL') || rowStr.includes('OPTION PUT')) {
+        const position = parseDerivativeRow(row, headerRow);
+        if (position && position.description) {
+          positions.push(position);
+        }
+        continue;
+      }
+    }
+    
+    // Parse regular position data
     const position = parsePositionRow(row, headerRow, currentSection);
     if (position && position.description) {
       positions.push(position);
@@ -97,6 +118,92 @@ function parsePortfolioData(rows: any[][]): {
   }
   
   return { positions, cashValue };
+}
+
+function parseDerivativeRow(
+  row: any[],
+  headers: string[]
+): Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'> | null {
+  // Find the description - it's usually in column 2 (index 2) for derivatives
+  let description = '';
+  for (let i = 0; i < row.length; i++) {
+    const cell = String(row[i] || '').toUpperCase();
+    if (cell.includes('OPTION CALL') || cell.includes('OPTION PUT')) {
+      description = String(row[i] || '');
+      break;
+    }
+  }
+  
+  if (!description) return null;
+  
+  const descUpper = description.toUpperCase();
+  
+  // Get currency
+  const currency = findColumnValue(row, headers, ['DIVISA CODICE', 'DIVISA']) || 'USD';
+  
+  // Get price values
+  const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
+  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO CARICO', 'PREZZO CARICO']));
+  const marketValue = parseExcelNumber(findColumnValue(row, headers, ['CONTROVALORE EUR', 'CONTROVALORE']));
+  const profitLoss = parseExcelNumber(findColumnValue(row, headers, ['GUADAGNO_PERDITA_EUR', 'GUADAGNO PERDITA', 'CONTROVALORE_SCOST_SU_PREZZO']));
+  const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
+  const weightPct = parseExcelNumber(findColumnValue(row, headers, ['% PATR', 'PESO %']));
+  
+  // Get quantity - for derivatives it might be in QUANTITA column
+  let quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
+  
+  // Parse option type
+  let optionType: 'call' | 'put' | undefined;
+  if (descUpper.includes('OPTION CALL') || descUpper.includes('CALL')) {
+    optionType = 'call';
+  } else if (descUpper.includes('OPTION PUT') || descUpper.includes('PUT')) {
+    optionType = 'put';
+  }
+  
+  // Parse strike price (e.g., "OPTION CALL 200", "OPTION PUT 125")
+  let strikePrice: number | undefined;
+  const strikeMatch = descUpper.match(/OPTION\s+(?:CALL|PUT)\s+(\d+(?:\.\d+)?)/);
+  if (strikeMatch) {
+    strikePrice = parseFloat(strikeMatch[1]);
+  }
+  
+  // Parse expiry (e.g., "DEC/25", "JUN/26", "DEC/27")
+  let expiryDate: string | undefined;
+  const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
+  if (expiryMatch) {
+    const months: Record<string, string> = {
+      JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+      JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+    };
+    const year = parseInt(expiryMatch[2]) + 2000;
+    expiryDate = `${year}-${months[expiryMatch[1]]}-21`; // Third Friday approximation
+  }
+  
+  // Parse underlying (everything before "OPTION")
+  let underlying: string | undefined;
+  const underlyingMatch = description.match(/^(.+?)\s+OPTION/i);
+  if (underlyingMatch) {
+    underlying = underlyingMatch[1].trim();
+  }
+  
+  return {
+    isin: undefined,
+    ticker: undefined,
+    description: description,
+    asset_type: 'derivative',
+    currency: String(currency),
+    quantity: quantity,
+    current_price: currentPrice || undefined,
+    avg_cost: avgCost || undefined,
+    market_value: Math.abs(marketValue) || undefined,
+    profit_loss: profitLoss || undefined,
+    profit_loss_pct: profitLossPct || undefined,
+    weight_pct: Math.abs(weightPct) || undefined,
+    option_type: optionType,
+    strike_price: strikePrice,
+    expiry_date: expiryDate,
+    underlying,
+  };
 }
 
 function parsePositionRow(
