@@ -17,12 +17,37 @@ export function usePortfolio() {
         .from('portfolios')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
       
       if (error) throw error;
-      return data as unknown as Portfolio;
+      return data as unknown as Portfolio | null;
     },
     enabled: !!user,
+  });
+
+  const updateInitialValueMutation = useMutation({
+    mutationFn: async ({ initialValue, initialDate }: { initialValue: number; initialDate: string }) => {
+      if (!portfolioQuery.data?.id) throw new Error('Portfolio non trovato');
+      
+      const { error } = await supabase
+        .from('portfolios')
+        .update({ 
+          initial_value: initialValue,
+          initial_date: initialDate,
+        })
+        .eq('id', portfolioQuery.data.id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      toast.success('Patrimonio iniziale salvato!');
+    },
+    onError: (error) => {
+      toast.error('Errore nel salvataggio', {
+        description: error.message,
+      });
+    },
   });
 
   const positionsQuery = useQuery({
@@ -95,6 +120,8 @@ export function usePortfolio() {
     isLoading: portfolioQuery.isLoading || positionsQuery.isLoading,
     updatePositions: updatePositionsMutation.mutate,
     isUpdating: updatePositionsMutation.isPending,
+    updateInitialValue: updateInitialValueMutation.mutate,
+    isUpdatingInitialValue: updateInitialValueMutation.isPending,
   };
 }
 

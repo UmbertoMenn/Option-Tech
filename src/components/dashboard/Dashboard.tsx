@@ -9,12 +9,13 @@ import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLeg
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
+import { InitialValueForm } from '@/components/dashboard/InitialValueForm';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
-  const { portfolio, positions, summary, isLoading } = usePortfolio();
+  const { portfolio, positions, summary, isLoading, updateInitialValue, isUpdatingInitialValue } = usePortfolio();
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -61,7 +62,7 @@ export function Dashboard() {
 
       <main className="container mx-auto px-4 py-8 space-y-8">
         {/* Stats */}
-        {summary && <StatsCards summary={summary} />}
+        {summary && <StatsCards summary={summary} portfolio={portfolio} />}
 
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -91,10 +92,21 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* File Upload */}
+          {/* File Upload & Initial Value */}
           <div className="space-y-4">
-            <h3 className="text-sm font-medium text-muted-foreground">Carica Portfolio</h3>
-            <FileUploader />
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Patrimonio Iniziale</h3>
+              <InitialValueForm
+                initialValue={portfolio?.initial_value ?? null}
+                initialDate={portfolio?.initial_date ?? null}
+                onSave={(value, date) => updateInitialValue({ initialValue: value, initialDate: date })}
+                isLoading={isUpdatingInitialValue}
+              />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
+              <FileUploader />
+            </div>
           </div>
         </div>
 

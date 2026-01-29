@@ -1,12 +1,25 @@
-import { PortfolioSummary } from '@/types/portfolio';
+import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { formatCurrency, formatProfitLoss, formatPercentage } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, Target } from 'lucide-react';
 
 interface StatsCardsProps {
   summary: PortfolioSummary;
+  portfolio: Portfolio | null;
 }
 
-export function StatsCards({ summary }: StatsCardsProps) {
+export function StatsCards({ summary, portfolio }: StatsCardsProps) {
+  // Calcola P/L rispetto al patrimonio iniziale
+  const initialValue = portfolio?.initial_value;
+  const hasInitialValue = initialValue && initialValue > 0;
+  
+  const absolutePL = hasInitialValue 
+    ? summary.totalValue - initialValue 
+    : summary.totalProfitLoss;
+  
+  const percentPL = hasInitialValue 
+    ? ((summary.totalValue - initialValue) / initialValue) * 100 
+    : summary.totalProfitLossPct;
+
   const stats = [
     {
       label: 'Patrimonio Totale',
@@ -15,10 +28,11 @@ export function StatsCards({ summary }: StatsCardsProps) {
       change: null,
     },
     {
-      label: 'Investito',
-      value: formatCurrency(summary.investedValue),
-      icon: BarChart3,
+      label: 'Patrimonio Iniziale',
+      value: hasInitialValue ? formatCurrency(initialValue) : '—',
+      icon: Target,
       change: null,
+      dimmed: !hasInitialValue,
     },
     {
       label: 'Liquidità',
@@ -28,10 +42,11 @@ export function StatsCards({ summary }: StatsCardsProps) {
     },
     {
       label: 'Profitto/Perdita',
-      value: formatProfitLoss(summary.totalProfitLoss),
-      icon: summary.totalProfitLoss >= 0 ? TrendingUp : TrendingDown,
-      change: formatPercentage(summary.totalProfitLossPct),
-      isProfit: summary.totalProfitLoss >= 0,
+      value: hasInitialValue ? formatProfitLoss(absolutePL) : '—',
+      icon: absolutePL >= 0 ? TrendingUp : TrendingDown,
+      change: hasInitialValue ? formatPercentage(percentPL) : null,
+      isProfit: absolutePL >= 0,
+      dimmed: !hasInitialValue,
     },
   ];
 
@@ -47,11 +62,13 @@ export function StatsCards({ summary }: StatsCardsProps) {
             <div>
               <p className="text-sm text-muted-foreground">{stat.label}</p>
               <p className={`text-xl font-bold font-mono mt-1 ${
-                stat.isProfit !== undefined 
-                  ? stat.isProfit 
-                    ? 'text-profit' 
-                    : 'text-loss'
-                  : ''
+                stat.dimmed 
+                  ? 'text-muted-foreground'
+                  : stat.isProfit !== undefined 
+                    ? stat.isProfit 
+                      ? 'text-profit' 
+                      : 'text-loss'
+                    : ''
               }`}>
                 {stat.value}
               </p>
@@ -64,11 +81,13 @@ export function StatsCards({ summary }: StatsCardsProps) {
               )}
             </div>
             <div className={`p-2 rounded-lg ${
-              stat.isProfit !== undefined
-                ? stat.isProfit
-                  ? 'bg-profit/10 text-profit'
-                  : 'bg-loss/10 text-loss'
-                : 'bg-primary/10 text-primary'
+              stat.dimmed
+                ? 'bg-muted/10 text-muted-foreground'
+                : stat.isProfit !== undefined
+                  ? stat.isProfit
+                    ? 'bg-profit/10 text-profit'
+                    : 'bg-loss/10 text-loss'
+                  : 'bg-primary/10 text-primary'
             }`}>
               <stat.icon className="w-5 h-5" />
             </div>

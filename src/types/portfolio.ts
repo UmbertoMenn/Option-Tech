@@ -32,6 +32,8 @@ export interface Portfolio {
   cash_value: number | null;
   last_updated: string | null;
   created_at: string;
+  initial_value: number | null;
+  initial_date: string | null;
 }
 
 export interface PortfolioSummary {

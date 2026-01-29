@@ -19,6 +19,8 @@ export type Database = {
           cash_value: number | null
           created_at: string
           id: string
+          initial_date: string | null
+          initial_value: number | null
           last_updated: string | null
           name: string
           total_value: number | null
@@ -28,6 +30,8 @@ export type Database = {
           cash_value?: number | null
           created_at?: string
           id?: string
+          initial_date?: string | null
+          initial_value?: number | null
           last_updated?: string | null
           name?: string
           total_value?: number | null
@@ -37,6 +41,8 @@ export type Database = {
           cash_value?: number | null
           created_at?: string
           id?: string
+          initial_date?: string | null
+          initial_value?: number | null
           last_updated?: string | null
           name?: string
           total_value?: number | null
