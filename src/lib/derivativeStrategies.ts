@@ -187,6 +187,20 @@ function findUnderlyingStock(option: Position, stocks: Position[]): Position | u
   const optionText = `${option.underlying ?? ''} ${option.description ?? ''} ${option.ticker ?? ''}`;
   const optionNormalized = normalizeForMatching(optionText);
 
+  // 0) Hard rule: GOOGLE/GOOG/GOOGL must always map to ALPHABET.
+  // This must override any broker mis-parsing of the `underlying` field.
+  const googleSignalText = `${option.description ?? ''} ${option.ticker ?? ''} ${option.underlying ?? ''}`;
+  const googleSignal = normalizeForMatching(googleSignalText);
+  const isGoogleLike = /\b(GOOGLE|GOOG|GOOGL)\b/.test(googleSignal);
+  if (isGoogleLike) {
+    const alphabetStock = stocksOnly.find(stock => {
+      const stockText = `${stock.description ?? ''} ${stock.ticker ?? ''}`;
+      const stockNorm = normalizeForMatching(stockText);
+      return /\bALPHABET\b/.test(stockNorm) || /\b(GOOG|GOOGL|GOOGLE)\b/.test(stockNorm);
+    });
+    if (alphabetStock) return alphabetStock;
+  }
+
   // 1) Special-case GOOGLE/ALPHABET equivalence
   const optionCanonical = getCanonicalKey(optionText);
   if (optionCanonical) {
