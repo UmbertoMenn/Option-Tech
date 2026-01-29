@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
@@ -167,9 +168,13 @@ export function Derivatives() {
 
 function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { option, underlying, contractsCovered, sharesCovered, isFullyCovered } = coveredCall;
-  const profitLoss = option.profit_loss || 0;
-  const isProfitable = profitLoss >= 0;
+  const { option, underlying, contractsCovered } = coveredCall;
+  
+  // Calculate ITM/OTM status for CALL options
+  // ITM: strike < underlying price, OTM: strike >= underlying price
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = underlying.current_price || 0;
+  const isITM = strikePrice < underlyingPrice;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -182,18 +187,30 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge variant={isFullyCovered ? "default" : "secondary"} className="text-xs shrink-0">
-              {isFullyCovered ? 'Coperta' : 'Parziale'}
+            <Badge 
+              variant={isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {isITM ? 'ITM' : 'OTM'}
             </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PS: {formatCurrency(underlyingPrice)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Sottostante</p>
+              </TooltipContent>
+            </Tooltip>
             <span className="text-sm text-muted-foreground">
               {contractsCovered} × 100
             </span>
-            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span className="font-semibold text-sm">{formatCurrency(profitLoss)}</span>
-            </div>
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0)}
+            </span>
           </div>
         </div>
       </CollapsibleTrigger>
@@ -216,8 +233,8 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
               </p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Premio</p>
-              <p className="font-medium">{formatCurrency(option.market_value || 0)}</p>
+              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0)}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
