@@ -180,9 +180,10 @@ function normalizeForMatching(text: string): string {
   return text
     .toUpperCase()
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
+    .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
     .replace(/\s+/g, ' ')          // Normalize spaces
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA)\b/gi, '') // Remove common suffixes
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE)\b/gi, '') // Remove common suffixes
     .trim();
 }
 
