@@ -104,8 +104,22 @@ export function usePortfolio() {
       
       if (error) throw error;
       
-      // Update portfolio totals
-      const totalValue = positions.reduce((sum, p) => sum + (p.market_value || 0), 0);
+      // Update portfolio totals (IMPORTANT: derivatives must NOT be included in total portfolio value)
+      const investedNonDerivatives = positions
+        .filter(p => p.asset_type !== 'derivative')
+        .reduce((sum, p) => sum + (p.market_value || 0), 0);
+
+      // Fetch current cash value from backend to avoid relying on potentially stale query cache
+      const { data: portfolioCash, error: cashError } = await supabase
+        .from('portfolios')
+        .select('cash_value')
+        .eq('id', portfolioQuery.data.id)
+        .single();
+
+      if (cashError) throw cashError;
+
+      const cashValue = portfolioCash?.cash_value ?? 0;
+      const totalValue = investedNonDerivatives + cashValue;
       await supabase
         .from('portfolios')
         .update({ 
