@@ -8,6 +8,11 @@ export interface CoveredCallPosition {
   isFullyCovered: boolean;
 }
 
+export interface LongPutPosition {
+  option: Position;
+  contracts: number;
+}
+
 export interface StrategyPosition {
   positions: Position[];
   strategyType: 'naked_put' | 'naked_call' | 'long_call' | 'long_put' | 'vertical_spread' | 'straddle' | 'strangle' | 'unknown';
@@ -16,6 +21,7 @@ export interface StrategyPosition {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
+  longPuts: LongPutPosition[];
   strategies: StrategyPosition[];
 }
 
@@ -33,6 +39,7 @@ export function categorizeDerivatives(
   allPositions: Position[]
 ): DerivativeCategories {
   const coveredCalls: CoveredCallPosition[] = [];
+  const longPuts: LongPutPosition[] = [];
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions
@@ -87,6 +94,19 @@ export function categorizeDerivatives(
     }
   }
   
+  // Find bought PUT options (positive quantity) - these go to Long PUT section
+  const boughtPuts = derivatives.filter(d => 
+    d.option_type === 'put' && d.quantity > 0
+  );
+  
+  for (const put of boughtPuts) {
+    longPuts.push({
+      option: put,
+      contracts: put.quantity
+    });
+    usedDerivatives.add(put.id);
+  }
+  
   // All remaining derivatives go to strategies
   const strategies: StrategyPosition[] = [];
   
@@ -126,7 +146,7 @@ export function categorizeDerivatives(
     });
   }
   
-  return { coveredCalls, strategies };
+  return { coveredCalls, longPuts, strategies };
 }
 
 /**
