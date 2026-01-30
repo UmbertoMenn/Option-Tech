@@ -16,8 +16,10 @@ import {
   CoveredCallPosition,
   LongPutPosition,
   IronCondorPosition,
+  DoubleDiagonalPosition,
   NakedPutPosition,
-  LeapCallPosition
+  LeapCallPosition,
+  OtherStrategyPosition
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
@@ -37,8 +39,10 @@ export function Derivatives() {
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
+  const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
+  const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -213,6 +217,46 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
+        {/* Section 3.5: Double Diagonal */}
+        <Collapsible open={doubleDiagonalOpen} onOpenChange={setDoubleDiagonalOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-5 h-5 text-purple-500" />
+                    <CardTitle className="text-xl">Double Diagonal</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.doubleDiagonals.length}</Badge>
+                  </div>
+                  {doubleDiagonalOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  Strategie a 4 gambe con scadenze differenti
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.doubleDiagonals.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessun Double Diagonal presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.doubleDiagonals.map((dd, index) => (
+                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
         {/* Section 4: Naked Put (Collapsible) */}
         <Collapsible open={nakedPutsOpen} onOpenChange={setNakedPutsOpen}>
           <Card className="border-border bg-card">
@@ -285,6 +329,46 @@ export function Derivatives() {
                   <div className="space-y-1">
                     {categories.leapCalls.map((lc, index) => (
                       <LeapCallRow key={index} leapCall={lc} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Section 6: Altre Strategie (Collapsible) */}
+        <Collapsible open={otherStrategiesOpen} onOpenChange={setOtherStrategiesOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="w-5 h-5 text-muted-foreground" />
+                    <CardTitle className="text-xl">Altre Strategie</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.otherStrategies.length}</Badge>
+                  </div>
+                  {otherStrategiesOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  Opzioni non classificate in altre categorie
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.otherStrategies.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna altra strategia presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.otherStrategies.map((os, index) => (
+                      <OtherStrategyRow key={index} otherStrategy={os} />
                     ))}
                   </div>
                 )}
@@ -642,6 +726,279 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               {formatCurrency(gainPotenziale, 'USD')}
             </span>
           </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { underlying, soldExpiryDate, boughtExpiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = doubleDiagonal;
+  
+  const soldExpiryFormatted = formatExpiryMMY(soldExpiryDate);
+  const boughtExpiryFormatted = formatExpiryMMY(boughtExpiryDate);
+  
+  // Calculate Gain Potenziale = premi incassati - premi pagati
+  const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
+  const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
+  const gainPotenziale = premiumReceived - premiumPaid;
+  const isPositiveGP = gainPotenziale >= 0;
+  
+  // Calculate Max Loss
+  const putSpreadWidth = (soldPut.strike_price || 0) - (boughtPut.strike_price || 0);
+  const callSpreadWidth = (boughtCall.strike_price || 0) - (soldCall.strike_price || 0);
+  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
+  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
+  
+  // Strikes summary
+  const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
+  const callSpread = `${soldCall.strike_price}/${boughtCall.strike_price}`;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{underlying}</span>
+            <Badge variant="outline" className="text-xs shrink-0 text-purple-500 border-purple-500/50">
+              DD
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              V:{soldExpiryFormatted} / C:{boughtExpiryFormatted}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  PUT {putSpread}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  CALL {callSpread}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="text-sm text-muted-foreground">
+              {contracts} × 100
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={`flex items-center gap-1 cursor-help ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+                  <span className="text-xs text-muted-foreground">GP:</span>
+                  <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Gain Potenziale: premi incassati - premi pagati</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 cursor-help text-red-500">
+                  <span className="text-xs text-muted-foreground">ML:</span>
+                  <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Max Loss: perdita massima possibile</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
+          {/* Put Spread */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD (scadenze diverse)</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Venduta (V) - {soldExpiryFormatted}</span>
+                  <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Comprata (C) - {boughtExpiryFormatted}</span>
+                  <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Call Spread */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD (scadenze diverse)</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Venduta (V) - {soldExpiryFormatted}</span>
+                  <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Comprata (C) - {boughtExpiryFormatted}</span>
+                  <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Summary */}
+          <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
+            <span className="text-muted-foreground">Gain Potenziale:</span>
+            <span className={`font-semibold ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(gainPotenziale, 'USD')}
+            </span>
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { option, underlying } = otherStrategy;
+  
+  const isCall = option.option_type === 'call';
+  const isPut = option.option_type === 'put';
+  const isBought = option.quantity > 0;
+  
+  // Calculate ITM/OTM
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  
+  let isITM = false;
+  if (hasUnderlyingPrice) {
+    if (isCall) {
+      isITM = strikePrice < underlyingPrice;
+    } else if (isPut) {
+      isITM = strikePrice > underlyingPrice;
+    }
+  }
+  
+  const typeLabel = `${isCall ? 'CALL' : isPut ? 'PUT' : 'OPT'} ${isBought ? 'comprata' : 'venduta'}`;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge 
+              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            </Badge>
+            <span className="text-xs text-muted-foreground">{typeLabel}</span>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <span className="text-sm text-muted-foreground">
+              {Math.abs(option.quantity)} × 100
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Sottostante</p>
+              <p className="font-medium">{option.underlying || option.description}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Strike</p>
+              <p className="font-medium">${option.strike_price}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Scadenza</p>
+              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+            </div>
+          </div>
+          {option.profit_loss_pct !== null && (
+            <div className="text-xs text-muted-foreground">
+              P/L: {formatPercentage(option.profit_loss_pct)}
+            </div>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
