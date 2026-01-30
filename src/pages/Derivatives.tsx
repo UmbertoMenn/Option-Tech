@@ -24,11 +24,11 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
-  const [coveredCallOpen, setCoveredCallOpen] = useState(true);
+  const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
-  const [ironCondorOpen, setIronCondorOpen] = useState(true);
-  const [nakedPutsOpen, setNakedPutsOpen] = useState(true);
-  const [leapCallsOpen, setLeapCallsOpen] = useState(true);
+  const [ironCondorOpen, setIronCondorOpen] = useState(false);
+  const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
+  const [leapCallsOpen, setLeapCallsOpen] = useState(false);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
