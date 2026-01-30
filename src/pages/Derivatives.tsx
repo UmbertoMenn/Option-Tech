@@ -208,6 +208,16 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             <span className="text-sm text-muted-foreground">
               {contractsCovered} × 100
             </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PMC: {formatCurrency(underlying.avg_cost || 0)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico</p>
+              </TooltipContent>
+            </Tooltip>
             <span className="font-semibold text-sm">
               {formatCurrency(option.current_price || 0)}
             </span>
