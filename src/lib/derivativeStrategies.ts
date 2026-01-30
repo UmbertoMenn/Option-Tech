@@ -76,10 +76,11 @@ export interface DerivativeCategories {
  * Categorizes derivatives into Covered Calls and Strategies
  * 
  * Rules:
+ * - First, try to detect 4-leg strategies (Iron Condor, Double Diagonal)
+ * - If 4 options of same underlying (1 bought call, 1 sold call, 1 bought put, 1 sold put)
+ *   don't match Iron Condor or Double Diagonal, put them ALL in "Altre Strategie"
  * - Covered Call: Sold CALL options (negative quantity) where you own the underlying stock
- *   - Each option contract = 100 shares
- *   - If sold calls * 100 > shares owned, excess goes to Strategies
- * - Strategies: Everything else (naked puts, bought options, excess calls, combinations)
+ * - Remaining options go to their respective categories (Naked Put, Leap Call, etc.)
  */
 export function categorizeDerivatives(
   derivatives: Position[],
@@ -99,40 +100,10 @@ export function categorizeDerivatives(
     p.asset_type === 'stock' || p.asset_type === 'etf'
   );
   
-  // ============ STEP 1: Detect Iron Condors first (same expiry for all 4 legs) ============
-  // Group derivatives by underlying + expiry
-  const groupedByUnderlyingExpiry = new Map<string, Position[]>();
-  
-  for (const d of derivatives) {
-    const underlying = normalizeForMatching(d.underlying || d.description);
-    const expiry = d.expiry_date || '';
-    const key = `${underlying}|${expiry}`;
-    
-    if (!groupedByUnderlyingExpiry.has(key)) {
-      groupedByUnderlyingExpiry.set(key, []);
-    }
-    groupedByUnderlyingExpiry.get(key)!.push(d);
-  }
-  
-  // For each group, try to find Iron Condor patterns
-  for (const [key, group] of groupedByUnderlyingExpiry.entries()) {
-    const detectedCondors = findIronCondors(group);
-    
-    for (const condor of detectedCondors) {
-      ironCondors.push(condor);
-      usedDerivatives.add(condor.soldPut.id);
-      usedDerivatives.add(condor.boughtPut.id);
-      usedDerivatives.add(condor.soldCall.id);
-      usedDerivatives.add(condor.boughtCall.id);
-    }
-  }
-  
-  // ============ STEP 1.5: Detect Double Diagonals (bought options have longer expiry) ============
-  // Group derivatives by underlying only
+  // ============ STEP 1: Group derivatives by underlying ============
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of derivatives) {
-    if (usedDerivatives.has(d.id)) continue;
     const underlying = normalizeForMatching(d.underlying || d.description);
     
     if (!groupedByUnderlying.has(underlying)) {
@@ -141,37 +112,92 @@ export function categorizeDerivatives(
     groupedByUnderlying.get(underlying)!.push(d);
   }
   
-  // For each underlying, try to find Double Diagonal patterns
+  // ============ STEP 2: For each underlying, try to detect 4-leg strategies ============
   for (const [underlying, group] of groupedByUnderlying.entries()) {
-    const detectedDiagonals = findDoubleDiagonals(group);
+    // Check if we have potential 4-leg combinations
+    const soldCalls = group.filter(p => p.option_type === 'call' && p.quantity < 0);
+    const boughtCalls = group.filter(p => p.option_type === 'call' && p.quantity > 0);
+    const soldPuts = group.filter(p => p.option_type === 'put' && p.quantity < 0);
+    const boughtPuts = group.filter(p => p.option_type === 'put' && p.quantity > 0);
     
-    for (const diagonal of detectedDiagonals) {
-      doubleDiagonals.push(diagonal);
-      usedDerivatives.add(diagonal.soldPut.id);
-      usedDerivatives.add(diagonal.boughtPut.id);
-      usedDerivatives.add(diagonal.soldCall.id);
-      usedDerivatives.add(diagonal.boughtCall.id);
+    // Try to find 4-leg combinations (1 of each type)
+    while (soldCalls.length > 0 && boughtCalls.length > 0 && 
+           soldPuts.length > 0 && boughtPuts.length > 0) {
+      
+      // Try Iron Condor first (all same expiry)
+      const ironCondorResult = tryMatchIronCondor(soldCalls, boughtCalls, soldPuts, boughtPuts);
+      
+      if (ironCondorResult) {
+        ironCondors.push(ironCondorResult.condor);
+        usedDerivatives.add(ironCondorResult.condor.soldPut.id);
+        usedDerivatives.add(ironCondorResult.condor.boughtPut.id);
+        usedDerivatives.add(ironCondorResult.condor.soldCall.id);
+        usedDerivatives.add(ironCondorResult.condor.boughtCall.id);
+        // Remove from arrays
+        removeFromArray(soldCalls, ironCondorResult.condor.soldCall);
+        removeFromArray(boughtCalls, ironCondorResult.condor.boughtCall);
+        removeFromArray(soldPuts, ironCondorResult.condor.soldPut);
+        removeFromArray(boughtPuts, ironCondorResult.condor.boughtPut);
+        continue;
+      }
+      
+      // Try Double Diagonal (sold legs same expiry, bought legs same expiry, different from sold)
+      const doubleDiagonalResult = tryMatchDoubleDiagonal(soldCalls, boughtCalls, soldPuts, boughtPuts);
+      
+      if (doubleDiagonalResult) {
+        doubleDiagonals.push(doubleDiagonalResult.diagonal);
+        usedDerivatives.add(doubleDiagonalResult.diagonal.soldPut.id);
+        usedDerivatives.add(doubleDiagonalResult.diagonal.boughtPut.id);
+        usedDerivatives.add(doubleDiagonalResult.diagonal.soldCall.id);
+        usedDerivatives.add(doubleDiagonalResult.diagonal.boughtCall.id);
+        // Remove from arrays
+        removeFromArray(soldCalls, doubleDiagonalResult.diagonal.soldCall);
+        removeFromArray(boughtCalls, doubleDiagonalResult.diagonal.boughtCall);
+        removeFromArray(soldPuts, doubleDiagonalResult.diagonal.soldPut);
+        removeFromArray(boughtPuts, doubleDiagonalResult.diagonal.boughtPut);
+        continue;
+      }
+      
+      // If we have 4 legs but don't match Iron Condor or Double Diagonal,
+      // put ALL 4 in "Altre Strategie"
+      const fourLegResult = tryMatch4LegUnclassified(soldCalls, boughtCalls, soldPuts, boughtPuts);
+      
+      if (fourLegResult) {
+        for (const option of fourLegResult.options) {
+          const underlyingStock = findUnderlyingStock(option, stockPositions);
+          otherStrategies.push({
+            option,
+            underlying: underlyingStock || null
+          });
+          usedDerivatives.add(option.id);
+        }
+        // Remove from arrays
+        removeFromArray(soldCalls, fourLegResult.options.find(o => o.option_type === 'call' && o.quantity < 0)!);
+        removeFromArray(boughtCalls, fourLegResult.options.find(o => o.option_type === 'call' && o.quantity > 0)!);
+        removeFromArray(soldPuts, fourLegResult.options.find(o => o.option_type === 'put' && o.quantity < 0)!);
+        removeFromArray(boughtPuts, fourLegResult.options.find(o => o.option_type === 'put' && o.quantity > 0)!);
+        continue;
+      }
+      
+      // No more 4-leg combinations possible
+      break;
     }
   }
   
-  // ============ STEP 2: Find Covered Calls ============
-  // Find sold CALL options (negative quantity)
-  const soldCalls = derivatives.filter(d => 
+  // ============ STEP 3: Find Covered Calls ============
+  const soldCallsForCovered = derivatives.filter(d => 
     d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id)
   );
   
-  // Match sold calls with underlying stocks
-  for (const call of soldCalls) {
+  for (const call of soldCallsForCovered) {
     if (!call.underlying) continue;
     
-    // Find matching stock position
     const underlyingStock = findUnderlyingStock(call, stockPositions);
     
     if (underlyingStock && underlyingStock.quantity > 0) {
       const contractsSold = Math.abs(call.quantity);
       const sharesOwned = underlyingStock.quantity;
       
-      // Calculate how many contracts are actually covered
       const contractsCoverable = Math.floor(sharesOwned / 100);
       const contractsCovered = Math.min(contractsSold, contractsCoverable);
       
@@ -181,7 +207,6 @@ export function categorizeDerivatives(
         coveredCalls.push({
           option: {
             ...call,
-            // Adjust quantity to show only covered portion
             quantity: -contractsCovered
           },
           underlying: underlyingStock,
@@ -190,9 +215,7 @@ export function categorizeDerivatives(
           isFullyCovered: contractsCovered === contractsSold
         });
         
-        // If not fully covered, the excess will be handled in strategies
         if (contractsCovered < contractsSold) {
-          // Mark as partially used - we'll create the excess entry later
           usedDerivatives.add(`${call.id}-partial-${contractsCovered}`);
         } else {
           usedDerivatives.add(call.id);
@@ -201,14 +224,12 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 3: Find Long PUTs (protections) ============
-  // Find bought PUT options (positive quantity) - these go to Long PUT section
-  const boughtPuts = derivatives.filter(d => 
+  // ============ STEP 4: Find Long PUTs (protections) ============
+  const boughtPutsForLong = derivatives.filter(d => 
     d.option_type === 'put' && d.quantity > 0 && !usedDerivatives.has(d.id)
   );
   
-  for (const put of boughtPuts) {
-    // Try to find underlying stock for price reference
+  for (const put of boughtPutsForLong) {
     const underlyingStock = findUnderlyingStock(put, stockPositions);
     
     longPuts.push({
@@ -219,13 +240,12 @@ export function categorizeDerivatives(
     usedDerivatives.add(put.id);
   }
   
-  // ============ STEP 4: Find Naked Puts ============
-  // Naked Put = sold PUT options (negative quantity) not used in other strategies
-  const soldPuts = derivatives.filter(d => 
+  // ============ STEP 5: Find Naked Puts ============
+  const soldPutsForNaked = derivatives.filter(d => 
     d.option_type === 'put' && d.quantity < 0 && !usedDerivatives.has(d.id)
   );
   
-  for (const put of soldPuts) {
+  for (const put of soldPutsForNaked) {
     const underlyingStock = findUnderlyingStock(put, stockPositions);
     
     nakedPuts.push({
@@ -236,13 +256,11 @@ export function categorizeDerivatives(
     usedDerivatives.add(put.id);
   }
   
-  // ============ STEP 5: Find Leap Calls ============
-  // Leap Call = bought CALL options (positive quantity) not used in other strategies
+  // ============ STEP 6: Find Leap Calls ============
   const boughtCallsForLeaps = derivatives.filter(d => 
     d.option_type === 'call' && d.quantity > 0 && !usedDerivatives.has(d.id)
   );
   
-  // Get all stock positions for underlying reference
   for (const call of boughtCallsForLeaps) {
     const underlyingStock = findUnderlyingStock(call, stockPositions);
     
@@ -254,7 +272,7 @@ export function categorizeDerivatives(
     usedDerivatives.add(call.id);
   }
   
-  // ============ STEP 6: Collect remaining unclassified derivatives ============
+  // ============ STEP 7: Collect remaining unclassified derivatives ============
   for (const d of derivatives) {
     if (!usedDerivatives.has(d.id)) {
       const underlyingStock = findUnderlyingStock(d, stockPositions);
@@ -270,50 +288,39 @@ export function categorizeDerivatives(
 }
 
 /**
- * Find Iron Condor patterns within a group of options (same underlying, same expiry)
- * 
- * Iron Condor = 4 legs:
- * - 1 sold PUT (higher strike in the put spread)
- * - 1 bought PUT (lower strike - protection)
- * - 1 sold CALL (lower strike in the call spread)
- * - 1 bought CALL (higher strike - protection)
- * 
- * Pattern: Bought PUT < Sold PUT < Sold CALL < Bought CALL
+ * Helper to remove an item from an array
  */
-function findIronCondors(group: Position[]): IronCondorPosition[] {
-  const condors: IronCondorPosition[] = [];
+function removeFromArray(arr: Position[], item: Position): void {
+  const idx = arr.findIndex(p => p.id === item.id);
+  if (idx >= 0) arr.splice(idx, 1);
+}
+
+/**
+ * Try to match an Iron Condor (all 4 legs same expiry)
+ */
+function tryMatchIronCondor(
+  soldCalls: Position[],
+  boughtCalls: Position[],
+  soldPuts: Position[],
+  boughtPuts: Position[]
+): { condor: IronCondorPosition } | null {
   
-  // Separate by type and direction
-  const soldPuts = group.filter(p => p.option_type === 'put' && p.quantity < 0)
-    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0)); // Higher strike first
-  const boughtPuts = group.filter(p => p.option_type === 'put' && p.quantity > 0)
-    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0)); // Lower strike first
-  const soldCalls = group.filter(p => p.option_type === 'call' && p.quantity < 0)
-    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0)); // Lower strike first
-  const boughtCalls = group.filter(p => p.option_type === 'call' && p.quantity > 0)
-    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0)); // Higher strike first
-  
-  // Track used positions
-  const usedIds = new Set<string>();
-  
-  // Try to match Iron Condors
   for (const soldPut of soldPuts) {
-    if (usedIds.has(soldPut.id)) continue;
-    
-    const soldPutStrike = soldPut.strike_price || 0;
+    const expiry = soldPut.expiry_date;
     const contracts = Math.abs(soldPut.quantity);
+    const soldPutStrike = soldPut.strike_price || 0;
     
-    // Find matching bought PUT (lower strike, same quantity)
-    const matchingBoughtPut = boughtPuts.find(bp => 
-      !usedIds.has(bp.id) &&
+    // Find bought PUT with same expiry, lower strike, same contracts
+    const matchingBoughtPut = boughtPuts.find(bp =>
+      bp.expiry_date === expiry &&
       (bp.strike_price || 0) < soldPutStrike &&
       bp.quantity === contracts
     );
     if (!matchingBoughtPut) continue;
     
-    // Find matching sold CALL (strike above sold PUT, same quantity)
+    // Find sold CALL with same expiry, strike above sold PUT, same contracts
     const matchingSoldCall = soldCalls.find(sc =>
-      !usedIds.has(sc.id) &&
+      sc.expiry_date === expiry &&
       (sc.strike_price || 0) > soldPutStrike &&
       Math.abs(sc.quantity) === contracts
     );
@@ -321,21 +328,15 @@ function findIronCondors(group: Position[]): IronCondorPosition[] {
     
     const soldCallStrike = matchingSoldCall.strike_price || 0;
     
-    // Find matching bought CALL (higher strike than sold call, same quantity)
+    // Find bought CALL with same expiry, strike above sold CALL, same contracts
     const matchingBoughtCall = boughtCalls.find(bc =>
-      !usedIds.has(bc.id) &&
+      bc.expiry_date === expiry &&
       (bc.strike_price || 0) > soldCallStrike &&
       bc.quantity === contracts
     );
     if (!matchingBoughtCall) continue;
     
-    // We have a complete Iron Condor!
-    usedIds.add(soldPut.id);
-    usedIds.add(matchingBoughtPut.id);
-    usedIds.add(matchingSoldCall.id);
-    usedIds.add(matchingBoughtCall.id);
-    
-    // Calculate totals
+    // We have an Iron Condor!
     const totalPremium = 
       (soldPut.market_value || 0) + 
       (matchingBoughtPut.market_value || 0) +
@@ -348,88 +349,66 @@ function findIronCondors(group: Position[]): IronCondorPosition[] {
       (matchingSoldCall.profit_loss || 0) +
       (matchingBoughtCall.profit_loss || 0);
     
-    condors.push({
-      underlying: soldPut.underlying || soldPut.description,
-      expiryDate: soldPut.expiry_date || '',
-      soldPut,
-      boughtPut: matchingBoughtPut,
-      soldCall: matchingSoldCall,
-      boughtCall: matchingBoughtCall,
-      contracts,
-      totalPremium,
-      totalProfitLoss
-    });
+    return {
+      condor: {
+        underlying: soldPut.underlying || soldPut.description,
+        expiryDate: expiry || '',
+        soldPut,
+        boughtPut: matchingBoughtPut,
+        soldCall: matchingSoldCall,
+        boughtCall: matchingBoughtCall,
+        contracts,
+        totalPremium,
+        totalProfitLoss
+      }
+    };
   }
   
-  return condors;
+  return null;
 }
 
 /**
- * Find Double Diagonal patterns within a group of options (same underlying, different expiries)
- * 
- * Double Diagonal = 4 legs like Iron Condor, but bought options have LONGER expiry than sold options
- * - 1 sold PUT (shorter expiry)
- * - 1 bought PUT (longer expiry - protection, lower strike)
- * - 1 sold CALL (shorter expiry)
- * - 1 bought CALL (longer expiry - protection, any strike - typically different from sold)
- * 
- * Pattern: Bought PUT strike < Sold PUT strike, Bought CALL strike != Sold CALL strike
- * AND: Sold options expiry < Bought options expiry (same expiry for both sold, same for both bought)
+ * Try to match a Double Diagonal (sold legs same expiry, bought legs same longer expiry)
  */
-function findDoubleDiagonals(group: Position[]): DoubleDiagonalPosition[] {
-  const diagonals: DoubleDiagonalPosition[] = [];
-  
-  // Separate by type and direction
-  const soldPuts = group.filter(p => p.option_type === 'put' && p.quantity < 0)
-    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0));
-  const boughtPuts = group.filter(p => p.option_type === 'put' && p.quantity > 0)
-    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
-  const soldCalls = group.filter(p => p.option_type === 'call' && p.quantity < 0)
-    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
-  const boughtCalls = group.filter(p => p.option_type === 'call' && p.quantity > 0)
-    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0));
-  
-  const usedIds = new Set<string>();
+function tryMatchDoubleDiagonal(
+  soldCalls: Position[],
+  boughtCalls: Position[],
+  soldPuts: Position[],
+  boughtPuts: Position[]
+): { diagonal: DoubleDiagonalPosition } | null {
   
   for (const soldPut of soldPuts) {
-    if (usedIds.has(soldPut.id)) continue;
-    
-    const soldPutStrike = soldPut.strike_price || 0;
-    const soldPutExpiry = soldPut.expiry_date ? new Date(soldPut.expiry_date).getTime() : 0;
+    const soldExpiry = soldPut.expiry_date;
+    const soldExpiryTime = soldExpiry ? new Date(soldExpiry).getTime() : 0;
     const contracts = Math.abs(soldPut.quantity);
+    const soldPutStrike = soldPut.strike_price || 0;
     
-    // Find matching bought PUT (lower strike, same qty, LONGER expiry)
-    const matchingBoughtPut = boughtPuts.find(bp => 
-      !usedIds.has(bp.id) &&
-      (bp.strike_price || 0) < soldPutStrike &&
-      bp.quantity === contracts &&
-      bp.expiry_date && new Date(bp.expiry_date).getTime() > soldPutExpiry
-    );
-    if (!matchingBoughtPut) continue;
-    
-    // Find matching sold CALL (strike above sold PUT, same qty, same expiry as sold PUT)
+    // Find sold CALL with SAME expiry as sold PUT, strike above sold PUT, same contracts
     const matchingSoldCall = soldCalls.find(sc =>
-      !usedIds.has(sc.id) &&
+      sc.expiry_date === soldExpiry &&
       (sc.strike_price || 0) > soldPutStrike &&
-      Math.abs(sc.quantity) === contracts &&
-      sc.expiry_date === soldPut.expiry_date
+      Math.abs(sc.quantity) === contracts
     );
     if (!matchingSoldCall) continue;
     
-    // Find matching bought CALL (any strike different from sold call, same qty, LONGER expiry - same as bought put)
+    // Find bought PUT with LONGER expiry, lower strike, same contracts
+    const matchingBoughtPut = boughtPuts.find(bp =>
+      bp.expiry_date && new Date(bp.expiry_date).getTime() > soldExpiryTime &&
+      (bp.strike_price || 0) < soldPutStrike &&
+      bp.quantity === contracts
+    );
+    if (!matchingBoughtPut) continue;
+    
+    const boughtExpiry = matchingBoughtPut.expiry_date;
+    
+    // Find bought CALL with SAME expiry as bought PUT, same contracts
     const matchingBoughtCall = boughtCalls.find(bc =>
-      !usedIds.has(bc.id) &&
-      bc.quantity === contracts &&
-      bc.expiry_date === matchingBoughtPut.expiry_date
+      bc.expiry_date === boughtExpiry &&
+      bc.quantity === contracts
     );
     if (!matchingBoughtCall) continue;
     
-    // We have a complete Double Diagonal!
-    usedIds.add(soldPut.id);
-    usedIds.add(matchingBoughtPut.id);
-    usedIds.add(matchingSoldCall.id);
-    usedIds.add(matchingBoughtCall.id);
-    
+    // We have a Double Diagonal!
     const totalPremium = 
       (soldPut.market_value || 0) + 
       (matchingBoughtPut.market_value || 0) +
@@ -442,22 +421,64 @@ function findDoubleDiagonals(group: Position[]): DoubleDiagonalPosition[] {
       (matchingSoldCall.profit_loss || 0) +
       (matchingBoughtCall.profit_loss || 0);
     
-    diagonals.push({
-      underlying: soldPut.underlying || soldPut.description,
-      soldExpiryDate: soldPut.expiry_date || '',
-      boughtExpiryDate: matchingBoughtPut.expiry_date || '',
-      soldPut,
-      boughtPut: matchingBoughtPut,
-      soldCall: matchingSoldCall,
-      boughtCall: matchingBoughtCall,
-      contracts,
-      totalPremium,
-      totalProfitLoss
-    });
+    return {
+      diagonal: {
+        underlying: soldPut.underlying || soldPut.description,
+        soldExpiryDate: soldExpiry || '',
+        boughtExpiryDate: boughtExpiry || '',
+        soldPut,
+        boughtPut: matchingBoughtPut,
+        soldCall: matchingSoldCall,
+        boughtCall: matchingBoughtCall,
+        contracts,
+        totalPremium,
+        totalProfitLoss
+      }
+    };
   }
   
-  return diagonals;
+  return null;
 }
+
+/**
+ * Try to match any 4-leg combination that doesn't fit Iron Condor or Double Diagonal
+ * Returns the 4 options to put in "Altre Strategie"
+ */
+function tryMatch4LegUnclassified(
+  soldCalls: Position[],
+  boughtCalls: Position[],
+  soldPuts: Position[],
+  boughtPuts: Position[]
+): { options: Position[] } | null {
+  
+  if (soldCalls.length === 0 || boughtCalls.length === 0 ||
+      soldPuts.length === 0 || boughtPuts.length === 0) {
+    return null;
+  }
+  
+  // Take first of each type
+  const soldCall = soldCalls[0];
+  const boughtCall = boughtCalls[0];
+  const soldPut = soldPuts[0];
+  const boughtPut = boughtPuts[0];
+  
+  // Check if quantities match (same number of contracts)
+  const contracts = Math.abs(soldCall.quantity);
+  if (Math.abs(soldPut.quantity) !== contracts ||
+      boughtCall.quantity !== contracts ||
+      boughtPut.quantity !== contracts) {
+    return null;
+  }
+  
+  return {
+    options: [soldCall, boughtCall, soldPut, boughtPut]
+  };
+}
+
+/**
+ * Special-case aliasing
+ * Only keep the explicit GOOGLE ↔ ALPHABET equivalence requested.
+ */
 
 /**
  * Special-case aliasing
