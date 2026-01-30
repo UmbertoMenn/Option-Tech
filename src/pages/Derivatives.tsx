@@ -427,6 +427,12 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
   const gainPotenziale = premiumReceived - premiumPaid;
   const isPositiveGP = gainPotenziale >= 0;
   
+  // Calculate Max Loss = spread width * 100 * contracts - net premium received
+  const putSpreadWidth = (soldPut.strike_price || 0) - (boughtPut.strike_price || 0);
+  const callSpreadWidth = (boughtCall.strike_price || 0) - (soldCall.strike_price || 0);
+  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
+  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
+  
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
   const callSpread = `${soldCall.strike_price}/${boughtCall.strike_price}`;
@@ -446,7 +452,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               IC
             </Badge>
             <span className="text-xs text-muted-foreground">
-              Scadenza: {expiryFormatted}
+              {expiryFormatted}
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
@@ -482,6 +488,17 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               </TooltipTrigger>
               <TooltipContent>
                 <p>Gain Potenziale: premi incassati - premi pagati</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 cursor-help text-red-500">
+                  <span className="text-xs text-muted-foreground">ML:</span>
+                  <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Max Loss: perdita massima possibile</p>
               </TooltipContent>
             </Tooltip>
           </div>
