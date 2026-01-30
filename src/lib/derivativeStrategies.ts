@@ -32,11 +32,23 @@ export interface IronCondorPosition {
   totalProfitLoss: number;
 }
 
+export interface NakedPutPosition {
+  option: Position;
+  contracts: number;
+}
+
+export interface LeapCallPosition {
+  option: Position;
+  underlying: Position | null;
+  contracts: number;
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
-  strategies: StrategyPosition[];
+  nakedPuts: NakedPutPosition[];
+  leapCalls: LeapCallPosition[];
 }
 
 /**
@@ -55,6 +67,8 @@ export function categorizeDerivatives(
   const coveredCalls: CoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
+  const nakedPuts: NakedPutPosition[] = [];
+  const leapCalls: LeapCallPosition[] = [];
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions
@@ -155,46 +169,39 @@ export function categorizeDerivatives(
     usedDerivatives.add(put.id);
   }
   
-  // ============ STEP 4: All remaining go to strategies ============
-  const strategies: StrategyPosition[] = [];
+  // ============ STEP 4: Find Naked Puts ============
+  // Naked Put = sold PUT options (negative quantity) not used in other strategies
+  const soldPuts = derivatives.filter(d => 
+    d.option_type === 'put' && d.quantity < 0 && !usedDerivatives.has(d.id)
+  );
   
-  for (const derivative of derivatives) {
-    // Skip fully used derivatives
-    if (usedDerivatives.has(derivative.id)) continue;
-    
-    // Check for partial coverage
-    const partialKey = Array.from(usedDerivatives).find(key => 
-      key.startsWith(`${derivative.id}-partial-`)
-    );
-    
-    if (partialKey) {
-      // This is a partially covered call - add the excess
-      const contractsCovered = parseInt(partialKey.split('-partial-')[1]);
-      const excessContracts = Math.abs(derivative.quantity) - contractsCovered;
-      
-      if (excessContracts > 0) {
-        strategies.push({
-          positions: [{
-            ...derivative,
-            quantity: -excessContracts // Negative because they're sold
-          }],
-          strategyType: 'naked_call',
-          description: `Naked Call (eccedente da Covered Call)`
-        });
-      }
-      continue;
-    }
-    
-    // Categorize the derivative
-    const strategyType = determineStrategyType(derivative);
-    strategies.push({
-      positions: [derivative],
-      strategyType,
-      description: getStrategyDescription(strategyType)
+  for (const put of soldPuts) {
+    nakedPuts.push({
+      option: put,
+      contracts: Math.abs(put.quantity)
     });
+    usedDerivatives.add(put.id);
   }
   
-  return { coveredCalls, longPuts, ironCondors, strategies };
+  // ============ STEP 5: Find Leap Calls ============
+  // Leap Call = bought CALL options (positive quantity) not used in other strategies
+  const boughtCalls = derivatives.filter(d => 
+    d.option_type === 'call' && d.quantity > 0 && !usedDerivatives.has(d.id)
+  );
+  
+  // Get all stock positions for underlying reference
+  for (const call of boughtCalls) {
+    const underlyingStock = findUnderlyingStock(call, stockPositions);
+    
+    leapCalls.push({
+      option: call,
+      underlying: underlyingStock || null,
+      contracts: call.quantity
+    });
+    usedDerivatives.add(call.id);
+  }
+  
+  return { coveredCalls, longPuts, ironCondors, nakedPuts, leapCalls };
 }
 
 /**

@@ -16,7 +16,8 @@ import {
   CoveredCallPosition,
   LongPutPosition,
   IronCondorPosition,
-  StrategyPosition 
+  NakedPutPosition,
+  LeapCallPosition
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
@@ -26,7 +27,8 @@ export function Derivatives() {
   const [coveredCallOpen, setCoveredCallOpen] = useState(true);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(true);
-  const [strategiesOpen, setStrategiesOpen] = useState(true);
+  const [nakedPutsOpen, setNakedPutsOpen] = useState(true);
+  const [leapCallsOpen, setLeapCallsOpen] = useState(true);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -132,7 +134,7 @@ export function Derivatives() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
-                    <CardTitle className="text-xl">Protezioni - Long PUT</CardTitle>
+                    <CardTitle className="text-xl">Protezioni - Long Put</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.longPuts.length}</Badge>
                   </div>
                   {deRiskingOpen ? (
@@ -147,7 +149,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 {categories.longPuts.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna protezione Long PUT presente</p>
+                    <p className="text-sm">Nessuna protezione Long Put presente</p>
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -201,38 +203,78 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 4: Strategie (Collapsible) */}
-        <Collapsible open={strategiesOpen} onOpenChange={setStrategiesOpen}>
+        {/* Section 4: Naked Put (Collapsible) */}
+        <Collapsible open={nakedPutsOpen} onOpenChange={setNakedPutsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
               <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Target className="w-5 h-5 text-primary" />
-                    <CardTitle className="text-xl">Strategie</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.strategies.length}</Badge>
+                    <CardTitle className="text-xl">Naked Put</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.nakedPuts.length}</Badge>
                   </div>
-                  {strategiesOpen ? (
+                  {nakedPutsOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
                   ) : (
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground text-left">
-                  Opzioni singole e strategie combinate
+                  PUT vendute senza copertura
                 </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.strategies.length === 0 ? (
+                {categories.nakedPuts.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna strategia presente</p>
+                    <p className="text-sm">Nessuna Naked Put presente</p>
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {categories.strategies.map((strategy, index) => (
-                      <StrategyRow key={index} strategy={strategy} />
+                    {categories.nakedPuts.map((np, index) => (
+                      <NakedPutRow key={index} nakedPut={np} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Section 5: Leap Call (Collapsible) */}
+        <Collapsible open={leapCallsOpen} onOpenChange={setLeapCallsOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-green-500" />
+                    <CardTitle className="text-xl">Leap Call</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.leapCalls.length}</Badge>
+                  </div>
+                  {leapCallsOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  CALL acquistate a lungo termine
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.leapCalls.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna Leap Call presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.leapCalls.map((lc, index) => (
+                      <LeapCallRow key={index} leapCall={lc} />
                     ))}
                   </div>
                 )}
@@ -609,27 +651,9 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
   );
 }
 
-function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
+function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const position = strategy.positions[0];
-  if (!position) return null;
-  
-  const profitLoss = position.profit_loss || 0;
-  const isProfitable = profitLoss >= 0;
-  const isSold = position.quantity < 0;
-  
-  const getStrategyBadgeVariant = () => {
-    switch (strategy.strategyType) {
-      case 'naked_put':
-      case 'naked_call':
-        return 'destructive';
-      case 'long_call':
-      case 'long_put':
-        return 'default';
-      default:
-        return 'secondary';
-    }
-  };
+  const { option, contracts } = nakedPut;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -641,19 +665,28 @@ function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <span className="font-medium truncate">{formatOptionDescription(position)}</span>
-            <Badge variant={getStrategyBadgeVariant()} className="text-xs shrink-0">
-              {strategy.description}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge variant="destructive" className="text-xs shrink-0">
+              Naked Put
             </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
             <span className="text-sm text-muted-foreground">
-              {Math.abs(position.quantity)} {isSold ? 'V' : 'C'}
+              {contracts} × 100
             </span>
-            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span className="font-semibold text-sm">{formatCurrency(profitLoss, 'USD')}</span>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
           </div>
         </div>
       </CollapsibleTrigger>
@@ -661,27 +694,120 @@ function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <p className="text-muted-foreground text-xs">Tipo</p>
-              <p className="font-medium">{position.option_type?.toUpperCase() || '-'}</p>
+              <p className="text-muted-foreground text-xs">Sottostante</p>
+              <p className="font-medium">{option.underlying || option.description}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${position.strike_price || '-'}</p>
+              <p className="font-medium">${option.strike_price}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
               <p className="font-medium">
-                {position.expiry_date ? new Date(position.expiry_date).toLocaleDateString('it-IT') : '-'}
+                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
               </p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Valore</p>
-              <p className="font-medium">{formatCurrency(position.market_value || 0, 'USD')}</p>
+              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
             </div>
           </div>
-          {position.profit_loss_pct !== null && (
+          {option.profit_loss_pct !== null && (
             <div className="text-xs text-muted-foreground">
-              P/L: {formatPercentage(position.profit_loss_pct)}
+              P/L: {formatPercentage(option.profit_loss_pct)}
+            </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function LeapCallRow({ leapCall }: { leapCall: LeapCallPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { option, underlying, contracts } = leapCall;
+  
+  // Calculate ITM/OTM status for CALL options
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  const isITM = hasUnderlyingPrice && strikePrice < underlyingPrice;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge 
+              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <span className="text-sm text-muted-foreground">
+              {contracts} × 100
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Sottostante</p>
+              <p className="font-medium">{option.underlying || option.description}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Strike</p>
+              <p className="font-medium">${option.strike_price}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Scadenza</p>
+              <p className="font-medium">
+                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+            </div>
+          </div>
+          {option.profit_loss_pct !== null && (
+            <div className="text-xs text-muted-foreground">
+              P/L: {formatPercentage(option.profit_loss_pct)}
             </div>
           )}
         </div>
