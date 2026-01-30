@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Position, AssetType, ASSET_TYPE_LABELS, DerivativePosition } from '@/types/portfolio';
+import { Position, AssetType, ASSET_TYPE_LABELS } from '@/types/portfolio';
 import { formatCurrency, formatPercentage, formatProfitLoss, formatDate } from '@/lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronDown, ChevronUp, BarChart2, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
-import { OptionPayoffDialog } from './OptionPayoffDialog';
+import { ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
 
 interface PositionsTableProps {
   positions: Position[];
@@ -24,8 +23,6 @@ const assetTabs: { value: AssetType | 'all'; label: string }[] = [
 export function PositionsTable({ positions }: PositionsTableProps) {
   const [selectedTab, setSelectedTab] = useState<AssetType | 'all'>('all');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' } | null>(null);
-  const [selectedDerivatives, setSelectedDerivatives] = useState<DerivativePosition[]>([]);
-  const [showPayoffDialog, setShowPayoffDialog] = useState(false);
 
   const filteredPositions = selectedTab === 'all' 
     ? positions 
@@ -61,15 +58,6 @@ export function PositionsTable({ positions }: PositionsTableProps) {
     return sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />;
   };
 
-  const derivatives = positions.filter(p => p.asset_type === 'derivative' && p.option_type) as DerivativePosition[];
-  const underlyings = [...new Set(derivatives.map(d => d.underlying).filter(Boolean))];
-
-  const handleShowPayoff = (underlying: string) => {
-    const derivs = derivatives.filter(d => d.underlying === underlying);
-    setSelectedDerivatives(derivs);
-    setShowPayoffDialog(true);
-  };
-
   return (
     <div className="space-y-4">
       <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as AssetType | 'all')}>
@@ -97,21 +85,9 @@ export function PositionsTable({ positions }: PositionsTableProps) {
         </TabsList>
       </Tabs>
 
-      {/* Derivative Payoff Buttons */}
+      {/* Link to Derivatives Strategies */}
       {selectedTab === 'derivative' && (
         <div className="flex flex-wrap gap-2 items-center">
-          {underlyings.map(underlying => (
-            <Button
-              key={underlying}
-              variant="outline"
-              size="sm"
-              onClick={() => handleShowPayoff(underlying!)}
-              className="border-primary/30 hover:bg-primary/10"
-            >
-              <BarChart2 className="w-4 h-4 mr-2" />
-              Payoff {underlying}
-            </Button>
-          ))}
           <Button
             variant="default"
             size="sm"
@@ -222,12 +198,6 @@ export function PositionsTable({ positions }: PositionsTableProps) {
           </table>
         </div>
       </div>
-
-      <OptionPayoffDialog
-        open={showPayoffDialog}
-        onOpenChange={setShowPayoffDialog}
-        positions={selectedDerivatives}
-      />
     </div>
   );
 }
