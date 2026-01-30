@@ -114,7 +114,7 @@ export function Derivatives() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
-                    <CardTitle className="text-xl">Protezioni - LONG PUT</CardTitle>
+                    <CardTitle className="text-xl">Protezioni - Long PUT</CardTitle>
                     <Badge variant="secondary" className="text-xs">0</Badge>
                   </div>
                   {deRiskingOpen ? (
@@ -128,7 +128,7 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="text-center py-6 text-muted-foreground">
-                  <p className="text-sm">Nessuna protezione LONG PUT presente</p>
+                  <p className="text-sm">Nessuna protezione Long PUT presente</p>
                 </div>
               </CardContent>
             </CollapsibleContent>
