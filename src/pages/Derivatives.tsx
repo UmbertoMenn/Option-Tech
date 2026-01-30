@@ -23,8 +23,10 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
+  const [coveredCallOpen, setCoveredCallOpen] = useState(true);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(true);
+  const [strategiesOpen, setStrategiesOpen] = useState(true);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -82,32 +84,45 @@ export function Derivatives() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-6">
-        {/* Section 1: Covered Call */}
-        <Card className="border-border bg-card">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-primary" />
-              <CardTitle className="text-xl">Covered Call</CardTitle>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              CALL vendute con sottostante in portafoglio
-            </p>
-          </CardHeader>
-          <CardContent>
-            {categories.coveredCalls.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Shield className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">Nessuna Covered Call presente</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {categories.coveredCalls.map((cc, index) => (
-                  <CoveredCallRow key={index} coveredCall={cc} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Section 1: Covered Call (Collapsible) */}
+        <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-xl">Covered Call</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length}</Badge>
+                  </div>
+                  {coveredCallOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  CALL vendute con sottostante in portafoglio
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.coveredCalls.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna Covered Call presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.coveredCalls.map((cc, index) => (
+                      <CoveredCallRow key={index} coveredCall={cc} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
 
         {/* Section 2: Protezioni - Long PUT (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
@@ -186,32 +201,45 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 4: Strategie */}
-        <Card className="border-border bg-card">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <Target className="w-5 h-5 text-primary" />
-              <CardTitle className="text-xl">Strategie</CardTitle>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Opzioni singole e strategie combinate
-            </p>
-          </CardHeader>
-          <CardContent>
-            {categories.strategies.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Target className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">Nessuna strategia presente</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {categories.strategies.map((strategy, index) => (
-                  <StrategyRow key={index} strategy={strategy} />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Section 4: Strategie (Collapsible) */}
+        <Collapsible open={strategiesOpen} onOpenChange={setStrategiesOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-xl">Strategie</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.strategies.length}</Badge>
+                  </div>
+                  {strategiesOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  Opzioni singole e strategie combinate
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.strategies.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna strategia presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.strategies.map((strategy, index) => (
+                      <StrategyRow key={index} strategy={strategy} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       </main>
     </div>
   );
