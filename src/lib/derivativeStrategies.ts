@@ -369,12 +369,12 @@ function findIronCondors(group: Position[]): IronCondorPosition[] {
  * 
  * Double Diagonal = 4 legs like Iron Condor, but bought options have LONGER expiry than sold options
  * - 1 sold PUT (shorter expiry)
- * - 1 bought PUT (longer expiry - protection)
+ * - 1 bought PUT (longer expiry - protection, lower strike)
  * - 1 sold CALL (shorter expiry)
- * - 1 bought CALL (longer expiry - protection)
+ * - 1 bought CALL (longer expiry - protection, any strike - typically different from sold)
  * 
- * Pattern: Bought PUT < Sold PUT < Sold CALL < Bought CALL (by strike)
- * AND: Sold options expiry < Bought options expiry
+ * Pattern: Bought PUT strike < Sold PUT strike, Bought CALL strike != Sold CALL strike
+ * AND: Sold options expiry < Bought options expiry (same expiry for both sold, same for both bought)
  */
 function findDoubleDiagonals(group: Position[]): DoubleDiagonalPosition[] {
   const diagonals: DoubleDiagonalPosition[] = [];
@@ -416,12 +416,9 @@ function findDoubleDiagonals(group: Position[]): DoubleDiagonalPosition[] {
     );
     if (!matchingSoldCall) continue;
     
-    const soldCallStrike = matchingSoldCall.strike_price || 0;
-    
-    // Find matching bought CALL (higher strike than sold call, same qty, LONGER expiry - same as bought put)
+    // Find matching bought CALL (any strike different from sold call, same qty, LONGER expiry - same as bought put)
     const matchingBoughtCall = boughtCalls.find(bc =>
       !usedIds.has(bc.id) &&
-      (bc.strike_price || 0) > soldCallStrike &&
       bc.quantity === contracts &&
       bc.expiry_date === matchingBoughtPut.expiry_date
     );
