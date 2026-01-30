@@ -19,7 +19,8 @@ import {
   DoubleDiagonalPosition,
   NakedPutPosition,
   LeapCallPosition,
-  OtherStrategyPosition
+  OtherStrategyPosition,
+  GroupedOtherStrategy
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
@@ -346,7 +347,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <TrendingDown className="w-5 h-5 text-muted-foreground" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.otherStrategies.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.groupedOtherStrategies.length}</Badge>
                   </div>
                   {otherStrategiesOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -361,14 +362,14 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.otherStrategies.length === 0 ? (
+                {categories.groupedOtherStrategies.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
                     <p className="text-sm">Nessuna altra strategia presente</p>
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {categories.otherStrategies.map((os, index) => (
-                      <OtherStrategyRow key={index} otherStrategy={os} />
+                    {categories.groupedOtherStrategies.map((group, index) => (
+                      <GroupedOtherStrategyRow key={index} group={group} />
                     ))}
                   </div>
                 )}
@@ -896,6 +897,130 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { underlying, options, totalProfitLoss } = group;
+  
+  // Get underlying price from first option that has it
+  const underlyingPrice = options[0]?.underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  
+  // Count calls and puts
+  const callCount = options.filter(o => o.option.option_type === 'call').length;
+  const putCount = options.filter(o => o.option.option_type === 'put').length;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{underlying}</span>
+            <Badge variant="secondary" className="text-xs shrink-0">
+              {options.length} gambe
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {callCount > 0 && `${callCount} CALL`}
+              {callCount > 0 && putCount > 0 && ' • '}
+              {putCount > 0 && `${putCount} PUT`}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <span className={`font-semibold text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(totalProfitLoss, 'USD')}
+            </span>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 space-y-2">
+          {options.map((os, idx) => (
+            <GroupedOptionLegRow key={idx} otherStrategy={os} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function GroupedOptionLegRow({ otherStrategy }: { otherStrategy: OtherStrategyPosition }) {
+  const { option, underlying } = otherStrategy;
+  
+  const isCall = option.option_type === 'call';
+  const isPut = option.option_type === 'put';
+  const isBought = option.quantity > 0;
+  
+  // Calculate ITM/OTM
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  
+  let isITM = false;
+  if (hasUnderlyingPrice) {
+    if (isCall) {
+      isITM = strikePrice < underlyingPrice;
+    } else if (isPut) {
+      isITM = strikePrice > underlyingPrice;
+    }
+  }
+  
+  const typeLabel = isBought ? 'C' : 'V';
+  const optionTypeLabel = isCall ? 'CALL' : isPut ? 'PUT' : 'OPT';
+  
+  return (
+    <div className="flex items-center justify-between p-2 rounded-lg border border-border/50 bg-muted/30">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <Badge variant={isBought ? "default" : "secondary"} className="text-xs shrink-0 w-5 justify-center">
+          {typeLabel}
+        </Badge>
+        <span className="text-sm">{optionTypeLabel}</span>
+        <span className="font-medium text-sm">${option.strike_price}</span>
+        <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
+        <Badge 
+          variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
+          className="text-xs shrink-0"
+        >
+          {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+        </Badge>
+      </div>
+      <div className="flex items-center gap-4 shrink-0">
+        <span className="text-sm text-muted-foreground">
+          {Math.abs(option.quantity)} × 100
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-sm text-muted-foreground cursor-help">
+              PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Prezzo Medio di Carico Opzione</p>
+          </TooltipContent>
+        </Tooltip>
+        <span className="font-semibold text-sm">
+          {formatCurrency(option.current_price || 0, 'USD')}
+        </span>
+      </div>
+    </div>
   );
 }
 

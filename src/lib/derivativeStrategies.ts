@@ -62,6 +62,13 @@ export interface OtherStrategyPosition {
   underlying: Position | null;
 }
 
+export interface GroupedOtherStrategy {
+  underlying: string;
+  options: OtherStrategyPosition[];
+  totalPremium: number;
+  totalProfitLoss: number;
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   longPuts: LongPutPosition[];
@@ -70,6 +77,7 @@ export interface DerivativeCategories {
   nakedPuts: NakedPutPosition[];
   leapCalls: LeapCallPosition[];
   otherStrategies: OtherStrategyPosition[];
+  groupedOtherStrategies: GroupedOtherStrategy[];
 }
 
 /**
@@ -284,7 +292,45 @@ export function categorizeDerivatives(
     }
   }
   
-  return { coveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies };
+  // ============ STEP 8: Group other strategies by underlying ============
+  const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
+  
+  return { coveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+}
+
+/**
+ * Groups other strategies by underlying asset
+ */
+function groupOtherStrategiesByUnderlying(otherStrategies: OtherStrategyPosition[]): GroupedOtherStrategy[] {
+  const grouped = new Map<string, OtherStrategyPosition[]>();
+  
+  for (const os of otherStrategies) {
+    const underlyingKey = normalizeForMatching(os.option.underlying || os.option.description);
+    
+    if (!grouped.has(underlyingKey)) {
+      grouped.set(underlyingKey, []);
+    }
+    grouped.get(underlyingKey)!.push(os);
+  }
+  
+  const result: GroupedOtherStrategy[] = [];
+  
+  for (const [key, options] of grouped.entries()) {
+    // Use the first option's underlying name as display name
+    const displayName = options[0].option.underlying || options[0].option.description;
+    
+    const totalPremium = options.reduce((sum, os) => sum + (os.option.market_value || 0), 0);
+    const totalProfitLoss = options.reduce((sum, os) => sum + (os.option.profit_loss || 0), 0);
+    
+    result.push({
+      underlying: displayName,
+      options,
+      totalPremium,
+      totalProfitLoss
+    });
+  }
+  
+  return result;
 }
 
 /**
@@ -391,10 +437,9 @@ function tryMatchDoubleDiagonal(
     );
     if (!matchingSoldCall) continue;
     
-    // Find bought PUT with LONGER expiry, lower strike, same contracts
+    // Find bought PUT with LONGER expiry, same contracts (no strike constraint)
     const matchingBoughtPut = boughtPuts.find(bp =>
       bp.expiry_date && new Date(bp.expiry_date).getTime() > soldExpiryTime &&
-      (bp.strike_price || 0) < soldPutStrike &&
       bp.quantity === contracts
     );
     if (!matchingBoughtPut) continue;
