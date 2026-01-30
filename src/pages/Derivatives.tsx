@@ -14,6 +14,7 @@ import {
   categorizeDerivatives, 
   formatOptionDescription,
   CoveredCallPosition,
+  LongPutPosition,
   StrategyPosition 
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
@@ -106,7 +107,7 @@ export function Derivatives() {
           </CardContent>
         </Card>
 
-        {/* Section 2: Protezioni - LONG PUT (Collapsible) */}
+        {/* Section 2: Protezioni - Long PUT (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -115,7 +116,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
                     <CardTitle className="text-xl">Protezioni - Long PUT</CardTitle>
-                    <Badge variant="secondary" className="text-xs">0</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.longPuts.length}</Badge>
                   </div>
                   {deRiskingOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -127,9 +128,17 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                <div className="text-center py-6 text-muted-foreground">
-                  <p className="text-sm">Nessuna protezione Long PUT presente</p>
-                </div>
+                {categories.longPuts.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna protezione Long PUT presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.longPuts.map((lp, index) => (
+                      <LongPutRow key={index} longPut={lp} />
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </CollapsibleContent>
           </Card>
@@ -231,6 +240,89 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
               <p className="text-muted-foreground text-xs">Sottostante</p>
               <p className="font-medium">{underlying.description}</p>
               <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Strike</p>
+              <p className="font-medium">${option.strike_price}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Scadenza</p>
+              <p className="font-medium">
+                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+            </div>
+          </div>
+          {option.profit_loss_pct !== null && (
+            <div className="text-xs text-muted-foreground">
+              P/L: {formatPercentage(option.profit_loss_pct)}
+            </div>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { option, contracts } = longPut;
+  
+  // Calculate ITM/OTM status for PUT options
+  // ITM: strike > underlying price, OTM: strike <= underlying price
+  const strikePrice = option.strike_price || 0;
+  // For Long PUTs we don't have the underlying in portfolio, so we use current_price as proxy
+  // or we could leave it as OTM if no price info available
+  const underlyingPrice = option.current_price ? strikePrice * 0.95 : strikePrice; // Approximate, will show based on strike
+  const isITM = strikePrice > underlyingPrice;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge 
+              variant={isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {isITM ? 'ITM' : 'OTM'}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-sm text-muted-foreground">
+              {contracts} × 100
+            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Sottostante</p>
+              <p className="font-medium">{option.underlying || option.description}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
