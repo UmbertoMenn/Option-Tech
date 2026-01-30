@@ -2,7 +2,9 @@ import { formatDistanceToNow } from 'date-fns';
 import { it } from 'date-fns/locale';
 
 export function formatCurrency(value: number, currency: string = 'EUR'): string {
-  return new Intl.NumberFormat('it-IT', {
+  // Use appropriate locale for currency symbol display
+  const locale = currency === 'USD' ? 'en-US' : 'it-IT';
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
