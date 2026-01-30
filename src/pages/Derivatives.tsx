@@ -211,11 +211,11 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(underlying.avg_cost || 0)}
+                  PMC: {formatCurrency(option.avg_cost || 0)}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Prezzo Medio di Carico</p>
+                <p>Prezzo Medio di Carico Opzione</p>
               </TooltipContent>
             </Tooltip>
             <span className="font-semibold text-sm">
