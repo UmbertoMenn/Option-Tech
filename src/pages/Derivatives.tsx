@@ -198,7 +198,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground cursor-help">
-                  PS: {formatCurrency(underlyingPrice)}
+                  PS: {formatCurrency(underlyingPrice, 'USD')}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -211,7 +211,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(option.avg_cost || 0)}
+                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -219,7 +219,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
               </TooltipContent>
             </Tooltip>
             <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0)}
+              {formatCurrency(option.current_price || 0, 'USD')}
             </span>
           </div>
         </div>
@@ -244,7 +244,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0)}</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
@@ -301,7 +301,7 @@ function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
             </span>
             <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
               {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span className="font-semibold text-sm">{formatCurrency(profitLoss)}</span>
+              <span className="font-semibold text-sm">{formatCurrency(profitLoss, 'USD')}</span>
             </div>
           </div>
         </div>
@@ -325,7 +325,7 @@ function StrategyRow({ strategy }: { strategy: StrategyPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Valore</p>
-              <p className="font-medium">{formatCurrency(position.market_value || 0)}</p>
+              <p className="font-medium">{formatCurrency(position.market_value || 0, 'USD')}</p>
             </div>
           </div>
           {position.profit_loss_pct !== null && (
