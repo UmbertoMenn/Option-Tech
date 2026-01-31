@@ -3,7 +3,7 @@ import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, Target, Calendar, Pencil, Check, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Target, Calendar, Pencil, Check, X, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
@@ -363,13 +363,29 @@ export function StatsCards({
                       {'value' in stat ? stat.value : '—'}
                     </p>
                     {'isEditable' in stat && stat.isEditable && (
-                      <button
-                        onClick={startEditGiacenza}
-                        className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-                        title="Modifica giacenza media"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-0.5">
+                        {isManualAverageBalance && (
+                          <button
+                            onClick={() => {
+                              onManualAverageBalanceToggle(false);
+                              // Force recalculation by triggering the effect
+                              onAverageBalanceChange(timeWeightedData.average);
+                              onDepositsChange(timeWeightedData.totalDeposits);
+                            }}
+                            className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+                            title="Ricalcola automaticamente"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          onClick={startEditGiacenza}
+                          className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+                          title="Modifica giacenza media"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                   </div>
                   {'subtext' in stat && stat.subtext && (
