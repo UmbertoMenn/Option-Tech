@@ -664,7 +664,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Venduta (V)</span>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -676,7 +676,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Comprata (C)</span>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -695,7 +695,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Venduta (V)</span>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -707,7 +707,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Comprata (C)</span>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -831,7 +831,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Venduta (V) - {soldExpiryFormatted}</span>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V - {soldExpiryFormatted}</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -843,7 +843,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Comprata (C) - {boughtExpiryFormatted}</span>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A - {boughtExpiryFormatted}</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -862,7 +862,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Venduta (V) - {soldExpiryFormatted}</span>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V - {soldExpiryFormatted}</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -874,7 +874,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground text-xs">Comprata (C) - {boughtExpiryFormatted}</span>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A - {boughtExpiryFormatted}</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -1046,7 +1046,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
     }
   }
   
-  const typeLabel = `${isCall ? 'CALL' : isPut ? 'PUT' : 'OPT'} ${isBought ? 'comprata' : 'venduta'}`;
+  const typeLabel = isCall ? 'CALL' : isPut ? 'PUT' : 'OPT';
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -1058,6 +1058,11 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
+            <Badge 
+              className={`text-xs shrink-0 ${isBought ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}
+            >
+              {isBought ? 'A' : 'V'}
+            </Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
