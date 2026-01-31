@@ -154,64 +154,44 @@ export function RiskAnalyzer() {
           </Card>
         ) : (
           <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              {riskCategories.map((cat, index) => (
-                <Card key={index} className="border-border bg-card">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={`p-1.5 rounded ${cat.color} bg-opacity-20`}>
-                        <cat.icon className={`w-4 h-4 ${cat.color.replace('bg-', 'text-')}`} />
-                      </div>
-                      <span className="text-sm font-medium text-muted-foreground">{cat.label}</span>
-                    </div>
-                    <div className="text-2xl font-bold">{formatEUR(cat.value)}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{cat.description}</div>
-                    <div className="mt-2">
-                      <div className={`h-1.5 rounded-full ${cat.color} bg-opacity-30`}>
-                        <div 
-                          className={`h-1.5 rounded-full ${cat.color}`} 
-                          style={{ width: `${cat.percentage}%` }}
-                        />
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {cat.percentage.toFixed(1)}% del totale
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-              
-              {/* Total Card */}
-              <Card className="border-primary/50 bg-primary/5">
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="p-1.5 rounded bg-primary/20">
-                      <ShieldAlert className="w-4 h-4 text-primary" />
-                    </div>
-                    <span className="text-sm font-medium text-primary">Esposizione Totale</span>
+            {/* Total Exposure Card */}
+            <Card className="border-primary/50 bg-primary/5">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-1.5 rounded bg-primary/20">
+                    <ShieldAlert className="w-4 h-4 text-primary" />
                   </div>
-                  <div className="text-2xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-                  <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie</div>
-                </CardContent>
-              </Card>
-            </div>
+                  <span className="text-sm font-medium text-primary">Esposizione Totale</span>
+                </div>
+                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
+              </CardContent>
+            </Card>
 
             {/* Horizontal Bar Chart */}
             <Card className="border-border bg-card">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Distribuzione del Rischio</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-5">
                 {riskCategories.map((cat, index) => (
-                  <div key={index} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">{cat.label}</span>
-                      <span className="text-muted-foreground">
-                        {formatEUR(cat.value)} ({cat.percentage.toFixed(1)}%)
-                      </span>
+                  <div key={index} className="space-y-1.5">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1 rounded ${cat.color} bg-opacity-20`}>
+                            <cat.icon className={`w-3.5 h-3.5 ${cat.color.replace('bg-', 'text-')}`} />
+                          </div>
+                          <span className="font-medium text-sm">{cat.label}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground ml-6">{cat.description}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-semibold">{formatEUR(cat.value)}</span>
+                        <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
+                      </div>
                     </div>
-                    <div className="h-6 bg-muted rounded-full overflow-hidden">
+                    <div className="h-5 bg-muted rounded-full overflow-hidden">
                       <div 
                         className={`h-full ${cat.color} transition-all duration-500 flex items-center justify-end pr-2`}
                         style={{ width: `${Math.max(cat.percentage, 2)}%` }}
