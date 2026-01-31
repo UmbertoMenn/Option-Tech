@@ -293,15 +293,46 @@ export function categorizeDerivatives(
   
   // For groups with more than 1 option AND close expiries, put in "Altre Strategie"
   // Se le scadenze differiscono di più di 12 mesi, le opzioni passano allo Step 6 (singole gambe)
+  // ECCEZIONE: Se il gruppo contiene solo CALL comprate e/o PUT vendute (non correlate), 
+  // le classifichiamo singolarmente come Leap Call e Naked Put
   for (const [, group] of regrouped.entries()) {
     if (group.length > 1 && hasCloseExpiries(group)) {
-      for (const option of group) {
-        const underlyingStock = findUnderlyingStock(option, stockPositions);
-        otherStrategies.push({
-          option,
-          underlying: underlyingStock || null
-        });
-        usedDerivatives.add(option.id);
+      // Check if group contains ONLY bought CALLs and/or sold PUTs (no real strategy)
+      const onlyLeapsAndNakeds = group.every(option => 
+        (option.option_type === 'call' && option.quantity > 0) || // Leap Call
+        (option.option_type === 'put' && option.quantity < 0)     // Naked Put
+      );
+      
+      if (onlyLeapsAndNakeds) {
+        // Non è una vera strategia, classifica singolarmente
+        for (const option of group) {
+          const underlyingStock = findUnderlyingStock(option, stockPositions);
+          
+          if (option.option_type === 'call' && option.quantity > 0) {
+            leapCalls.push({
+              option,
+              underlying: underlyingStock || null,
+              contracts: option.quantity
+            });
+          } else if (option.option_type === 'put' && option.quantity < 0) {
+            nakedPuts.push({
+              option,
+              underlying: underlyingStock || null,
+              contracts: Math.abs(option.quantity)
+            });
+          }
+          usedDerivatives.add(option.id);
+        }
+      } else {
+        // È una strategia complessa, mantieni in "Altre Strategie"
+        for (const option of group) {
+          const underlyingStock = findUnderlyingStock(option, stockPositions);
+          otherStrategies.push({
+            option,
+            underlying: underlyingStock || null
+          });
+          usedDerivatives.add(option.id);
+        }
       }
     }
   }
