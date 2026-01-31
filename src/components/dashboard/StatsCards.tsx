@@ -1,9 +1,13 @@
+import { useEffect } from 'react';
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
 import { TrendingUp, TrendingDown, Wallet, Landmark, Target, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -21,6 +25,12 @@ interface StatsCardsProps {
   historicalData: HistoricalDataEntry[];
   selectedHistoricalDate: string | null;
   onHistoricalDateChange: (date: string | null) => void;
+  deposits: number;
+  averageBalance: number;
+  isManualAverageBalance: boolean;
+  onDepositsChange: (value: number) => void;
+  onAverageBalanceChange: (value: number) => void;
+  onManualAverageBalanceToggle: (isManual: boolean) => void;
 }
 
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
@@ -38,22 +48,58 @@ export function StatsCards({
   historicalData,
   selectedHistoricalDate,
   onHistoricalDateChange,
+  deposits,
+  averageBalance,
+  isManualAverageBalance,
+  onDepositsChange,
+  onAverageBalanceChange,
+  onManualAverageBalanceToggle,
 }: StatsCardsProps) {
   const initialValue = portfolio?.initial_value || 0;
-  const deposits = portfolio?.deposits || 0;
-  const averageBalance = portfolio?.average_balance || 0;
+  const portfolioDeposits = portfolio?.deposits || 0;
+  const portfolioAverageBalance = portfolio?.average_balance || 0;
   const initialDate = portfolio?.initial_date;
   const averageBalanceDate = portfolio?.average_balance_date;
-  const initialPlusDeposits = initialValue + deposits;
+  const initialPlusDeposits = initialValue + portfolioDeposits;
   
   const hasInitialData = initialValue > 0;
-  const hasAverageBalance = averageBalance > 0;
+  const hasPortfolioAverageBalance = portfolioAverageBalance > 0;
   
   // Find selected historical entry
   const selectedHistoricalEntry = selectedHistoricalDate 
     ? historicalData.find(h => h.snapshot_date === selectedHistoricalDate) 
     : null;
   const hasHistoricalData = selectedHistoricalEntry !== null;
+  
+  // Auto-calculate average balance when historical data, deposits, or viewMode changes
+  useEffect(() => {
+    if (isManualAverageBalance) return;
+    
+    if (!selectedHistoricalEntry) {
+      onAverageBalanceChange(0);
+      return;
+    }
+    
+    // Get historical value based on viewMode
+    let historicalValue: number;
+    switch (viewMode) {
+      case 'netting_total':
+        historicalValue = selectedHistoricalEntry.netting_total;
+        break;
+      case 'netting_ex_cc':
+        historicalValue = selectedHistoricalEntry.netting_ex_cc;
+        break;
+      default:
+        historicalValue = selectedHistoricalEntry.total_value;
+    }
+    
+    // Calculate average balance
+    const calculatedAverage = deposits > 0 
+      ? historicalValue + (deposits / 2) 
+      : historicalValue;
+    
+    onAverageBalanceChange(calculatedAverage);
+  }, [selectedHistoricalEntry, deposits, viewMode, isManualAverageBalance, onAverageBalanceChange]);
   
   // Patrimonio value based on viewMode
   const getPatrimonioValue = () => {
@@ -70,7 +116,7 @@ export function StatsCards({
       // Fallback to old calculation if no historical data selected
       if (!hasInitialData) return { absolute: 0, percent: 0 };
       const absolutePL = summary.totalValue - initialPlusDeposits;
-      const percentPL = hasAverageBalance ? (absolutePL / averageBalance) * 100 : 0;
+      const percentPL = hasPortfolioAverageBalance ? (absolutePL / portfolioAverageBalance) * 100 : 0;
       return { absolute: absolutePL, percent: percentPL };
     }
 
@@ -92,12 +138,11 @@ export function StatsCards({
         historicalValue = historical.total_value;
     }
 
-    // P/L = Current Value - Historical Value
-    const absolutePL = currentValue - historicalValue;
+    // P/L = Current Value - Historical Value - Deposits
+    const absolutePL = currentValue - historicalValue - deposits;
     
-    // Use historical average balance for percentage calculation
-    const avgBalance = historical.average_balance || historicalValue;
-    const percentPL = avgBalance > 0 ? (absolutePL / avgBalance) * 100 : 0;
+    // Rendimento % = P/L / Giacenza Media
+    const percentPL = averageBalance > 0 ? (absolutePL / averageBalance) * 100 : 0;
     
     return { absolute: absolutePL, percent: percentPL };
   };
@@ -107,6 +152,10 @@ export function StatsCards({
   const plAbsolute = plData.absolute;
   const plPercent = plData.percent;
   const canCalculatePL = hasInitialData || hasHistoricalData;
+
+  const parseInputValue = (val: string): number => {
+    return parseFloat(val.replace(/[^\d.,\-]/g, '').replace(',', '.')) || 0;
+  };
 
   const stats = [
     {
@@ -128,11 +177,11 @@ export function StatsCards({
     },
     {
       key: 'giacenza',
-      label: 'Giacenza Media',
-      value: hasAverageBalance ? formatCurrency(averageBalance) : '—',
+      label: 'Giacenza Media (Portfolio)',
+      value: hasPortfolioAverageBalance ? formatCurrency(portfolioAverageBalance) : '—',
       icon: Landmark,
       change: null,
-      dimmed: !hasAverageBalance,
+      dimmed: !hasPortfolioAverageBalance,
       subtext: initialDate && averageBalanceDate 
         ? `dal ${formatDate(initialDate)} al ${formatDate(averageBalanceDate)}` 
         : null,
@@ -142,7 +191,7 @@ export function StatsCards({
       label: VIEW_LABELS[viewMode].pl,
       value: canCalculatePL ? formatProfitLoss(plAbsolute) : '—',
       icon: plAbsolute >= 0 ? TrendingUp : TrendingDown,
-      change: canCalculatePL && (hasAverageBalance || hasHistoricalData) ? formatPercentage(plPercent) : null,
+      change: canCalculatePL && (hasPortfolioAverageBalance || (hasHistoricalData && averageBalance > 0)) ? formatPercentage(plPercent) : null,
       isProfit: plAbsolute >= 0,
       dimmed: !canCalculatePL,
       subtext: null,
@@ -187,7 +236,7 @@ export function StatsCards({
                 </p>
               )}
               {stat.hasDateSelector && historicalData.length > 0 && (
-                <div className="mt-2">
+                <div className="mt-2 space-y-2">
                   <Select
                     value={selectedHistoricalDate || 'none'}
                     onValueChange={(value) => onHistoricalDateChange(value === 'none' ? null : value)}
@@ -205,6 +254,46 @@ export function StatsCards({
                       ))}
                     </SelectContent>
                   </Select>
+                  
+                  {hasHistoricalData && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Versamenti ($)</Label>
+                        <Input
+                          type="text"
+                          placeholder="0"
+                          value={deposits === 0 ? '' : deposits.toString()}
+                          onChange={(e) => onDepositsChange(parseInputValue(e.target.value))}
+                          className="h-7 text-xs font-mono"
+                        />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Giacenza Media ($)</Label>
+                        <Input
+                          type="text"
+                          placeholder="0"
+                          value={averageBalance === 0 ? '' : averageBalance.toFixed(2)}
+                          onChange={(e) => {
+                            onManualAverageBalanceToggle(true);
+                            onAverageBalanceChange(parseInputValue(e.target.value));
+                          }}
+                          className="h-7 text-xs font-mono"
+                        />
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <Checkbox
+                            id="auto-calc"
+                            checked={!isManualAverageBalance}
+                            onCheckedChange={(checked) => onManualAverageBalanceToggle(!checked)}
+                            className="h-3 w-3"
+                          />
+                          <label htmlFor="auto-calc" className="text-[10px] text-muted-foreground cursor-pointer">
+                            Calcola automaticamente
+                          </label>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

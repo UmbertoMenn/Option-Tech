@@ -35,8 +35,6 @@ export function HistoricalDataForm({
   const [newEntryTotalValue, setNewEntryTotalValue] = useState('');
   const [newEntryNettingTotal, setNewEntryNettingTotal] = useState('');
   const [newEntryNettingExCC, setNewEntryNettingExCC] = useState('');
-  const [newEntryDeposits, setNewEntryDeposits] = useState('0');
-  const [newEntryAverageBalance, setNewEntryAverageBalance] = useState('0');
 
   const parseValue = (val: string) => {
     return parseFloat(val.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
@@ -50,16 +48,14 @@ export function HistoricalDataForm({
       total_value: parseValue(newEntryTotalValue),
       netting_total: parseValue(newEntryNettingTotal),
       netting_ex_cc: parseValue(newEntryNettingExCC),
-      deposits: parseValue(newEntryDeposits),
-      average_balance: parseValue(newEntryAverageBalance),
+      deposits: 0,
+      average_balance: 0,
     });
     
     setNewEntryDate(undefined);
     setNewEntryTotalValue('');
     setNewEntryNettingTotal('');
     setNewEntryNettingExCC('');
-    setNewEntryDeposits('0');
-    setNewEntryAverageBalance('0');
     setIsAddingNew(false);
   };
 
@@ -103,9 +99,7 @@ export function HistoricalDataForm({
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                           <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
                           <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
-                          <span>Netting ex CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
-                          <span>Versamenti: <span className="font-mono text-foreground">{formatCurrency(entry.deposits)}</span></span>
-                          <span>Giacenza Media: <span className="font-mono text-foreground">{formatCurrency(entry.average_balance)}</span></span>
+                          <span className="col-span-2">Netting ex CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
                         </div>
                       </div>
                       <Button
@@ -143,23 +137,13 @@ export function HistoricalDataForm({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
+                <div className="col-span-2 space-y-1">
                   <Label className="text-xs">Patrimonio Totale ($)</Label>
                   <Input
                     type="text"
                     placeholder="es. 100.000"
                     value={newEntryTotalValue}
                     onChange={(e) => setNewEntryTotalValue(e.target.value)}
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Versamenti ($)</Label>
-                  <Input
-                    type="text"
-                    placeholder="es. 10.000"
-                    value={newEntryDeposits}
-                    onChange={(e) => setNewEntryDeposits(e.target.value)}
                     className="font-mono text-sm"
                   />
                 </div>
@@ -186,17 +170,6 @@ export function HistoricalDataForm({
                     className="font-mono text-sm"
                   />
                 </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Giacenza Media ($)</Label>
-                <Input
-                  type="text"
-                  placeholder="es. 80.000"
-                  value={newEntryAverageBalance}
-                  onChange={(e) => setNewEntryAverageBalance(e.target.value)}
-                  className="font-mono text-sm"
-                />
               </div>
 
               <div className="flex gap-2 pt-2">

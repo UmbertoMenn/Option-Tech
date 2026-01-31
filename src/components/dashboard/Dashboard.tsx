@@ -33,11 +33,24 @@ export function Dashboard() {
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
     earliestEntry?.snapshot_date || null
   );
+  
+  // New state for P/L calculation
+  const [deposits, setDeposits] = useState<number>(0);
+  const [averageBalance, setAverageBalance] = useState<number>(0);
+  const [isManualAverageBalance, setIsManualAverageBalance] = useState<boolean>(false);
 
   // Update selected date when earliest entry changes (on first load)
   if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
     setSelectedHistoricalDate(earliestEntry.snapshot_date);
   }
+  
+  // Reset deposits and averageBalance when historical date changes
+  const handleHistoricalDateChange = (date: string | null) => {
+    setSelectedHistoricalDate(date);
+    setDeposits(0);
+    setAverageBalance(0);
+    setIsManualAverageBalance(false);
+  };
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -102,7 +115,13 @@ export function Dashboard() {
             viewMode={viewMode}
             historicalData={historicalData}
             selectedHistoricalDate={selectedHistoricalDate}
-            onHistoricalDateChange={setSelectedHistoricalDate}
+            onHistoricalDateChange={handleHistoricalDateChange}
+            deposits={deposits}
+            averageBalance={averageBalance}
+            isManualAverageBalance={isManualAverageBalance}
+            onDepositsChange={setDeposits}
+            onAverageBalanceChange={setAverageBalance}
+            onManualAverageBalanceToggle={setIsManualAverageBalance}
           />
         )}
 
