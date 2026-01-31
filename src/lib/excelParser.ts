@@ -308,13 +308,23 @@ function parsePositionRow(
   
   if (!description && !isin) return null;
   
-  // Determine if it's an ETF based on description
-  // Use word boundary regex to avoid false positives like "NETFLIX" containing "ETF"
+  // Determine the correct asset type based on description
+  // Priority: bond > etf > stock
   let finalAssetType = assetType;
   if (assetType === 'stock' && description) {
     const descUpper = description.toUpperCase();
+    
+    // Check if it's a bond (obbligazione) based on prefix or keywords
+    // "OB." prefix indicates bond, also check for common bond keywords
+    if (descUpper.startsWith('OB.') || 
+        descUpper.startsWith('OBB.') ||
+        /\bOBBLIGAZION[EI]\b/.test(descUpper) ||
+        /\bBOND\b/.test(descUpper) ||
+        /\b\d+[.,]\d+%\s/.test(descUpper)) { // Pattern like "0.125%" indicates a bond coupon
+      finalAssetType = 'bond';
+    }
     // Match ETF or UCITS as whole words only, not as substrings
-    if (/\bETF\b/.test(descUpper) || /\bUCITS\b/.test(descUpper)) {
+    else if (/\bETF\b/.test(descUpper) || /\bUCITS\b/.test(descUpper)) {
       finalAssetType = 'etf';
     }
   }
