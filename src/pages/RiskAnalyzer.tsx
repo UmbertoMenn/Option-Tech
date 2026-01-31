@@ -34,18 +34,22 @@ export function RiskAnalyzer() {
     [analysis]
   );
   
-  // Extract ETF ISINs from stock details
+  // Extract ETF ISINs from stock details - look for instruments marked as ETF
   const etfIsins = useMemo(() => {
     const isins: string[] = [];
+    const seen = new Set<string>();
+    
     for (const stock of analysis.stockDetails) {
-      if (stock.isin) {
-        // Check if it's likely an ETF
-        const isETF = /ETF|ISHARES|VANGUARD|SPDR|LYXOR|XTRACKERS|AMUNDI|INVESCO/i.test(stock.underlying);
+      if (stock.isin && !seen.has(stock.isin)) {
+        seen.add(stock.isin);
+        // Check underlying name for ETF keywords
+        const isETF = /ETF|ISHARES|VANGUARD|SPDR|LYXOR|XTRACKERS|AMUNDI|INVESCO|VANECK/i.test(stock.underlying);
         if (isETF) {
           isins.push(stock.isin);
         }
       }
     }
+    console.log('[RiskAnalyzer] Detected ETF ISINs:', isins);
     return isins;
   }, [analysis.stockDetails]);
   
