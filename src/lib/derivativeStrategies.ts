@@ -1,4 +1,5 @@
 import { Position } from '@/types/portfolio';
+import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
 
 export interface CoveredCallPosition {
   option: Position;
@@ -93,7 +94,8 @@ export interface DerivativeCategories {
  */
 export function categorizeDerivatives(
   derivatives: Position[],
-  allPositions: Position[]
+  allPositions: Position[],
+  overrides: DerivativeOverride[] = []
 ): DerivativeCategories {
   const coveredCalls: CoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
@@ -106,6 +108,80 @@ export function categorizeDerivatives(
   
   // Get all stock positions (NOT ETFs for matching)
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
+  
+  // ============ STEP 0: Apply Manual Overrides ============
+  const singleOverrides = overrides.filter(o => o.override_type === 'single');
+  
+  for (const override of singleOverrides) {
+    if (!override.position_id || !override.target_category) continue;
+    
+    const position = derivatives.find(d => d.id === override.position_id);
+    if (!position) continue;
+    
+    // Find linked stock if specified
+    const linkedStock = override.linked_stock_id 
+      ? allPositions.find(p => p.id === override.linked_stock_id)
+      : findUnderlyingStock(position, stockPositions);
+    
+    switch (override.target_category as OverrideCategory) {
+      case 'covered_call':
+        if (position.option_type === 'call' && position.quantity < 0) {
+          const contracts = Math.abs(position.quantity);
+          const sharesCovered = contracts * 100;
+          coveredCalls.push({
+            option: position,
+            underlying: linkedStock || createDummyStock(position.underlying || position.description),
+            contractsCovered: contracts,
+            sharesCovered,
+            isFullyCovered: true
+          });
+          usedDerivatives.add(position.id);
+        }
+        break;
+        
+      case 'protection':
+        if (position.option_type === 'put' && position.quantity > 0) {
+          longPuts.push({
+            option: position,
+            underlying: linkedStock || null,
+            contracts: position.quantity,
+            isPartial: false
+          });
+          usedDerivatives.add(position.id);
+        }
+        break;
+        
+      case 'naked_put':
+        if (position.option_type === 'put' && position.quantity < 0) {
+          nakedPuts.push({
+            option: position,
+            underlying: linkedStock || null,
+            contracts: Math.abs(position.quantity)
+          });
+          usedDerivatives.add(position.id);
+        }
+        break;
+        
+      case 'leap_call':
+        if (position.option_type === 'call' && position.quantity > 0) {
+          leapCalls.push({
+            option: position,
+            underlying: linkedStock || null,
+            contracts: position.quantity
+          });
+          usedDerivatives.add(position.id);
+        }
+        break;
+        
+      case 'other':
+        otherStrategies.push({
+          option: position,
+          underlying: linkedStock || null
+        });
+        usedDerivatives.add(position.id);
+        break;
+    }
+  }
   
   // ============ STEP 1: Find Covered Calls ============
   const soldCalls = derivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
@@ -440,6 +516,35 @@ function groupOtherStrategiesByUnderlying(otherStrategies: OtherStrategyPosition
   }
   
   return result;
+}
+
+/**
+ * Creates a dummy stock position for manual overrides when no real stock is linked
+ */
+function createDummyStock(description: string): Position {
+  return {
+    id: `dummy-${description}`,
+    portfolio_id: '',
+    isin: null,
+    ticker: null,
+    description,
+    asset_type: 'stock',
+    currency: 'USD',
+    exchange_rate: 1,
+    quantity: 0,
+    current_price: null,
+    avg_cost: null,
+    market_value: null,
+    profit_loss: null,
+    profit_loss_pct: null,
+    weight_pct: null,
+    option_type: null,
+    strike_price: null,
+    expiry_date: null,
+    underlying: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
 }
 
 /**

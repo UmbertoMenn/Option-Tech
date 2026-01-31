@@ -23,6 +23,8 @@ import {
   GroupedOtherStrategy
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
+import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
+import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -37,6 +39,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
+  const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
@@ -50,9 +53,14 @@ export function Derivatives() {
     [positions]
   );
 
+  const stockPositions = useMemo(() => 
+    positions.filter(p => p.asset_type === 'stock'),
+    [positions]
+  );
+
   const categories = useMemo(() => 
-    categorizeDerivatives(derivatives, positions),
-    [derivatives, positions]
+    categorizeDerivatives(derivatives, positions, overrides),
+    [derivatives, positions, overrides]
   );
 
   if (isLoading) {
@@ -139,7 +147,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.coveredCalls.map((cc, index) => (
-                      <CoveredCallRow key={index} coveredCall={cc} />
+                      <CoveredCallRow key={index} coveredCall={cc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
                     ))}
                   </div>
                 )}
@@ -176,7 +184,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.longPuts.map((lp, index) => (
-                      <LongPutRow key={index} longPut={lp} />
+                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
                     ))}
                   </div>
                 )}
@@ -296,7 +304,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.nakedPuts.map((np, index) => (
-                      <NakedPutRow key={index} nakedPut={np} />
+                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
                     ))}
                   </div>
                 )}
@@ -336,7 +344,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.leapCalls.map((lc, index) => (
-                      <LeapCallRow key={index} leapCall={lc} />
+                      <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
                     ))}
                   </div>
                 )}
@@ -376,7 +384,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.groupedOtherStrategies.map((group, index) => (
-                      <GroupedOtherStrategyRow key={index} group={group} />
+                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
                     ))}
                   </div>
                 )}
@@ -389,9 +397,16 @@ export function Derivatives() {
   );
 }
 
-function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
+interface RowProps {
+  stockPositions: Position[];
+  getOverrideForPosition: (positionId: string) => import('@/types/derivativeOverrides').DerivativeOverride | undefined;
+}
+
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }: { coveredCall: CoveredCallPosition } & RowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
+  
+  const hasOverride = !!getOverrideForPosition(option.id);
   
   // Calculate ITM/OTM status for CALL options
   // ITM: strike < underlying price, OTM: strike >= underlying price
@@ -425,8 +440,14 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             >
               {isITM ? 'ITM' : 'OTM'}
             </Badge>
+            {hasOverride && <OverrideBadge />}
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="covered_call" 
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground cursor-help">
@@ -488,9 +509,11 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
   );
 }
 
-function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
+function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longPut: LongPutPosition } & RowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts, isPartial } = longPut;
+  
+  const hasOverride = !!getOverrideForPosition(option.id);
   
   // Calculate ITM/OTM status for PUT options
   // PUT is ITM when strike > underlying price (you can sell at higher than market)
@@ -530,8 +553,14 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
                 </TooltipContent>
               </Tooltip>
             )}
+            {hasOverride && <OverrideBadge />}
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="protection" 
+            />
             {hasUnderlyingPrice && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -936,7 +965,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
   );
 }
 
-function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
+function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition }: { group: GroupedOtherStrategy } & RowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, options, totalProfitLoss, strategyName } = group;
   
@@ -995,7 +1024,12 @@ function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
       <CollapsibleContent>
         <div className="ml-7 mt-2 space-y-2">
           {options.map((os, idx) => (
-            <GroupedOptionLegRow key={idx} otherStrategy={os} />
+            <GroupedOptionLegRow 
+              key={idx} 
+              otherStrategy={os} 
+              stockPositions={stockPositions} 
+              getOverrideForPosition={getOverrideForPosition} 
+            />
           ))}
         </div>
       </CollapsibleContent>
@@ -1003,8 +1037,10 @@ function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
   );
 }
 
-function GroupedOptionLegRow({ otherStrategy }: { otherStrategy: OtherStrategyPosition }) {
+function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosition }: { otherStrategy: OtherStrategyPosition } & RowProps) {
   const { option, underlying } = otherStrategy;
+  
+  const hasOverride = !!getOverrideForPosition(option.id);
   
   const isCall = option.option_type === 'call';
   const isPut = option.option_type === 'put';
@@ -1043,8 +1079,14 @@ function GroupedOptionLegRow({ otherStrategy }: { otherStrategy: OtherStrategyPo
         >
           {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
         </Badge>
+        {hasOverride && <OverrideBadge />}
       </div>
       <div className="flex items-center gap-4 shrink-0">
+        <MoveOptionMenu 
+          option={option} 
+          availableStocks={stockPositions} 
+          currentCategory="other" 
+        />
         <span className="text-sm text-muted-foreground">
           {Math.abs(option.quantity)} × 100
         </span>
@@ -1177,9 +1219,11 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
   );
 }
 
-function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
+function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition }: { nakedPut: NakedPutPosition } & RowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts } = nakedPut;
+  
+  const hasOverride = !!getOverrideForPosition(option.id);
   
   // Calculate ITM/OTM status for PUT options
   // PUT is ITM when underlying price < strike price (you can sell at higher than market)
@@ -1207,8 +1251,14 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
+            {hasOverride && <OverrideBadge />}
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="naked_put" 
+            />
             {hasUnderlyingPrice && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1271,9 +1321,11 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
   );
 }
 
-function LeapCallRow({ leapCall }: { leapCall: LeapCallPosition }) {
+function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition }: { leapCall: LeapCallPosition } & RowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts } = leapCall;
+  
+  const hasOverride = !!getOverrideForPosition(option.id);
   
   // Calculate ITM/OTM status for CALL options
   const strikePrice = option.strike_price || 0;
@@ -1299,8 +1351,14 @@ function LeapCallRow({ leapCall }: { leapCall: LeapCallPosition }) {
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
+            {hasOverride && <OverrideBadge />}
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="leap_call" 
+            />
             {hasUnderlyingPrice && (
               <Tooltip>
                 <TooltipTrigger asChild>
