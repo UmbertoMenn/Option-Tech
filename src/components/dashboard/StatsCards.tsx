@@ -168,12 +168,20 @@ export function StatsCards({
     },
     {
       key: 'iniziale',
-      label: 'Patrimonio Iniziale + Versamenti',
-      value: hasInitialData ? formatCurrency(initialPlusDeposits) : '—',
+      label: 'Patrimonio Iniziale',
+      value: hasHistoricalData 
+        ? formatCurrency(
+            viewMode === 'netting_total' 
+              ? selectedHistoricalEntry!.netting_total 
+              : viewMode === 'netting_ex_cc' 
+                ? selectedHistoricalEntry!.netting_ex_cc 
+                : selectedHistoricalEntry!.total_value
+          )
+        : '—',
       icon: Target,
       change: null,
-      dimmed: !hasInitialData,
-      subtext: initialDate ? `al ${formatDate(initialDate)}` : null,
+      dimmed: !hasHistoricalData,
+      subtext: hasHistoricalData ? `al ${formatDate(selectedHistoricalEntry!.snapshot_date)}` : null,
     },
     {
       key: 'calcolo-rendimenti',
