@@ -12,6 +12,7 @@ export interface LongPutPosition {
   option: Position;
   underlying: Position | null;
   contracts: number;
+  isPartial: boolean; // True if net exposure > 0 (protezione parziale)
 }
 
 export interface StrategyPosition {
@@ -138,8 +139,9 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 2: Find Protezioni (Long PUT solo se esposizione netta = 0) ============
-  // Esposizione netta = (Titoli/100) - (PUT comprate - PUT vendute) deve essere 0
+  // ============ STEP 2: Find Protezioni (Long PUT) ============
+  // Protezione totale: esposizione netta <= 0
+  // Protezione parziale: esposizione netta > 0 (PUT comprate single-leg non usate in altre strategie)
   
   // Raggruppa le PUT per sottostante
   const putsByUnderlying = new Map<string, { bought: Position[], sold: Position[], stock: Position | null }>();
@@ -166,8 +168,12 @@ export function categorizeDerivatives(
     }
   }
   
+  // Track PUT comprate per sottostante che hanno il sottostante ma esposizione > 0
+  // Queste verranno aggiunte come protezioni parziali se rimangono single-leg
+  const partialProtectionCandidates = new Map<string, { puts: Position[], stock: Position }>();
+  
   // Verifica esposizione netta per ogni sottostante
-  for (const [, group] of putsByUnderlying.entries()) {
+  for (const [underlyingKey, group] of putsByUnderlying.entries()) {
     if (!group.stock || group.stock.quantity <= 0) continue;
     
     const stockContracts = Math.floor(group.stock.quantity / 100);
@@ -177,16 +183,21 @@ export function categorizeDerivatives(
     // Esposizione netta = Titoli/100 - (PUT comprate - PUT vendute)
     const netExposure = stockContracts - (boughtContracts - soldContracts);
     
-    // Solo se esposizione netta = 0, le PUT comprate sono protezioni
-    if (netExposure === 0) {
+    if (netExposure <= 0) {
+      // Protezione totale: tutte le PUT comprate sono protezioni complete
       for (const put of group.bought) {
         longPuts.push({
           option: put,
           underlying: group.stock,
-          contracts: put.quantity
+          contracts: put.quantity,
+          isPartial: false
         });
         usedDerivatives.add(put.id);
       }
+    } else {
+      // Esposizione netta > 0: le PUT comprate potrebbero essere protezioni parziali
+      // Ma solo se rimangono single-leg (non associate ad altre strategie)
+      partialProtectionCandidates.set(underlyingKey, { puts: group.bought, stock: group.stock });
     }
   }
   
@@ -283,6 +294,23 @@ export function categorizeDerivatives(
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
+    const underlyingKey = normalizeForMatching(option.underlying || option.description);
+    
+    // Check if this is a bought PUT that's a partial protection candidate
+    if (option.option_type === 'put' && option.quantity > 0) {
+      const candidate = partialProtectionCandidates.get(underlyingKey);
+      if (candidate && candidate.puts.some(p => p.id === option.id)) {
+        // This is a partial protection (single-leg bought PUT with underlying, net exposure > 0)
+        longPuts.push({
+          option,
+          underlying: candidate.stock,
+          contracts: option.quantity,
+          isPartial: true
+        });
+        usedDerivatives.add(option.id);
+        continue;
+      }
+    }
     
     if (option.option_type === 'call' && option.quantity > 0) {
       // Long Call → LEAP CALL

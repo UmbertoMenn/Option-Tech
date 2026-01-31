@@ -475,7 +475,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
 
 function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { option, underlying, contracts } = longPut;
+  const { option, underlying, contracts, isPartial } = longPut;
   
   // Calculate ITM/OTM status for PUT options
   // PUT is ITM when strike > underlying price (you can sell at higher than market)
@@ -496,6 +496,18 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
+            {isPartial && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help shrink-0">
+                    P!
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Protezione parziale</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
