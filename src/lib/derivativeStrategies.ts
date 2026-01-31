@@ -856,6 +856,7 @@ function detectStrategyName(options: OtherStrategyPosition[]): string | null {
 const SPECIAL_ALIASES: Record<string, string[]> = {
   ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
   PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
+  NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],
 };
 
 /**
@@ -867,8 +868,8 @@ function normalizeForMatching(text: string): string {
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
     .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
-    .replace(/\s+/g, ' ')          // Normalize spaces
     .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '') // Remove common suffixes including ADR
+    .replace(/\s+/g, ' ')  // Normalize spaces AFTER suffix removal to avoid multiple spaces
     .trim();
 }
 
@@ -950,7 +951,8 @@ function findUnderlyingStock(option: Position, stocks: Position[]): Position | u
 
     if (stockTokens.length > 0) {
       const shared = stockTokens.filter(t => optionTokens.includes(t)).length;
-      const required = Math.min(2, stockTokens.length); // 1 token for single-word names, 2 when possible
+      // For single-word stock names (e.g. NETEASE), require only 1 match
+      const required = stockTokens.length === 1 ? 1 : Math.min(2, stockTokens.length);
       if (shared >= required) return stock;
     }
   }
