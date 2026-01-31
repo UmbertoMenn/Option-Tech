@@ -230,7 +230,7 @@ export function CurrencyExposureView({
                             {formatEUR(curr.totalRisk)}
                           </span>
                         </div>
-                        {curr.currency !== 'EUR' && (
+                        {curr.currency !== 'EUR' && curr.currency !== 'OTHER' && (
                           <span className="text-xs text-muted-foreground">
                             {formatCurrency(curr.totalRiskOriginal, curr.currency)}
                           </span>
