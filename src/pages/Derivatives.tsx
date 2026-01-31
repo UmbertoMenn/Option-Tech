@@ -402,6 +402,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
+            <Badge className="text-xs shrink-0 bg-green-500 text-white hover:bg-green-600">V</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={isITM ? "destructive" : "default"} 
@@ -494,6 +495,7 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
+            <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
@@ -1157,6 +1159,7 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
+            <Badge className="text-xs shrink-0 bg-green-500 text-white hover:bg-green-600">V</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
@@ -1248,6 +1251,7 @@ function LeapCallRow({ leapCall }: { leapCall: LeapCallPosition }) {
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
+            <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
