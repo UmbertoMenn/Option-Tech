@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
+import { DepositEntry } from '@/types/deposits';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
 import { TrendingUp, TrendingDown, Wallet, Target, Calendar, Pencil, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { differenceInDays, parseISO } from 'date-fns';
 import {
   Select,
   SelectContent,
@@ -30,6 +32,55 @@ interface StatsCardsProps {
   onDepositsChange: (value: number) => void;
   onAverageBalanceChange: (value: number) => void;
   onManualAverageBalanceToggle: (isManual: boolean) => void;
+  allDeposits: DepositEntry[];
+}
+
+/**
+ * Calculate time-weighted average balance
+ * Each balance level is weighted by the number of days it was held
+ */
+function calculateTimeWeightedAverage(
+  startDate: Date,
+  endDate: Date,
+  initialValue: number,
+  deposits: DepositEntry[]
+): { average: number; totalDeposits: number } {
+  const totalDays = differenceInDays(endDate, startDate);
+  if (totalDays <= 0) return { average: initialValue, totalDeposits: 0 };
+
+  // Filter and sort deposits in the period
+  const depositsInPeriod = deposits
+    .filter(d => {
+      const date = parseISO(d.deposit_date);
+      return date > startDate && date <= endDate;
+    })
+    .sort((a, b) => parseISO(a.deposit_date).getTime() - parseISO(b.deposit_date).getTime());
+
+  const totalDeposits = depositsInPeriod.reduce((sum, d) => sum + d.amount, 0);
+
+  if (depositsInPeriod.length === 0) {
+    return { average: initialValue, totalDeposits: 0 };
+  }
+
+  // Time-weighted calculation
+  let weightedSum = 0;
+  let currentBalance = initialValue;
+  let previousDate = startDate;
+
+  for (const deposit of depositsInPeriod) {
+    const depositDate = parseISO(deposit.deposit_date);
+    const daysAtThisBalance = differenceInDays(depositDate, previousDate);
+
+    weightedSum += currentBalance * daysAtThisBalance;
+    currentBalance += deposit.amount;
+    previousDate = depositDate;
+  }
+
+  // Final period (from last deposit to end date)
+  const finalDays = differenceInDays(endDate, previousDate);
+  weightedSum += currentBalance * finalDays;
+
+  return { average: weightedSum / totalDays, totalDeposits };
 }
 
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
@@ -53,6 +104,7 @@ export function StatsCards({
   onDepositsChange,
   onAverageBalanceChange,
   onManualAverageBalanceToggle,
+  allDeposits,
 }: StatsCardsProps) {
   const [isEditingGiacenza, setIsEditingGiacenza] = useState(false);
   const [giacenzaInputValue, setGiacenzaInputValue] = useState('');
@@ -71,16 +123,19 @@ export function StatsCards({
     ? historicalData.find(h => h.snapshot_date === selectedHistoricalDate) 
     : null;
   const hasHistoricalData = selectedHistoricalEntry !== null;
+
+  // Get the snapshot date from portfolio (extracted from Excel)
+  const snapshotDate = portfolio?.snapshot_date;
   
-  // Auto-calculate average balance when historical data, deposits, or viewMode changes
-  useEffect(() => {
-    if (isManualAverageBalance) return;
-    
-    if (!selectedHistoricalEntry) {
-      onAverageBalanceChange(0);
-      return;
+  // Calculate time-weighted average and deposits in period
+  const timeWeightedData = useMemo(() => {
+    if (!selectedHistoricalEntry || !snapshotDate) {
+      return { average: 0, totalDeposits: 0 };
     }
-    
+
+    const startDate = parseISO(selectedHistoricalEntry.snapshot_date);
+    const endDate = parseISO(snapshotDate);
+
     // Get historical value based on viewMode
     let historicalValue: number;
     switch (viewMode) {
@@ -93,14 +148,23 @@ export function StatsCards({
       default:
         historicalValue = selectedHistoricalEntry.total_value;
     }
+
+    return calculateTimeWeightedAverage(startDate, endDate, historicalValue, allDeposits);
+  }, [selectedHistoricalEntry, snapshotDate, viewMode, allDeposits]);
+  
+  // Auto-calculate average balance when historical data changes (time-weighted)
+  useEffect(() => {
+    if (isManualAverageBalance) return;
     
-    // Calculate average balance
-    const calculatedAverage = deposits > 0 
-      ? historicalValue + (deposits / 2) 
-      : historicalValue;
+    if (!selectedHistoricalEntry || !snapshotDate) {
+      onAverageBalanceChange(0);
+      onDepositsChange(0);
+      return;
+    }
     
-    onAverageBalanceChange(calculatedAverage);
-  }, [selectedHistoricalEntry, deposits, viewMode, isManualAverageBalance, onAverageBalanceChange]);
+    onAverageBalanceChange(timeWeightedData.average);
+    onDepositsChange(timeWeightedData.totalDeposits);
+  }, [selectedHistoricalEntry, snapshotDate, timeWeightedData, isManualAverageBalance, onAverageBalanceChange, onDepositsChange]);
   
   // Patrimonio value based on viewMode
   const getPatrimonioValue = () => {
@@ -188,7 +252,7 @@ export function StatsCards({
       value: formatCurrency(patrimonioValue),
       icon: Wallet,
       change: null,
-      subtext: null,
+      subtext: snapshotDate ? `al ${formatDate(snapshotDate)}` : null,
     },
     {
       key: 'iniziale',
@@ -214,7 +278,11 @@ export function StatsCards({
       icon: Wallet,
       change: null,
       dimmed: averageBalance === 0,
-      subtext: isManualAverageBalance ? 'modificato manualmente' : null,
+      subtext: isManualAverageBalance 
+        ? 'modificato manualmente' 
+        : deposits > 0 
+          ? `Versamenti: ${formatCurrency(deposits)}`
+          : null,
       isEditable: true,
     },
     {

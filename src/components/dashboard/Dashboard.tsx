@@ -131,6 +131,7 @@ export function Dashboard() {
             onDepositsChange={setPlDeposits}
             onAverageBalanceChange={setAverageBalance}
             onManualAverageBalanceToggle={setIsManualAverageBalance}
+            allDeposits={deposits}
           />
         )}
 

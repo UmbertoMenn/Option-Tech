@@ -8,6 +8,7 @@ interface ExcelRow {
 export async function parsePortfolioExcel(file: File): Promise<{
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
+  snapshotDate: string | null;
 }> {
   // Dynamic import of xlsx library
   const XLSX = await import('xlsx');
@@ -24,8 +25,9 @@ export async function parsePortfolioExcel(file: File): Promise<{
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         
+        const snapshotDate = extractSnapshotDate(jsonData);
         const result = parsePortfolioData(jsonData);
-        resolve(result);
+        resolve({ ...result, snapshotDate });
       } catch (error) {
         reject(error);
       }
@@ -34,6 +36,53 @@ export async function parsePortfolioExcel(file: File): Promise<{
     reader.onerror = () => reject(new Error('Errore lettura file'));
     reader.readAsArrayBuffer(file);
   });
+}
+
+/**
+ * Extract the snapshot date from the first rows of the Excel file
+ * Looks for patterns like "POSIZIONE AL DD/MM/YYYY" or Excel date serials
+ */
+function extractSnapshotDate(rows: any[][]): string | null {
+  // Check first 10 rows for date patterns
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    
+    for (const cell of row) {
+      if (cell === null || cell === undefined) continue;
+      
+      // Check for Excel date serial number (40000-50000 range = ~2009-2036)
+      if (typeof cell === 'number' && cell > 40000 && cell < 50000) {
+        const date = new Date((cell - 25569) * 86400 * 1000);
+        return date.toISOString().split('T')[0];
+      }
+      
+      // Check for string patterns
+      if (typeof cell === 'string') {
+        const cellStr = cell.toUpperCase();
+        
+        // Pattern: "POSIZIONE AL DD/MM/YYYY" or "POSIZIONE AL DD-MM-YYYY"
+        const posizioneMatch = cellStr.match(/POSIZIONE\s+AL\s+(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+        if (posizioneMatch) {
+          return `${posizioneMatch[3]}-${posizioneMatch[2]}-${posizioneMatch[1]}`;
+        }
+        
+        // Pattern: "DATA: DD/MM/YYYY" or "DATA DD/MM/YYYY"
+        const dataMatch = cellStr.match(/DATA[:\s]+(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+        if (dataMatch) {
+          return `${dataMatch[3]}-${dataMatch[2]}-${dataMatch[1]}`;
+        }
+        
+        // Pattern: standalone date DD/MM/YYYY (more permissive, at start of cell)
+        const standaloneDateMatch = cell.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+        if (standaloneDateMatch) {
+          return `${standaloneDateMatch[3]}-${standaloneDateMatch[2]}-${standaloneDateMatch[1]}`;
+        }
+      }
+    }
+  }
+  
+  return null;
 }
 
 function parsePortfolioData(rows: any[][]): {

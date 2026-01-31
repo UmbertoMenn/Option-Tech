@@ -21,7 +21,7 @@ export function FileUploader() {
     setUploadSuccess(false);
 
     try {
-      const { positions, cashValue } = await parsePortfolioExcel(file);
+      const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file);
       
       if (positions.length === 0) {
         toast.error('Nessuna posizione trovata', {
@@ -30,19 +30,29 @@ export function FileUploader() {
         return;
       }
 
-      // Update cash value in portfolio
-      if (portfolio?.id && cashValue > 0) {
-        await supabase
-          .from('portfolios')
-          .update({ cash_value: cashValue })
-          .eq('id', portfolio.id);
+      // Update cash value and snapshot date in portfolio
+      if (portfolio?.id) {
+        const updateData: { cash_value?: number; snapshot_date?: string } = {};
+        if (cashValue > 0) {
+          updateData.cash_value = cashValue;
+        }
+        if (snapshotDate) {
+          updateData.snapshot_date = snapshotDate;
+        }
+        if (Object.keys(updateData).length > 0) {
+          await supabase
+            .from('portfolios')
+            .update(updateData)
+            .eq('id', portfolio.id);
+        }
       }
 
       updatePositions(positions);
       setUploadSuccess(true);
       
+      const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
       toast.success('Portfolio caricato!', {
-        description: `${positions.length} posizioni importate.`,
+        description: `${positions.length} posizioni importate${dateInfo}.`,
       });
     } catch (error) {
       console.error('Error parsing file:', error);
