@@ -8,6 +8,7 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { AdminPanel } from "@/components/admin/AdminPanel";
 import { Derivatives } from "@/pages/Derivatives";
+import { RiskAnalyzer } from "@/pages/RiskAnalyzer";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/derivatives" element={<Derivatives />} />
+      <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
       <Route path="/admin" element={<AdminPanel />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

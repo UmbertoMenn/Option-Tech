@@ -7,7 +7,7 @@ import { useDeposits } from '@/hooks/useDeposits';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
@@ -116,6 +116,12 @@ export function Dashboard() {
                 <Link to="/derivatives">
                   <TrendingUp className="w-4 h-4 mr-2" />
                   Strategie Derivati
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/risk-analyzer">
+                  <ShieldAlert className="w-4 h-4 mr-2" />
+                  Risk Analyzer
                 </Link>
               </Button>
               {isAdmin && (
