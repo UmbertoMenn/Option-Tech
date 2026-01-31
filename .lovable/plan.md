@@ -1,142 +1,77 @@
 
-# Piano: Supporto Multi-Portfolio per Utente
+# Piano: Differenziazione Icone Strategie Derivati
 
 ## Obiettivo
-Permettere a ogni utente di creare e gestire più portfolio separati, con un selettore nell'header per passare da uno all'altro.
+Cambiare le icone per Double Diagonal e Naked Put per distinguerle visivamente da Iron Condor, e modificare il colore della sezione "Altre Strategie".
 
 ---
 
-## Panoramica Architetturale
+## Stato Attuale
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         Header                                   │
-│  [Logo] [Portfolio Selector ▼] [Derivatives] [Risk] [Admin]     │
-│         └── Portfolio 1                                          │
-│             Portfolio 2                                          │
-│             + Nuovo Portfolio                                    │
-└─────────────────────────────────────────────────────────────────┘
-```
+| Sezione | Icona | Colore |
+|---------|-------|--------|
+| Covered Call | Shield | text-primary |
+| Protezioni - Long Put | Shield | text-primary |
+| Iron Condor | Target | text-amber-500 |
+| Double Diagonal | Target | text-purple-500 |
+| Naked Put | Target | text-primary |
+| Leap Call | TrendingUp | text-green-500 |
+| Altre Strategie | TrendingDown | text-muted-foreground |
 
 ---
 
-## Modifiche Previste
+## Modifiche Proposte
 
-### 1. Nuovo Context: PortfolioContext
-Creare un contesto React dedicato per gestire:
-- Lista di tutti i portfolio dell'utente
-- Portfolio attualmente selezionato
-- Funzioni per creare/eliminare/rinominare portfolio
-
-**File:** `src/contexts/PortfolioContext.tsx`
-
-### 2. Refactor Hook usePortfolio
-Modificare per:
-- Fetchare TUTTI i portfolio dell'utente (non `.maybeSingle()`)
-- Usare il portfolio selezionato dal context
-- Mantenere retrocompatibilita con le pagine esistenti
-
-**File:** `src/hooks/usePortfolio.ts`
-
-### 3. Componente Portfolio Selector
-Creare un dropdown nell'header per:
-- Mostrare il portfolio attivo
-- Permettere di cambiare portfolio
-- Aggiungere nuovo portfolio
-- Eliminare/rinominare portfolio esistenti
-
-**File:** `src/components/portfolio/PortfolioSelector.tsx`
-
-### 4. Aggiornamento Layout Header
-Integrare il selettore portfolio nell'header della Dashboard (e altre pagine).
-
-**File:** `src/components/dashboard/Dashboard.tsx`
-
-### 5. Aggiornamento App.tsx
-Wrappare l'app con il nuovo `PortfolioProvider`.
-
-**File:** `src/App.tsx`
+| Sezione | Nuova Icona | Nuovo Colore | Motivazione |
+|---------|-------------|--------------|-------------|
+| Double Diagonal | `Layers` | text-purple-500 | Rappresenta le scadenze stratificate/diagonali |
+| Naked Put | `CircleDollarSign` | text-orange-500 | Rappresenta il rischio monetario delle put scoperte |
+| Altre Strategie | `Puzzle` | text-cyan-500 | Colore più vivace per strategie non classificate |
 
 ---
 
 ## Dettaglio Tecnico
 
-### PortfolioContext
+### File da Modificare
+`src/pages/Derivatives.tsx`
 
-```typescript
-interface PortfolioContextType {
-  portfolios: Portfolio[];
-  selectedPortfolio: Portfolio | null;
-  selectPortfolio: (id: string) => void;
-  createPortfolio: (name: string) => Promise<void>;
-  deletePortfolio: (id: string) => Promise<void>;
-  renamePortfolio: (id: string, name: string) => Promise<void>;
-  isLoading: boolean;
-}
-```
+### Modifiche
 
-### usePortfolio Refactored
+1. **Import aggiuntivi** - Aggiungere le nuove icone da lucide-react:
+   - `Layers` (per Double Diagonal)
+   - `CircleDollarSign` (per Naked Put)
+   - `Puzzle` (per Altre Strategie)
 
-Il hook usePortfolio continuera a funzionare come prima, ma preletera il portfolio dal context invece di fetcharlo direttamente. Questo garantisce retrocompatibilita zero-refactor per Dashboard, Derivatives e RiskAnalyzer.
+2. **Double Diagonal (linea ~247)**
+   - Da: `<Target className="w-5 h-5 text-purple-500" />`
+   - A: `<Layers className="w-5 h-5 text-purple-500" />`
 
-### Portfolio Selector UI
+3. **Naked Put (linea ~287)**
+   - Da: `<Target className="w-5 h-5 text-primary" />`
+   - A: `<CircleDollarSign className="w-5 h-5 text-orange-500" />`
 
-- Dropdown con lista portfolio
-- Badge con valore totale per ogni portfolio  
-- Pulsante "+ Nuovo" in fondo alla lista
-- Menu contestuale (tasto destro o icona) per rinominare/eliminare
-- Conferma prima di eliminare un portfolio
-
-### Persistenza Selezione
-
-Il portfolio selezionato verra salvato in `localStorage` con key `selectedPortfolioId` per ricordare la scelta tra sessioni.
+4. **Altre Strategie (linea ~367)**
+   - Da: `<TrendingDown className="w-5 h-5 text-muted-foreground" />`
+   - A: `<Puzzle className="w-5 h-5 text-cyan-500" />`
 
 ---
 
-## Flusso Utente
+## Risultato Finale
 
-1. **Primo accesso**: Portfolio "Principale" gia creato (dal trigger esistente)
-2. **Cambio portfolio**: Click sul selector, scegli portfolio, dati si aggiornano
-3. **Nuovo portfolio**: Click su "+ Nuovo", inserisci nome, viene creato vuoto
-4. **Elimina portfolio**: Menu contestuale, conferma, portfolio eliminato (cascade su positions, deposits, ecc.)
-5. **Upload Excel**: I dati vengono caricati nel portfolio attualmente selezionato
-
----
-
-## File da Creare
-
-| File | Descrizione |
-|------|-------------|
-| `src/contexts/PortfolioContext.tsx` | Context per gestione multi-portfolio |
-| `src/components/portfolio/PortfolioSelector.tsx` | Dropdown selector |
-| `src/components/portfolio/CreatePortfolioDialog.tsx` | Dialog per nuovo portfolio |
-| `src/components/portfolio/PortfolioMenu.tsx` | Menu contestuale rinomina/elimina |
-
-## File da Modificare
-
-| File | Modifiche |
-|------|-----------|
-| `src/App.tsx` | Aggiungere PortfolioProvider |
-| `src/hooks/usePortfolio.ts` | Usare portfolio da context |
-| `src/components/dashboard/Dashboard.tsx` | Aggiungere selector nell'header |
-| `src/pages/Derivatives.tsx` | Aggiornare header con selector |
-| `src/pages/RiskAnalyzer.tsx` | Aggiornare header con selector |
+| Sezione | Icona | Colore |
+|---------|-------|--------|
+| Covered Call | Shield | text-primary (blu) |
+| Protezioni - Long Put | Shield | text-primary (blu) |
+| Iron Condor | Target | text-amber-500 (giallo/oro) |
+| Double Diagonal | Layers | text-purple-500 (viola) |
+| Naked Put | CircleDollarSign | text-orange-500 (arancione) |
+| Leap Call | TrendingUp | text-green-500 (verde) |
+| Altre Strategie | Puzzle | text-cyan-500 (ciano) |
 
 ---
 
-## Rischi e Mitigazioni
+## File Coinvolti
 
-| Rischio | Mitigazione |
-|---------|-------------|
-| Eliminazione accidentale portfolio | Dialog di conferma con nome portfolio |
-| Portfolio vuoto dopo creazione | Messaggio guida "Carica un file Excel" |
-| Confusione su quale portfolio e attivo | Nome portfolio ben visibile nell'header |
-
----
-
-## Stima Effort
-
-- Creazione context e selector: ~40%
-- Refactor usePortfolio: ~20%
-- Integrazione nelle pagine: ~30%
-- Testing e polish UI: ~10%
+| File | Tipo Modifica |
+|------|---------------|
+| `src/pages/Derivatives.tsx` | Aggiornamento import e icone |
