@@ -1,13 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, Target, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Target, Calendar, Pencil, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -55,6 +54,8 @@ export function StatsCards({
   onAverageBalanceChange,
   onManualAverageBalanceToggle,
 }: StatsCardsProps) {
+  const [isEditingGiacenza, setIsEditingGiacenza] = useState(false);
+  const [giacenzaInputValue, setGiacenzaInputValue] = useState('');
   const initialValue = portfolio?.initial_value || 0;
   const portfolioDeposits = portfolio?.deposits || 0;
   const portfolioAverageBalance = portfolio?.average_balance || 0;
@@ -154,7 +155,30 @@ export function StatsCards({
   const canCalculatePL = hasInitialData || hasHistoricalData;
 
   const parseInputValue = (val: string): number => {
-    return parseFloat(val.replace(/[^\d.,\-]/g, '').replace(',', '.')) || 0;
+    // Support Italian number formats
+    const cleaned = val.toString().replace(/\s/g, '').replace(/[^0-9.,-]/g, '');
+    if (!cleaned) return 0;
+    const normalized = cleaned.includes(',')
+      ? cleaned.replace(/\./g, '').replace(',', '.')
+      : cleaned.replace(/\./g, '');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const startEditGiacenza = () => {
+    setGiacenzaInputValue(averageBalance > 0 ? averageBalance.toFixed(2) : '');
+    setIsEditingGiacenza(true);
+  };
+
+  const saveGiacenza = () => {
+    const newValue = parseInputValue(giacenzaInputValue);
+    onManualAverageBalanceToggle(true);
+    onAverageBalanceChange(newValue);
+    setIsEditingGiacenza(false);
+  };
+
+  const cancelEditGiacenza = () => {
+    setIsEditingGiacenza(false);
   };
 
   const stats = [
@@ -190,7 +214,8 @@ export function StatsCards({
       icon: Wallet,
       change: null,
       dimmed: averageBalance === 0,
-      subtext: null,
+      subtext: isManualAverageBalance ? 'modificato manualmente' : null,
+      isEditable: true,
     },
     {
       key: 'pl',
@@ -217,30 +242,68 @@ export function StatsCards({
             <div className="flex-1 min-w-0">
               <p className="text-sm text-muted-foreground truncate">{stat.label}</p>
               
-              <p className={cn(
-                "text-xl font-bold font-mono mt-1",
-                'dimmed' in stat && stat.dimmed 
-                  ? 'text-muted-foreground'
-                  : 'isProfit' in stat && stat.isProfit !== undefined 
-                    ? stat.isProfit 
-                      ? 'text-profit' 
-                      : 'text-loss'
-                    : ''
-              )}>
-                {'value' in stat ? stat.value : '—'}
-              </p>
-              {'subtext' in stat && stat.subtext && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {stat.subtext}
-                </p>
-              )}
-              {'change' in stat && stat.change && (
-                <p className={cn(
-                  "text-xs font-mono mt-1",
-                  'isProfit' in stat && stat.isProfit ? 'text-profit' : 'text-loss'
-                )}>
-                  {stat.change}
-                </p>
+              {'isEditable' in stat && stat.isEditable && isEditingGiacenza ? (
+                <div className="mt-1 space-y-2">
+                  <Input
+                    type="text"
+                    placeholder="0"
+                    value={giacenzaInputValue}
+                    onChange={(e) => setGiacenzaInputValue(e.target.value)}
+                    className="h-8 text-sm font-mono"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveGiacenza();
+                      if (e.key === 'Escape') cancelEditGiacenza();
+                    }}
+                  />
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" className="h-6 px-2" onClick={saveGiacenza}>
+                      <Check className="w-3 h-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-6 px-2" onClick={cancelEditGiacenza}>
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <p className={cn(
+                      "text-xl font-bold font-mono mt-1",
+                      'dimmed' in stat && stat.dimmed 
+                        ? 'text-muted-foreground'
+                        : 'isProfit' in stat && stat.isProfit !== undefined 
+                          ? stat.isProfit 
+                            ? 'text-profit' 
+                            : 'text-loss'
+                          : ''
+                    )}>
+                      {'value' in stat ? stat.value : '—'}
+                    </p>
+                    {'isEditable' in stat && stat.isEditable && (
+                      <button
+                        onClick={startEditGiacenza}
+                        className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+                        title="Modifica giacenza media"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {'subtext' in stat && stat.subtext && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {stat.subtext}
+                    </p>
+                  )}
+                  {'change' in stat && stat.change && (
+                    <p className={cn(
+                      "text-xs font-mono mt-1",
+                      'isProfit' in stat && stat.isProfit ? 'text-profit' : 'text-loss'
+                    )}>
+                      {stat.change}
+                    </p>
+                  )}
+                </>
               )}
               
               {'hasDateSelector' in stat && stat.hasDateSelector && (
