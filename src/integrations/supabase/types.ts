@@ -233,6 +233,33 @@ export type Database = {
           },
         ]
       }
+      isin_mappings: {
+        Row: {
+          created_at: string
+          exchange: string | null
+          isin: string
+          last_verified_at: string
+          source: string
+          ticker: string
+        }
+        Insert: {
+          created_at?: string
+          exchange?: string | null
+          isin: string
+          last_verified_at?: string
+          source: string
+          ticker: string
+        }
+        Update: {
+          created_at?: string
+          exchange?: string | null
+          isin?: string
+          last_verified_at?: string
+          source?: string
+          ticker?: string
+        }
+        Relationships: []
+      }
       portfolios: {
         Row: {
           average_balance: number | null

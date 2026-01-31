@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Position, PortfolioSummary, AssetType } from '@/types/portfolio';
+import { Position, AssetType } from '@/types/portfolio';
 import { toast } from 'sonner';
 
 export interface LivePriceData {
@@ -12,8 +12,12 @@ export interface LivePriceData {
   ask: number | null;
   volume: number | null;
   lastUpdated: string;
-  source: 'tradier' | 'yahoo' | 'error';
+  source: 'tradier' | 'yahoo' | 'justetf' | 'error';
   error?: string;
+  // Direction tracking for 45s visual feedback
+  previousPrice: number | null;
+  priceDirection: 'up' | 'down' | null;
+  directionTimestamp: number | null;
 }
 
 interface OptionRequest {
@@ -25,8 +29,9 @@ interface OptionRequest {
 }
 
 interface FetchResult {
-  stocks: Record<string, LivePriceData>;
-  options: Record<string, LivePriceData>;
+  stocks: Record<string, Omit<LivePriceData, 'previousPrice' | 'priceDirection' | 'directionTimestamp'>>;
+  options: Record<string, Omit<LivePriceData, 'previousPrice' | 'priceDirection' | 'directionTimestamp'>>;
+  isinMappings: Record<string, string>;
   fetchedAt: string;
 }
 
@@ -51,6 +56,51 @@ interface LivePricesContextType {
 const LivePricesContext = createContext<LivePricesContextType | null>(null);
 
 const POLLING_INTERVAL_MS = 300000; // 5 minutes
+const DIRECTION_DISPLAY_MS = 45000; // 45 seconds for price direction color
+
+/**
+ * Adds direction tracking to price data by comparing with previous prices
+ */
+function addDirectionTracking(
+  newPrices: Record<string, Omit<LivePriceData, 'previousPrice' | 'priceDirection' | 'directionTimestamp'>>,
+  previousPrices: Record<string, LivePriceData>
+): Record<string, LivePriceData> {
+  const result: Record<string, LivePriceData> = {};
+  
+  for (const [symbol, newPrice] of Object.entries(newPrices)) {
+    const oldPrice = previousPrices[symbol];
+    let direction: 'up' | 'down' | null = null;
+    let directionTimestamp: number | null = null;
+    let previousPriceValue: number | null = null;
+    
+    if (oldPrice && oldPrice.price !== null && newPrice.price !== null) {
+      previousPriceValue = oldPrice.price;
+      
+      if (newPrice.price > oldPrice.price) {
+        direction = 'up';
+        directionTimestamp = Date.now();
+      } else if (newPrice.price < oldPrice.price) {
+        direction = 'down';
+        directionTimestamp = Date.now();
+      } else {
+        // Price unchanged - keep old direction if still within 45s window
+        if (oldPrice.directionTimestamp && (Date.now() - oldPrice.directionTimestamp) < DIRECTION_DISPLAY_MS) {
+          direction = oldPrice.priceDirection;
+          directionTimestamp = oldPrice.directionTimestamp;
+        }
+      }
+    }
+    
+    result[symbol] = {
+      ...newPrice,
+      previousPrice: previousPriceValue,
+      priceDirection: direction,
+      directionTimestamp: directionTimestamp,
+    };
+  }
+  
+  return result;
+}
 
 /**
  * Recalculates market_value and profit_loss for a position with a new price.
@@ -98,6 +148,8 @@ export function LivePricesProvider({ children }: LivePricesProviderProps) {
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isFetchingRef = useRef(false);
+  const previousStockPricesRef = useRef<Record<string, LivePriceData>>({});
+  const previousOptionPricesRef = useRef<Record<string, LivePriceData>>({});
 
   const fetchPrices = useCallback(async () => {
     if (positionsToFetch.length === 0 || isFetchingRef.current) return;
@@ -119,11 +171,19 @@ export function LivePricesProvider({ children }: LivePricesProviderProps) {
              p.strike_price
       );
       
-      // Extract unique tickers for stocks/ETFs
+      // Extract unique tickers (for positions that have them)
       const tickers = [...new Set(
         stockPositions
           .map(p => p.ticker)
-          .filter((t): t is string => !!t)
+          .filter((t): t is string => !!t && t.length > 0)
+      )];
+      
+      // Extract unique ISINs (for positions without tickers)
+      const isins = [...new Set(
+        stockPositions
+          .filter(p => !p.ticker && p.isin)
+          .map(p => p.isin)
+          .filter((i): i is string => !!i && i.length > 0)
       )];
       
       // Build option requests
@@ -135,13 +195,14 @@ export function LivePricesProvider({ children }: LivePricesProviderProps) {
         originalId: p.id,
       }));
       
-      console.log(`[LivePricesContext] Fetching: ${tickers.length} stocks, ${optionRequests.length} options`);
+      console.log(`[LivePricesContext] Fetching: ${tickers.length} tickers, ${isins.length} ISINs, ${optionRequests.length} options`);
       
       const { data, error: fnError } = await supabase.functions.invoke<FetchResult>(
         'fetch-market-prices',
         {
           body: {
             tickers,
+            isins,
             options: optionRequests,
           },
         }
@@ -152,15 +213,39 @@ export function LivePricesProvider({ children }: LivePricesProviderProps) {
       }
       
       if (data) {
-        setStockPrices(data.stocks || {});
-        setOptionPrices(data.options || {});
+        // Add direction tracking by comparing with previous prices
+        const newStockPrices = addDirectionTracking(
+          data.stocks || {},
+          previousStockPricesRef.current
+        );
+        const newOptionPrices = addDirectionTracking(
+          data.options || {},
+          previousOptionPricesRef.current
+        );
+        
+        // Update previous prices refs
+        previousStockPricesRef.current = newStockPrices;
+        previousOptionPricesRef.current = newOptionPrices;
+        
+        setStockPrices(newStockPrices);
+        setOptionPrices(newOptionPrices);
         setLastFetched(new Date(data.fetchedAt));
         
         // Count successful fetches
-        const stockCount = Object.values(data.stocks || {}).filter(s => s.source !== 'error').length;
-        const optionCount = Object.values(data.options || {}).filter(o => o.source !== 'error').length;
+        const stockCount = Object.values(newStockPrices).filter(s => s.source !== 'error').length;
+        const optionCount = Object.values(newOptionPrices).filter(o => o.source !== 'error').length;
         
-        console.log(`[LivePricesContext] Fetched ${stockCount}/${tickers.length} stocks, ${optionCount}/${optionRequests.length} options`);
+        console.log(`[LivePricesContext] Fetched ${stockCount} stocks, ${optionCount} options`);
+        
+        // Log direction changes for debugging
+        const upCount = Object.values(newStockPrices).filter(s => s.priceDirection === 'up').length +
+                       Object.values(newOptionPrices).filter(o => o.priceDirection === 'up').length;
+        const downCount = Object.values(newStockPrices).filter(s => s.priceDirection === 'down').length +
+                         Object.values(newOptionPrices).filter(o => o.priceDirection === 'down').length;
+        
+        if (upCount > 0 || downCount > 0) {
+          console.log(`[LivePricesContext] Price changes: ${upCount} up, ${downCount} down`);
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Errore nel recupero prezzi';
@@ -204,9 +289,18 @@ export function LivePricesProvider({ children }: LivePricesProviderProps) {
   const getPriceForPosition = useCallback((position: Position): LivePriceData | null => {
     if (position.asset_type === 'derivative') {
       return optionPrices[position.id] || null;
-    } else if (position.ticker) {
-      return stockPrices[position.ticker] || null;
     }
+    
+    // Try ticker first
+    if (position.ticker && stockPrices[position.ticker]) {
+      return stockPrices[position.ticker];
+    }
+    
+    // Try ISIN
+    if (position.isin && stockPrices[position.isin]) {
+      return stockPrices[position.isin];
+    }
+    
     return null;
   }, [stockPrices, optionPrices]);
 
@@ -259,3 +353,6 @@ export function useLivePricesContext() {
   }
   return context;
 }
+
+// Export the direction display duration for use in components
+export const DIRECTION_DISPLAY_DURATION_MS = DIRECTION_DISPLAY_MS;

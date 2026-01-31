@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
 import { LivePriceBadge } from './LivePriceBadge';
 import { LivePriceIndicator } from './LivePriceIndicator';
-import { LivePriceData } from '@/hooks/useLivePrices';
+import { LivePriceData } from '@/contexts/LivePricesContext';
 
 interface PositionsTableProps {
   positions: Position[];

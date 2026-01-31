@@ -1,156 +1,79 @@
+# Piano: Sistema Prezzi Live - COMPLETATO ✅
 
-# Piano: Miglioramento Sistema Prezzi Live
-
-## Problemi Identificati
-
-### 1. I ticker sono sempre NULL
-L'Excel parser non estrae il campo ticker - tutte le posizioni hanno `ticker: null`. Questo significa che l'API Yahoo Finance non riceve alcun ticker da cercare!
-
-**Query di verifica:**
-```sql
-SELECT ticker, isin, asset_type FROM positions LIMIT 10
--- Risultato: TUTTI i ticker sono NULL
-```
-
-### 2. Tradier API - Token Non Valido
-Dai log dell'edge function:
-```
-Tradier API error: 401 - Invalid Access Token
-Fetching prices for 0 stocks and 110 options
-```
-Il token Tradier sembra essere scaduto o non valido.
-
-### 3. Manca Mapping ISIN → Ticker
-Per azioni/ETF europei (ISIN come IT0003132476 per ENI), non esiste un servizio che converta l'ISIN nel ticker corrispondente.
-
-### 4. Underlying opzioni in formato descrittivo
-Le opzioni hanno `underlying: "APPLE COMPUTER, INC."` invece di `"AAPL"`, quindi non possono essere convertite in simboli OCC.
-
-### 5. Nessun feedback visivo per variazioni
-Non c'è logica per mostrare il prezzo in rosso/verde per 45 secondi dopo ogni aggiornamento.
+## Stato: Implementazione Completa
 
 ---
 
-## Soluzione Proposta
+## Problemi Risolti
 
-### Fase 1: Mapping ISIN → Ticker (Nuovo Edge Function)
+### ✅ 1. I ticker erano sempre NULL
+**Soluzione:** Implementato sistema ISIN → Ticker via OpenFIGI API con cache in database.
 
-Creare un servizio che converta gli ISIN in ticker usando multiple fonti:
+### ✅ 2. Mancava Mapping ISIN → Ticker
+**Soluzione:** 
+- Nuova edge function `resolve-isin` con OpenFIGI
+- Fallback a Yahoo Finance Search
+- Fallback a JustETF per ETF europei
+- Cache in tabella `isin_mappings`
 
-1. **OpenFIGI API** (gratuita) - Database Bloomberg per mapping ISIN → Ticker
-2. **Yahoo Finance Search** - Fallback per cercare per ISIN
-3. **Cache locale** - Tabella `isin_mappings` per evitare chiamate ripetute
+### ✅ 3. Underlying opzioni in formato descrittivo
+**Soluzione:** Lookup table con 100+ mappings per titoli USA comuni in `src/lib/underlyingToTicker.ts`
 
-**Nuova Edge Function: `resolve-isin`**
-```typescript
-// Input: ["IT0003132476", "US0378331005"]
-// Output: { "IT0003132476": "ENI.MI", "US0378331005": "AAPL" }
-```
+### ✅ 4. Nessun feedback visivo per variazioni
+**Soluzione:** 
+- Prezzo in verde se rialzo, rosso se ribasso
+- Animazione pulse per 45 secondi
+- Indicatore live che cambia colore
+- Tooltip mostra prezzo precedente
 
-### Fase 2: Mapping Underlying → Ticker per Opzioni
-
-Creare una lookup table per convertire i nomi descrittivi in ticker:
-
-| Underlying (Excel)           | Ticker |
-|-----------------------------|--------|
-| APPLE COMPUTER, INC.        | AAPL   |
-| NVIDIA CORP                 | NVDA   |
-| AMAZON.COM.INC              | AMZN   |
-| META PLATFORMS              | META   |
-| GOOGLE INC. (A)             | GOOGL  |
-
-**Implementazione:**
-- Tabella statica `underlying_to_ticker` nell'edge function
-- Fallback: tentativo di parsing dal nome (es. "Tesla Inc" → "TSLA")
-
-### Fase 3: Provider Multipli per ETF
-
-Integrare **JustETF** per i prezzi degli ETF europei (già abbiamo l'edge function `fetch-etf-allocation`):
-
-1. **Yahoo Finance** - Provider primario per ETF USA (ticker tipo "VWO", "SPY")
-2. **JustETF Scraping** - Per ETF europei con ISIN (es. IE00B0M63623)
-3. **Borsa Italiana** - Per ETF quotati su Borsa Italiana (via scraping o API)
-
-**Flusso decisionale:**
-```
-ETF con ticker USA → Yahoo Finance
-ETF con ISIN + .MI → Yahoo Finance (es. "SWDA.MI")
-ETF con ISIN europeo → JustETF scraping (prezzo NAV)
-```
-
-### Fase 4: Feedback Visivo Variazione Prezzo (45 secondi)
-
-Modificare il sistema per:
-
-1. **Salvare il prezzo precedente** nel context
-2. **Confrontare con il nuovo prezzo** ad ogni fetch
-3. **Applicare classe CSS temporanea** (`price-up` / `price-down`)
-4. **Rimuovere dopo 45 secondi** via timeout
-
-**Nuova interfaccia LivePriceData:**
-```typescript
-interface LivePriceData {
-  // ... campi esistenti
-  previousPrice: number | null;  // NUOVO
-  priceDirection: 'up' | 'down' | null;  // NUOVO
-  directionTimestamp: number | null;  // NUOVO (per timeout 45s)
-}
-```
-
-**CSS animato:**
-```css
-.price-up {
-  color: #22c55e !important;  /* text-profit */
-  animation: pulse-green 0.5s ease-out;
-}
-
-.price-down {
-  color: #ef4444 !important;  /* text-loss */
-  animation: pulse-red 0.5s ease-out;
-}
-```
+### ⚠️ 5. Tradier API - Token Non Valido
+**Azione richiesta dall'utente:**
+1. Accedere a https://developer.tradier.com/
+2. Generare un nuovo Access Token (Production)
+3. Aggiornare il secret `TRADIER_API_KEY`
 
 ---
 
-## File da Creare
+## File Creati
 
 | File | Descrizione |
 |------|-------------|
 | `supabase/functions/resolve-isin/index.ts` | Edge function per mapping ISIN → Ticker via OpenFIGI |
-| `src/lib/underlyingToTicker.ts` | Lookup table per underlying opzioni |
+| `src/lib/underlyingToTicker.ts` | Lookup table per 100+ underlying opzioni |
+| `src/contexts/LivePricesContext.tsx` | Context centralizzato per prezzi live con direction tracking |
+| `src/hooks/usePositionsWithLivePrices.ts` | Hook che combina posizioni + prezzi live |
 
-## File da Modificare
+## File Modificati
 
 | File | Modifiche |
 |------|-----------|
-| `supabase/functions/fetch-market-prices/index.ts` | Aggiungere supporto ISIN, integrare JustETF per ETF, aggiungere mapping underlying |
-| `src/contexts/LivePricesContext.tsx` | Salvare prezzi precedenti, calcolare direzione, gestire timeout 45s |
-| `src/components/dashboard/LivePriceBadge.tsx` | Applicare classi CSS per variazione prezzo |
-| `src/index.css` | Aggiungere stili animati per price-up/price-down |
-| `supabase/migrations/` | Nuova tabella `isin_mappings` per cache |
+| `supabase/functions/fetch-market-prices/index.ts` | Supporto ISIN, JustETF fallback, underlying mapping |
+| `src/components/dashboard/LivePriceBadge.tsx` | Feedback visivo 45s (verde/rosso) |
+| `src/hooks/useLivePrices.ts` | Ora wrapper per backward compatibility |
+| `src/App.tsx` | Wrappato con `LivePricesProvider` |
+| `src/pages/Derivatives.tsx` | Usa prezzi live |
+| `src/pages/RiskAnalyzer.tsx` | Usa prezzi live |
 
-## Database: Nuova Tabella
+## Database
 
-```sql
-CREATE TABLE isin_mappings (
-  isin TEXT PRIMARY KEY,
-  ticker TEXT NOT NULL,
-  exchange TEXT,
-  source TEXT NOT NULL, -- 'openfigi', 'yahoo', 'manual'
-  last_verified_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
+**Tabella creata:** `isin_mappings`
+- `isin TEXT PRIMARY KEY`
+- `ticker TEXT NOT NULL`
+- `exchange TEXT`
+- `source TEXT NOT NULL`
+- `last_verified_at TIMESTAMPTZ`
 
 ---
 
-## Architettura Aggiornata
+## Architettura Finale
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    LivePricesContext                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐      │
-│  │ previousPrices │  │ currentPrices │  │ priceDirections (45s) │      │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘      │
+│  - Polling ogni 5 minuti                                            │
+│  - Tracking direzione prezzi (up/down)                              │
+│  - Timeout 45s per feedback visivo                                  │
+│  - Ricalcolo automatico market_value e profit_loss                  │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -158,104 +81,51 @@ CREATE TABLE isin_mappings (
 │                   fetch-market-prices (Edge Function)                │
 │                                                                      │
 │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            │
-│  │  resolve-isin │  │ Yahoo Finance │  │    Tradier    │            │
-│  │  (OpenFIGI)   │  │  (Stock/ETF)  │  │   (Options)   │            │
-│  └───────┬───────┘  └───────┬───────┘  └───────┬───────┘            │
-│          │                  │                  │                     │
-│          ▼                  ▼                  ▼                     │
-│  ┌───────────────────────────────────────────────────────┐          │
-│  │           Underlying → Ticker Mapping                  │          │
-│  │  "APPLE COMPUTER, INC." → "AAPL"                      │          │
-│  │  "NVIDIA CORP" → "NVDA"                               │          │
-│  └───────────────────────────────────────────────────────┘          │
-│                                                                      │
+│  │  OpenFIGI     │  │ Yahoo Finance │  │    Tradier    │            │
+│  │  (ISIN→Ticker)│  │  (Stock/ETF)  │  │   (Options)   │            │
+│  └───────────────┘  └───────────────┘  └───────────────┘            │
+│                              │                                       │
 │  ┌───────────────────────────────────────────────────────┐          │
 │  │           JustETF (fallback per ETF europei)          │          │
-│  │  ISIN IE00B0M63623 → Prezzo NAV                       │          │
+│  └───────────────────────────────────────────────────────┘          │
+│                              │                                       │
+│  ┌───────────────────────────────────────────────────────┐          │
+│  │           Underlying → Ticker Mapping (100+ titoli)   │          │
 │  └───────────────────────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Dettaglio Implementazione: Feedback Visivo 45s
+## Funzionalità
 
-### LivePricesContext.tsx
+### Dashboard
+- ✅ Prezzi live per azioni/ETF
+- ✅ Prezzi live per opzioni (richiede token Tradier valido)
+- ✅ Netting calcolato su prezzi live
+- ✅ Feedback visivo variazioni (45s)
 
-```typescript
-interface PriceState {
-  current: LivePriceData;
-  previous: LivePriceData | null;
-  direction: 'up' | 'down' | null;
-  directionExpiresAt: number | null;  // timestamp in ms
-}
+### Strategie Derivati
+- ✅ Prezzi opzioni aggiornati ogni 5 min
+- ✅ P/L ricalcolato in tempo reale
+- ✅ Indicatore stato live nell'header
 
-// Nel fetchPrices, confronta con i prezzi precedenti
-const newStockPrices = { ...data.stocks };
-for (const [symbol, newPrice] of Object.entries(newStockPrices)) {
-  const oldPrice = previousStockPrices[symbol];
-  if (oldPrice && newPrice.price && oldPrice.price) {
-    if (newPrice.price > oldPrice.price) {
-      newPrice.priceDirection = 'up';
-      newPrice.directionTimestamp = Date.now();
-    } else if (newPrice.price < oldPrice.price) {
-      newPrice.priceDirection = 'down';
-      newPrice.directionTimestamp = Date.now();
-    }
-  }
-}
-```
-
-### LivePriceBadge.tsx
-
-```typescript
-const isDirectionActive = livePrice.directionTimestamp && 
-  (Date.now() - livePrice.directionTimestamp) < 45000;
-
-const priceClass = isDirectionActive
-  ? livePrice.priceDirection === 'up' 
-    ? 'text-profit animate-pulse-once' 
-    : 'text-loss animate-pulse-once'
-  : '';
-```
+### Risk Analyzer
+- ✅ Esposizione equity con prezzi live
+- ✅ Grafici rischio aggiornati
+- ✅ Indicatore stato live nell'header
 
 ---
 
-## Priorità e Dipendenze
+## Note Tecniche
 
-1. **Fase 1 (Critica)**: Mapping ISIN → Ticker
-   - Senza questo, nessun prezzo stock/ETF funziona
-   
-2. **Fase 2 (Critica)**: Mapping Underlying → Ticker  
-   - Senza questo, nessun prezzo opzione funziona
-   
-3. **Fase 3 (Miglioramento)**: JustETF per ETF europei
-   - Fallback per ETF senza ticker Yahoo
-   
-4. **Fase 4 (UX)**: Feedback visivo 45 secondi
-   - Puramente estetico, non blocca funzionalità
+### Limitazioni Note
+- OpenFIGI: 25 req/min senza API key
+- Yahoo Finance: API non ufficiale
+- JustETF: Scraping (può rompersi)
+- Tradier: Richiede token valido
 
----
-
-## Verifica Token Tradier
-
-Prima di procedere, devo verificare che il token Tradier sia valido:
-
-1. **Controllare che sia un token di produzione** (non sandbox)
-2. **Verificare scadenza** - I token Tradier possono scadere
-3. **Rigenerare se necessario** - Dalla dashboard Tradier
-
-**Formato atteso:**
-- Produzione: `Bearer XXXXX` (token alfanumerico ~30 caratteri)
-- Sandbox: Richiede endpoint diverso (`sandbox.tradier.com`)
-
----
-
-## Stima Effort
-
-- **Fase 1** (ISIN → Ticker): ~2 messaggi
-- **Fase 2** (Underlying → Ticker): ~1 messaggio  
-- **Fase 3** (JustETF): ~1 messaggio
-- **Fase 4** (Feedback 45s): ~1 messaggio
-
-**Totale stimato**: 5 messaggi per implementazione completa
+### Prossimi Passi Consigliati
+1. Verificare token Tradier
+2. Monitorare log edge function per errori
+3. Aggiungere più underlying al mapping se necessario
