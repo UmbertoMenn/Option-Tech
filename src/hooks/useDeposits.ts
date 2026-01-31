@@ -24,24 +24,40 @@ export function useDeposits(portfolioId: string | undefined) {
   });
 
   const upsertMutation = useMutation({
-    mutationFn: async (entry: DepositInput) => {
+    mutationFn: async (entry: DepositInput & { id?: string }) => {
       if (!portfolioId) throw new Error('Portfolio non trovato');
       
-      const { data, error } = await supabase
-        .from('deposits')
-        .upsert({
-          portfolio_id: portfolioId,
-          deposit_date: entry.deposit_date,
-          amount: entry.amount,
-          description: entry.description || null,
-        }, {
-          onConflict: 'portfolio_id,deposit_date'
-        })
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
+      if (entry.id) {
+        // Update existing
+        const { data, error } = await supabase
+          .from('deposits')
+          .update({
+            deposit_date: entry.deposit_date,
+            amount: entry.amount,
+            description: entry.description || null,
+          })
+          .eq('id', entry.id)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        return data;
+      } else {
+        // Insert new
+        const { data, error } = await supabase
+          .from('deposits')
+          .insert({
+            portfolio_id: portfolioId,
+            deposit_date: entry.deposit_date,
+            amount: entry.amount,
+            description: entry.description || null,
+          })
+          .select()
+          .single();
+        
+        if (error) throw error;
+        return data;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] });

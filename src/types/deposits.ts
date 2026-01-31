@@ -9,6 +9,7 @@ export interface DepositEntry {
 }
 
 export interface DepositInput {
+  id?: string;
   deposit_date: string;
   amount: number;
   description?: string;

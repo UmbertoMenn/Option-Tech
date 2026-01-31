@@ -50,6 +50,7 @@ export function DepositsSection({
     if (!formDate) return;
     
     onSave({
+      id: editingId || undefined,
       deposit_date: format(formDate, 'yyyy-MM-dd'),
       amount: parseValue(formAmount),
       description: formDescription || undefined,
