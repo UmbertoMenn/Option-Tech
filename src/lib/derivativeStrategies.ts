@@ -138,7 +138,7 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 2: Find Protezioni (Long PUT solo se possiedo sottostante) ============
+  // ============ STEP 2: Find Protezioni (Long PUT solo se possiedo sottostante E non ci sono PUT vendute sullo stesso sottostante) ============
   const boughtPuts = derivatives.filter(d => 
     d.option_type === 'put' && d.quantity > 0 && !usedDerivatives.has(d.id)
   );
@@ -146,14 +146,26 @@ export function categorizeDerivatives(
   for (const put of boughtPuts) {
     const underlyingStock = findUnderlyingStock(put, stockPositions);
     
-    // Solo se possiedo il sottostante, è una protezione
+    // Solo se possiedo il sottostante E non ci sono altre PUT vendute sullo stesso sottostante
     if (underlyingStock && underlyingStock.quantity > 0) {
-      longPuts.push({
-        option: put,
-        underlying: underlyingStock,
-        contracts: put.quantity
-      });
-      usedDerivatives.add(put.id);
+      // Verifica che non esistano PUT vendute sullo stesso sottostante (non ancora usate)
+      const putUnderlying = normalizeForMatching(put.underlying || put.description);
+      const hasSoldPutOnSameUnderlying = derivatives.some(d => 
+        d.option_type === 'put' && 
+        d.quantity < 0 && 
+        !usedDerivatives.has(d.id) &&
+        normalizeForMatching(d.underlying || d.description) === putUnderlying
+      );
+      
+      // È una protezione SOLO se non ci sono PUT vendute sullo stesso sottostante
+      if (!hasSoldPutOnSameUnderlying) {
+        longPuts.push({
+          option: put,
+          underlying: underlyingStock,
+          contracts: put.quantity
+        });
+        usedDerivatives.add(put.id);
+      }
     }
   }
   
