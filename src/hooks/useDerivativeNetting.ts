@@ -3,7 +3,7 @@ import { Position, PortfolioSummary } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 
 export interface NettingResult {
-  // Netting excluding covered calls and long puts (protezioni)
+  // Netting excluding only covered calls
   nettingExCoveredCall: number;
   // Total netting including all derivatives
   nettingTotal: number;
@@ -43,16 +43,15 @@ export function useDerivativeNetting(
       };
     }
 
-    // Categorize derivatives to identify covered calls and long puts
+    // Categorize derivatives to identify covered calls
     const categories = categorizeDerivatives(derivatives, positions);
     
-    // Create sets of option IDs that should be excluded from netting ex covered call
+    // Create set of option IDs that should be excluded from netting ex covered call
     const coveredCallIds = new Set(categories.coveredCalls.map(cc => cc.option.id));
-    const longPutIds = new Set(categories.longPuts.map(lp => lp.option.id));
     
     // Calculate netting for each derivative
     let totalNetting = 0;
-    let nettingExCoveredCallPuts = 0;
+    let nettingExCoveredCall = 0;
     
     for (const derivative of derivatives) {
       const price = derivative.current_price ?? 0;
@@ -65,17 +64,16 @@ export function useDerivativeNetting(
       
       totalNetting += nettingValue;
       
-      // For netting ex covered call: exclude covered calls and long puts
+      // For netting ex covered call: exclude only covered calls
       const isCoveredCall = coveredCallIds.has(derivative.id);
-      const isLongPut = longPutIds.has(derivative.id);
       
-      if (!isCoveredCall && !isLongPut) {
-        nettingExCoveredCallPuts += nettingValue;
+      if (!isCoveredCall) {
+        nettingExCoveredCall += nettingValue;
       }
     }
     
     return {
-      nettingExCoveredCall: summary.totalValue + nettingExCoveredCallPuts,
+      nettingExCoveredCall: summary.totalValue + nettingExCoveredCall,
       nettingTotal: summary.totalValue + totalNetting,
     };
   }, [positions, summary]);
