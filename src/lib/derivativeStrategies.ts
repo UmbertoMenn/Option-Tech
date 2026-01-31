@@ -138,30 +138,51 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 2: Find Protezioni (Long PUT solo se possiedo sottostante E non ci sono PUT vendute sullo stesso sottostante) ============
-  const boughtPuts = derivatives.filter(d => 
-    d.option_type === 'put' && d.quantity > 0 && !usedDerivatives.has(d.id)
-  );
+  // ============ STEP 2: Find Protezioni (Long PUT solo se esposizione netta = 0) ============
+  // Esposizione netta = (Titoli/100) - (PUT comprate - PUT vendute) deve essere 0
   
-  for (const put of boughtPuts) {
-    const underlyingStock = findUnderlyingStock(put, stockPositions);
-    
-    // Solo se possiedo il sottostante E non ci sono altre PUT vendute sullo stesso sottostante
-    if (underlyingStock && underlyingStock.quantity > 0) {
-      // Verifica che non esistano PUT vendute sullo stesso sottostante (non ancora usate)
-      const putUnderlying = normalizeForMatching(put.underlying || put.description);
-      const hasSoldPutOnSameUnderlying = derivatives.some(d => 
-        d.option_type === 'put' && 
-        d.quantity < 0 && 
-        !usedDerivatives.has(d.id) &&
-        normalizeForMatching(d.underlying || d.description) === putUnderlying
-      );
+  // Raggruppa le PUT per sottostante
+  const putsByUnderlying = new Map<string, { bought: Position[], sold: Position[], stock: Position | null }>();
+  
+  for (const d of derivatives) {
+    if (d.option_type === 'put' && !usedDerivatives.has(d.id)) {
+      const underlyingKey = normalizeForMatching(d.underlying || d.description);
+      const underlyingStock = findUnderlyingStock(d, stockPositions);
       
-      // È una protezione SOLO se non ci sono PUT vendute sullo stesso sottostante
-      if (!hasSoldPutOnSameUnderlying) {
+      if (!putsByUnderlying.has(underlyingKey)) {
+        putsByUnderlying.set(underlyingKey, { bought: [], sold: [], stock: underlyingStock || null });
+      }
+      
+      const group = putsByUnderlying.get(underlyingKey)!;
+      if (d.quantity > 0) {
+        group.bought.push(d);
+      } else {
+        group.sold.push(d);
+      }
+      // Aggiorna stock se trovato
+      if (underlyingStock && !group.stock) {
+        group.stock = underlyingStock;
+      }
+    }
+  }
+  
+  // Verifica esposizione netta per ogni sottostante
+  for (const [, group] of putsByUnderlying.entries()) {
+    if (!group.stock || group.stock.quantity <= 0) continue;
+    
+    const stockContracts = Math.floor(group.stock.quantity / 100);
+    const boughtContracts = group.bought.reduce((sum, p) => sum + p.quantity, 0);
+    const soldContracts = group.sold.reduce((sum, p) => sum + Math.abs(p.quantity), 0);
+    
+    // Esposizione netta = Titoli/100 - (PUT comprate - PUT vendute)
+    const netExposure = stockContracts - (boughtContracts - soldContracts);
+    
+    // Solo se esposizione netta = 0, le PUT comprate sono protezioni
+    if (netExposure === 0) {
+      for (const put of group.bought) {
         longPuts.push({
           option: put,
-          underlying: underlyingStock,
+          underlying: group.stock,
           contracts: put.quantity
         });
         usedDerivatives.add(put.id);
