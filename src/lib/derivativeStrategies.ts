@@ -588,13 +588,25 @@ function normalizeRatios(quantities: number[]): number[] {
 function detectStrategyName(options: OtherStrategyPosition[]): string | null {
   if (options.length < 2) return null;
   
-  // Prepare legs with normalized data
-  const legs = options.map(o => ({
-    type: o.option.option_type as 'call' | 'put',
-    strike: o.option.strike_price || 0,
-    expiry: o.option.expiry_date || '',
-    qty: o.option.quantity
-  })).sort((a, b) => a.strike - b.strike);
+  // Aggregate options with same strike, type, and expiry into single legs
+  const aggregatedMap = new Map<string, { type: 'call' | 'put', strike: number, expiry: string, qty: number }>();
+  
+  for (const o of options) {
+    const key = `${o.option.option_type}-${o.option.strike_price}-${o.option.expiry_date}`;
+    if (aggregatedMap.has(key)) {
+      aggregatedMap.get(key)!.qty += o.option.quantity;
+    } else {
+      aggregatedMap.set(key, {
+        type: o.option.option_type as 'call' | 'put',
+        strike: o.option.strike_price || 0,
+        expiry: o.option.expiry_date || '',
+        qty: o.option.quantity
+      });
+    }
+  }
+  
+  // Convert to sorted array of legs
+  const legs = Array.from(aggregatedMap.values()).sort((a, b) => a.strike - b.strike);
   
   const calls = legs.filter(l => l.type === 'call');
   const puts = legs.filter(l => l.type === 'put');
@@ -706,21 +718,43 @@ function detectStrategyName(options: OtherStrategyPosition[]): string | null {
     const strikes = legs.map(l => l.strike);
     const types = new Set(legs.map(l => l.type));
     
-    // BUTTERFLY: stesso tipo, 3 strike equidistanti, ratio 1:-2:1
-    if (types.size === 1 && sameExpiry) {
+    // Only PUT strategies (for broken wing and butterfly)
+    if (types.size === 1 && legs[0].type === 'put') {
+      const sortedByStrike = [...legs].sort((a, b) => a.strike - b.strike);
+      const normSorted = normalizeRatios(sortedByStrike.map(l => l.qty));
       const isEquidistant = (strikes[2] - strikes[1]) === (strikes[1] - strikes[0]);
-      if (isEquidistant) {
-        const sortedByStrike = [...legs].sort((a, b) => a.strike - b.strike);
-        const normSorted = normalizeRatios(sortedByStrike.map(l => l.qty));
-        
-        // Long Butterfly: +1, -2, +1
-        if (normSorted[0] === 1 && normSorted[1] === -2 && normSorted[2] === 1) {
-          return legs[0].type === 'call' ? 'Long Call Butterfly' : 'Long Put Butterfly';
+      
+      // Pattern +1, -2, +1 (comprata bassa, venduta centro, comprata alta)
+      if (normSorted[0] === 1 && normSorted[1] === -2 && normSorted[2] === 1) {
+        // Se asimmetrico → Put Broken Wing Butterfly
+        if (!isEquidistant) {
+          return 'Put Broken Wing Butterfly';
         }
-        // Short Butterfly: -1, +2, -1
-        if (normSorted[0] === -1 && normSorted[1] === 2 && normSorted[2] === -1) {
-          return legs[0].type === 'call' ? 'Short Call Butterfly' : 'Short Put Butterfly';
+        // Se simmetrico → Long Put Butterfly
+        return 'Long Put Butterfly';
+      }
+      // Short Butterfly: -1, +2, -1
+      if (normSorted[0] === -1 && normSorted[1] === 2 && normSorted[2] === -1) {
+        return 'Short Put Butterfly';
+      }
+    }
+    
+    // Only CALL strategies
+    if (types.size === 1 && legs[0].type === 'call') {
+      const sortedByStrike = [...legs].sort((a, b) => a.strike - b.strike);
+      const normSorted = normalizeRatios(sortedByStrike.map(l => l.qty));
+      const isEquidistant = (strikes[2] - strikes[1]) === (strikes[1] - strikes[0]);
+      
+      // Long Call Butterfly: +1, -2, +1
+      if (normSorted[0] === 1 && normSorted[1] === -2 && normSorted[2] === 1) {
+        if (!isEquidistant) {
+          return 'Call Broken Wing Butterfly';
         }
+        return 'Long Call Butterfly';
+      }
+      // Short Call Butterfly: -1, +2, -1
+      if (normSorted[0] === -1 && normSorted[1] === 2 && normSorted[2] === -1) {
+        return 'Short Call Butterfly';
       }
     }
     
@@ -743,35 +777,6 @@ function detectStrategyName(options: OtherStrategyPosition[]): string | null {
   if (legs.length === 4) {
     const callLegs = calls.sort((a, b) => a.strike - b.strike);
     const putLegs = puts.sort((a, b) => a.strike - b.strike);
-    
-    // PUT BROKEN WING: 2 PUT vendute centro + 1 PUT comprata strike inferiore + 1 PUT comprata strike superiore
-    if (puts.length === 4 && calls.length === 0) {
-      const normPuts = normalizeRatios(putLegs.map(l => l.qty));
-      // Pattern: +1 (bassa), -2 (centro), +1 (alta) - ma asymmetric (broken wing)
-      // oppure: +1 (bassa comprata), -1 -1 (centro vendute), +1 (alta comprata)
-      const boughtPuts = putLegs.filter(l => l.qty > 0);
-      const soldPuts = putLegs.filter(l => l.qty < 0);
-      
-      if (boughtPuts.length === 2 && soldPuts.length === 2) {
-        const soldStrikes = soldPuts.map(p => p.strike).sort((a, b) => a - b);
-        const boughtStrikes = boughtPuts.map(p => p.strike).sort((a, b) => a - b);
-        
-        // Verifica che le PUT comprate siano una sotto e una sopra le PUT vendute
-        const lowestBought = Math.min(...boughtStrikes);
-        const highestBought = Math.max(...boughtStrikes);
-        const lowestSold = Math.min(...soldStrikes);
-        const highestSold = Math.max(...soldStrikes);
-        
-        if (lowestBought < lowestSold && highestBought > highestSold) {
-          // Verifica ratio 1:1:1:1 o simili
-          const boughtNorm = normalizeRatios(boughtPuts.map(p => p.qty));
-          const soldNorm = normalizeRatios(soldPuts.map(p => p.qty));
-          if (boughtNorm.every(n => n === 1) && soldNorm.every(n => n === -1)) {
-            return 'Put Broken Wing Butterfly';
-          }
-        }
-      }
-    }
     
     // ALTERNATIVE DOUBLE DIAGONAL: 1 PUT venduta + 1 PUT comprata + 1 CALL venduta + 1 CALL comprata, scadenze diverse
     if (puts.length === 2 && calls.length === 2 && diffExpiry) {
