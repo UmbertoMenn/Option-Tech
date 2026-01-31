@@ -127,14 +127,26 @@ export function StatsCards({
   // Get the snapshot date from portfolio (extracted from Excel)
   const snapshotDate = portfolio?.snapshot_date;
   
+  // Debug logging
+  console.log('[StatsCards] Portfolio snapshot_date:', snapshotDate);
+  console.log('[StatsCards] Selected historical entry:', selectedHistoricalEntry?.snapshot_date);
+  console.log('[StatsCards] All deposits count:', allDeposits?.length);
+  
   // Calculate time-weighted average and deposits in period
   const timeWeightedData = useMemo(() => {
     if (!selectedHistoricalEntry || !snapshotDate) {
+      console.log('[StatsCards] Cannot calculate: missing', !selectedHistoricalEntry ? 'historicalEntry' : 'snapshotDate');
       return { average: 0, totalDeposits: 0 };
     }
 
     const startDate = parseISO(selectedHistoricalEntry.snapshot_date);
     const endDate = parseISO(snapshotDate);
+
+    console.log('[StatsCards] Calculating time-weighted average:', {
+      startDate: selectedHistoricalEntry.snapshot_date,
+      endDate: snapshotDate,
+      depositsCount: allDeposits?.length
+    });
 
     // Get historical value based on viewMode
     let historicalValue: number;
@@ -149,7 +161,9 @@ export function StatsCards({
         historicalValue = selectedHistoricalEntry.total_value;
     }
 
-    return calculateTimeWeightedAverage(startDate, endDate, historicalValue, allDeposits);
+    const result = calculateTimeWeightedAverage(startDate, endDate, historicalValue, allDeposits);
+    console.log('[StatsCards] Time-weighted result:', result);
+    return result;
   }, [selectedHistoricalEntry, snapshotDate, viewMode, allDeposits]);
   
   // Auto-calculate average balance when historical data changes (time-weighted)

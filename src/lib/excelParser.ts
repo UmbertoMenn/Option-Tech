@@ -40,20 +40,45 @@ export async function parsePortfolioExcel(file: File): Promise<{
 
 /**
  * Extract the snapshot date from the first rows of the Excel file
- * Looks for patterns like "POSIZIONE AL DD/MM/YYYY" or Excel date serials
+ * Priority: Cell C4 first, then scan first 10 rows for date patterns
  */
 function extractSnapshotDate(rows: any[][]): string | null {
-  // Check first 10 rows for date patterns
+  // PRIORITY: Check cell C4 specifically (row index 3, column index 2)
+  if (rows.length > 3 && rows[3] && rows[3][2] !== undefined && rows[3][2] !== null) {
+    const cellC4 = rows[3][2];
+    console.log('[ExcelParser] Cell C4 value:', cellC4, 'type:', typeof cellC4);
+    
+    // Excel date serial number
+    if (typeof cellC4 === 'number' && cellC4 > 40000 && cellC4 < 50000) {
+      const date = new Date((cellC4 - 25569) * 86400 * 1000);
+      console.log('[ExcelParser] C4 parsed as Excel serial date:', date.toISOString().split('T')[0]);
+      return date.toISOString().split('T')[0];
+    }
+    
+    // String date pattern
+    if (typeof cellC4 === 'string') {
+      const dateMatch = cellC4.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+      if (dateMatch) {
+        const parsed = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+        console.log('[ExcelParser] C4 parsed as string date:', parsed);
+        return parsed;
+      }
+    }
+  }
+  
+  // Fallback: Check first 10 rows for date patterns
   for (let i = 0; i < Math.min(10, rows.length); i++) {
     const row = rows[i];
     if (!row) continue;
     
-    for (const cell of row) {
+    for (let j = 0; j < row.length; j++) {
+      const cell = row[j];
       if (cell === null || cell === undefined) continue;
       
       // Check for Excel date serial number (40000-50000 range = ~2009-2036)
       if (typeof cell === 'number' && cell > 40000 && cell < 50000) {
         const date = new Date((cell - 25569) * 86400 * 1000);
+        console.log(`[ExcelParser] Found Excel serial date at row ${i}, col ${j}:`, date.toISOString().split('T')[0]);
         return date.toISOString().split('T')[0];
       }
       
@@ -64,24 +89,31 @@ function extractSnapshotDate(rows: any[][]): string | null {
         // Pattern: "POSIZIONE AL DD/MM/YYYY" or "POSIZIONE AL DD-MM-YYYY"
         const posizioneMatch = cellStr.match(/POSIZIONE\s+AL\s+(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
         if (posizioneMatch) {
-          return `${posizioneMatch[3]}-${posizioneMatch[2]}-${posizioneMatch[1]}`;
+          const parsed = `${posizioneMatch[3]}-${posizioneMatch[2]}-${posizioneMatch[1]}`;
+          console.log(`[ExcelParser] Found POSIZIONE AL pattern at row ${i}:`, parsed);
+          return parsed;
         }
         
         // Pattern: "DATA: DD/MM/YYYY" or "DATA DD/MM/YYYY"
         const dataMatch = cellStr.match(/DATA[:\s]+(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
         if (dataMatch) {
-          return `${dataMatch[3]}-${dataMatch[2]}-${dataMatch[1]}`;
+          const parsed = `${dataMatch[3]}-${dataMatch[2]}-${dataMatch[1]}`;
+          console.log(`[ExcelParser] Found DATA pattern at row ${i}:`, parsed);
+          return parsed;
         }
         
         // Pattern: standalone date DD/MM/YYYY (more permissive, at start of cell)
         const standaloneDateMatch = cell.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
         if (standaloneDateMatch) {
-          return `${standaloneDateMatch[3]}-${standaloneDateMatch[2]}-${standaloneDateMatch[1]}`;
+          const parsed = `${standaloneDateMatch[3]}-${standaloneDateMatch[2]}-${standaloneDateMatch[1]}`;
+          console.log(`[ExcelParser] Found standalone date at row ${i}:`, parsed);
+          return parsed;
         }
       }
     }
   }
   
+  console.log('[ExcelParser] No date found in Excel file');
   return null;
 }
 

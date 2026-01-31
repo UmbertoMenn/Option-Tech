@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
@@ -12,6 +13,7 @@ export function FileUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const { portfolio, updatePositions } = usePortfolio();
+  const queryClient = useQueryClient();
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -23,6 +25,12 @@ export function FileUploader() {
     try {
       const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file);
       
+      console.log('[FileUploader] Parsed Excel result:', { 
+        positionsCount: positions.length, 
+        cashValue, 
+        snapshotDate 
+      });
+      
       if (positions.length === 0) {
         toast.error('Nessuna posizione trovata', {
           description: 'Il file non contiene dati validi.',
@@ -32,18 +40,26 @@ export function FileUploader() {
 
       // Update cash value and snapshot date in portfolio
       if (portfolio?.id) {
-        const updateData: { cash_value?: number; snapshot_date?: string } = {};
+        const updateData: { cash_value?: number; snapshot_date?: string | null } = {};
         if (cashValue > 0) {
           updateData.cash_value = cashValue;
         }
-        if (snapshotDate) {
-          updateData.snapshot_date = snapshotDate;
-        }
-        if (Object.keys(updateData).length > 0) {
-          await supabase
-            .from('portfolios')
-            .update(updateData)
-            .eq('id', portfolio.id);
+        // Always update snapshot_date (even if null, to clear old value)
+        updateData.snapshot_date = snapshotDate;
+        
+        console.log('[FileUploader] Updating portfolio with:', updateData);
+        
+        const { error } = await supabase
+          .from('portfolios')
+          .update(updateData)
+          .eq('id', portfolio.id);
+          
+        if (error) {
+          console.error('[FileUploader] Error updating portfolio:', error);
+        } else {
+          console.log('[FileUploader] Portfolio updated successfully');
+          // Force refresh portfolio query to get the new snapshot_date
+          await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
         }
       }
 
@@ -62,7 +78,7 @@ export function FileUploader() {
     } finally {
       setIsProcessing(false);
     }
-  }, [portfolio, updatePositions]);
+  }, [portfolio, updatePositions, queryClient]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
