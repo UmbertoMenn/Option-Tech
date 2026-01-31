@@ -35,25 +35,22 @@ interface NettingChartProps {
 }
 
 function NettingChart({ baseValue, nettedValue, label }: NettingChartProps) {
-  const delta = nettedValue - baseValue;
-  const isPositive = delta >= 0;
-  
   const data = [
-    { name: 'Patrimonio Base', value: baseValue, fill: 'hsl(var(--muted-foreground))' },
-    { name: label, value: nettedValue, fill: isPositive ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+    { name: 'Valore Asset Portafoglio', value: baseValue, fill: 'hsl(var(--muted-foreground))' },
+    { name: label, value: nettedValue, fill: 'hsl(217, 91%, 60%)' },
   ];
 
   const formatValue = (value: number) => {
-    if (value >= 1000000) return `€${(value / 1000000).toFixed(2)}M`;
-    if (value >= 1000) return `€${(value / 1000).toFixed(0)}K`;
-    return `€${value.toFixed(0)}`;
+    if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M $`;
+    if (value >= 1000) return `${(value / 1000).toFixed(0)}K $`;
+    return `${value.toFixed(0)} $`;
   };
 
   return (
     <div className="flex flex-col items-center py-4">
       <div className="w-full h-[180px]">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={{ left: 20, right: 60, top: 10, bottom: 10 }}>
+          <BarChart data={data} layout="vertical" margin={{ left: 20, right: 80, top: 10, bottom: 10 }}>
             <XAxis type="number" hide domain={[0, 'dataMax']} />
             <YAxis 
               type="category" 
@@ -61,7 +58,7 @@ function NettingChart({ baseValue, nettedValue, label }: NettingChartProps) {
               axisLine={false} 
               tickLine={false}
               tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-              width={120}
+              width={140}
             />
             <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={32}>
               {data.map((entry, index) => (
@@ -78,13 +75,10 @@ function NettingChart({ baseValue, nettedValue, label }: NettingChartProps) {
         </ResponsiveContainer>
       </div>
       <div className="mt-2 text-center">
-        <p className={cn(
-          "text-lg font-semibold",
-          isPositive ? "text-green-500" : "text-red-500"
-        )}>
-          {isPositive ? '+' : ''}{formatCurrency(delta)}
+        <p className="text-2xl font-bold text-blue-500">
+          {formatCurrency(nettedValue)}
         </p>
-        <p className="text-xs text-muted-foreground">Differenza rispetto al patrimonio base</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
       </div>
     </div>
   );
