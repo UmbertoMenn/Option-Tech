@@ -35,11 +35,13 @@ export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const { 
     totalStockRisk,
+    totalCommodityRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
     grandTotal,
     stockDetails,
+    commodityDetails,
     nakedPutDetails,
     leapCallDetails,
     strategyDetails,
@@ -56,7 +58,15 @@ export function RiskAnalyzer() {
       percentage: getPercentage(totalStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
-      description: 'Al netto di protezioni PUT'
+      description: 'Azioni e ETF (al netto di protezioni PUT)'
+    },
+    { 
+      label: 'Rischio Commodities', 
+      value: totalCommodityRisk, 
+      percentage: getPercentage(totalCommodityRisk),
+      color: 'bg-orange-500',
+      icon: BarChart3,
+      description: 'Materie prime'
     },
     { 
       label: 'Rischio Naked PUT', 
@@ -145,7 +155,7 @@ export function RiskAnalyzer() {
         ) : (
           <>
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               {riskCategories.map((cat, index) => (
                 <Card key={index} className="border-border bg-card">
                   <CardContent className="pt-6">
@@ -320,6 +330,47 @@ export function RiskAnalyzer() {
                           </div>
                         );
                       })}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+              {/* Commodity Details */}
+              {commodityDetails.length > 0 && (
+                <AccordionItem value="commodities" className="border rounded-lg bg-card">
+                  <AccordionTrigger className="px-6 hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="p-1.5 rounded bg-orange-500/20">
+                        <BarChart3 className="w-4 h-4 text-orange-500" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-semibold">Dettaglio Commodities</div>
+                        <div className="text-sm text-muted-foreground">
+                          {commodityDetails.length} posizioni • Rischio totale: {formatEUR(totalCommodityRisk)}
+                        </div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="px-6 pb-4">
+                    <div className="space-y-3">
+                      {commodityDetails.map((commodity, index) => (
+                        <div key={index} className="p-4 rounded-lg bg-muted/50 flex justify-between items-center">
+                          <div>
+                            <div className="font-semibold">{commodity.underlying}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {formatNumber(commodity.quantity)} unità @ {commodity.currency} {formatNumber(commodity.price, 2)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-orange-500">
+                              {formatEUR(commodity.riskEUR)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {commodity.currency} {formatNumber(commodity.riskOriginal, 0)} / {commodity.exchangeRate.toFixed(4)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </AccordionContent>
                 </AccordionItem>

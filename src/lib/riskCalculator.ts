@@ -59,9 +59,21 @@ export interface StrategyRiskDetail {
   calculation: string;          // Descrizione calcolo per tooltip
 }
 
+export interface CommodityRiskDetail {
+  underlying: string;
+  value: number;              // Valore in valuta originale
+  quantity: number;
+  price: number;
+  riskOriginal: number;       // Rischio in valuta originale (= valore)
+  riskEUR: number;            // Rischio convertito in EUR
+  currency: string;
+  exchangeRate: number;
+}
+
 export interface RiskAnalysis {
   // Totali EUR
   totalStockRisk: number;
+  totalCommodityRisk: number;
   totalNakedPutRisk: number;
   totalLeapCallRisk: number;
   totalStrategyRisk: number;
@@ -69,6 +81,7 @@ export interface RiskAnalysis {
   
   // Dettagli
   stockDetails: StockRiskDetail[];
+  commodityDetails: CommodityRiskDetail[];
   nakedPutDetails: NakedPutRiskDetail[];
   leapCallDetails: LeapCallRiskDetail[];
   strategyDetails: StrategyRiskDetail[];
@@ -125,11 +138,11 @@ export function calculateStockRisk(
     putsByUnderlying.get(underlyingKey)!.push(lp);
   }
   
-  // Include stocks, equity ETFs, and commodities as equity exposure
-  const equityAssetTypes = ['stock', 'etf', 'commodity'];
+  // Include only stocks and ETFs (commodities are calculated separately)
+  const stockAssetTypes = ['stock', 'etf'];
   
   for (const stock of stocks) {
-    if (!equityAssetTypes.includes(stock.asset_type)) continue;
+    if (!stockAssetTypes.includes(stock.asset_type)) continue;
     
     const stockKey = normalizeForMatching(stock.ticker || stock.description);
     const stockValue = (stock.quantity || 0) * (stock.current_price || 0);
@@ -541,32 +554,66 @@ export function analyzePortfolioRisk(
   positions: Position[],
   categories: DerivativeCategories
 ): RiskAnalysis {
-  // Get equity positions (stocks, ETFs, commodities)
-  const equityAssetTypes = ['stock', 'etf', 'commodity'];
-  const stocks = positions.filter(p => equityAssetTypes.includes(p.asset_type));
+  // Get stock/ETF positions (excluding commodities)
+  const stockAssetTypes = ['stock', 'etf'];
+  const stocks = positions.filter(p => stockAssetTypes.includes(p.asset_type));
+  
+  // Get commodity positions separately
+  const commodities = positions.filter(p => p.asset_type === 'commodity');
   
   // Calculate each risk category
   const stockDetails = calculateStockRisk(stocks, categories.longPuts);
+  const commodityDetails = calculateCommodityRisk(commodities);
   const nakedPutDetails = calculateNakedPutRisk(categories.nakedPuts);
   const leapCallDetails = calculateLeapCallRisk(categories.leapCalls);
   const strategyDetails = calculateStrategyRisk(categories);
   
   // Sum up totals in EUR
   const totalStockRisk = stockDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+  const totalCommodityRisk = commodityDetails.reduce((sum, c) => sum + c.riskEUR, 0);
   const totalNakedPutRisk = nakedPutDetails.reduce((sum, n) => sum + n.riskEUR, 0);
   const totalLeapCallRisk = leapCallDetails.reduce((sum, l) => sum + l.riskEUR, 0);
   const totalStrategyRisk = strategyDetails.reduce((sum, s) => sum + s.maxLossEUR, 0);
-  const grandTotal = totalStockRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
+  const grandTotal = totalStockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
   
   return {
     totalStockRisk,
+    totalCommodityRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
     grandTotal,
     stockDetails,
+    commodityDetails,
     nakedPutDetails,
     leapCallDetails,
     strategyDetails
   };
+}
+
+/**
+ * Calculate commodity risk.
+ * Formula: Quantità × Prezzo / Cambio (no protection available for commodities)
+ */
+export function calculateCommodityRisk(
+  commodities: Position[]
+): CommodityRiskDetail[] {
+  return commodities.map(commodity => {
+    const quantity = commodity.quantity || 0;
+    const price = commodity.current_price || 0;
+    const value = quantity * price;
+    const exchangeRate = getEffectiveExchangeRate(commodity);
+    const currency = commodity.currency || 'USD';
+    
+    return {
+      underlying: commodity.ticker || commodity.description,
+      value,
+      quantity,
+      price,
+      riskOriginal: value,
+      riskEUR: value / exchangeRate,
+      currency,
+      exchangeRate
+    };
+  });
 }
