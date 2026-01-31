@@ -1,112 +1,83 @@
 
+# Piano: Riconoscimento ADR e Alias per Matching Opzioni
 
-# Piano: Regola di separazione per scadenze distanti (>12 mesi)
+## Problema Identificato
 
-## Problema
-Nello Step 5, tutte le opzioni con lo stesso sottostante vengono raggruppate in "Altre Strategie" se sono più di una, senza considerare che opzioni con scadenze molto distanti non formano una strategia vera.
+Dopo aver analizzato il database, ho trovato due casi distinti:
 
-## Soluzione
-Aggiungere un controllo sulla differenza di scadenze: se le opzioni di un gruppo hanno scadenze che differiscono di **più di 12 mesi**, vanno trattate come **gambe singole** e non come strategia.
+### Caso 1: NETEASE
+| Tipo | Descrizione |
+|------|-------------|
+| Azione | `AZ.NETEASE INC-ADR` |
+| Opzione underlying | `NETEASE INC` |
+
+Il suffisso `-ADR` non viene rimosso durante la normalizzazione, quindi il matching fallisce.
+
+### Caso 2: PINDUODUO
+| Tipo | Descrizione |
+|------|-------------|
+| Azione | `AZ.PDD HOLDINGS INC` |
+| Opzione underlying | `PINDUODUO INC` |
+
+Sono la stessa società (Pinduoduo ha fatto rebranding in PDD Holdings nel 2023), ma hanno nomi completamente diversi.
 
 ---
 
-## Logica Proposta
+## Soluzione Proposta
 
-### Modifica Step 5 (righe 278-290)
+### Modifica 1: Rimuovere suffisso `-ADR` nella normalizzazione
 
-```text
-Per ogni gruppo di opzioni con stesso sottostante:
-  1. Se tutte le scadenze sono entro 12 mesi l'una dall'altra:
-     → Raggruppa in "Altre Strategie" (comportamento attuale)
-  
-  2. Se almeno due scadenze differiscono di più di 12 mesi:
-     → NON raggruppare, lascia passare allo Step 6 (singole gambe)
-```
+**File**: `src/lib/derivativeStrategies.ts`
+**Funzione**: `normalizeForMatching` (riga 594-603)
 
-### Calcolo Differenza Scadenze
+Aggiungere la rimozione del suffisso `-ADR` nella regex dei suffissi comuni:
 
-```text
-function hasCloseExpiries(options: Position[]): boolean {
-  const dates = options
-    .map(o => new Date(o.expiry_date))
-    .filter(d => !isNaN(d.getTime()));
-  
-  if (dates.length < 2) return true; // una sola scadenza = ok
-  
-  const maxDate = Math.max(...dates.map(d => d.getTime()));
-  const minDate = Math.min(...dates.map(d => d.getTime()));
-  const diffMonths = (maxDate - minDate) / (1000 * 60 * 60 * 24 * 30);
-  
-  return diffMonths <= 12; // true se entro 12 mesi
+```typescript
+function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/^AZ\./i, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    // Aggiunto: ADR ai suffissi da rimuovere
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '')
+    .trim();
 }
 ```
 
----
+Questo risolverà automaticamente:
+- `NETEASE INC-ADR` → `NETEASE`
+- `NETEASE INC` → `NETEASE`
+- Qualsiasi altro ADR con lo stesso pattern
 
-## Modifica al Codice
+### Modifica 2: Aggiungere alias PINDUODUO ↔ PDD HOLDINGS
 
-### File: `src/lib/derivativeStrategies.ts`
+**File**: `src/lib/derivativeStrategies.ts`
+**Costante**: `SPECIAL_ALIASES` (riga 587-589)
 
-**Aggiungere funzione helper** (prima dello Step 5):
+Aggiungere l'equivalenza esplicita:
 
 ```typescript
-// Verifica se tutte le scadenze sono entro 12 mesi l'una dall'altra
-const hasCloseExpiries = (options: Position[]): boolean => {
-  const dates = options
-    .map(o => o.expiry_date ? new Date(o.expiry_date) : null)
-    .filter((d): d is Date => d !== null && !isNaN(d.getTime()));
-  
-  if (dates.length < 2) return true;
-  
-  const timestamps = dates.map(d => d.getTime());
-  const maxDate = Math.max(...timestamps);
-  const minDate = Math.min(...timestamps);
-  const diffMonths = (maxDate - minDate) / (1000 * 60 * 60 * 24 * 30);
-  
-  return diffMonths <= 12;
+const SPECIAL_ALIASES: Record<string, string[]> = {
+  ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
+  PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
 };
-```
-
-**Modificare Step 5** (righe 278-290):
-
-```typescript
-// For groups with more than 1 option AND close expiries, put in "Altre Strategie"
-for (const [, group] of regrouped.entries()) {
-  if (group.length > 1 && hasCloseExpiries(group)) {
-    for (const option of group) {
-      const underlyingStock = findUnderlyingStock(option, stockPositions);
-      otherStrategies.push({
-        option,
-        underlying: underlyingStock || null
-      });
-      usedDerivatives.add(option.id);
-    }
-  }
-  // Se scadenze distanti (>12 mesi), le opzioni passano allo Step 6
-}
 ```
 
 ---
 
 ## Risultato Atteso
 
-### Caso Google
+| Opzione | Azione | Match Attuale | Match Nuovo |
+|---------|--------|---------------|-------------|
+| NETEASE INC OPTION CALL 145 | AZ.NETEASE INC-ADR | ❌ No | ✅ Sì |
+| PINDUODUO INC OPTION CALL 110 | AZ.PDD HOLDINGS INC | ❌ No | ✅ Sì |
 
-| Opzione | Scadenza | Differenza | Classificazione |
-|---------|----------|------------|-----------------|
-| PUT 295 venduta | Feb 2026 | - | **Naked Put** |
-| PUT 220 comprata | Dic 2027 | ~22 mesi | **Protezione (P!)** |
-
-Le due PUT hanno scadenze distanti >12 mesi → non vengono raggruppate → passano allo Step 6 → classificate individualmente.
-
-### Strategia vera (esempio)
-
-| Opzione | Scadenza | Differenza | Classificazione |
-|---------|----------|------------|-----------------|
-| PUT 290 venduta | Mar 2026 | - | **Altre Strategie** |
-| PUT 280 comprata | Mar 2026 | 0 mesi | **Altre Strategie** |
-
-Stessa scadenza → raggruppate in "Altre Strategie" come spread.
+Le opzioni verranno ora correttamente associate alle rispettive azioni, permettendo:
+- Classificazione come Covered Call (se vendute)
+- Classificazione come Protezione (se PUT comprate)
+- Visualizzazione corretta del prezzo sottostante (PS:...)
 
 ---
 
@@ -115,8 +86,12 @@ Stessa scadenza → raggruppate in "Altre Strategie" come spread.
 | Elemento | Dettaglio |
 |----------|-----------|
 | File da modificare | `src/lib/derivativeStrategies.ts` |
-| Nuova funzione | `hasCloseExpiries(options)` |
-| Punto di modifica | Step 5, riga 280 |
-| Soglia temporale | 12 mesi |
-| Impatto | Solo opzioni con scadenze distanti passano a Step 6 |
+| Righe interessate | 587-589 (SPECIAL_ALIASES), 594-603 (normalizeForMatching) |
+| Tipo di modifica | Aggiunta suffisso ADR + nuovo alias PDD/PINDUODUO |
+| Impatto | Matching automatico per tutti gli ADR e per Pinduoduo/PDD |
 
+---
+
+## Note Aggiuntive
+
+Questa soluzione è estensibile: se in futuro ci fossero altri casi di rebranding (es. Facebook → Meta), basterà aggiungere una riga a `SPECIAL_ALIASES`.
