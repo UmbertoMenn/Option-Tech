@@ -6,22 +6,106 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers } from 'lucide-react';
-import { CurrencyExposure, getCurrencyColor } from '@/lib/currencyExposure';
+import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink } from 'lucide-react';
+import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
 import { formatEUR } from '@/lib/formatters';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
   grandTotal: number;
 }
 
-const BREAKDOWN_LABELS = {
+const CATEGORY_CONFIG = {
   stocks: { label: 'Stocks & ETF', icon: TrendingUp, colorClass: 'text-blue-500' },
   commodities: { label: 'Commodities', icon: BarChart3, colorClass: 'text-orange-500' },
   nakedPuts: { label: 'Naked PUT', icon: TrendingDown, colorClass: 'text-red-500' },
   leapCalls: { label: 'Leap Call', icon: DollarSign, colorClass: 'text-amber-500' },
   strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
 };
+
+function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
+  const config = CATEGORY_CONFIG[instrument.category];
+  const Icon = config.icon;
+  
+  const handleJustETFClick = () => {
+    // Try to find ISIN in the name or use the name as search
+    const searchTerm = instrument.name.replace(/\s+/g, '+');
+    window.open(`https://www.justetf.com/en/find-etf.html?query=${searchTerm}`, '_blank');
+  };
+  
+  return (
+    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <Icon className={`w-3.5 h-3.5 ${config.colorClass} flex-shrink-0`} />
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium truncate">{instrument.name}</span>
+            {instrument.isETF && (
+              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
+                ETF
+              </Badge>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground truncate">{instrument.details}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="font-medium text-sm">{formatEUR(instrument.riskEUR)}</span>
+        {instrument.isETF && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-primary"
+            onClick={handleJustETFClick}
+            title="Cerca su justETF"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CategoryBreakdown({ 
+  instruments, 
+  category, 
+  total 
+}: { 
+  instruments: InstrumentDetail[]; 
+  category: keyof typeof CATEGORY_CONFIG;
+  total: number;
+}) {
+  const categoryInstruments = instruments.filter(i => i.category === category);
+  if (categoryInstruments.length === 0) return null;
+  
+  const config = CATEGORY_CONFIG[category];
+  const Icon = config.icon;
+  
+  return (
+    <AccordionItem value={category} className="border-0">
+      <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-background/50 rounded-lg">
+        <div className="flex items-center gap-2 flex-1">
+          <Icon className={`w-4 h-4 ${config.colorClass}`} />
+          <span className="text-sm">{config.label}</span>
+          <Badge variant="secondary" className="ml-auto mr-2 text-xs">
+            {categoryInstruments.length}
+          </Badge>
+          <span className="font-medium text-sm">{formatEUR(total)}</span>
+        </div>
+      </AccordionTrigger>
+      <AccordionContent className="pt-1 pb-2 px-2">
+        <div className="space-y-1">
+          {categoryInstruments.map((instrument, idx) => (
+            <InstrumentRow key={`${instrument.name}-${idx}`} instrument={instrument} />
+          ))}
+        </div>
+      </AccordionContent>
+    </AccordionItem>
+  );
+}
 
 export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyExposureViewProps) {
   const hasData = currencyExposure.length > 0 && grandTotal > 0;
@@ -102,7 +186,7 @@ export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyE
         </Card>
       </div>
 
-      {/* Currency Breakdown Accordion */}
+      {/* Currency Breakdown Accordion with Instrument Details */}
       {hasData && (
         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
@@ -124,9 +208,12 @@ export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyE
                       />
                       <div className="flex items-center justify-between flex-1 pr-2">
                         <span className="font-semibold">{curr.currency}</span>
-                        <div className="text-right">
+                        <div className="text-right flex items-center gap-2">
+                          <Badge variant="secondary" className="text-xs">
+                            {curr.instruments.length} strumenti
+                          </Badge>
                           <span className="font-semibold">{formatEUR(curr.totalRisk)}</span>
-                          <span className="text-muted-foreground text-sm ml-2">
+                          <span className="text-muted-foreground text-sm">
                             ({curr.percentage.toFixed(1)}%)
                           </span>
                         </div>
@@ -134,25 +221,33 @@ export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyE
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 pb-4">
-                    <div className="space-y-2 pt-2">
-                      {Object.entries(curr.breakdown).map(([key, value]) => {
-                        if (value === 0) return null;
-                        const config = BREAKDOWN_LABELS[key as keyof typeof BREAKDOWN_LABELS];
-                        const Icon = config.icon;
-                        return (
-                          <div 
-                            key={key} 
-                            className="flex items-center justify-between p-2 rounded-lg bg-background"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Icon className={`w-4 h-4 ${config.colorClass}`} />
-                              <span className="text-sm">{config.label}</span>
-                            </div>
-                            <span className="font-medium">{formatEUR(value)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <Accordion type="multiple" className="space-y-1">
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="stocks" 
+                        total={curr.breakdown.stocks} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="commodities" 
+                        total={curr.breakdown.commodities} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="nakedPuts" 
+                        total={curr.breakdown.nakedPuts} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="leapCalls" 
+                        total={curr.breakdown.leapCalls} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="strategies" 
+                        total={curr.breakdown.strategies} 
+                      />
+                    </Accordion>
                   </AccordionContent>
                 </AccordionItem>
               ))}

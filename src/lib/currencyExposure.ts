@@ -1,4 +1,4 @@
-import { RiskAnalysis } from './riskCalculator';
+import { RiskAnalysis, StockRiskDetail, CommodityRiskDetail, NakedPutRiskDetail, LeapCallRiskDetail, StrategyRiskDetail } from './riskCalculator';
 
 export interface CurrencyBreakdown {
   stocks: number;
@@ -8,11 +8,21 @@ export interface CurrencyBreakdown {
   strategies: number;
 }
 
+export interface InstrumentDetail {
+  name: string;
+  riskEUR: number;
+  category: 'stocks' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
+  details: string;
+  isin?: string;
+  isETF?: boolean;
+}
+
 export interface CurrencyExposure {
   currency: string;
   totalRisk: number;         // In EUR
   percentage: number;
   breakdown: CurrencyBreakdown;
+  instruments: InstrumentDetail[];
 }
 
 export const CURRENCY_COLORS: Record<string, string> = {
@@ -49,10 +59,17 @@ function getOrCreateCurrency(
       currency,
       totalRisk: 0,
       percentage: 0,
-      breakdown: createEmptyBreakdown()
+      breakdown: createEmptyBreakdown(),
+      instruments: []
     });
   }
   return map.get(currency)!;
+}
+
+function isETFByDescription(description: string): boolean {
+  const etfKeywords = ['ETF', 'ISHARES', 'VANGUARD', 'SPDR', 'LYXOR', 'XTRACKERS', 'AMUNDI', 'INVESCO'];
+  const upperDesc = description.toUpperCase();
+  return etfKeywords.some(kw => upperDesc.includes(kw));
 }
 
 export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExposure[] {
@@ -64,6 +81,17 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.stocks += stock.riskEUR;
     exposure.totalRisk += stock.riskEUR;
+    
+    const isETF = isETFByDescription(stock.underlying);
+    exposure.instruments.push({
+      name: stock.underlying,
+      riskEUR: stock.riskEUR,
+      category: 'stocks',
+      details: stock.hasProtection 
+        ? `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)} (protetto a ${stock.protectionStrike})`
+        : `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
+      isETF
+    });
   }
   
   // Aggregate commodityDetails by currency
@@ -72,6 +100,13 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.commodities += commodity.riskEUR;
     exposure.totalRisk += commodity.riskEUR;
+    
+    exposure.instruments.push({
+      name: commodity.underlying,
+      riskEUR: commodity.riskEUR,
+      category: 'commodities',
+      details: `${commodity.quantity} × ${commodity.price.toFixed(2)}`
+    });
   }
   
   // Aggregate nakedPutDetails by currency
@@ -80,6 +115,13 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.nakedPuts += np.riskEUR;
     exposure.totalRisk += np.riskEUR;
+    
+    exposure.instruments.push({
+      name: np.underlying,
+      riskEUR: np.riskEUR,
+      category: 'nakedPuts',
+      details: `PUT ${np.strike} × ${np.contracts} (${np.expiry})`
+    });
   }
   
   // Aggregate leapCallDetails by currency
@@ -88,6 +130,13 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.leapCalls += lc.riskEUR;
     exposure.totalRisk += lc.riskEUR;
+    
+    exposure.instruments.push({
+      name: lc.underlying,
+      riskEUR: lc.riskEUR,
+      category: 'leapCalls',
+      details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
+    });
   }
   
   // Aggregate strategyDetails by currency
@@ -96,6 +145,18 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.strategies += strat.maxLossEUR;
     exposure.totalRisk += strat.maxLossEUR;
+    
+    exposure.instruments.push({
+      name: `${strat.underlying} - ${strat.strategyName}`,
+      riskEUR: strat.maxLossEUR,
+      category: 'strategies',
+      details: strat.calculation
+    });
+  }
+  
+  // Sort instruments by riskEUR desc within each currency
+  for (const exposure of byCurrency.values()) {
+    exposure.instruments.sort((a, b) => b.riskEUR - a.riskEUR);
   }
   
   // Calculate percentages
