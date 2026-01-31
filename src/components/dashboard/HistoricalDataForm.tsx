@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Plus, Trash2, Save, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, Save, ChevronDown, ChevronUp, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,39 +31,63 @@ export function HistoricalDataForm({
 }: HistoricalDataFormProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
-  const [newEntryDate, setNewEntryDate] = useState<Date | undefined>(undefined);
-  const [newEntryTotalValue, setNewEntryTotalValue] = useState('');
-  const [newEntryNettingTotal, setNewEntryNettingTotal] = useState('');
-  const [newEntryNettingExCC, setNewEntryNettingExCC] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // Form state for new/edit
+  const [formDate, setFormDate] = useState<Date | undefined>(undefined);
+  const [formTotalValue, setFormTotalValue] = useState('');
+  const [formNettingTotal, setFormNettingTotal] = useState('');
+  const [formNettingExCC, setFormNettingExCC] = useState('');
 
   const parseValue = (val: string) => {
     return parseFloat(val.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
   };
 
+  const resetForm = () => {
+    setFormDate(undefined);
+    setFormTotalValue('');
+    setFormNettingTotal('');
+    setFormNettingExCC('');
+    setIsAddingNew(false);
+    setEditingId(null);
+  };
+
   const handleSave = () => {
-    if (!newEntryDate) return;
+    if (!formDate) return;
     
     onSave({
-      snapshot_date: format(newEntryDate, 'yyyy-MM-dd'),
-      total_value: parseValue(newEntryTotalValue),
-      netting_total: parseValue(newEntryNettingTotal),
-      netting_ex_cc: parseValue(newEntryNettingExCC),
+      snapshot_date: format(formDate, 'yyyy-MM-dd'),
+      total_value: parseValue(formTotalValue),
+      netting_total: parseValue(formNettingTotal),
+      netting_ex_cc: parseValue(formNettingExCC),
       deposits: 0,
       average_balance: 0,
     });
     
-    setNewEntryDate(undefined);
-    setNewEntryTotalValue('');
-    setNewEntryNettingTotal('');
-    setNewEntryNettingExCC('');
+    resetForm();
+  };
+
+  const startEdit = (entry: HistoricalDataEntry) => {
+    setEditingId(entry.id);
+    setFormDate(new Date(entry.snapshot_date));
+    setFormTotalValue(entry.total_value.toString());
+    setFormNettingTotal(entry.netting_total.toString());
+    setFormNettingExCC(entry.netting_ex_cc.toString());
     setIsAddingNew(false);
   };
 
-  const useCurrent = () => {
-    setNewEntryTotalValue(currentTotalValue.toString());
-    setNewEntryNettingTotal(currentNettingTotal.toString());
-    setNewEntryNettingExCC(currentNettingExCC.toString());
+  const startAddNew = () => {
+    resetForm();
+    setIsAddingNew(true);
   };
+
+  const useCurrent = () => {
+    setFormTotalValue(currentTotalValue.toString());
+    setFormNettingTotal(currentNettingTotal.toString());
+    setFormNettingExCC(currentNettingExCC.toString());
+  };
+
+  const isEditing = editingId !== null || isAddingNew;
 
   return (
     <div className="p-4 rounded-lg bg-background-secondary border border-border">
@@ -89,28 +113,124 @@ export function HistoricalDataForm({
                 {historicalData.map((entry) => (
                   <div
                     key={entry.id}
-                    className="p-3 rounded-md bg-muted/30 border border-border/50 text-sm"
+                    className={cn(
+                      "p-3 rounded-md bg-muted/30 border border-border/50 text-sm",
+                      editingId === entry.id && "ring-2 ring-primary"
+                    )}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-1">
-                        <p className="font-medium">
-                          {format(new Date(entry.snapshot_date), 'dd MMMM yyyy', { locale: it })}
-                        </p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                          <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
-                          <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
-                          <span className="col-span-2">Netting ex CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
+                    {editingId === entry.id ? (
+                      // Edit mode for this entry
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium">Modifica dato</p>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={resetForm}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs">Data</Label>
+                          <DateInput
+                            value={formDate}
+                            onChange={(date) => setFormDate(date)}
+                            disabled={(d) => d > new Date()}
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-xs">Patrimonio Totale ($)</Label>
+                          <Input
+                            type="text"
+                            placeholder="es. 100.000"
+                            value={formTotalValue}
+                            onChange={(e) => setFormTotalValue(e.target.value)}
+                            className="font-mono text-sm"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Netting Totale ($)</Label>
+                            <Input
+                              type="text"
+                              placeholder="es. 95.000"
+                              value={formNettingTotal}
+                              onChange={(e) => setFormNettingTotal(e.target.value)}
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Netting ex CC ($)</Label>
+                            <Input
+                              type="text"
+                              placeholder="es. 98.000"
+                              value={formNettingExCC}
+                              onChange={(e) => setFormNettingExCC(e.target.value)}
+                              className="font-mono text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={resetForm}
+                            className="flex-1"
+                          >
+                            Annulla
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={!formDate || !formTotalValue || isLoading}
+                            className="flex-1"
+                          >
+                            <Save className="w-4 h-4 mr-1" />
+                            Salva
+                          </Button>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => onDelete(entry.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
+                    ) : (
+                      // Display mode
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-1">
+                          <p className="font-medium">
+                            {format(new Date(entry.snapshot_date), 'dd MMMM yyyy', { locale: it })}
+                          </p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
+                            <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
+                            <span className="col-span-2">Netting ex CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => startEdit(entry)}
+                            disabled={isEditing}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => onDelete(entry.id)}
+                            disabled={isEditing}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -130,8 +250,8 @@ export function HistoricalDataForm({
               <div className="space-y-2">
                 <Label className="text-xs">Data</Label>
                 <DateInput
-                  value={newEntryDate}
-                  onChange={(date) => setNewEntryDate(date)}
+                  value={formDate}
+                  onChange={(date) => setFormDate(date)}
                   disabled={(d) => d > new Date()}
                 />
               </div>
@@ -142,8 +262,8 @@ export function HistoricalDataForm({
                   <Input
                     type="text"
                     placeholder="es. 100.000"
-                    value={newEntryTotalValue}
-                    onChange={(e) => setNewEntryTotalValue(e.target.value)}
+                    value={formTotalValue}
+                    onChange={(e) => setFormTotalValue(e.target.value)}
                     className="font-mono text-sm"
                   />
                 </div>
@@ -155,8 +275,8 @@ export function HistoricalDataForm({
                   <Input
                     type="text"
                     placeholder="es. 95.000"
-                    value={newEntryNettingTotal}
-                    onChange={(e) => setNewEntryNettingTotal(e.target.value)}
+                    value={formNettingTotal}
+                    onChange={(e) => setFormNettingTotal(e.target.value)}
                     className="font-mono text-sm"
                   />
                 </div>
@@ -165,8 +285,8 @@ export function HistoricalDataForm({
                   <Input
                     type="text"
                     placeholder="es. 98.000"
-                    value={newEntryNettingExCC}
-                    onChange={(e) => setNewEntryNettingExCC(e.target.value)}
+                    value={formNettingExCC}
+                    onChange={(e) => setFormNettingExCC(e.target.value)}
                     className="font-mono text-sm"
                   />
                 </div>
@@ -176,7 +296,7 @@ export function HistoricalDataForm({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsAddingNew(false)}
+                  onClick={resetForm}
                   className="flex-1"
                 >
                   Annulla
@@ -184,7 +304,7 @@ export function HistoricalDataForm({
                 <Button
                   size="sm"
                   onClick={handleSave}
-                  disabled={!newEntryDate || !newEntryTotalValue || isLoading}
+                  disabled={!formDate || !formTotalValue || isLoading}
                   className="flex-1"
                 >
                   <Save className="w-4 h-4 mr-1" />
@@ -196,8 +316,9 @@ export function HistoricalDataForm({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsAddingNew(true)}
+              onClick={startAddNew}
               className="w-full"
+              disabled={editingId !== null}
             >
               <Plus className="w-4 h-4 mr-1" />
               Aggiungi dato storico
