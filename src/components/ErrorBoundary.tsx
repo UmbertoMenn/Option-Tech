@@ -24,6 +24,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      // Ensure we always get a console entry even if componentDidCatch didn't run
+      // (some errors can surface during render phases differently in dev/prod).
+      console.error("[ErrorBoundary] Rendered error fallback", this.state.error);
+
       return (
         <Card className="border-border bg-card">
           <CardContent className="py-10">
@@ -34,6 +38,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
               <p className="text-xs text-muted-foreground break-words">
                 {this.state.error.message}
               </p>
+
+              {this.state.error.stack ? (
+                <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words mt-3">
+                  {this.state.error.stack}
+                </pre>
+              ) : null}
             </div>
           </CardContent>
         </Card>

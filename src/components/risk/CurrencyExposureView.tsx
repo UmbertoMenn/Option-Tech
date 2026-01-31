@@ -117,7 +117,16 @@ export function CurrencyExposureView({
   etfCount = 0,
   loadedETFCount = 0
 }: CurrencyExposureViewProps) {
-  const hasData = currencyExposure.length > 0 && grandTotal > 0;
+  const safeCurrencyExposure = currencyExposure.filter((c) => {
+    return (
+      typeof c.currency === 'string' &&
+      Number.isFinite(c.totalRisk) &&
+      c.totalRisk > 0 &&
+      Number.isFinite(c.percentage)
+    );
+  });
+
+  const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
 
   return (
     <div className="space-y-6">
@@ -158,7 +167,7 @@ export function CurrencyExposureView({
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={currencyExposure}
+                        data={safeCurrencyExposure}
                         cx="50%"
                         cy="50%"
                         innerRadius={55}
@@ -166,7 +175,7 @@ export function CurrencyExposureView({
                         paddingAngle={2}
                         dataKey="totalRisk"
                       >
-                        {currencyExposure.map((entry, index) => (
+                        {safeCurrencyExposure.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
                             fill={getCurrencyColor(entry.currency)}
@@ -177,7 +186,7 @@ export function CurrencyExposureView({
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 space-y-2">
-                  {currencyExposure.map((curr) => (
+                  {safeCurrencyExposure.map((curr) => (
                     <div key={curr.currency} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div 
@@ -220,7 +229,7 @@ export function CurrencyExposureView({
           </CardHeader>
           <CardContent>
             <Accordion type="multiple" className="space-y-2">
-              {currencyExposure.map((curr) => (
+              {safeCurrencyExposure.map((curr) => (
                 <AccordionItem 
                   key={curr.currency} 
                   value={curr.currency}
