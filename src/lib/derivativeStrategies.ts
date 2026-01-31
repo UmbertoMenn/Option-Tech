@@ -275,9 +275,26 @@ export function categorizeDerivatives(
     regrouped.get(underlying)!.push(d);
   }
   
-  // For groups with more than 1 option, put in "Altre Strategie"
+  // Helper: verifica se tutte le scadenze sono entro 12 mesi l'una dall'altra
+  const hasCloseExpiries = (options: Position[]): boolean => {
+    const dates = options
+      .map(o => o.expiry_date ? new Date(o.expiry_date) : null)
+      .filter((d): d is Date => d !== null && !isNaN(d.getTime()));
+    
+    if (dates.length < 2) return true;
+    
+    const timestamps = dates.map(d => d.getTime());
+    const maxDate = Math.max(...timestamps);
+    const minDate = Math.min(...timestamps);
+    const diffMonths = (maxDate - minDate) / (1000 * 60 * 60 * 24 * 30);
+    
+    return diffMonths <= 12;
+  };
+  
+  // For groups with more than 1 option AND close expiries, put in "Altre Strategie"
+  // Se le scadenze differiscono di più di 12 mesi, le opzioni passano allo Step 6 (singole gambe)
   for (const [, group] of regrouped.entries()) {
-    if (group.length > 1) {
+    if (group.length > 1 && hasCloseExpiries(group)) {
       for (const option of group) {
         const underlyingStock = findUnderlyingStock(option, stockPositions);
         otherStrategies.push({
