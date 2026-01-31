@@ -118,6 +118,11 @@ export function PositionsTable({ positions }: PositionsTableProps) {
                   </div>
                 </th>
                 <th className="text-right">Prezzo</th>
+                <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('avg_cost')}>
+                  <div className="flex items-center justify-end gap-1">
+                    PMC <SortIcon columnKey="avg_cost" />
+                  </div>
+                </th>
                 <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('market_value')}>
                   <div className="flex items-center justify-end gap-1">
                     Controvalore <SortIcon columnKey="market_value" />
@@ -171,6 +176,9 @@ export function PositionsTable({ positions }: PositionsTableProps) {
                   </td>
                   <td className="text-right font-mono text-muted-foreground">
                     {position.current_price ? formatCurrency(position.current_price, position.currency) : '-'}
+                  </td>
+                  <td className="text-right font-mono text-muted-foreground">
+                    {position.avg_cost ? formatCurrency(position.avg_cost, position.currency) : '-'}
                   </td>
                   <td className="text-right font-mono font-medium">
                     {position.market_value ? formatCurrency(position.market_value) : '-'}
