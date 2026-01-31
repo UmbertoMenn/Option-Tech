@@ -52,6 +52,104 @@ export type Database = {
           },
         ]
       }
+      derivative_overrides: {
+        Row: {
+          bought_call_id: string | null
+          bought_put_id: string | null
+          created_at: string
+          id: string
+          linked_stock_id: string | null
+          override_type: string
+          portfolio_id: string
+          position_id: string | null
+          sold_call_id: string | null
+          sold_put_id: string | null
+          strategy_type: string | null
+          target_category: string | null
+          updated_at: string
+        }
+        Insert: {
+          bought_call_id?: string | null
+          bought_put_id?: string | null
+          created_at?: string
+          id?: string
+          linked_stock_id?: string | null
+          override_type: string
+          portfolio_id: string
+          position_id?: string | null
+          sold_call_id?: string | null
+          sold_put_id?: string | null
+          strategy_type?: string | null
+          target_category?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bought_call_id?: string | null
+          bought_put_id?: string | null
+          created_at?: string
+          id?: string
+          linked_stock_id?: string | null
+          override_type?: string
+          portfolio_id?: string
+          position_id?: string | null
+          sold_call_id?: string | null
+          sold_put_id?: string | null
+          strategy_type?: string | null
+          target_category?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "derivative_overrides_bought_call_id_fkey"
+            columns: ["bought_call_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_bought_put_id_fkey"
+            columns: ["bought_put_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_linked_stock_id_fkey"
+            columns: ["linked_stock_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_sold_call_id_fkey"
+            columns: ["sold_call_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "derivative_overrides_sold_put_id_fkey"
+            columns: ["sold_put_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       historical_data: {
         Row: {
           average_balance: number
