@@ -262,17 +262,45 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 5: Classificazione singole gambe PRIMA del raggruppamento ============
+  // ============ STEP 5: Altre Strategie (più di 1 gamba per sottostante) ============
+  // Re-group remaining derivatives
   const afterFourLegRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
-
-  for (const option of afterFourLegRemaining) {
+  const regrouped = new Map<string, Position[]>();
+  
+  for (const d of afterFourLegRemaining) {
+    const underlying = normalizeForMatching(d.underlying || d.description);
+    if (!regrouped.has(underlying)) {
+      regrouped.set(underlying, []);
+    }
+    regrouped.get(underlying)!.push(d);
+  }
+  
+  // For groups with more than 1 option, put in "Altre Strategie"
+  for (const [, group] of regrouped.entries()) {
+    if (group.length > 1) {
+      for (const option of group) {
+        const underlyingStock = findUnderlyingStock(option, stockPositions);
+        otherStrategies.push({
+          option,
+          underlying: underlyingStock || null
+        });
+        usedDerivatives.add(option.id);
+      }
+    }
+  }
+  
+  // ============ STEP 6: Singole gambe ============
+  const singleLegs = derivatives.filter(d => !usedDerivatives.has(d.id));
+  
+  for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
     const underlyingKey = normalizeForMatching(option.underlying || option.description);
     
-    // 5a. PUT comprata con sottostante → Protezione parziale
+    // Check if this is a bought PUT that's a partial protection candidate
     if (option.option_type === 'put' && option.quantity > 0) {
       const candidate = partialProtectionCandidates.get(underlyingKey);
       if (candidate && candidate.puts.some(p => p.id === option.id)) {
+        // This is a partial protection (single-leg bought PUT with underlying, net exposure > 0)
         longPuts.push({
           option,
           underlying: candidate.stock,
@@ -284,39 +312,30 @@ export function categorizeDerivatives(
       }
     }
     
-    // 5b. PUT venduta → Naked Put
-    if (option.option_type === 'put' && option.quantity < 0) {
-      nakedPuts.push({
-        option,
-        underlying: underlyingStock || null,
-        contracts: Math.abs(option.quantity)
-      });
-      usedDerivatives.add(option.id);
-      continue;
-    }
-    
-    // 5c. CALL comprata → Leap Call
     if (option.option_type === 'call' && option.quantity > 0) {
+      // Long Call → LEAP CALL
       leapCalls.push({
         option,
         underlying: underlyingStock || null,
         contracts: option.quantity
       });
       usedDerivatives.add(option.id);
-      continue;
+    } else if (option.option_type === 'put' && option.quantity < 0) {
+      // Short PUT → NAKED PUT
+      nakedPuts.push({
+        option,
+        underlying: underlyingStock || null,
+        contracts: Math.abs(option.quantity)
+      });
+      usedDerivatives.add(option.id);
+    } else {
+      // Altre opzioni singole non classificate → Altre Strategie
+      otherStrategies.push({
+        option,
+        underlying: underlyingStock || null
+      });
+      usedDerivatives.add(option.id);
     }
-  }
-
-  // ============ STEP 6: Altre Strategie - solo opzioni rimanenti non classificate ============
-  const finalRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
-
-  for (const option of finalRemaining) {
-    const underlyingStock = findUnderlyingStock(option, stockPositions);
-    otherStrategies.push({
-      option,
-      underlying: underlyingStock || null
-    });
-    usedDerivatives.add(option.id);
   }
   
   // ============ STEP 7: Group other strategies by underlying ============
