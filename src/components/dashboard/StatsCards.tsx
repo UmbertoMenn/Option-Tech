@@ -75,10 +75,6 @@ export function StatsCards({
     }
 
     const historical = selectedHistoricalEntry!;
-    const currentDeposits = deposits; // Current cumulative deposits from portfolio
-    const historicalDeposits = historical.deposits; // Cumulative deposits at snapshot time
-    const newDeposits = currentDeposits - historicalDeposits; // Deposits made since snapshot
-    
     let currentValue: number;
     let historicalValue: number;
 
@@ -96,11 +92,11 @@ export function StatsCards({
         historicalValue = historical.total_value;
     }
 
-    // P/L = Current Value - Historical Value - New Deposits since snapshot
-    const absolutePL = currentValue - historicalValue - newDeposits;
+    // P/L = Current Value - Historical Value
+    const absolutePL = currentValue - historicalValue;
     
-    // Use current average balance for percentage calculation
-    const avgBalance = averageBalance > 0 ? averageBalance : (historical.average_balance || historicalValue);
+    // Use historical average balance for percentage calculation
+    const avgBalance = historical.average_balance || historicalValue;
     const percentPL = avgBalance > 0 ? (absolutePL / avgBalance) * 100 : 0;
     
     return { absolute: absolutePL, percent: percentPL };
