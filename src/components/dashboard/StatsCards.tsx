@@ -184,10 +184,13 @@ export function StatsCards({
       subtext: hasHistoricalData ? `al ${formatDate(selectedHistoricalEntry!.snapshot_date)}` : null,
     },
     {
-      key: 'calcolo-rendimenti',
-      label: 'Calcolo Rendimenti',
-      icon: Calendar,
-      isCalculoRendimenti: true,
+      key: 'giacenza-media',
+      label: 'Giacenza Media',
+      value: averageBalance > 0 ? formatCurrency(averageBalance) : '—',
+      icon: Wallet,
+      change: null,
+      dimmed: averageBalance === 0,
+      subtext: null,
     },
     {
       key: 'pl',
@@ -198,6 +201,7 @@ export function StatsCards({
       isProfit: plAbsolute >= 0,
       dimmed: !canCalculatePL,
       subtext: null,
+      hasDateSelector: true,
     },
   ];
 
@@ -213,8 +217,34 @@ export function StatsCards({
             <div className="flex-1 min-w-0">
               <p className="text-sm text-muted-foreground truncate">{stat.label}</p>
               
-              {'isCalculoRendimenti' in stat && stat.isCalculoRendimenti ? (
-                <div className="mt-2 space-y-2">
+              <p className={cn(
+                "text-xl font-bold font-mono mt-1",
+                'dimmed' in stat && stat.dimmed 
+                  ? 'text-muted-foreground'
+                  : 'isProfit' in stat && stat.isProfit !== undefined 
+                    ? stat.isProfit 
+                      ? 'text-profit' 
+                      : 'text-loss'
+                    : ''
+              )}>
+                {'value' in stat ? stat.value : '—'}
+              </p>
+              {'subtext' in stat && stat.subtext && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {stat.subtext}
+                </p>
+              )}
+              {'change' in stat && stat.change && (
+                <p className={cn(
+                  "text-xs font-mono mt-1",
+                  'isProfit' in stat && stat.isProfit ? 'text-profit' : 'text-loss'
+                )}>
+                  {stat.change}
+                </p>
+              )}
+              
+              {'hasDateSelector' in stat && stat.hasDateSelector && (
+                <div className="mt-2">
                   <Select
                     value={selectedHistoricalDate || 'none'}
                     onValueChange={(value) => onHistoricalDateChange(value === 'none' ? null : value)}
@@ -232,65 +262,7 @@ export function StatsCards({
                       ))}
                     </SelectContent>
                   </Select>
-                  
-                  {hasHistoricalData && (
-                    <>
-                      
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Giacenza Media ($)</Label>
-                        <Input
-                          type="text"
-                          placeholder="0"
-                          value={averageBalance === 0 ? '' : averageBalance.toFixed(2)}
-                          onChange={(e) => {
-                            onManualAverageBalanceToggle(true);
-                            onAverageBalanceChange(parseInputValue(e.target.value));
-                          }}
-                          className="h-7 text-xs font-mono"
-                        />
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <Checkbox
-                            id="auto-calc"
-                            checked={!isManualAverageBalance}
-                            onCheckedChange={(checked) => onManualAverageBalanceToggle(!checked)}
-                            className="h-3 w-3"
-                          />
-                          <label htmlFor="auto-calc" className="text-[10px] text-muted-foreground cursor-pointer">
-                            Calcola automaticamente
-                          </label>
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
-              ) : (
-                <>
-                  <p className={cn(
-                    "text-xl font-bold font-mono mt-1",
-                    'dimmed' in stat && stat.dimmed 
-                      ? 'text-muted-foreground'
-                      : 'isProfit' in stat && stat.isProfit !== undefined 
-                        ? stat.isProfit 
-                          ? 'text-profit' 
-                          : 'text-loss'
-                        : ''
-                  )}>
-                    {'value' in stat ? stat.value : '—'}
-                  </p>
-                  {'subtext' in stat && stat.subtext && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {stat.subtext}
-                    </p>
-                  )}
-                  {'change' in stat && stat.change && (
-                    <p className={cn(
-                      "text-xs font-mono mt-1",
-                      'isProfit' in stat && stat.isProfit ? 'text-profit' : 'text-loss'
-                    )}>
-                      {stat.change}
-                    </p>
-                  )}
-                </>
               )}
             </div>
             <div className={cn(
