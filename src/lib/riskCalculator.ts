@@ -125,8 +125,11 @@ export function calculateStockRisk(
     putsByUnderlying.get(underlyingKey)!.push(lp);
   }
   
+  // Include stocks, equity ETFs, and commodities as equity exposure
+  const equityAssetTypes = ['stock', 'etf', 'commodity'];
+  
   for (const stock of stocks) {
-    if (stock.asset_type !== 'stock') continue;
+    if (!equityAssetTypes.includes(stock.asset_type)) continue;
     
     const stockKey = normalizeForMatching(stock.ticker || stock.description);
     const stockValue = (stock.quantity || 0) * (stock.current_price || 0);
