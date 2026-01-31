@@ -142,8 +142,9 @@ async function scrapeJustETF(isin: string): Promise<{
     || html.match(/<title>([^|<]+)/i);
   const name = nameMatch ? nameMatch[1].trim() : isin;
   
-  // Check if hedged
-  const isHedged = /hedged|EUR Hedged|currency hedged/i.test(html);
+  // Check if hedged - must be in the ETF name itself, not just anywhere on the page
+  // Look for "hedged" specifically in the ETF name/title
+  const isHedged = /hedged/i.test(name);
   
   // Extract country allocations from the page
   const countryAllocations: Record<string, number> = {};
