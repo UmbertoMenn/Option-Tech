@@ -228,20 +228,39 @@ export function calculateLeapCallRisk(
 }
 
 /**
+ * Calculate the initial premium (GP) from avg_cost values.
+ * Sold options (qty < 0) contribute positive premium (we receive money).
+ * Bought options (qty > 0) contribute negative premium (we pay money).
+ * Net GP = premium received - premium paid
+ */
+function calculateInitialPremium(positions: Position[]): number {
+  let netPremium = 0;
+  for (const pos of positions) {
+    const avgCost = pos.avg_cost || 0;
+    const qty = pos.quantity || 0;
+    // For sold options (qty < 0): we received premium = avgCost * |qty| * 100
+    // For bought options (qty > 0): we paid premium = avgCost * qty * 100
+    // Net = received - paid = -qty * avgCost * 100 (since qty is negative for sold)
+    netPremium += -qty * avgCost * 100;
+  }
+  return netPremium;
+}
+
+/**
  * Calculate Iron Condor max loss.
  * Formula: max(PUT spread width, CALL spread width) × 100 × contratti - GP
+ * GP is calculated from initial premiums (avg_cost), not current market values.
  */
 function calculateIronCondorMaxLoss(ic: IronCondorPosition): { maxLoss: number; calculation: string } {
   const putSpreadWidth = Math.abs((ic.soldPut.strike_price || 0) - (ic.boughtPut.strike_price || 0));
   const callSpreadWidth = Math.abs((ic.boughtCall.strike_price || 0) - (ic.soldCall.strike_price || 0));
   const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
   
-  // GP = Gain Potenziale (premi incassati - premi pagati)
-  // For sold options: market_value is positive (premium received)
-  // For bought options: market_value is negative (premium paid)
-  const gp = Math.abs(ic.totalPremium);
+  // GP = Gain Potenziale (premi incassati - premi pagati) from INITIAL premiums
+  const gp = calculateInitialPremium([ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall]);
   
-  const maxLoss = (maxSpreadWidth * 100 * ic.contracts) - gp;
+  const grossMaxLoss = maxSpreadWidth * 100 * ic.contracts;
+  const maxLoss = grossMaxLoss - gp;
   
   return {
     maxLoss: Math.max(0, maxLoss),
@@ -258,8 +277,9 @@ function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: 
   const callSpreadWidth = Math.abs((dd.boughtCall.strike_price || 0) - (dd.soldCall.strike_price || 0));
   const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
   
-  const gp = Math.abs(dd.totalPremium);
-  const maxLoss = (maxSpreadWidth * 100 * dd.contracts) - gp;
+  const gp = calculateInitialPremium([dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall]);
+  const grossMaxLoss = maxSpreadWidth * 100 * dd.contracts;
+  const maxLoss = grossMaxLoss - gp;
   
   return {
     maxLoss: Math.max(0, maxLoss),
@@ -274,9 +294,6 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
   const strategyName = group.strategyName || 'Unknown';
   const options = group.options;
   
-  // Get exchange rate from first option
-  const exchangeRate = options.length > 0 ? getEffectiveExchangeRate(options[0].option) : 1;
-  
   // Sort options by strike
   const sortedOptions = [...options].sort((a, b) => 
     (a.option.strike_price || 0) - (b.option.strike_price || 0)
@@ -285,8 +302,11 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
   const puts = sortedOptions.filter(o => o.option.option_type === 'put');
   const calls = sortedOptions.filter(o => o.option.option_type === 'call');
   
+  // Calculate initial premium (GP) from avg_cost values
+  const gp = calculateInitialPremium(options.map(o => o.option));
+  
   // SHORT STRANGLE: Risk = Strike PUT venduta × 100 × contratti
-  if (strategyName === 'Short Strangle') {
+  if (strategyName === 'Short Strangle' || strategyName === 'Short Straddle') {
     const soldPuts = puts.filter(p => p.option.quantity < 0);
     if (soldPuts.length > 0) {
       const soldPut = soldPuts[0];
@@ -300,6 +320,20 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
     }
   }
   
+  // LONG STRANGLE / LONG STRADDLE: Risk = premium paid
+  if (strategyName === 'Long Strangle' || strategyName === 'Long Straddle') {
+    // We paid for these options, risk is the premium paid
+    const premiumPaid = options.reduce((sum, o) => {
+      const avgCost = o.option.avg_cost || 0;
+      const qty = Math.abs(o.option.quantity);
+      return sum + avgCost * qty * 100;
+    }, 0);
+    return {
+      maxLoss: premiumPaid,
+      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
+    };
+  }
+  
   // VERTICAL SPREADS (Bull Put, Bear Put, Bull Call, Bear Call)
   if (strategyName?.includes('Spread') && !strategyName.includes('Diagonal') && !strategyName.includes('Calendar')) {
     const relevantOptions = strategyName.includes('Put') ? puts : calls;
@@ -307,13 +341,29 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
       const strikes = relevantOptions.map(o => o.option.strike_price || 0).sort((a, b) => a - b);
       const spreadWidth = strikes[strikes.length - 1] - strikes[0];
       const contracts = Math.abs(relevantOptions[0].option.quantity);
-      const gp = Math.abs(group.totalPremium);
-      const maxLoss = (spreadWidth * 100 * contracts) - gp;
+      const grossMaxLoss = spreadWidth * 100 * contracts;
+      const maxLoss = grossMaxLoss - gp;
       return {
         maxLoss: Math.max(0, maxLoss),
-        calculation: `(${strikes[strikes.length - 1]} - ${strikes[0]}) × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+        calculation: `(${strikes[strikes.length - 1]} - ${strikes[0]}) × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${Math.max(0, maxLoss).toFixed(0)}`
       };
     }
+  }
+  
+  // DIAGONAL/CALENDAR SPREADS: Risk = premium paid for long leg
+  if (strategyName?.includes('Diagonal') || strategyName?.includes('Calendar')) {
+    const boughtOptions = options.filter(o => o.option.quantity > 0);
+    const premiumPaid = boughtOptions.reduce((sum, o) => {
+      const avgCost = o.option.avg_cost || 0;
+      const qty = o.option.quantity;
+      return sum + avgCost * qty * 100;
+    }, 0);
+    // Max risk is typically the net debit paid
+    const netDebit = -gp; // If gp is negative, we paid net premium
+    return {
+      maxLoss: Math.max(0, netDebit),
+      calculation: `Debito netto = ${Math.max(0, netDebit).toFixed(0)}`
+    };
   }
   
   // BROKEN WING BUTTERFLY / BUTTERFLY
@@ -325,19 +375,18 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
       const upperWidth = strikes.length > 2 ? strikes[2] - strikes[1] : lowerWidth;
       const maxWidth = Math.max(lowerWidth, upperWidth);
       const contracts = Math.abs(sortedOptions[0]?.option.quantity || 1);
-      const gp = Math.abs(group.totalPremium);
-      const maxLoss = (maxWidth * 100 * contracts) - gp;
+      const grossMaxLoss = maxWidth * 100 * contracts;
+      const maxLoss = grossMaxLoss - gp;
       return {
         maxLoss: Math.max(0, maxLoss),
-        calculation: `Max width ${maxWidth} × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+        calculation: `Max width ${maxWidth} × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${Math.max(0, maxLoss).toFixed(0)}`
       };
     }
   }
   
-  // DEFAULT: Sum of absolute values of sold options (conservative estimate)
+  // DEFAULT: For strategies with sold PUTs, use strike as max loss
   const soldOptions = options.filter(o => o.option.quantity < 0);
   if (soldOptions.length > 0) {
-    // For sold PUTs, use strike as max loss
     const soldPuts = soldOptions.filter(o => o.option.option_type === 'put');
     if (soldPuts.length > 0) {
       const totalPutRisk = soldPuts.reduce((sum, p) => {
@@ -348,12 +397,36 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
         calculation: `Somma strike PUT vendute × 100 × contratti = ${totalPutRisk.toFixed(0)}`
       };
     }
+    // For sold CALLs without underlying, risk is theoretically infinite
+    // Use a conservative estimate based on premium received
+    const soldCalls = soldOptions.filter(o => o.option.option_type === 'call');
+    if (soldCalls.length > 0) {
+      const premiumReceived = soldCalls.reduce((sum, c) => {
+        return sum + (c.option.avg_cost || 0) * Math.abs(c.option.quantity) * 100;
+      }, 0);
+      return {
+        maxLoss: premiumReceived * 10, // Conservative estimate: 10x premium
+        calculation: `CALL vendute senza copertura - rischio teorico illimitato (stima ${(premiumReceived * 10).toFixed(0)})`
+      };
+    }
   }
   
-  // Fallback: use premium as max loss estimate
+  // Fallback: For bought options, risk is premium paid
+  const boughtOptions = options.filter(o => o.option.quantity > 0);
+  if (boughtOptions.length > 0) {
+    const premiumPaid = boughtOptions.reduce((sum, o) => {
+      return sum + (o.option.avg_cost || 0) * o.option.quantity * 100;
+    }, 0);
+    return {
+      maxLoss: premiumPaid,
+      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
+    };
+  }
+  
+  // Final fallback
   return {
-    maxLoss: Math.abs(group.totalPremium),
-    calculation: `Premio totale = ${Math.abs(group.totalPremium).toFixed(0)}`
+    maxLoss: Math.abs(gp),
+    calculation: `Premio netto = ${Math.abs(gp).toFixed(0)}`
   };
 }
 
