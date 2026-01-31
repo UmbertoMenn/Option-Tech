@@ -1,6 +1,15 @@
 import { formatDistanceToNow } from 'date-fns';
 import { it } from 'date-fns/locale';
 
+export function formatEUR(value: number): string {
+  return new Intl.NumberFormat('it-IT', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function formatCurrency(value: number, currency: string = 'EUR'): string {
   if (currency === 'USD') {
     // Format with Italian number style but $ symbol after
