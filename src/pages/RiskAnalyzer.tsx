@@ -7,8 +7,7 @@ import {
   ArrowLeft, 
   ShieldAlert, 
   TrendingUp, 
-  LogOut,
-  RefreshCw
+  LogOut
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useETFAllocations } from '@/hooks/useETFAllocations';
@@ -22,7 +21,6 @@ import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
-  const [isRefreshingETFs, setIsRefreshingETFs] = useState(false);
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
   
   const riskAnalysis = useRiskAnalysis();
@@ -73,15 +71,6 @@ export function RiskAnalyzer() {
   // Check if any ETF data is still loading
   const isETFDataLoading = Object.values(etfLoading).some(Boolean);
   
-  const handleRefreshETFs = async () => {
-    setIsRefreshingETFs(true);
-    try {
-      await fetchMultipleAllocations(etfIsins);
-    } finally {
-      setIsRefreshingETFs(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -101,17 +90,6 @@ export function RiskAnalyzer() {
             </div>
             
             <div className="flex items-center gap-2">
-              {viewMode === 'currency' && etfIsins.length > 0 && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleRefreshETFs}
-                  disabled={isRefreshingETFs || isETFDataLoading}
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshingETFs ? 'animate-spin' : ''}`} />
-                  Aggiorna ETF
-                </Button>
-              )}
               <Button variant="outline" size="sm" asChild>
                 <Link to="/">
                   <ArrowLeft className="w-4 h-4 mr-2" />
