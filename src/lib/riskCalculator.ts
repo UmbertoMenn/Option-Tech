@@ -352,17 +352,55 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
   
   // DIAGONAL/CALENDAR SPREADS: Risk = premium paid for long leg
   if (strategyName?.includes('Diagonal') || strategyName?.includes('Calendar')) {
+    // Use net debit when present; otherwise (credit structures) avoid returning 0 by using
+    // a conservative PUT-based exposure (sold put strike, optionally reduced by bought put strike).
+    const netDebit = -gp; // If gp is negative, we paid net premium
+
+    if (netDebit > 0) {
+      return {
+        maxLoss: netDebit,
+        calculation: `Debito netto (premio pagato) = ${netDebit.toFixed(0)}`
+      };
+    }
+
+    // Credit / zero-debit: fallback to PUT short-side risk
+    const soldPuts = puts.filter(p => p.option.quantity < 0);
+    const boughtPuts = puts.filter(p => p.option.quantity > 0);
+
+    if (soldPuts.length > 0) {
+      const soldPut = soldPuts.sort((a, b) => (b.option.strike_price || 0) - (a.option.strike_price || 0))[0];
+      const soldStrike = soldPut.option.strike_price || 0;
+      const contracts = Math.abs(soldPut.option.quantity || 0);
+
+      const bestBoughtPut = boughtPuts
+        .sort((a, b) => (a.option.strike_price || 0) - (b.option.strike_price || 0))[0];
+      const boughtStrike = bestBoughtPut?.option.strike_price ?? null;
+
+      // If we have a bought put, approximate as a spread risk; otherwise treat as naked.
+      // For calendar (same strike), spreadWidth = 0 → fall back to naked strike risk.
+      const spreadWidth = boughtStrike !== null ? Math.max(0, soldStrike - boughtStrike) : 0;
+      const baseRisk = spreadWidth > 0 ? spreadWidth * 100 * contracts : soldStrike * 100 * contracts;
+      const maxLoss = Math.max(0, baseRisk - gp); // credit reduces max loss
+
+      return {
+        maxLoss,
+        calculation:
+          boughtStrike !== null
+            ? `MaxLoss ≈ (${soldStrike} - ${boughtStrike}) × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+            : `MaxLoss ≈ ${soldStrike} × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+      };
+    }
+
+    // If no sold PUT exists, fall back to premium-based estimate (rare for diagonal/calendar)
     const boughtOptions = options.filter(o => o.option.quantity > 0);
     const premiumPaid = boughtOptions.reduce((sum, o) => {
       const avgCost = o.option.avg_cost || 0;
       const qty = o.option.quantity;
       return sum + avgCost * qty * 100;
     }, 0);
-    // Max risk is typically the net debit paid
-    const netDebit = -gp; // If gp is negative, we paid net premium
     return {
-      maxLoss: Math.max(0, netDebit),
-      calculation: `Debito netto = ${Math.max(0, netDebit).toFixed(0)}`
+      maxLoss: premiumPaid,
+      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
     };
   }
   
