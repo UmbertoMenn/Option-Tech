@@ -541,8 +541,9 @@ export function analyzePortfolioRisk(
   positions: Position[],
   categories: DerivativeCategories
 ): RiskAnalysis {
-  // Get stock positions
-  const stocks = positions.filter(p => p.asset_type === 'stock');
+  // Get equity positions (stocks, ETFs, commodities)
+  const equityAssetTypes = ['stock', 'etf', 'commodity'];
+  const stocks = positions.filter(p => equityAssetTypes.includes(p.asset_type));
   
   // Calculate each risk category
   const stockDetails = calculateStockRisk(stocks, categories.longPuts);
