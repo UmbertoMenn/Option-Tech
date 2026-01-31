@@ -570,42 +570,275 @@ function tryMatchDoubleDiagonal(
 }
 
 /**
+ * Helper to normalize ratios (e.g., [2,4,2] -> [1,2,1])
+ */
+function normalizeRatios(quantities: number[]): number[] {
+  const absQtys = quantities.map(q => Math.abs(q));
+  const gcd = absQtys.reduce((a, b) => {
+    while (b) { const t = b; b = a % b; a = t; }
+    return a;
+  });
+  return quantities.map(q => q / gcd);
+}
+
+/**
  * Detects known strategy names for grouped options
+ * Supports strategies with multiple contracts (same ratios)
  */
 function detectStrategyName(options: OtherStrategyPosition[]): string | null {
-  if (options.length !== 2) return null;
+  if (options.length < 2) return null;
   
-  const opt1 = options[0].option;
-  const opt2 = options[1].option;
+  // Prepare legs with normalized data
+  const legs = options.map(o => ({
+    type: o.option.option_type as 'call' | 'put',
+    strike: o.option.strike_price || 0,
+    expiry: o.option.expiry_date || '',
+    qty: o.option.quantity
+  })).sort((a, b) => a.strike - b.strike);
   
-  // Straddle: Same strike, same expiry, 1 CALL + 1 PUT
-  if (opt1.option_type !== opt2.option_type &&
-      opt1.expiry_date === opt2.expiry_date &&
-      opt1.strike_price === opt2.strike_price) {
-    if (opt1.quantity < 0 && opt2.quantity < 0) return 'Short Straddle';
-    if (opt1.quantity > 0 && opt2.quantity > 0) return 'Long Straddle';
+  const calls = legs.filter(l => l.type === 'call');
+  const puts = legs.filter(l => l.type === 'put');
+  const expiries = [...new Set(legs.map(l => l.expiry))];
+  const sameExpiry = expiries.length === 1;
+  const diffExpiry = expiries.length > 1;
+  
+  // Normalize quantities to detect ratio-based strategies
+  const normalized = normalizeRatios(legs.map(l => l.qty));
+  
+  // ============================================
+  // 2-LEG STRATEGIES
+  // ============================================
+  if (legs.length === 2) {
+    const [l1, l2] = legs;
+    const [n1, n2] = normalized;
+    const sameType = l1.type === l2.type;
+    const sameStrike = l1.strike === l2.strike;
+    
+    // SHORT STRANGLE: 1 PUT venduta + 1 CALL venduta (strike diversi)
+    if (!sameType && sameExpiry && !sameStrike && n1 === -1 && n2 === -1) {
+      const putLeg = legs.find(l => l.type === 'put');
+      const callLeg = legs.find(l => l.type === 'call');
+      if (putLeg && callLeg && putLeg.qty < 0 && callLeg.qty < 0) {
+        return 'Short Strangle';
+      }
+    }
+    
+    // LONG STRANGLE: 1 PUT comprata + 1 CALL comprata (strike diversi)
+    if (!sameType && sameExpiry && !sameStrike && n1 === 1 && n2 === 1) {
+      const putLeg = legs.find(l => l.type === 'put');
+      const callLeg = legs.find(l => l.type === 'call');
+      if (putLeg && callLeg && putLeg.qty > 0 && callLeg.qty > 0) {
+        return 'Long Strangle';
+      }
+    }
+    
+    // STRADDLE: Same strike, same expiry, CALL + PUT
+    if (!sameType && sameExpiry && sameStrike) {
+      if (n1 === -1 && n2 === -1) return 'Short Straddle';
+      if (n1 === 1 && n2 === 1) return 'Long Straddle';
+    }
+    
+    // DIAGONAL PUT SPREAD: 1 PUT venduta + 1 PUT comprata, scadenze diverse
+    if (sameType && l1.type === 'put' && diffExpiry) {
+      const hasSold = legs.some(l => l.qty < 0);
+      const hasBought = legs.some(l => l.qty > 0);
+      if (hasSold && hasBought && Math.abs(n1) === 1 && Math.abs(n2) === 1) {
+        return 'Diagonal Put Spread';
+      }
+    }
+    
+    // DIAGONAL CALL SPREAD: 1 CALL venduta + 1 CALL comprata, scadenze diverse
+    if (sameType && l1.type === 'call' && diffExpiry) {
+      const hasSold = legs.some(l => l.qty < 0);
+      const hasBought = legs.some(l => l.qty > 0);
+      if (hasSold && hasBought && Math.abs(n1) === 1 && Math.abs(n2) === 1) {
+        return 'Diagonal Call Spread';
+      }
+    }
+    
+    // VERTICAL SPREAD (CALL): same expiry, different strikes
+    if (sameType && l1.type === 'call' && sameExpiry && !sameStrike) {
+      const hasSold = legs.some(l => l.qty < 0);
+      const hasBought = legs.some(l => l.qty > 0);
+      if (hasSold && hasBought) {
+        const boughtLeg = legs.find(l => l.qty > 0)!;
+        const soldLeg = legs.find(l => l.qty < 0)!;
+        if (boughtLeg.strike < soldLeg.strike) return 'Bull Call Spread';
+        return 'Bear Call Spread';
+      }
+    }
+    
+    // VERTICAL SPREAD (PUT): same expiry, different strikes
+    if (sameType && l1.type === 'put' && sameExpiry && !sameStrike) {
+      const hasSold = legs.some(l => l.qty < 0);
+      const hasBought = legs.some(l => l.qty > 0);
+      if (hasSold && hasBought) {
+        const boughtLeg = legs.find(l => l.qty > 0)!;
+        const soldLeg = legs.find(l => l.qty < 0)!;
+        if (boughtLeg.strike > soldLeg.strike) return 'Bear Put Spread';
+        return 'Bull Put Spread';
+      }
+    }
+    
+    // CALENDAR SPREAD: same strike, different expiries
+    if (sameType && sameStrike && diffExpiry) {
+      const hasSold = legs.some(l => l.qty < 0);
+      const hasBought = legs.some(l => l.qty > 0);
+      if (hasSold && hasBought) {
+        return l1.type === 'call' ? 'Calendar Call Spread' : 'Calendar Put Spread';
+      }
+    }
+    
+    // COLLAR: PUT comprata + CALL venduta (stesso sottostante)
+    if (!sameType && sameExpiry) {
+      const putLeg = legs.find(l => l.type === 'put');
+      const callLeg = legs.find(l => l.type === 'call');
+      if (putLeg && callLeg && putLeg.qty > 0 && callLeg.qty < 0) {
+        return 'Collar';
+      }
+    }
   }
   
-  // Strangle: Different strikes, same expiry, 1 CALL + 1 PUT
-  if (opt1.option_type !== opt2.option_type &&
-      opt1.expiry_date === opt2.expiry_date &&
-      opt1.strike_price !== opt2.strike_price) {
-    if (opt1.quantity < 0 && opt2.quantity < 0) return 'Short Strangle';
-    if (opt1.quantity > 0 && opt2.quantity > 0) return 'Long Strangle';
+  // ============================================
+  // 3-LEG STRATEGIES
+  // ============================================
+  if (legs.length === 3) {
+    const strikes = legs.map(l => l.strike);
+    const types = new Set(legs.map(l => l.type));
+    
+    // BUTTERFLY: stesso tipo, 3 strike equidistanti, ratio 1:-2:1
+    if (types.size === 1 && sameExpiry) {
+      const isEquidistant = (strikes[2] - strikes[1]) === (strikes[1] - strikes[0]);
+      if (isEquidistant) {
+        const sortedByStrike = [...legs].sort((a, b) => a.strike - b.strike);
+        const normSorted = normalizeRatios(sortedByStrike.map(l => l.qty));
+        
+        // Long Butterfly: +1, -2, +1
+        if (normSorted[0] === 1 && normSorted[1] === -2 && normSorted[2] === 1) {
+          return legs[0].type === 'call' ? 'Long Call Butterfly' : 'Long Put Butterfly';
+        }
+        // Short Butterfly: -1, +2, -1
+        if (normSorted[0] === -1 && normSorted[1] === 2 && normSorted[2] === -1) {
+          return legs[0].type === 'call' ? 'Short Call Butterfly' : 'Short Put Butterfly';
+        }
+      }
+    }
+    
+    // RATIO SPREAD: 2 strike, ratio non 1:1
+    if (types.size === 1) {
+      const uniqueStrikes = [...new Set(strikes)];
+      if (uniqueStrikes.length === 2) {
+        const boughtTotal = legs.filter(l => l.qty > 0).reduce((s, l) => s + l.qty, 0);
+        const soldTotal = legs.filter(l => l.qty < 0).reduce((s, l) => s + Math.abs(l.qty), 0);
+        if (boughtTotal !== soldTotal) {
+          return legs[0].type === 'call' ? 'Ratio Call Spread' : 'Ratio Put Spread';
+        }
+      }
+    }
   }
   
-  // Vertical Spread (Call): 1 bought CALL + 1 sold CALL, same expiry
-  if (opt1.option_type === 'call' && opt2.option_type === 'call' &&
-      opt1.expiry_date === opt2.expiry_date &&
-      ((opt1.quantity > 0 && opt2.quantity < 0) || (opt1.quantity < 0 && opt2.quantity > 0))) {
-    return 'Vertical Spread (Call)';
+  // ============================================
+  // 4-LEG STRATEGIES
+  // ============================================
+  if (legs.length === 4) {
+    const callLegs = calls.sort((a, b) => a.strike - b.strike);
+    const putLegs = puts.sort((a, b) => a.strike - b.strike);
+    
+    // PUT BROKEN WING: 2 PUT vendute centro + 1 PUT comprata strike inferiore + 1 PUT comprata strike superiore
+    if (puts.length === 4 && calls.length === 0) {
+      const normPuts = normalizeRatios(putLegs.map(l => l.qty));
+      // Pattern: +1 (bassa), -2 (centro), +1 (alta) - ma asymmetric (broken wing)
+      // oppure: +1 (bassa comprata), -1 -1 (centro vendute), +1 (alta comprata)
+      const boughtPuts = putLegs.filter(l => l.qty > 0);
+      const soldPuts = putLegs.filter(l => l.qty < 0);
+      
+      if (boughtPuts.length === 2 && soldPuts.length === 2) {
+        const soldStrikes = soldPuts.map(p => p.strike).sort((a, b) => a - b);
+        const boughtStrikes = boughtPuts.map(p => p.strike).sort((a, b) => a - b);
+        
+        // Verifica che le PUT comprate siano una sotto e una sopra le PUT vendute
+        const lowestBought = Math.min(...boughtStrikes);
+        const highestBought = Math.max(...boughtStrikes);
+        const lowestSold = Math.min(...soldStrikes);
+        const highestSold = Math.max(...soldStrikes);
+        
+        if (lowestBought < lowestSold && highestBought > highestSold) {
+          // Verifica ratio 1:1:1:1 o simili
+          const boughtNorm = normalizeRatios(boughtPuts.map(p => p.qty));
+          const soldNorm = normalizeRatios(soldPuts.map(p => p.qty));
+          if (boughtNorm.every(n => n === 1) && soldNorm.every(n => n === -1)) {
+            return 'Put Broken Wing Butterfly';
+          }
+        }
+      }
+    }
+    
+    // ALTERNATIVE DOUBLE DIAGONAL: 1 PUT venduta + 1 PUT comprata + 1 CALL venduta + 1 CALL comprata, scadenze diverse
+    if (puts.length === 2 && calls.length === 2 && diffExpiry) {
+      const putNorm = normalizeRatios(putLegs.map(l => l.qty));
+      const callNorm = normalizeRatios(callLegs.map(l => l.qty));
+      
+      const hasSoldPut = putLegs.some(l => l.qty < 0);
+      const hasBoughtPut = putLegs.some(l => l.qty > 0);
+      const hasSoldCall = callLegs.some(l => l.qty < 0);
+      const hasBoughtCall = callLegs.some(l => l.qty > 0);
+      
+      if (hasSoldPut && hasBoughtPut && hasSoldCall && hasBoughtCall) {
+        // Verifica ratio 1:1 per ogni tipo
+        if (Math.abs(putNorm[0]) === 1 && Math.abs(putNorm[1]) === 1 &&
+            Math.abs(callNorm[0]) === 1 && Math.abs(callNorm[1]) === 1) {
+          return 'Alternative Double Diagonal';
+        }
+      }
+    }
+    
+    // IRON BUTTERFLY: 2 opzioni vendute stesso strike centrale + 2 comprate esterne
+    if (puts.length === 2 && calls.length === 2 && sameExpiry) {
+      const soldLegs = legs.filter(l => l.qty < 0);
+      const boughtLegs = legs.filter(l => l.qty > 0);
+      
+      if (soldLegs.length === 2 && boughtLegs.length === 2) {
+        const soldStrikes = soldLegs.map(l => l.strike);
+        if (soldStrikes[0] === soldStrikes[1]) {
+          // Le vendute hanno stesso strike = Iron Butterfly
+          return 'Iron Butterfly';
+        }
+      }
+    }
+    
+    // CONDOR (solo CALL o solo PUT): 4 strike diversi, stessa scadenza
+    if ((puts.length === 4 || calls.length === 4) && sameExpiry) {
+      const relevantLegs = puts.length === 4 ? putLegs : callLegs;
+      const uniqueStrikes = [...new Set(relevantLegs.map(l => l.strike))];
+      
+      if (uniqueStrikes.length === 4) {
+        return puts.length === 4 ? 'Put Condor' : 'Call Condor';
+      }
+    }
   }
   
-  // Vertical Spread (Put): 1 bought PUT + 1 sold PUT, same expiry
-  if (opt1.option_type === 'put' && opt2.option_type === 'put' &&
-      opt1.expiry_date === opt2.expiry_date &&
-      ((opt1.quantity > 0 && opt2.quantity < 0) || (opt1.quantity < 0 && opt2.quantity > 0))) {
-    return 'Vertical Spread (Put)';
+  // ============================================
+  // N-LEG STRATEGIES (ratio-based detection)
+  // ============================================
+  
+  // SHORT STRANGLE (multi-leg): N PUT vendute + N CALL vendute (ratio 1:1)
+  if (puts.length > 0 && calls.length > 0 && 
+      puts.every(p => p.qty < 0) && calls.every(c => c.qty < 0) && sameExpiry) {
+    const putTotal = puts.reduce((s, p) => s + Math.abs(p.qty), 0);
+    const callTotal = calls.reduce((s, c) => s + Math.abs(c.qty), 0);
+    if (putTotal === callTotal) {
+      return 'Short Strangle';
+    }
+  }
+  
+  // LONG STRANGLE (multi-leg): N PUT comprate + N CALL comprate (ratio 1:1)
+  if (puts.length > 0 && calls.length > 0 && 
+      puts.every(p => p.qty > 0) && calls.every(c => c.qty > 0) && sameExpiry) {
+    const putTotal = puts.reduce((s, p) => s + p.qty, 0);
+    const callTotal = calls.reduce((s, c) => s + c.qty, 0);
+    if (putTotal === callTotal) {
+      return 'Long Strangle';
+    }
   }
   
   return null;
