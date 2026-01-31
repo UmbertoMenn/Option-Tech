@@ -35,7 +35,24 @@ export function DepositsSection({
   const [formDescription, setFormDescription] = useState('');
 
   const parseValue = (val: string) => {
-    return parseFloat(val.replace(/[^\\d.,-]/g, '').replace(',', '.')) || 0;
+    // Support Italian number formats:
+    // - 5.000 -> 5000
+    // - 5.000,50 -> 5000.50
+    // - 5000,50 -> 5000.50
+    // Also supports negatives.
+    const cleaned = val
+      .toString()
+      .replace(/\s/g, '')
+      .replace(/[^0-9.,-]/g, '');
+
+    if (!cleaned) return 0;
+
+    const normalized = cleaned.includes(',')
+      ? cleaned.replace(/\./g, '').replace(',', '.')
+      : cleaned.replace(/\./g, '');
+
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : 0;
   };
 
   const resetForm = () => {
