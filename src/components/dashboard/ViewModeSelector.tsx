@@ -9,12 +9,12 @@ interface ViewModeSelectorProps {
 }
 
 const VIEW_LABELS: Record<ViewMode, string> = {
-  base: 'Base',
-  netting_total: 'Netting Totale',
   netting_ex_cc: 'Netting ex CC',
+  netting_total: 'Netting Totale',
+  base: 'Base',
 };
 
-const VIEWS: ViewMode[] = ['base', 'netting_total', 'netting_ex_cc'];
+const VIEWS: ViewMode[] = ['netting_ex_cc', 'netting_total', 'base'];
 
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   const currentIndex = VIEWS.indexOf(viewMode);

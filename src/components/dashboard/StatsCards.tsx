@@ -84,7 +84,7 @@ function calculateTimeWeightedAverage(
 }
 
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
-  base: { patrimonio: 'Patrimonio Totale', pl: 'Profitto/Perdita' },
+  base: { patrimonio: 'Valore Assets (ex. Derivatives)', pl: 'Profitto/Perdita' },
   netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
   netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex CC)', pl: 'P/L (Netting ex CC)' },
 };
