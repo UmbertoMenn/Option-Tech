@@ -916,7 +916,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
 
 function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { underlying, options, totalProfitLoss } = group;
+  const { underlying, options, totalProfitLoss, strategyName } = group;
   
   // Get underlying price from first option that has it
   const underlyingPrice = options[0]?.underlying?.current_price || 0;
@@ -937,6 +937,11 @@ function GroupedOtherStrategyRow({ group }: { group: GroupedOtherStrategy }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <span className="font-medium truncate">{underlying}</span>
+            {strategyName && (
+              <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
+                {strategyName}
+              </Badge>
+            )}
             <Badge variant="secondary" className="text-xs shrink-0">
               {options.length} gambe
             </Badge>
