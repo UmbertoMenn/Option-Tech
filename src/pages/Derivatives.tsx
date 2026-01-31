@@ -496,6 +496,13 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge 
+              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            </Badge>
             {isPartial && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -508,13 +515,6 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
                 </TooltipContent>
               </Tooltip>
             )}
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge 
-              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
-              className="text-xs shrink-0"
-            >
-              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-            </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
             {hasUnderlyingPrice && (
