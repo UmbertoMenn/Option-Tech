@@ -773,7 +773,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               DD
             </Badge>
             <span className="text-xs text-muted-foreground">
-              V:{soldExpiryFormatted} / C:{boughtExpiryFormatted}
+              {soldExpiryFormatted} / {boughtExpiryFormatted}
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
@@ -833,8 +833,8 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V - {soldExpiryFormatted}</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                  <Badge variant="outline" className="text-xs">{soldExpiryFormatted}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
@@ -845,8 +845,8 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A - {boughtExpiryFormatted}</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                  <Badge variant="outline" className="text-xs">{boughtExpiryFormatted}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
@@ -864,8 +864,8 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V - {soldExpiryFormatted}</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
+                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                  <Badge variant="outline" className="text-xs">{soldExpiryFormatted}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
@@ -876,8 +876,8 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A - {boughtExpiryFormatted}</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
+                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                  <Badge variant="outline" className="text-xs">{boughtExpiryFormatted}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
@@ -985,14 +985,15 @@ function GroupedOptionLegRow({ otherStrategy }: { otherStrategy: OtherStrategyPo
     }
   }
   
-  const typeLabel = isBought ? 'C' : 'V';
   const optionTypeLabel = isCall ? 'CALL' : isPut ? 'PUT' : 'OPT';
   
   return (
     <div className="flex items-center justify-between p-2 rounded-lg border border-border/50 bg-muted/30">
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <Badge variant={isBought ? "default" : "secondary"} className="text-xs shrink-0 w-5 justify-center">
-          {typeLabel}
+        <Badge 
+          className={`text-xs shrink-0 w-5 justify-center ${isBought ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}
+        >
+          {isBought ? 'A' : 'V'}
         </Badge>
         <span className="text-sm">{optionTypeLabel}</span>
         <span className="font-medium text-sm">${option.strike_price}</span>
