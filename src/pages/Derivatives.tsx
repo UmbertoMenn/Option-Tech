@@ -773,7 +773,7 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
               DD
             </Badge>
             <span className="text-xs text-muted-foreground">
-              {soldExpiryFormatted} / {boughtExpiryFormatted}
+              {soldExpiryFormatted} - {boughtExpiryFormatted}
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
