@@ -586,6 +586,7 @@ function detectStrategyName(options: OtherStrategyPosition[]): string | null {
  */
 const SPECIAL_ALIASES: Record<string, string[]> = {
   ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
+  PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
 };
 
 /**
@@ -598,7 +599,7 @@ function normalizeForMatching(text: string): string {
     .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
     .replace(/\s+/g, ' ')          // Normalize spaces
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE)\b/gi, '') // Remove common suffixes
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '') // Remove common suffixes including ADR
     .trim();
 }
 
