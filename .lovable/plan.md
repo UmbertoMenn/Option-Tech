@@ -1,311 +1,258 @@
 
 
-# Piano: Sistema Override Manuale con Accoppiamento Titoli e Strategie Multi-Gamba
+# Piano: Carousel in Risk Analyzer con Currency Exposure
 
-## Problema
+## Obiettivo
 
-L'algoritmo automatico sbaglia a classificare alcune opzioni (es. NETEASE, ENI). Serve un sistema che permetta:
+Trasformare la pagina Risk Analyzer in un carousel a due viste:
+1. **Equity Exposure** - La pagina attuale (esposizione per categoria di rischio)
+2. **Currency Exposure** - Nuova vista che aggrega i rischi per valuta
 
-1. Spostare opzioni in categorie diverse
-2. **Accoppiare opzioni con titoli** (per Covered Call/Protezioni) con controllo sui titoli "liberi"
-3. **Accoppiare 4 opzioni insieme** per formare Iron Condor o Double Diagonal
+---
 
-## Soluzione
+## Architettura UI
 
-### Flusso Utente
+### Struttura della Pagina
 
 ```text
-SCENARIO 1: Spostare in Covered Call
------------------------------------------
-Opzione NETEASE CALL venduta in "Altre Strategie"
-       |
-       v
-Click su icona "Sposta"
-       |
-       v
-Menu: [Covered Call] [Protezione] [Iron Condor] [Double Diagonal] [...]
-       |
-       v
-Seleziona "Covered Call"
-       |
-       v
-Dialog mostra titoli liberi:
-  - AZ.NETEASE INC-ADR (200 azioni) - 100 usate da altra CC
-  - [Seleziona questo titolo]
-       |
-       v
-Conferma -> NETEASE appare in Covered Call
++----------------------------------------------------------+
+|  Header (invariato)                                       |
++----------------------------------------------------------+
+|                                                          |
+|    [<]  ●  ○   Vista: Equity Exposure              [>]   |
+|                                                          |
++----------------------------------------------------------+
+|                                                          |
+|  Contenuto dinamico basato sulla vista selezionata       |
+|                                                          |
++----------------------------------------------------------+
+```
 
+### Vista Currency Exposure
 
-SCENARIO 2: Creare Iron Condor manuale
------------------------------------------
-4 opzioni NETEASE in "Altre Strategie" (non riconosciute)
-       |
-       v
-Click su "Crea strategia manuale" nell'header "Altre Strategie"
-       |
-       v
-Dialog wizard:
-  1. Seleziona tipo: [Iron Condor] [Double Diagonal]
-  2. Seleziona sottostante: [NETEASE]
-  3. Seleziona 4 gambe:
-     - PUT venduta: NETEASE 120 FEB/26
-     - PUT comprata: NETEASE 100 FEB/26
-     - CALL venduta: NETEASE 160 FEB/26
-     - CALL comprata: NETEASE 180 FEB/26
-       |
-       v
-Conferma -> Iron Condor appare nella sezione dedicata
+```text
++----------------------------------------------------------+
+|                   CURRENCY EXPOSURE                       |
++----------------------------------------------------------+
+|                                                          |
+|      [Grafico Anello Grande e Sottile]                   |
+|                                                          |
+|              Esposizione: € 245.000                      |
+|                                                          |
+|           USD  ████████████████  65.2%                   |
+|           EUR  ██████████        28.3%                   |
+|           GBP  ███               4.1%                    |
+|           JPY  █                 2.4%                    |
+|                                                          |
++----------------------------------------------------------+
+|                                                          |
+|  Dettaglio per Valuta (accordion):                       |
+|                                                          |
+|  ▼ USD - € 159.740 (65.2%)                               |
+|    • Stocks: € 85.000                                    |
+|    • Naked PUT: € 45.000                                 |
+|    • Strategie: € 29.740                                 |
+|                                                          |
+|  ▼ EUR - € 69.345 (28.3%)                                |
+|    • Stocks: € 42.000                                    |
+|    • Commodities: € 27.345                               |
+|                                                          |
++----------------------------------------------------------+
 ```
 
 ---
 
-## Architettura Tecnica
+## Logica di Calcolo Currency Exposure
 
-### 1. Nuova tabella: `derivative_overrides`
-
-```sql
-CREATE TABLE public.derivative_overrides (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  portfolio_id UUID NOT NULL,
-  
-  -- Tipo di override
-  override_type TEXT NOT NULL CHECK (override_type IN (
-    'single',      -- Singola opzione spostata
-    'multi_leg'    -- Strategia multi-gamba creata manualmente
-  )),
-  
-  -- Per override singoli
-  position_id UUID,                    -- FK all'opzione
-  target_category TEXT,                -- covered_call, protection, naked_put, leap_call, other
-  linked_stock_id UUID,                -- FK al titolo accoppiato (per covered call/protezione)
-  
-  -- Per strategie multi-gamba
-  strategy_type TEXT,                  -- iron_condor, double_diagonal
-  sold_put_id UUID,
-  bought_put_id UUID,
-  sold_call_id UUID,
-  bought_call_id UUID,
-  
-  created_at TIMESTAMPTZ DEFAULT now(),
-  
-  CONSTRAINT valid_single CHECK (
-    override_type != 'single' OR (position_id IS NOT NULL AND target_category IS NOT NULL)
-  ),
-  CONSTRAINT valid_multi_leg CHECK (
-    override_type != 'multi_leg' OR (
-      strategy_type IS NOT NULL AND 
-      sold_put_id IS NOT NULL AND bought_put_id IS NOT NULL AND
-      sold_call_id IS NOT NULL AND bought_call_id IS NOT NULL
-    )
-  )
-);
-```
-
-### 2. Tracking Titoli Liberi
-
-Nuovo calcolo per determinare quante azioni sono ancora disponibili per nuove covered call:
+I dati esistenti in `RiskAnalysis` contengono già la valuta per ogni posizione:
 
 ```typescript
-interface AvailableStock {
-  position: Position;
-  totalShares: number;
-  usedShares: number;      // Usate da covered call esistenti
-  availableShares: number; // Libere per nuove associazioni
-  availableContracts: number;
-}
-
-function calculateAvailableStocks(
-  stockPositions: Position[],
-  existingCoveredCalls: CoveredCallPosition[],
-  manualOverrides: DerivativeOverride[]
-): AvailableStock[] {
-  // 1. Somma tutte le azioni per sottostante
-  // 2. Sottrai quelle usate da covered call automatiche
-  // 3. Sottrai quelle usate da override manuali
-  // 4. Ritorna lista con disponibilita
-}
-```
-
-### 3. Nuovi Componenti UI
-
-| Componente | Funzione |
-|------------|----------|
-| `MoveOptionMenu.tsx` | Dropdown su ogni riga opzione con categorie target |
-| `LinkStockDialog.tsx` | Dialog per selezionare il titolo da accoppiare |
-| `CreateMultiLegDialog.tsx` | Wizard per creare Iron Condor/Double Diagonal manuale |
-| `OverrideBadge.tsx` | Badge "Manuale" per indicare override attivo |
-| `AvailableStocksSelector.tsx` | Lista titoli liberi con quantita disponibile |
-
-### 4. Modifiche a `categorizeDerivatives`
-
-```typescript
-export function categorizeDerivatives(
-  derivatives: Position[],
-  allPositions: Position[],
-  overrides?: DerivativeOverride[]  // NUOVO parametro
-): DerivativeCategories {
-  
-  // STEP 0: Applica override manuali PRIMA della logica automatica
-  const { 
-    manualCoveredCalls,
-    manualProtections,
-    manualIronCondors,
-    manualDoubleDiagonals,
-    usedByOverrides,
-    usedStockShares  // Map<stockId, sharesUsed>
-  } = applyManualOverrides(derivatives, allPositions, overrides);
-  
-  // Aggiungi alle categorie
-  coveredCalls.push(...manualCoveredCalls);
-  longPuts.push(...manualProtections);
-  ironCondors.push(...manualIronCondors);
-  doubleDiagonals.push(...manualDoubleDiagonals);
-  
-  // Escludi posizioni con override dalla logica automatica
-  const autoDerivatives = derivatives.filter(d => !usedByOverrides.has(d.id));
-  
-  // STEP 1-7: Logica automatica esistente
-  // MA: considera usedStockShares quando calcola copertura
-}
-```
-
-### 5. Hook: `useDerivativeOverrides`
-
-```typescript
-interface DerivativeOverride {
-  id: string;
-  portfolioId: string;
-  overrideType: 'single' | 'multi_leg';
-  
-  // Per single
-  positionId?: string;
-  targetCategory?: OverrideCategory;
-  linkedStockId?: string;
-  
-  // Per multi_leg
-  strategyType?: 'iron_condor' | 'double_diagonal';
-  soldPutId?: string;
-  boughtPutId?: string;
-  soldCallId?: string;
-  boughtCallId?: string;
-}
-
-function useDerivativeOverrides() {
-  return {
-    overrides,
-    isLoading,
-    
-    // Operazioni singole
-    moveToCategory: (positionId, category, linkedStockId?) => {},
-    removeOverride: (positionId) => {},
-    
-    // Operazioni multi-gamba
-    createIronCondor: (soldPutId, boughtPutId, soldCallId, boughtCallId) => {},
-    createDoubleDiagonal: (soldPutId, boughtPutId, soldCallId, boughtCallId) => {},
-    removeMultiLeg: (overrideId) => {},
-    
-    // Utility
-    getAvailableStocks: (underlying: string) => AvailableStock[],
-    getUnassignedOptions: () => Position[]
+interface CurrencyExposure {
+  currency: string;
+  totalRisk: number;         // In EUR
+  percentage: number;
+  breakdown: {
+    stocks: number;
+    commodities: number;
+    nakedPuts: number;
+    leapCalls: number;
+    strategies: number;
   };
 }
+
+function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExposure[] {
+  const byCurrency = new Map<string, CurrencyExposure>();
+  
+  // Aggrega stockDetails per valuta
+  for (const stock of analysis.stockDetails) {
+    const curr = stock.currency;
+    if (!byCurrency.has(curr)) {
+      byCurrency.set(curr, { currency: curr, totalRisk: 0, breakdown: {...} });
+    }
+    byCurrency.get(curr)!.breakdown.stocks += stock.riskEUR;
+    byCurrency.get(curr)!.totalRisk += stock.riskEUR;
+  }
+  
+  // Ripeti per commodityDetails, nakedPutDetails, leapCallDetails, strategyDetails
+  // ...
+  
+  // Calcola percentuali
+  const total = analysis.grandTotal;
+  return Array.from(byCurrency.values()).map(c => ({
+    ...c,
+    percentage: (c.totalRisk / total) * 100
+  })).sort((a, b) => b.totalRisk - a.totalRisk);
+}
 ```
 
 ---
 
-## File da Creare/Modificare
+## Componenti da Creare/Modificare
 
 | File | Azione | Descrizione |
 |------|--------|-------------|
-| Migrazione SQL | Creare | Tabella `derivative_overrides` con RLS |
-| `src/types/derivativeOverrides.ts` | Creare | Tipi per override |
-| `src/hooks/useDerivativeOverrides.ts` | Creare | Hook CRUD + calcolo titoli liberi |
-| `src/components/derivatives/MoveOptionMenu.tsx` | Creare | Menu dropdown per spostare |
-| `src/components/derivatives/LinkStockDialog.tsx` | Creare | Dialog selezione titolo |
-| `src/components/derivatives/CreateMultiLegDialog.tsx` | Creare | Wizard Iron Condor/Double Diagonal |
-| `src/components/derivatives/OverrideBadge.tsx` | Creare | Indicatore visivo |
-| `src/lib/derivativeStrategies.ts` | Modificare | Applicare override prima di auto-classificazione |
-| `src/pages/Derivatives.tsx` | Modificare | Integrare menu e dialogs |
+| `src/pages/RiskAnalyzer.tsx` | Modificare | Aggiungere state viewMode e carousel, separare contenuti in componenti |
+| `src/components/risk/RiskViewModeSelector.tsx` | Creare | Selettore carousel simile a ViewModeSelector |
+| `src/components/risk/EquityExposureView.tsx` | Creare | Estrarre contenuto attuale della pagina |
+| `src/components/risk/CurrencyExposureView.tsx` | Creare | Nuova vista con aggregazione per valuta |
+| `src/lib/currencyExposure.ts` | Creare | Logica di calcolo esposizione valutaria |
 
 ---
 
-## Interazione UI Dettagliata
+## Dettagli Implementazione
 
-### Menu Spostamento (su ogni riga opzione)
+### 1. RiskViewModeSelector
 
-```
-[Icona Sposta] -> Dropdown:
-  |
-  +-- Sposta in Covered Call...    (solo per CALL vendute)
-  |     |
-  |     +-- [Dialog selezione titolo con disponibilita]
-  |
-  +-- Sposta in Protezione...      (solo per PUT comprate)
-  |     |
-  |     +-- [Dialog selezione titolo con disponibilita]
-  |
-  +-- Sposta in Naked Put          (solo per PUT vendute)
-  +-- Sposta in Leap Call          (solo per CALL comprate)
-  +-- Sposta in Altre Strategie
-  |
-  +-- [Rimuovi override]           (solo se gia presente)
+Componente simile a `ViewModeSelector` della Dashboard:
+
+```typescript
+export type RiskViewMode = 'equity' | 'currency';
+
+const VIEW_LABELS: Record<RiskViewMode, string> = {
+  equity: 'Equity Exposure',
+  currency: 'Currency Exposure',
+};
+
+// UI: frecce + dots + label
 ```
 
-### Dialog Selezione Titolo
+### 2. CurrencyExposureView
 
-```
-+------------------------------------------+
-|  Accoppia con Titolo                     |
-+------------------------------------------+
-|  CALL NETEASE 145 FEB/26 (-1 contratto)  |
-|                                          |
-|  Seleziona il titolo da coprire:         |
-|                                          |
-|  [ ] AZ.NETEASE INC-ADR                  |
-|      200 azioni totali                   |
-|      100 azioni usate (altra CC)         |
-|      100 azioni disponibili (1 contratto)|
-|                                          |
-|  [Annulla]              [Conferma]       |
-+------------------------------------------+
+Componente principale per la nuova vista:
+
+- **Card Totale** con valore esposizione totale (stesso grandTotal)
+- **Grafico Anello** grande (300x300) e sottile (innerRadius alto)
+- **Legenda** colorata per valuta
+- **Accordion** con breakdown per categoria dentro ogni valuta
+
+### 3. Grafico Anello
+
+Utilizzo di Recharts (già importato):
+
+```typescript
+<ResponsiveContainer width="100%" height={300}>
+  <PieChart>
+    <Pie
+      data={currencyData}
+      cx="50%"
+      cy="50%"
+      innerRadius={100}   // Sottile
+      outerRadius={130}
+      paddingAngle={2}
+      dataKey="totalRisk"
+    >
+      {currencyData.map((entry, index) => (
+        <Cell key={index} fill={CURRENCY_COLORS[entry.currency]} />
+      ))}
+    </Pie>
+  </PieChart>
+</ResponsiveContainer>
 ```
 
-### Wizard Creazione Multi-Gamba
+### 4. Mappa Colori Valute
 
-```
-+------------------------------------------+
-|  Crea Strategia Manuale                  |
-+------------------------------------------+
-|  Step 1: Tipo Strategia                  |
-|  ( ) Iron Condor                         |
-|  ( ) Double Diagonal                     |
-|                                          |
-|  Step 2: Seleziona Gambe                 |
-|                                          |
-|  PUT Venduta:   [Dropdown opzioni disp]  |
-|  PUT Comprata:  [Dropdown opzioni disp]  |
-|  CALL Venduta:  [Dropdown opzioni disp]  |
-|  CALL Comprata: [Dropdown opzioni disp]  |
-|                                          |
-|  [Annulla]              [Crea Strategia] |
-+------------------------------------------+
+```typescript
+const CURRENCY_COLORS: Record<string, string> = {
+  'USD': '#3b82f6',  // Blue
+  'EUR': '#22c55e',  // Green
+  'GBP': '#a855f7',  // Purple
+  'JPY': '#f59e0b',  // Amber
+  'CHF': '#ef4444',  // Red
+  'CAD': '#06b6d4',  // Cyan
+  'AUD': '#f97316',  // Orange
+  'OTHER': '#6b7280' // Gray
+};
 ```
 
 ---
 
-## Validazioni
+## Flusso Dati
 
-1. **Covered Call**: Solo CALL vendute, titolo deve avere azioni libere sufficienti
-2. **Protezione**: Solo PUT comprate, titolo deve esistere
-3. **Iron Condor**: 4 gambe con stesso sottostante, stessa scadenza, strikes validi
-4. **Double Diagonal**: 4 gambe, vendute stessa scadenza, comprate stessa scadenza piu lunga
+```text
+useRiskAnalysis()
+       |
+       v
+{stockDetails, commodityDetails, nakedPutDetails, leapCallDetails, strategyDetails}
+       |
+       +---------> EquityExposureView (vista attuale)
+       |
+       +---------> calculateCurrencyExposure()
+                          |
+                          v
+                   CurrencyExposure[]
+                          |
+                          v
+                   CurrencyExposureView (nuova vista)
+```
 
 ---
 
-## Indicatori Visivi
+## Struttura RiskAnalyzer Refactored
 
-- **Badge "M"** (blu): Override manuale attivo
-- **Tooltip**: "Classificazione manuale - clicca per rimuovere"
-- **Barra disponibilita titoli**: Mostra visivamente quante azioni sono libere
+```tsx
+export function RiskAnalyzer() {
+  const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
+  const riskAnalysis = useRiskAnalysis();
+  
+  // Calcola currency exposure dai dati esistenti
+  const currencyExposure = useMemo(() => 
+    calculateCurrencyExposure(riskAnalysis), 
+    [riskAnalysis]
+  );
+  
+  return (
+    <div>
+      {/* Header invariato */}
+      
+      <main>
+        {/* Carousel selector */}
+        <RiskViewModeSelector 
+          viewMode={viewMode} 
+          onViewModeChange={setViewMode} 
+        />
+        
+        {/* Contenuto dinamico */}
+        {viewMode === 'equity' ? (
+          <EquityExposureView analysis={riskAnalysis} />
+        ) : (
+          <CurrencyExposureView 
+            currencyExposure={currencyExposure}
+            grandTotal={riskAnalysis.grandTotal}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+```
+
+---
+
+## Vantaggi
+
+1. **Riutilizzo dati**: Nessuna nuova query - usa gli stessi dati già calcolati
+2. **Pattern coerente**: Stesso stile carousel della Dashboard
+3. **Grafico visivo**: Anello grande e sottile per impatto visivo immediato
+4. **Breakdown dettagliato**: Accordion mostra da dove viene ogni esposizione valutaria
+5. **Estendibile**: Facile aggiungere altre viste al carousel in futuro
 
