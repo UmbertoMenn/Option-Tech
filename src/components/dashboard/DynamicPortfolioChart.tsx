@@ -100,11 +100,16 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
 
     if (viewMode === 'netting_total') {
       return (
-        <NettingChart
-          baseValue={summary?.totalValue ?? 0}
-          nettedValue={netting.nettingTotal}
-          label="Netting Totale"
-        />
+        <div className="flex flex-col">
+          <NettingChart
+            baseValue={summary?.totalValue ?? 0}
+            nettedValue={netting.nettingTotal}
+            label="Netting Totale"
+          />
+          <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
+            Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio.
+          </p>
+        </div>
       );
     }
 
@@ -117,7 +122,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
           label="Netting ex. CC"
         />
         <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
-          Valorizzazione del portafoglio complessivo, al quale abbiamo sottratto il valore di riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. La logica è che, se un'opzione call è OTM, se non ho intenzione di liquidare il titolo, non ha senso che spenda dei soldi per ricomprarmi un'opzione che, nel peggiore dei casi, mi farà vendere i titoli ad un prezzo più alto. Per le Covered Call ITM invece, si sottrae la differenza tra prezzo attuale del titolo e strike delle opzioni call.
+          Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. La logica è che, se un'opzione call è OTM, se non ho intenzione di liquidare il titolo, non ha senso che spenda dei soldi per ricomprarmi un'opzione che, nel peggiore dei casi, mi farà vendere i titoli ad un prezzo più alto. Per le Covered Call ITM invece, si sottrae la differenza tra prezzo attuale del titolo e strike delle opzioni call.
         </p>
       </div>
     );
