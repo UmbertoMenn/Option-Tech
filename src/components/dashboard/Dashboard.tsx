@@ -19,12 +19,75 @@ import { useCallback, useEffect, useState } from 'react';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
 import { cn } from '@/lib/utils';
 import { NettingResult } from '@/hooks/useDerivativeNetting';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 interface PortfolioCarouselProps {
   summary: PortfolioSummary | null;
   portfolio: Portfolio | null;
   positions: Position[];
   netting: NettingResult;
+}
+
+interface NettingChartProps {
+  baseValue: number;
+  nettedValue: number;
+  label: string;
+}
+
+function NettingChart({ baseValue, nettedValue, label }: NettingChartProps) {
+  const delta = nettedValue - baseValue;
+  const isPositive = delta >= 0;
+  
+  const data = [
+    { name: 'Patrimonio Base', value: baseValue, fill: 'hsl(var(--muted-foreground))' },
+    { name: label, value: nettedValue, fill: isPositive ? 'hsl(142, 76%, 36%)' : 'hsl(0, 84%, 60%)' },
+  ];
+
+  const formatValue = (value: number) => {
+    if (value >= 1000000) return `€${(value / 1000000).toFixed(2)}M`;
+    if (value >= 1000) return `€${(value / 1000).toFixed(0)}K`;
+    return `€${value.toFixed(0)}`;
+  };
+
+  return (
+    <div className="flex flex-col items-center py-4">
+      <div className="w-full h-[180px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} layout="vertical" margin={{ left: 20, right: 60, top: 10, bottom: 10 }}>
+            <XAxis type="number" hide domain={[0, 'dataMax']} />
+            <YAxis 
+              type="category" 
+              dataKey="name" 
+              axisLine={false} 
+              tickLine={false}
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+              width={120}
+            />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={32}>
+              {data.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.fill} />
+              ))}
+              <LabelList 
+                dataKey="value" 
+                position="right" 
+                formatter={formatValue}
+                style={{ fill: 'hsl(var(--foreground))', fontSize: 12, fontWeight: 500 }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="mt-2 text-center">
+        <p className={cn(
+          "text-lg font-semibold",
+          isPositive ? "text-green-500" : "text-red-500"
+        )}>
+          {isPositive ? '+' : ''}{formatCurrency(delta)}
+        </p>
+        <p className="text-xs text-muted-foreground">Differenza rispetto al patrimonio base</p>
+      </div>
+    </div>
+  );
 }
 
 function PortfolioCarousel({ summary, portfolio, positions, netting }: PortfolioCarouselProps) {
@@ -97,40 +160,20 @@ function PortfolioCarousel({ summary, portfolio, positions, netting }: Portfolio
 
             {/* Slide 2: Netting ex. Covered Call */}
             <div className="flex-[0_0_100%] min-w-0">
-              <div className="flex flex-col items-center justify-center py-12">
-                <p className="text-sm text-muted-foreground mb-2">Valore netto (escl. Covered Call e Protezioni)</p>
-                <p className="text-4xl font-bold text-foreground">
-                  {formatCurrency(netting.nettingExCoveredCall)}
-                </p>
-                {summary && (
-                  <p className={cn(
-                    "text-sm mt-2",
-                    netting.nettingExCoveredCall >= summary.totalValue ? "text-green-500" : "text-red-500"
-                  )}>
-                    {netting.nettingExCoveredCall >= summary.totalValue ? '+' : ''}
-                    {formatCurrency(netting.nettingExCoveredCall - summary.totalValue)} rispetto al valore base
-                  </p>
-                )}
-              </div>
+              <NettingChart
+                baseValue={summary?.totalValue ?? 0}
+                nettedValue={netting.nettingExCoveredCall}
+                label="Netting ex. CC & Protezioni"
+              />
             </div>
 
             {/* Slide 3: Netting Totale Derivati */}
             <div className="flex-[0_0_100%] min-w-0">
-              <div className="flex flex-col items-center justify-center py-12">
-                <p className="text-sm text-muted-foreground mb-2">Valore netto chiudendo tutti i derivati</p>
-                <p className="text-4xl font-bold text-foreground">
-                  {formatCurrency(netting.nettingTotal)}
-                </p>
-                {summary && (
-                  <p className={cn(
-                    "text-sm mt-2",
-                    netting.nettingTotal >= summary.totalValue ? "text-green-500" : "text-red-500"
-                  )}>
-                    {netting.nettingTotal >= summary.totalValue ? '+' : ''}
-                    {formatCurrency(netting.nettingTotal - summary.totalValue)} rispetto al valore base
-                  </p>
-                )}
-              </div>
+              <NettingChart
+                baseValue={summary?.totalValue ?? 0}
+                nettedValue={netting.nettingTotal}
+                label="Netting Totale"
+              />
             </div>
           </div>
         </div>
