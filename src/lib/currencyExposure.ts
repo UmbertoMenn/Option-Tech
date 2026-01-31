@@ -11,6 +11,7 @@ export interface CurrencyBreakdown {
 export interface InstrumentDetail {
   name: string;
   riskEUR: number;
+  riskOriginal: number;
   category: 'stocks' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
   details: string;
   isin?: string;
@@ -20,6 +21,7 @@ export interface InstrumentDetail {
 export interface CurrencyExposure {
   currency: string;
   totalRisk: number;         // In EUR
+  totalRiskOriginal: number; // In original currency
   percentage: number;
   breakdown: CurrencyBreakdown;
   instruments: InstrumentDetail[];
@@ -58,6 +60,7 @@ function getOrCreateCurrency(
     map.set(currency, {
       currency,
       totalRisk: 0,
+      totalRiskOriginal: 0,
       percentage: 0,
       breakdown: createEmptyBreakdown(),
       instruments: []
@@ -81,11 +84,13 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.stocks += stock.riskEUR;
     exposure.totalRisk += stock.riskEUR;
+    exposure.totalRiskOriginal += stock.riskOriginal;
     
     const isETF = isETFByDescription(stock.underlying);
     exposure.instruments.push({
       name: stock.underlying,
       riskEUR: stock.riskEUR,
+      riskOriginal: stock.riskOriginal,
       category: 'stocks',
       details: stock.hasProtection 
         ? `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)} (protetto a ${stock.protectionStrike})`
@@ -100,10 +105,12 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.commodities += commodity.riskEUR;
     exposure.totalRisk += commodity.riskEUR;
+    exposure.totalRiskOriginal += commodity.riskOriginal;
     
     exposure.instruments.push({
       name: commodity.underlying,
       riskEUR: commodity.riskEUR,
+      riskOriginal: commodity.riskOriginal,
       category: 'commodities',
       details: `${commodity.quantity} × ${commodity.price.toFixed(2)}`
     });
@@ -115,10 +122,12 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.nakedPuts += np.riskEUR;
     exposure.totalRisk += np.riskEUR;
+    exposure.totalRiskOriginal += np.riskOriginal;
     
     exposure.instruments.push({
       name: np.underlying,
       riskEUR: np.riskEUR,
+      riskOriginal: np.riskOriginal,
       category: 'nakedPuts',
       details: `PUT ${np.strike} × ${np.contracts} (${np.expiry})`
     });
@@ -130,10 +139,12 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.leapCalls += lc.riskEUR;
     exposure.totalRisk += lc.riskEUR;
+    exposure.totalRiskOriginal += lc.premiumPaid;
     
     exposure.instruments.push({
       name: lc.underlying,
       riskEUR: lc.riskEUR,
+      riskOriginal: lc.premiumPaid,
       category: 'leapCalls',
       details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
     });
@@ -145,10 +156,12 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     const exposure = getOrCreateCurrency(byCurrency, curr);
     exposure.breakdown.strategies += strat.maxLossEUR;
     exposure.totalRisk += strat.maxLossEUR;
+    exposure.totalRiskOriginal += strat.maxLoss;
     
     exposure.instruments.push({
       name: `${strat.underlying} - ${strat.strategyName}`,
       riskEUR: strat.maxLossEUR,
+      riskOriginal: strat.maxLoss,
       category: 'strategies',
       details: strat.calculation
     });

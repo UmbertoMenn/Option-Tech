@@ -8,7 +8,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink } from 'lucide-react';
 import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
-import { formatEUR } from '@/lib/formatters';
+import { formatEUR, formatCurrency } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -167,11 +167,18 @@ export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyE
                         />
                         <span className="font-medium">{curr.currency}</span>
                       </div>
-                      <div className="text-right">
-                        <span className="font-medium">{curr.percentage.toFixed(1)}%</span>
-                        <span className="text-muted-foreground ml-2 text-xs">
-                          {formatEUR(curr.totalRisk)}
-                        </span>
+                      <div className="text-right flex flex-col">
+                        <div className="flex items-center gap-2 justify-end">
+                          <span className="font-medium">{curr.percentage.toFixed(1)}%</span>
+                          <span className="text-muted-foreground text-xs">
+                            {formatEUR(curr.totalRisk)}
+                          </span>
+                        </div>
+                        {curr.currency !== 'EUR' && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(curr.totalRiskOriginal, curr.currency)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
