@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      historical_data: {
+        Row: {
+          average_balance: number
+          created_at: string
+          deposits: number
+          id: string
+          netting_ex_cc: number
+          netting_total: number
+          portfolio_id: string
+          snapshot_date: string
+          total_value: number
+          updated_at: string
+        }
+        Insert: {
+          average_balance?: number
+          created_at?: string
+          deposits?: number
+          id?: string
+          netting_ex_cc?: number
+          netting_total?: number
+          portfolio_id: string
+          snapshot_date: string
+          total_value?: number
+          updated_at?: string
+        }
+        Update: {
+          average_balance?: number
+          created_at?: string
+          deposits?: number
+          id?: string
+          netting_ex_cc?: number
+          netting_total?: number
+          portfolio_id?: string
+          snapshot_date?: string
+          total_value?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historical_data_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       portfolios: {
         Row: {
           average_balance: number | null

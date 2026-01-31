@@ -1,6 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
+import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,7 +11,7 @@ import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLeg
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
-import { InitialValueForm } from '@/components/dashboard/InitialValueForm';
+import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
 import { formatCurrency } from '@/lib/formatters';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
@@ -178,8 +179,15 @@ function PortfolioCarousel({ summary, portfolio, positions, netting }: Portfolio
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
-  const { portfolio, positions, summary, isLoading, updateInitialValue, isUpdatingInitialValue } = usePortfolio();
+  const { portfolio, positions, summary, isLoading } = usePortfolio();
   const netting = useDerivativeNetting(positions, summary);
+  const { 
+    historicalData, 
+    earliestEntry, 
+    upsertHistoricalData, 
+    deleteHistoricalData,
+    isUpserting 
+  } = useHistoricalData(portfolio?.id);
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -232,25 +240,33 @@ export function Dashboard() {
 
       <main className="container mx-auto px-4 py-8 space-y-8">
         {/* Stats */}
-        {summary && <StatsCards summary={summary} portfolio={portfolio} />}
+        {summary && (
+          <StatsCards 
+            summary={summary} 
+            portfolio={portfolio}
+            nettingTotal={netting.nettingTotal}
+            nettingExCC={netting.nettingExCoveredCall}
+            earliestHistoricalData={earliestEntry}
+          />
+        )}
 
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Portfolio Chart Carousel */}
           <PortfolioCarousel summary={summary} portfolio={portfolio} positions={positions} netting={netting} />
 
-          {/* File Upload & Initial Value */}
+          {/* File Upload & Historical Data */}
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Dati Patrimonio</h3>
-              <InitialValueForm
-                initialValue={portfolio?.initial_value ?? null}
-                initialDate={portfolio?.initial_date ?? null}
-                deposits={portfolio?.deposits ?? null}
-                averageBalance={portfolio?.average_balance ?? null}
-                averageBalanceDate={portfolio?.average_balance_date ?? null}
-                onSave={(data) => updateInitialValue(data)}
-                isLoading={isUpdatingInitialValue}
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Gestione Dati</h3>
+              <HistoricalDataForm
+                historicalData={historicalData}
+                onSave={upsertHistoricalData}
+                onDelete={deleteHistoricalData}
+                isLoading={isUpserting}
+                currentTotalValue={summary?.totalValue ?? 0}
+                currentNettingTotal={netting.nettingTotal}
+                currentNettingExCC={netting.nettingExCoveredCall}
               />
             </div>
             <div>
