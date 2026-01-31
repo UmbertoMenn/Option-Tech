@@ -235,16 +235,6 @@ export function StatsCards({
                   
                   {hasHistoricalData && (
                     <>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Versamenti ($)</Label>
-                        <Input
-                          type="text"
-                          placeholder="0"
-                          value={deposits === 0 ? '' : deposits.toString()}
-                          onChange={(e) => onDepositsChange(parseInputValue(e.target.value))}
-                          className="h-7 text-xs font-mono"
-                        />
-                      </div>
                       
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Giacenza Media ($)</Label>
