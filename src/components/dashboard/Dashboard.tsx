@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
+import { useDeposits } from '@/hooks/useDeposits';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -11,6 +12,7 @@ import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
 import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
+import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioChart';
 import { formatRelativeTime } from '@/lib/formatters';
@@ -27,6 +29,13 @@ export function Dashboard() {
     deleteHistoricalData,
     isUpserting 
   } = useHistoricalData(portfolio?.id);
+  const {
+    deposits,
+    totalDeposits,
+    upsertDeposit,
+    deleteDeposit,
+    isUpserting: isUpsertingDeposit,
+  } = useDeposits(portfolio?.id);
 
   // Centralized state for unified carousel
   const [viewMode, setViewMode] = useState<ViewMode>('base');
@@ -35,7 +44,7 @@ export function Dashboard() {
   );
   
   // New state for P/L calculation
-  const [deposits, setDeposits] = useState<number>(0);
+  const [plDeposits, setPlDeposits] = useState<number>(0);
   const [averageBalance, setAverageBalance] = useState<number>(0);
   const [isManualAverageBalance, setIsManualAverageBalance] = useState<boolean>(false);
 
@@ -47,7 +56,7 @@ export function Dashboard() {
   // Reset deposits and averageBalance when historical date changes
   const handleHistoricalDateChange = (date: string | null) => {
     setSelectedHistoricalDate(date);
-    setDeposits(0);
+    setPlDeposits(0);
     setAverageBalance(0);
     setIsManualAverageBalance(false);
   };
@@ -116,10 +125,10 @@ export function Dashboard() {
             historicalData={historicalData}
             selectedHistoricalDate={selectedHistoricalDate}
             onHistoricalDateChange={handleHistoricalDateChange}
-            deposits={deposits}
+            deposits={plDeposits}
             averageBalance={averageBalance}
             isManualAverageBalance={isManualAverageBalance}
-            onDepositsChange={setDeposits}
+            onDepositsChange={setPlDeposits}
             onAverageBalanceChange={setAverageBalance}
             onManualAverageBalanceToggle={setIsManualAverageBalance}
           />
@@ -140,15 +149,24 @@ export function Dashboard() {
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Gestione Dati</h3>
-              <HistoricalDataForm
-                historicalData={historicalData}
-                onSave={upsertHistoricalData}
-                onDelete={deleteHistoricalData}
-                isLoading={isUpserting}
-                currentTotalValue={summary?.totalValue ?? 0}
-                currentNettingTotal={netting.nettingTotal}
-                currentNettingExCC={netting.nettingExCoveredCall}
-              />
+              <div className="space-y-3">
+                <HistoricalDataForm
+                  historicalData={historicalData}
+                  onSave={upsertHistoricalData}
+                  onDelete={deleteHistoricalData}
+                  isLoading={isUpserting}
+                  currentTotalValue={summary?.totalValue ?? 0}
+                  currentNettingTotal={netting.nettingTotal}
+                  currentNettingExCC={netting.nettingExCoveredCall}
+                />
+                <DepositsSection
+                  deposits={deposits}
+                  totalDeposits={totalDeposits}
+                  onSave={upsertDeposit}
+                  onDelete={deleteDeposit}
+                  isLoading={isUpsertingDeposit}
+                />
+              </div>
             </div>
             <div>
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
