@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -7,26 +7,77 @@ import {
   ArrowLeft, 
   ShieldAlert, 
   TrendingUp, 
-  LogOut
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
+import { useETFAllocations } from '@/hooks/useETFAllocations';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
+import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 
 export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
+  const [isRefreshingETFs, setIsRefreshingETFs] = useState(false);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
   
-  // Calculate currency exposure from existing data
-  const currencyExposure = useMemo(() => 
+  const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
+  
+  // Calculate base currency exposure from existing data
+  const baseCurrencyExposure = useMemo(() => 
     calculateCurrencyExposure(analysis), 
     [analysis]
   );
+  
+  // Extract ETF ISINs from stock details
+  const etfIsins = useMemo(() => {
+    const isins: string[] = [];
+    for (const stock of analysis.stockDetails) {
+      if (stock.isin) {
+        // Check if it's likely an ETF
+        const isETF = /ETF|ISHARES|VANGUARD|SPDR|LYXOR|XTRACKERS|AMUNDI|INVESCO/i.test(stock.underlying);
+        if (isETF) {
+          isins.push(stock.isin);
+        }
+      }
+    }
+    return isins;
+  }, [analysis.stockDetails]);
+  
+  // Fetch ETF allocations when ISINs change
+  useEffect(() => {
+    if (etfIsins.length > 0 && viewMode === 'currency') {
+      const missingIsins = etfIsins.filter(isin => !allocations[isin]);
+      if (missingIsins.length > 0) {
+        fetchMultipleAllocations(missingIsins);
+      }
+    }
+  }, [etfIsins, viewMode, allocations, fetchMultipleAllocations]);
+  
+  // Apply ETF decomposition to currency exposure
+  const currencyExposure = useMemo(() => {
+    if (Object.keys(allocations).length === 0) {
+      return baseCurrencyExposure;
+    }
+    return applyETFDecomposition(baseCurrencyExposure, allocations);
+  }, [baseCurrencyExposure, allocations]);
+  
+  // Check if any ETF data is still loading
+  const isETFDataLoading = Object.values(etfLoading).some(Boolean);
+  
+  const handleRefreshETFs = async () => {
+    setIsRefreshingETFs(true);
+    try {
+      await fetchMultipleAllocations(etfIsins);
+    } finally {
+      setIsRefreshingETFs(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -47,6 +98,17 @@ export function RiskAnalyzer() {
             </div>
             
             <div className="flex items-center gap-2">
+              {viewMode === 'currency' && etfIsins.length > 0 && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleRefreshETFs}
+                  disabled={isRefreshingETFs || isETFDataLoading}
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshingETFs ? 'animate-spin' : ''}`} />
+                  Aggiorna ETF
+                </Button>
+              )}
               <Button variant="outline" size="sm" asChild>
                 <Link to="/">
                   <ArrowLeft className="w-4 h-4 mr-2" />
@@ -93,6 +155,9 @@ export function RiskAnalyzer() {
               <CurrencyExposureView 
                 currencyExposure={currencyExposure}
                 grandTotal={analysis.grandTotal}
+                isLoadingETFData={isETFDataLoading}
+                etfCount={etfIsins.length}
+                loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
               />
             )}
           </>

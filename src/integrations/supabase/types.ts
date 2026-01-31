@@ -150,6 +150,42 @@ export type Database = {
           },
         ]
       }
+      etf_allocations: {
+        Row: {
+          country_allocations: Json
+          created_at: string
+          currency_allocations: Json
+          id: string
+          is_hedged: boolean | null
+          isin: string
+          last_fetched_at: string
+          name: string | null
+          updated_at: string
+        }
+        Insert: {
+          country_allocations?: Json
+          created_at?: string
+          currency_allocations?: Json
+          id?: string
+          is_hedged?: boolean | null
+          isin: string
+          last_fetched_at?: string
+          name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          country_allocations?: Json
+          created_at?: string
+          currency_allocations?: Json
+          id?: string
+          is_hedged?: boolean | null
+          isin?: string
+          last_fetched_at?: string
+          name?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       historical_data: {
         Row: {
           average_balance: number

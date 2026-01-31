@@ -15,6 +15,9 @@ import { Button } from '@/components/ui/button';
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
   grandTotal: number;
+  isLoadingETFData?: boolean;
+  etfCount?: number;
+  loadedETFCount?: number;
 }
 
 const CATEGORY_CONFIG = {
@@ -107,7 +110,13 @@ function CategoryBreakdown({
   );
 }
 
-export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyExposureViewProps) {
+export function CurrencyExposureView({ 
+  currencyExposure, 
+  grandTotal,
+  isLoadingETFData = false,
+  etfCount = 0,
+  loadedETFCount = 0
+}: CurrencyExposureViewProps) {
   const hasData = currencyExposure.length > 0 && grandTotal > 0;
 
   return (
@@ -126,6 +135,16 @@ export function CurrencyExposureView({ currencyExposure, grandTotal }: CurrencyE
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">
               Rischio aggregato per valuta
+              {isLoadingETFData && (
+                <span className="ml-2 text-primary animate-pulse">
+                  Caricamento dati ETF ({loadedETFCount}/{etfCount})...
+                </span>
+              )}
+              {!isLoadingETFData && etfCount > 0 && (
+                <span className="ml-2 text-green-500">
+                  ✓ {loadedETFCount} ETF analizzati
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>

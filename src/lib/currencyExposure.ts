@@ -95,6 +95,7 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
       details: stock.hasProtection 
         ? `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)} (protetto a ${stock.protectionStrike})`
         : `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
+      isin: stock.isin,
       isETF
     });
   }

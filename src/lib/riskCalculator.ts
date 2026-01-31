@@ -24,6 +24,7 @@ export interface StockRiskDetail {
   currency: string;
   exchangeRate: number;
   hasProtection: boolean;
+  isin?: string;                // ISIN for ETF lookups
 }
 
 export interface NakedPutRiskDetail {
@@ -183,7 +184,8 @@ export function calculateStockRisk(
       riskEUR,
       currency,
       exchangeRate,
-      hasProtection: protectionContracts > 0
+      hasProtection: protectionContracts > 0,
+      isin: stock.isin || undefined
     });
   }
   
