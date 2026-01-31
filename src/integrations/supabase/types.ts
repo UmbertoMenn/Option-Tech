@@ -388,6 +388,36 @@ export type Database = {
           },
         ]
       }
+      price_update_logs: {
+        Row: {
+          completed_at: string | null
+          error_message: string | null
+          id: string
+          positions_failed: number | null
+          positions_updated: number | null
+          source: string | null
+          started_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          error_message?: string | null
+          id?: string
+          positions_failed?: number | null
+          positions_updated?: number | null
+          source?: string | null
+          started_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          error_message?: string | null
+          id?: string
+          positions_failed?: number | null
+          positions_updated?: number | null
+          source?: string | null
+          started_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
