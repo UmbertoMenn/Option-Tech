@@ -6,6 +6,31 @@ export interface DecomposedInstrument extends InstrumentDetail {
   originalCurrency?: string;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function normalizeCurrencyWeights(
+  weights: Record<string, number> | undefined | null
+): Record<string, number> | null {
+  if (!weights) return null;
+  const entries = Object.entries(weights)
+    .filter(([, v]) => isFiniteNumber(v) && v > 0)
+    .map(([k, v]) => [k, v] as const);
+
+  if (entries.length === 0) return null;
+
+  const sum = entries.reduce((acc, [, v]) => acc + v, 0);
+  if (!Number.isFinite(sum) || sum <= 0) return null;
+
+  // Some scrapes can return totals > 100 (or < 100). We normalize to 100 to avoid exploding totals.
+  const normalized: Record<string, number> = {};
+  for (const [currency, value] of entries) {
+    normalized[currency] = (value / sum) * 100;
+  }
+  return normalized;
+}
+
 /**
  * Decomposes an ETF's risk across its underlying currencies based on allocation data
  */
@@ -14,6 +39,11 @@ export function decomposeETFByCurrency(
   allocation: ETFAllocation
 ): Record<string, number> {
   const decomposed: Record<string, number> = {};
+
+  // If risk is zero/invalid, don't decompose.
+  if (!isFiniteNumber(instrument.riskEUR) || instrument.riskEUR <= 0) {
+    return { OTHER: 0 };
+  }
   
   // If hedged, all risk stays in the ETF's base currency (usually EUR)
   if (allocation.isHedged) {
@@ -21,18 +51,22 @@ export function decomposeETFByCurrency(
     decomposed['EUR'] = instrument.riskEUR;
     return decomposed;
   }
-  
-  const currencyAllocations = allocation.currencyAllocations;
-  
-  // If no currency allocations found, return original
-  if (!currencyAllocations || Object.keys(currencyAllocations).length === 0) {
-    return { 'OTHER': instrument.riskEUR };
-  }
+
+  const currencyAllocations = normalizeCurrencyWeights(allocation.currencyAllocations);
+  if (!currencyAllocations) return { OTHER: instrument.riskEUR };
   
   // Decompose the risk based on currency weights
   for (const [currency, percentage] of Object.entries(currencyAllocations)) {
+    if (!isFiniteNumber(percentage) || percentage <= 0) continue;
     const weight = percentage / 100;
-    decomposed[currency] = instrument.riskEUR * weight;
+    const amount = instrument.riskEUR * weight;
+    if (!isFiniteNumber(amount) || amount <= 0) continue;
+    decomposed[currency] = amount;
+  }
+
+  // If everything got filtered out, fall back
+  if (Object.keys(decomposed).length === 0) {
+    return { OTHER: instrument.riskEUR };
   }
   
   return decomposed;
@@ -68,25 +102,33 @@ export function applyETFDecomposition(
   for (const exposure of originalExposures) {
     for (const instrument of exposure.instruments) {
       // Check if this is an ETF with allocation data
-      if (instrument.isETF && instrument.isin && etfAllocations[instrument.isin]) {
+      if (
+        instrument.isETF &&
+        instrument.isin &&
+        etfAllocations[instrument.isin] &&
+        isFiniteNumber(instrument.riskEUR) &&
+        instrument.riskEUR > 0
+      ) {
         const allocation = etfAllocations[instrument.isin];
         const decomposed = decomposeETFByCurrency(instrument, allocation);
         
         // Add decomposed amounts to each currency
         for (const [currency, riskAmount] of Object.entries(decomposed)) {
+          if (!isFiniteNumber(riskAmount) || riskAmount <= 0) continue;
           const entry = getOrCreate(currency);
           entry.totalRisk += riskAmount;
           
           // Pro-rate the original currency amount
-          const ratio = riskAmount / instrument.riskEUR;
-          entry.totalRiskOriginal += instrument.riskOriginal * ratio;
+          const ratio = instrument.riskEUR > 0 ? riskAmount / instrument.riskEUR : 0;
+          const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 0;
+          entry.totalRiskOriginal += instrument.riskOriginal * safeRatio;
           
           // Add instrument reference with decomposed info
           entry.instruments.push({
             ...instrument,
             riskEUR: riskAmount,
-            riskOriginal: instrument.riskOriginal * ratio,
-            details: `${instrument.details} [${(ratio * 100).toFixed(1)}% di ${instrument.name}]`,
+            riskOriginal: instrument.riskOriginal * safeRatio,
+            details: `${instrument.details} [${(safeRatio * 100).toFixed(1)}% di ${instrument.name}]`,
           });
         }
       } else {

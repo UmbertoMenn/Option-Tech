@@ -15,6 +15,7 @@ import { useETFAllocations } from '@/hooks/useETFAllocations';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
 import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 
@@ -154,13 +155,15 @@ export function RiskAnalyzer() {
             {viewMode === 'equity' ? (
               <EquityExposureView analysis={analysis} />
             ) : (
-              <CurrencyExposureView 
-                currencyExposure={currencyExposure}
-                grandTotal={analysis.grandTotal}
-                isLoadingETFData={isETFDataLoading}
-                etfCount={etfIsins.length}
-                loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
-              />
+              <ErrorBoundary title="Errore nella vista Currency Exposure">
+                <CurrencyExposureView 
+                  currencyExposure={currencyExposure}
+                  grandTotal={analysis.grandTotal}
+                  isLoadingETFData={isETFDataLoading}
+                  etfCount={etfIsins.length}
+                  loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
+                />
+              </ErrorBoundary>
             )}
           </>
         )}
