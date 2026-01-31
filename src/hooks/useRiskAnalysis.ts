@@ -10,11 +10,13 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     if (!positions || positions.length === 0) {
       return {
         totalStockRisk: 0,
+        totalCommodityRisk: 0,
         totalNakedPutRisk: 0,
         totalLeapCallRisk: 0,
         totalStrategyRisk: 0,
         grandTotal: 0,
         stockDetails: [],
+        commodityDetails: [],
         nakedPutDetails: [],
         leapCallDetails: [],
         strategyDetails: []
