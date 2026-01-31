@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, Landmark, Target, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Target, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
@@ -176,15 +176,10 @@ export function StatsCards({
       subtext: initialDate ? `al ${formatDate(initialDate)}` : null,
     },
     {
-      key: 'giacenza',
-      label: 'Giacenza Media (Portfolio)',
-      value: hasPortfolioAverageBalance ? formatCurrency(portfolioAverageBalance) : '—',
-      icon: Landmark,
-      change: null,
-      dimmed: !hasPortfolioAverageBalance,
-      subtext: initialDate && averageBalanceDate 
-        ? `dal ${formatDate(initialDate)} al ${formatDate(averageBalanceDate)}` 
-        : null,
+      key: 'calcolo-rendimenti',
+      label: 'Calcolo Rendimenti',
+      icon: Calendar,
+      isCalculoRendimenti: true,
     },
     {
       key: 'pl',
@@ -195,7 +190,6 @@ export function StatsCards({
       isProfit: plAbsolute >= 0,
       dimmed: !canCalculatePL,
       subtext: null,
-      hasDateSelector: true,
     },
   ];
 
@@ -210,32 +204,8 @@ export function StatsCards({
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0">
               <p className="text-sm text-muted-foreground truncate">{stat.label}</p>
-              <p className={cn(
-                "text-xl font-bold font-mono mt-1",
-                stat.dimmed 
-                  ? 'text-muted-foreground'
-                  : stat.isProfit !== undefined 
-                    ? stat.isProfit 
-                      ? 'text-profit' 
-                      : 'text-loss'
-                    : ''
-              )}>
-                {stat.value}
-              </p>
-              {stat.subtext && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {stat.subtext}
-                </p>
-              )}
-              {stat.change && (
-                <p className={cn(
-                  "text-xs font-mono mt-1",
-                  stat.isProfit ? 'text-profit' : 'text-loss'
-                )}>
-                  {stat.change}
-                </p>
-              )}
-              {stat.hasDateSelector && historicalData.length > 0 && (
+              
+              {'isCalculoRendimenti' in stat && stat.isCalculoRendimenti ? (
                 <div className="mt-2 space-y-2">
                   <Select
                     value={selectedHistoricalDate || 'none'}
@@ -295,13 +265,41 @@ export function StatsCards({
                     </>
                   )}
                 </div>
+              ) : (
+                <>
+                  <p className={cn(
+                    "text-xl font-bold font-mono mt-1",
+                    'dimmed' in stat && stat.dimmed 
+                      ? 'text-muted-foreground'
+                      : 'isProfit' in stat && stat.isProfit !== undefined 
+                        ? stat.isProfit 
+                          ? 'text-profit' 
+                          : 'text-loss'
+                        : ''
+                  )}>
+                    {'value' in stat ? stat.value : '—'}
+                  </p>
+                  {'subtext' in stat && stat.subtext && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {stat.subtext}
+                    </p>
+                  )}
+                  {'change' in stat && stat.change && (
+                    <p className={cn(
+                      "text-xs font-mono mt-1",
+                      'isProfit' in stat && stat.isProfit ? 'text-profit' : 'text-loss'
+                    )}>
+                      {stat.change}
+                    </p>
+                  )}
+                </>
               )}
             </div>
             <div className={cn(
               "p-2 rounded-lg",
-              stat.dimmed
+              'dimmed' in stat && stat.dimmed
                 ? 'bg-muted/10 text-muted-foreground'
-                : stat.isProfit !== undefined
+                : 'isProfit' in stat && stat.isProfit !== undefined
                   ? stat.isProfit
                     ? 'bg-profit/10 text-profit'
                     : 'bg-loss/10 text-loss'
