@@ -1,12 +1,13 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
+import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight, ShieldAlert } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState } from 'react';
@@ -23,6 +24,9 @@ import {
   GroupedOtherStrategy
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
+import { MoveOptionMenu } from '@/components/derivatives/MoveOptionMenu';
+import { OverrideBadge } from '@/components/derivatives/OverrideBadge';
+import { CreateMultiLegDialog } from '@/components/derivatives/CreateMultiLegDialog';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -37,6 +41,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
+  const { overrides, getUnassignedOptions, getOverrideForPosition, removeOverrideByPositionId } = useDerivativeOverrides();
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
@@ -44,6 +49,7 @@ export function Derivatives() {
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
+  const [createMultiLegOpen, setCreateMultiLegOpen] = useState(false);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -51,9 +57,11 @@ export function Derivatives() {
   );
 
   const categories = useMemo(() => 
-    categorizeDerivatives(derivatives, positions),
-    [derivatives, positions]
+    categorizeDerivatives(derivatives, positions, overrides),
+    [derivatives, positions, overrides]
   );
+
+  const unassignedOptions = useMemo(() => getUnassignedOptions(), [getUnassignedOptions]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
@@ -355,6 +363,18 @@ export function Derivatives() {
                     <TrendingDown className="w-5 h-5 text-muted-foreground" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.groupedOtherStrategies.length}</Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-2 h-6 px-2 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCreateMultiLegOpen(true);
+                      }}
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      Crea Strategia
+                    </Button>
                   </div>
                   {otherStrategiesOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -384,6 +404,13 @@ export function Derivatives() {
             </CollapsibleContent>
           </Card>
         </Collapsible>
+
+        {/* Create Multi-Leg Strategy Dialog */}
+        <CreateMultiLegDialog
+          open={createMultiLegOpen}
+          onOpenChange={setCreateMultiLegOpen}
+          availableOptions={unassignedOptions}
+        />
       </main>
     </div>
   );

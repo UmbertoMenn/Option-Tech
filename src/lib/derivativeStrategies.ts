@@ -1,4 +1,5 @@
 import { Position } from '@/types/portfolio';
+import { DerivativeOverride } from '@/types/derivativeOverrides';
 
 export interface CoveredCallPosition {
   option: Position;
@@ -82,6 +83,178 @@ export interface DerivativeCategories {
   groupedOtherStrategies: GroupedOtherStrategy[];
 }
 
+// Track which positions have manual overrides
+export interface ManualOverrideResult {
+  manualCoveredCalls: CoveredCallPosition[];
+  manualProtections: LongPutPosition[];
+  manualIronCondors: IronCondorPosition[];
+  manualDoubleDiagonals: DoubleDiagonalPosition[];
+  manualNakedPuts: NakedPutPosition[];
+  manualLeapCalls: LeapCallPosition[];
+  usedByOverrides: Set<string>;
+  usedStockShares: Map<string, number>;
+}
+
+/**
+ * Apply manual overrides before automatic classification
+ */
+function applyManualOverrides(
+  derivatives: Position[],
+  allPositions: Position[],
+  overrides: DerivativeOverride[]
+): ManualOverrideResult {
+  const manualCoveredCalls: CoveredCallPosition[] = [];
+  const manualProtections: LongPutPosition[] = [];
+  const manualIronCondors: IronCondorPosition[] = [];
+  const manualDoubleDiagonals: DoubleDiagonalPosition[] = [];
+  const manualNakedPuts: NakedPutPosition[] = [];
+  const manualLeapCalls: LeapCallPosition[] = [];
+  const usedByOverrides = new Set<string>();
+  const usedStockShares = new Map<string, number>();
+
+  const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
+
+  for (const override of overrides) {
+    if (override.override_type === 'single' && override.position_id) {
+      const option = derivatives.find(d => d.id === override.position_id);
+      if (!option) continue;
+
+      usedByOverrides.add(option.id);
+
+      switch (override.target_category) {
+        case 'covered_call': {
+          const linkedStock = override.linked_stock_id 
+            ? allPositions.find(p => p.id === override.linked_stock_id)
+            : findUnderlyingStock(option, stockPositions);
+          
+          if (linkedStock) {
+            const contractsSold = Math.abs(option.quantity);
+            const sharesCovered = contractsSold * 100;
+            
+            manualCoveredCalls.push({
+              option: { ...option, quantity: -contractsSold },
+              underlying: linkedStock,
+              contractsCovered: contractsSold,
+              sharesCovered,
+              isFullyCovered: true
+            });
+
+            // Track used stock shares
+            const stockKey = normalizeForMatching(linkedStock.description);
+            const current = usedStockShares.get(stockKey) || 0;
+            usedStockShares.set(stockKey, current + sharesCovered);
+          }
+          break;
+        }
+        
+        case 'protection': {
+          const linkedStock = override.linked_stock_id 
+            ? allPositions.find(p => p.id === override.linked_stock_id)
+            : findUnderlyingStock(option, stockPositions);
+          
+          manualProtections.push({
+            option,
+            underlying: linkedStock || null,
+            contracts: option.quantity,
+            isPartial: !linkedStock
+          });
+          break;
+        }
+        
+        case 'naked_put': {
+          const underlyingStock = findUnderlyingStock(option, stockPositions);
+          manualNakedPuts.push({
+            option,
+            underlying: underlyingStock || null,
+            contracts: Math.abs(option.quantity)
+          });
+          break;
+        }
+        
+        case 'leap_call': {
+          const underlyingStock = findUnderlyingStock(option, stockPositions);
+          manualLeapCalls.push({
+            option,
+            underlying: underlyingStock || null,
+            contracts: option.quantity
+          });
+          break;
+        }
+        
+        case 'other':
+        default:
+          // Will be handled by groupedOtherStrategies
+          break;
+      }
+    } else if (override.override_type === 'multi_leg') {
+      const soldPut = derivatives.find(d => d.id === override.sold_put_id);
+      const boughtPut = derivatives.find(d => d.id === override.bought_put_id);
+      const soldCall = derivatives.find(d => d.id === override.sold_call_id);
+      const boughtCall = derivatives.find(d => d.id === override.bought_call_id);
+
+      if (!soldPut || !boughtPut || !soldCall || !boughtCall) continue;
+
+      usedByOverrides.add(soldPut.id);
+      usedByOverrides.add(boughtPut.id);
+      usedByOverrides.add(soldCall.id);
+      usedByOverrides.add(boughtCall.id);
+
+      const totalPremium = 
+        (soldPut.market_value || 0) + 
+        (boughtPut.market_value || 0) +
+        (soldCall.market_value || 0) +
+        (boughtCall.market_value || 0);
+      
+      const totalProfitLoss =
+        (soldPut.profit_loss || 0) +
+        (boughtPut.profit_loss || 0) +
+        (soldCall.profit_loss || 0) +
+        (boughtCall.profit_loss || 0);
+
+      const contracts = Math.abs(soldCall.quantity);
+      const underlying = soldCall.underlying || soldCall.description;
+
+      if (override.strategy_type === 'iron_condor') {
+        manualIronCondors.push({
+          underlying,
+          expiryDate: soldCall.expiry_date || '',
+          soldPut,
+          boughtPut,
+          soldCall,
+          boughtCall,
+          contracts,
+          totalPremium,
+          totalProfitLoss
+        });
+      } else if (override.strategy_type === 'double_diagonal') {
+        manualDoubleDiagonals.push({
+          underlying,
+          soldExpiryDate: soldCall.expiry_date || '',
+          boughtExpiryDate: boughtCall.expiry_date || '',
+          soldPut,
+          boughtPut,
+          soldCall,
+          boughtCall,
+          contracts,
+          totalPremium,
+          totalProfitLoss
+        });
+      }
+    }
+  }
+
+  return {
+    manualCoveredCalls,
+    manualProtections,
+    manualIronCondors,
+    manualDoubleDiagonals,
+    manualNakedPuts,
+    manualLeapCalls,
+    usedByOverrides,
+    usedStockShares
+  };
+}
+
 /**
  * Categorizes derivatives following this priority order:
  * 1. Covered Call: CALL vendute con sottostante in portafoglio
@@ -93,22 +266,41 @@ export interface DerivativeCategories {
  */
 export function categorizeDerivatives(
   derivatives: Position[],
-  allPositions: Position[]
+  allPositions: Position[],
+  overrides: DerivativeOverride[] = []
 ): DerivativeCategories {
-  const coveredCalls: CoveredCallPosition[] = [];
-  const longPuts: LongPutPosition[] = [];
-  const ironCondors: IronCondorPosition[] = [];
-  const doubleDiagonals: DoubleDiagonalPosition[] = [];
-  const nakedPuts: NakedPutPosition[] = [];
-  const leapCalls: LeapCallPosition[] = [];
+  // STEP 0: Apply manual overrides BEFORE automatic classification
+  const {
+    manualCoveredCalls,
+    manualProtections,
+    manualIronCondors,
+    manualDoubleDiagonals,
+    manualNakedPuts,
+    manualLeapCalls,
+    usedByOverrides,
+    usedStockShares
+  } = applyManualOverrides(derivatives, allPositions, overrides);
+
+  // Initialize arrays with manual overrides
+  const coveredCalls: CoveredCallPosition[] = [...manualCoveredCalls];
+  const longPuts: LongPutPosition[] = [...manualProtections];
+  const ironCondors: IronCondorPosition[] = [...manualIronCondors];
+  const doubleDiagonals: DoubleDiagonalPosition[] = [...manualDoubleDiagonals];
+  const nakedPuts: NakedPutPosition[] = [...manualNakedPuts];
+  const leapCalls: LeapCallPosition[] = [...manualLeapCalls];
   const otherStrategies: OtherStrategyPosition[] = [];
-  const usedDerivatives = new Set<string>();
+  
+  // Start with overridden positions already marked as used
+  const usedDerivatives = new Set<string>(usedByOverrides);
+  
+  // Filter out positions that have overrides for automatic classification
+  const autoDerivatives = derivatives.filter(d => !usedByOverrides.has(d.id));
   
   // Get all stock positions (NOT ETFs for matching)
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
   
-  // ============ STEP 1: Find Covered Calls ============
-  const soldCalls = derivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
+  // ============ STEP 1: Find Covered Calls (from auto derivatives only) ============
+  const soldCalls = autoDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
   
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 
@@ -131,7 +323,12 @@ export function categorizeDerivatives(
       const contractsSold = Math.abs(call.quantity);
       const sharesOwned = underlyingStock.quantity;
       
-      const contractsCoverable = Math.floor(sharesOwned / 100);
+      // Account for shares already used by manual overrides
+      const stockKey = normalizeForMatching(underlyingStock.description);
+      const sharesUsedByOverrides = usedStockShares.get(stockKey) || 0;
+      const availableShares = sharesOwned - sharesUsedByOverrides;
+      
+      const contractsCoverable = Math.floor(availableShares / 100);
       const contractsCovered = Math.min(contractsSold, contractsCoverable);
       
       if (contractsCovered > 0) {
@@ -149,6 +346,9 @@ export function categorizeDerivatives(
         });
         
         usedDerivatives.add(call.id);
+        
+        // Update usedStockShares for subsequent iterations
+        usedStockShares.set(stockKey, sharesUsedByOverrides + sharesCovered);
       }
     }
   }
@@ -160,7 +360,7 @@ export function categorizeDerivatives(
   // Raggruppa le PUT per sottostante
   const putsByUnderlying = new Map<string, { bought: Position[], sold: Position[], stock: Position | null }>();
   
-  for (const d of derivatives) {
+  for (const d of autoDerivatives) {
     if (d.option_type === 'put' && !usedDerivatives.has(d.id)) {
       const underlyingKey = normalizeForMatching(d.underlying || d.description);
       const underlyingStock = findUnderlyingStock(d, stockPositions);
@@ -216,8 +416,8 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 3 & 4: Find Iron Condor and Double Diagonal ============
-  // Group remaining derivatives by underlying
-  const remainingDerivatives = derivatives.filter(d => !usedDerivatives.has(d.id));
+  // Group remaining auto derivatives by underlying
+  const remainingDerivatives = autoDerivatives.filter(d => !usedDerivatives.has(d.id));
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of remainingDerivatives) {
@@ -277,8 +477,8 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 5: Altre Strategie (più di 1 gamba per sottostante) ============
-  // Re-group remaining derivatives
-  const afterFourLegRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
+  // Re-group remaining auto derivatives
+  const afterFourLegRemaining = autoDerivatives.filter(d => !usedDerivatives.has(d.id));
   const regrouped = new Map<string, Position[]>();
   
   for (const d of afterFourLegRemaining) {
@@ -352,7 +552,7 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 6: Singole gambe ============
-  const singleLegs = derivatives.filter(d => !usedDerivatives.has(d.id));
+  const singleLegs = autoDerivatives.filter(d => !usedDerivatives.has(d.id));
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
