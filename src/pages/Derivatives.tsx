@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight, ShieldAlert } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState } from 'react';
@@ -244,7 +244,7 @@ export function Derivatives() {
               <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Target className="w-5 h-5 text-purple-500" />
+                    <Layers className="w-5 h-5 text-purple-500" />
                     <CardTitle className="text-xl">Double Diagonal</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.doubleDiagonals.length}</Badge>
                   </div>
@@ -284,7 +284,7 @@ export function Derivatives() {
               <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Target className="w-5 h-5 text-primary" />
+                    <CircleDollarSign className="w-5 h-5 text-orange-500" />
                     <CardTitle className="text-xl">Naked Put</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.nakedPuts.length}</Badge>
                   </div>
@@ -364,7 +364,7 @@ export function Derivatives() {
               <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <TrendingDown className="w-5 h-5 text-muted-foreground" />
+                    <Puzzle className="w-5 h-5 text-cyan-500" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.groupedOtherStrategies.length}</Badge>
                   </div>
