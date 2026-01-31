@@ -847,63 +847,70 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
-          {/* Put Spread */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD (scadenze diverse)</p>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
-                  <Badge variant="outline" className="text-xs">{soldExpiryFormatted}</Badge>
+          {/* Spreads side by side: PUT on left, CALL on right */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Put Spread - Vertical: sold on top, bought on bottom */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD</p>
+              <div className="flex flex-col gap-2 text-sm">
+                {/* Sold Put - on top */}
+                <div className="p-2 rounded bg-background/50 border border-border/30">
+                  <div className="flex justify-between items-center">
+                    <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                    <Badge variant="outline" className="text-xs">{soldPut.strike_price} {formatExpiryMMY(soldPut.expiry_date)}</Badge>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
-                  </span>
-                </div>
-              </div>
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
-                  <Badge variant="outline" className="text-xs">{boughtExpiryFormatted}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
-                  </span>
+                {/* Bought Put - on bottom */}
+                <div className="p-2 rounded bg-background/50 border border-border/30">
+                  <div className="flex justify-between items-center">
+                    <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                    <Badge variant="outline" className="text-xs">{boughtPut.strike_price} {formatExpiryMMY(boughtPut.expiry_date)}</Badge>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          
-          {/* Call Spread */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD (scadenze diverse)</p>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
-                  <Badge variant="outline" className="text-xs">{soldExpiryFormatted}</Badge>
+            
+            {/* Call Spread - Vertical: sold on top, bought on bottom */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD</p>
+              <div className="flex flex-col gap-2 text-sm">
+                {/* Sold Call - on top */}
+                <div className="p-2 rounded bg-background/50 border border-border/30">
+                  <div className="flex justify-between items-center">
+                    <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                    <Badge variant="outline" className="text-xs">{soldCall.strike_price} {formatExpiryMMY(soldCall.expiry_date)}</Badge>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
-                  </span>
-                </div>
-              </div>
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
-                  <Badge variant="outline" className="text-xs">{boughtExpiryFormatted}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
-                  </span>
+                {/* Bought Call - on bottom */}
+                <div className="p-2 rounded bg-background/50 border border-border/30">
+                  <div className="flex justify-between items-center">
+                    <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                    <Badge variant="outline" className="text-xs">{boughtCall.strike_price} {formatExpiryMMY(boughtCall.expiry_date)}</Badge>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
