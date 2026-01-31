@@ -3,7 +3,7 @@ import { Position, PortfolioSummary } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 
 export interface NettingResult {
-  // Netting excluding only covered calls
+  // Netting excluding OTM covered calls, with ITM covered calls valued at intrinsic value
   nettingExCoveredCall: number;
   // Total netting including all derivatives
   nettingTotal: number;
@@ -17,6 +17,10 @@ export interface NettingResult {
  *   → Closing a sold option means buying it back, reducing portfolio value
  * - Bought options (quantity > 0): ADD (current_price * quantity * 100) to portfolio
  *   → Closing a bought option means selling it, increasing portfolio value
+ * 
+ * Netting ex CC logic:
+ * - OTM covered calls (strike > stock price): excluded completely (no impact)
+ * - ITM covered calls (strike <= stock price): subtract contracts * 100 * (stock_price - strike)
  * 
  * @param positions All portfolio positions
  * @param summary Portfolio summary with total value
@@ -46,8 +50,10 @@ export function useDerivativeNetting(
     // Categorize derivatives to identify covered calls
     const categories = categorizeDerivatives(derivatives, positions);
     
-    // Create set of option IDs that should be excluded from netting ex covered call
-    const coveredCallIds = new Set(categories.coveredCalls.map(cc => cc.option.id));
+    // Create map of covered call IDs to their data for ITM/OTM check
+    const coveredCallMap = new Map(
+      categories.coveredCalls.map(cc => [cc.option.id, cc])
+    );
     
     // Calculate netting for each derivative
     let totalNetting = 0;
@@ -64,10 +70,24 @@ export function useDerivativeNetting(
       
       totalNetting += nettingValue;
       
-      // For netting ex covered call: exclude only covered calls
-      const isCoveredCall = coveredCallIds.has(derivative.id);
+      // For netting ex covered call: special handling for covered calls
+      const coveredCall = coveredCallMap.get(derivative.id);
       
-      if (!isCoveredCall) {
+      if (coveredCall) {
+        // This is a covered call - check if ITM or OTM
+        const strikePrice = derivative.strike_price ?? 0;
+        const underlyingPrice = coveredCall.underlying.current_price ?? 0;
+        
+        if (strikePrice < underlyingPrice) {
+          // ITM covered call: subtract intrinsic value
+          // contracts * 100 * (stock_price - strike)
+          const contracts = Math.abs(quantity);
+          const intrinsicValue = contracts * multiplier * (underlyingPrice - strikePrice);
+          nettingExCoveredCall -= intrinsicValue;
+        }
+        // OTM covered call (strike >= underlyingPrice): don't subtract anything
+      } else {
+        // Not a covered call - include full netting value
         nettingExCoveredCall += nettingValue;
       }
     }
