@@ -1,25 +1,44 @@
-import { useState } from 'react';
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { formatCurrency, formatProfitLoss, formatPercentage, formatDate } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, Landmark, Target, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Landmark, Target, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ViewMode } from './ViewModeSelector';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface StatsCardsProps {
   summary: PortfolioSummary;
   portfolio: Portfolio | null;
   nettingTotal: number;
   nettingExCC: number;
-  earliestHistoricalData: HistoricalDataEntry | null;
+  viewMode: ViewMode;
+  historicalData: HistoricalDataEntry[];
+  selectedHistoricalDate: string | null;
+  onHistoricalDateChange: (date: string | null) => void;
 }
 
-type PatrimonioView = 'base' | 'netting_total' | 'netting_ex_cc';
-type PLView = 'base' | 'netting_total' | 'netting_ex_cc';
+const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
+  base: { patrimonio: 'Patrimonio Totale', pl: 'Profitto/Perdita' },
+  netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
+  netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex CC)', pl: 'P/L (Netting ex CC)' },
+};
 
-export function StatsCards({ summary, portfolio, nettingTotal, nettingExCC, earliestHistoricalData }: StatsCardsProps) {
-  const [patrimonioView, setPatrimonioView] = useState<PatrimonioView>('base');
-  const [plView, setPlView] = useState<PLView>('base');
-
+export function StatsCards({ 
+  summary, 
+  portfolio, 
+  nettingTotal, 
+  nettingExCC, 
+  viewMode,
+  historicalData,
+  selectedHistoricalDate,
+  onHistoricalDateChange,
+}: StatsCardsProps) {
   const initialValue = portfolio?.initial_value || 0;
   const deposits = portfolio?.deposits || 0;
   const averageBalance = portfolio?.average_balance || 0;
@@ -29,40 +48,37 @@ export function StatsCards({ summary, portfolio, nettingTotal, nettingExCC, earl
   
   const hasInitialData = initialValue > 0;
   const hasAverageBalance = averageBalance > 0;
-  const hasHistoricalData = earliestHistoricalData !== null;
   
-  // Patrimonio values based on view
+  // Find selected historical entry
+  const selectedHistoricalEntry = selectedHistoricalDate 
+    ? historicalData.find(h => h.snapshot_date === selectedHistoricalDate) 
+    : null;
+  const hasHistoricalData = selectedHistoricalEntry !== null;
+  
+  // Patrimonio value based on viewMode
   const getPatrimonioValue = () => {
-    switch (patrimonioView) {
+    switch (viewMode) {
       case 'netting_total': return nettingTotal;
       case 'netting_ex_cc': return nettingExCC;
       default: return summary.totalValue;
     }
   };
 
-  const getPatrimonioLabel = () => {
-    switch (patrimonioView) {
-      case 'netting_total': return 'Patrimonio (Netting Totale)';
-      case 'netting_ex_cc': return 'Patrimonio (Netting ex CC)';
-      default: return 'Patrimonio Totale';
-    }
-  };
-
-  // P/L calculation based on historical data and view
-  const calculatePL = (view: PLView) => {
+  // P/L calculation based on historical data and viewMode
+  const calculatePL = () => {
     if (!hasHistoricalData) {
-      // Fallback to old calculation
+      // Fallback to old calculation if no historical data selected
       if (!hasInitialData) return { absolute: 0, percent: 0 };
       const absolutePL = summary.totalValue - initialPlusDeposits;
       const percentPL = hasAverageBalance ? (absolutePL / averageBalance) * 100 : 0;
       return { absolute: absolutePL, percent: percentPL };
     }
 
-    const historical = earliestHistoricalData!;
+    const historical = selectedHistoricalEntry!;
     let currentValue: number;
     let historicalValue: number;
 
-    switch (view) {
+    switch (viewMode) {
       case 'netting_total':
         currentValue = nettingTotal;
         historicalValue = historical.netting_total;
@@ -83,65 +99,20 @@ export function StatsCards({ summary, portfolio, nettingTotal, nettingExCC, earl
     return { absolute: absolutePL, percent: percentPL };
   };
 
-  const getPLLabel = () => {
-    switch (plView) {
-      case 'netting_total': return 'P/L (Netting Totale)';
-      case 'netting_ex_cc': return 'P/L (Netting ex CC)';
-      default: return 'Profitto/Perdita';
-    }
-  };
-
   const patrimonioValue = getPatrimonioValue();
-  const plData = calculatePL(plView);
+  const plData = calculatePL();
   const plAbsolute = plData.absolute;
   const plPercent = plData.percent;
-
-  const cyclePatrimonio = (direction: 'prev' | 'next') => {
-    const views: PatrimonioView[] = ['base', 'netting_total', 'netting_ex_cc'];
-    const currentIndex = views.indexOf(patrimonioView);
-    if (direction === 'next') {
-      setPatrimonioView(views[(currentIndex + 1) % views.length]);
-    } else {
-      setPatrimonioView(views[(currentIndex - 1 + views.length) % views.length]);
-    }
-  };
-
-  const cyclePL = (direction: 'prev' | 'next') => {
-    const views: PLView[] = ['base', 'netting_total', 'netting_ex_cc'];
-    const currentIndex = views.indexOf(plView);
-    if (direction === 'next') {
-      setPlView(views[(currentIndex + 1) % views.length]);
-    } else {
-      setPlView(views[(currentIndex - 1 + views.length) % views.length]);
-    }
-  };
-
-  const CarouselDots = ({ current, total }: { current: number; total: number }) => (
-    <div className="flex gap-1 justify-center mt-2">
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(
-            "w-1.5 h-1.5 rounded-full transition-colors",
-            i === current ? "bg-primary" : "bg-muted-foreground/30"
-          )}
-        />
-      ))}
-    </div>
-  );
+  const canCalculatePL = hasInitialData || hasHistoricalData;
 
   const stats = [
     {
       key: 'patrimonio',
-      label: getPatrimonioLabel(),
+      label: VIEW_LABELS[viewMode].patrimonio,
       value: formatCurrency(patrimonioValue),
       icon: Wallet,
       change: null,
       subtext: null,
-      hasCarousel: true,
-      carouselIndex: ['base', 'netting_total', 'netting_ex_cc'].indexOf(patrimonioView),
-      onPrev: () => cyclePatrimonio('prev'),
-      onNext: () => cyclePatrimonio('next'),
     },
     {
       key: 'iniziale',
@@ -165,17 +136,14 @@ export function StatsCards({ summary, portfolio, nettingTotal, nettingExCC, earl
     },
     {
       key: 'pl',
-      label: getPLLabel(),
-      value: hasInitialData || hasHistoricalData ? formatProfitLoss(plAbsolute) : '—',
+      label: VIEW_LABELS[viewMode].pl,
+      value: canCalculatePL ? formatProfitLoss(plAbsolute) : '—',
       icon: plAbsolute >= 0 ? TrendingUp : TrendingDown,
-      change: (hasAverageBalance || hasHistoricalData) ? formatPercentage(plPercent) : null,
+      change: canCalculatePL && (hasAverageBalance || hasHistoricalData) ? formatPercentage(plPercent) : null,
       isProfit: plAbsolute >= 0,
-      dimmed: !hasInitialData && !hasHistoricalData,
+      dimmed: !canCalculatePL,
       subtext: null,
-      hasCarousel: true,
-      carouselIndex: ['base', 'netting_total', 'netting_ex_cc'].indexOf(plView),
-      onPrev: () => cyclePL('prev'),
-      onNext: () => cyclePL('next'),
+      hasDateSelector: true,
     },
   ];
 
@@ -215,39 +183,39 @@ export function StatsCards({ summary, portfolio, nettingTotal, nettingExCC, earl
                   {stat.change}
                 </p>
               )}
-              {stat.hasCarousel && (
-                <CarouselDots current={stat.carouselIndex || 0} total={3} />
-              )}
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className={cn(
-                "p-2 rounded-lg",
-                stat.dimmed
-                  ? 'bg-muted/10 text-muted-foreground'
-                  : stat.isProfit !== undefined
-                    ? stat.isProfit
-                      ? 'bg-profit/10 text-profit'
-                      : 'bg-loss/10 text-loss'
-                    : 'bg-primary/10 text-primary'
-              )}>
-                <stat.icon className="w-5 h-5" />
-              </div>
-              {stat.hasCarousel && (
-                <div className="flex gap-1">
-                  <button
-                    onClick={stat.onPrev}
-                    className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+              {stat.hasDateSelector && historicalData.length > 0 && (
+                <div className="mt-2">
+                  <Select
+                    value={selectedHistoricalDate || 'none'}
+                    onValueChange={(value) => onHistoricalDateChange(value === 'none' ? null : value)}
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={stat.onNext}
-                    className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                    <SelectTrigger className="h-7 text-xs">
+                      <Calendar className="w-3 h-3 mr-1" />
+                      <SelectValue placeholder="Data riferimento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nessuna data</SelectItem>
+                      {historicalData.map((entry) => (
+                        <SelectItem key={entry.id} value={entry.snapshot_date}>
+                          {formatDate(entry.snapshot_date)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
+            </div>
+            <div className={cn(
+              "p-2 rounded-lg",
+              stat.dimmed
+                ? 'bg-muted/10 text-muted-foreground'
+                : stat.isProfit !== undefined
+                  ? stat.isProfit
+                    ? 'bg-profit/10 text-profit'
+                    : 'bg-loss/10 text-loss'
+                  : 'bg-primary/10 text-primary'
+            )}>
+              <stat.icon className="w-5 h-5" />
             </div>
           </div>
         </div>
