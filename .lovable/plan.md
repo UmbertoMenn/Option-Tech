@@ -1,245 +1,114 @@
 
-# Piano: Estensione Prezzi Live a Strategie Derivati e Risk Analyzer
+# Piano: Miglioramento Sistema Prezzi Live
 
-## ✅ COMPLETATO
+## Problemi Identificati
 
-**Implementazione completata.** Il sistema di prezzi live è ora centralizzato e utilizzato in tutte le pagine.
+### 1. I ticker sono sempre NULL
+L'Excel parser non estrae il campo ticker - tutte le posizioni hanno `ticker: null`. Questo significa che l'API Yahoo Finance non riceve alcun ticker da cercare!
+
+**Query di verifica:**
+```sql
+SELECT ticker, isin, asset_type FROM positions LIMIT 10
+-- Risultato: TUTTI i ticker sono NULL
+```
+
+### 2. Tradier API - Token Non Valido
+Dai log dell'edge function:
+```
+Tradier API error: 401 - Invalid Access Token
+Fetching prices for 0 stocks and 110 options
+```
+Il token Tradier sembra essere scaduto o non valido.
+
+### 3. Manca Mapping ISIN → Ticker
+Per azioni/ETF europei (ISIN come IT0003132476 per ENI), non esiste un servizio che converta l'ISIN nel ticker corrispondente.
+
+### 4. Underlying opzioni in formato descrittivo
+Le opzioni hanno `underlying: "APPLE COMPUTER, INC."` invece di `"AAPL"`, quindi non possono essere convertite in simboli OCC.
+
+### 5. Nessun feedback visivo per variazioni
+Non c'è logica per mostrare il prezzo in rosso/verde per 45 secondi dopo ogni aggiornamento.
 
 ---
 
-## Obiettivo
-Estendere il sistema di prezzi live già implementato nella Dashboard alle pagine **Strategie Derivati** e **Risk Analyzer**, permettendo l'aggiornamento automatico ogni 5 minuti dei prezzi di mercato e il ricalcolo in tempo reale di tutti i valori derivati (P/L, Market Value, rischio, netting).
+## Soluzione Proposta
 
----
+### Fase 1: Mapping ISIN → Ticker (Nuovo Edge Function)
 
-## Situazione Attuale
+Creare un servizio che converta gli ISIN in ticker usando multiple fonti:
 
-### Cosa funziona già
-- **Edge Function `fetch-market-prices`**: recupera prezzi da Yahoo Finance (azioni/ETF) e Tradier (opzioni USA)
-- **Hook `useLivePrices`**: polling ogni 5 minuti, restituisce prezzi live per ticker
-- **Dashboard**: mostra badge live nella colonna "Prezzo" della tabella posizioni
-- **Componenti UI**: `LivePriceBadge` e `LivePriceIndicator` già pronti
+1. **OpenFIGI API** (gratuita) - Database Bloomberg per mapping ISIN → Ticker
+2. **Yahoo Finance Search** - Fallback per cercare per ISIN
+3. **Cache locale** - Tabella `isin_mappings` per evitare chiamate ripetute
 
-### Cosa manca
-1. **I prezzi live sono solo visuali** - non aggiornano `current_price`, `market_value`, `profit_loss`
-2. **Strategie Derivati** - usa dati statici da `usePortfolio`, nessun prezzo live
-3. **Risk Analyzer** - calcola rischio su `current_price` statico, non si aggiorna
-4. **Netting Dashboard** - il calcolo usa prezzi del database, non live
-
----
-
-## Architettura della Soluzione
-
-```text
-                    ┌─────────────────────────────────────────┐
-                    │     LivePricesContext (NUOVO)           │
-                    │  - stockPrices, optionPrices            │
-                    │  - applyLivePricesToPositions()         │
-                    │  - polling ogni 5 min                   │
-                    └─────────────┬───────────────────────────┘
-                                  │
-          ┌───────────────────────┼───────────────────────┐
-          │                       │                       │
-          ▼                       ▼                       ▼
-    ┌───────────┐         ┌─────────────┐         ┌─────────────┐
-    │ Dashboard │         │ Derivatives │         │ Risk        │
-    │           │         │   Page      │         │ Analyzer    │
-    │ positions │         │ categories  │         │ analysis    │
-    │ con live  │         │ con live    │         │ con live    │
-    │ prices    │         │ prices      │         │ prices      │
-    └───────────┘         └─────────────┘         └─────────────┘
+**Nuova Edge Function: `resolve-isin`**
+```typescript
+// Input: ["IT0003132476", "US0378331005"]
+// Output: { "IT0003132476": "ENI.MI", "US0378331005": "AAPL" }
 ```
 
----
+### Fase 2: Mapping Underlying → Ticker per Opzioni
 
-## Fasi di Implementazione
+Creare una lookup table per convertire i nomi descrittivi in ticker:
 
-### Fase 1: Creare il Context Centralizzato per i Prezzi Live
+| Underlying (Excel)           | Ticker |
+|-----------------------------|--------|
+| APPLE COMPUTER, INC.        | AAPL   |
+| NVIDIA CORP                 | NVDA   |
+| AMAZON.COM.INC              | AMZN   |
+| META PLATFORMS              | META   |
+| GOOGLE INC. (A)             | GOOGL  |
 
-**Nuovo file: `src/contexts/LivePricesContext.tsx`**
+**Implementazione:**
+- Tabella statica `underlying_to_ticker` nell'edge function
+- Fallback: tentativo di parsing dal nome (es. "Tesla Inc" → "TSLA")
 
-Questo context:
-- Wrappa l'intera applicazione
-- Carica i prezzi live una sola volta (non duplica chiamate API)
-- Espone una funzione `applyLivePricesToPositions(positions)` che restituisce posizioni con prezzi aggiornati
-- Ricalcola automaticamente `current_price`, `market_value`, `profit_loss`
+### Fase 3: Provider Multipli per ETF
 
+Integrare **JustETF** per i prezzi degli ETF europei (già abbiamo l'edge function `fetch-etf-allocation`):
+
+1. **Yahoo Finance** - Provider primario per ETF USA (ticker tipo "VWO", "SPY")
+2. **JustETF Scraping** - Per ETF europei con ISIN (es. IE00B0M63623)
+3. **Borsa Italiana** - Per ETF quotati su Borsa Italiana (via scraping o API)
+
+**Flusso decisionale:**
+```
+ETF con ticker USA → Yahoo Finance
+ETF con ISIN + .MI → Yahoo Finance (es. "SWDA.MI")
+ETF con ISIN europeo → JustETF scraping (prezzo NAV)
+```
+
+### Fase 4: Feedback Visivo Variazione Prezzo (45 secondi)
+
+Modificare il sistema per:
+
+1. **Salvare il prezzo precedente** nel context
+2. **Confrontare con il nuovo prezzo** ad ogni fetch
+3. **Applicare classe CSS temporanea** (`price-up` / `price-down`)
+4. **Rimuovere dopo 45 secondi** via timeout
+
+**Nuova interfaccia LivePriceData:**
 ```typescript
-// Logica di ricalcolo per ogni posizione
-function recalculatePosition(position, livePrice) {
-  const newPrice = livePrice?.price ?? position.current_price;
-  const quantity = position.quantity;
-  const avgCost = position.avg_cost ?? 0;
-  const exchangeRate = position.exchange_rate ?? 1;
-  
-  // Per derivati: moltiplicatore 100
-  const multiplier = position.asset_type === 'derivative' ? 100 : 1;
-  
-  const marketValue = (newPrice * quantity * multiplier) / exchangeRate;
-  const costBasis = (avgCost * quantity * multiplier) / exchangeRate;
-  const profitLoss = marketValue - costBasis;
-  
-  return {
-    ...position,
-    current_price: newPrice,
-    market_value: marketValue,
-    profit_loss: profitLoss,
-    _isLive: true, // flag per indicare prezzo live
-  };
+interface LivePriceData {
+  // ... campi esistenti
+  previousPrice: number | null;  // NUOVO
+  priceDirection: 'up' | 'down' | null;  // NUOVO
+  directionTimestamp: number | null;  // NUOVO (per timeout 45s)
 }
 ```
 
-### Fase 2: Nuovo Hook `usePositionsWithLivePrices`
-
-**Nuovo file: `src/hooks/usePositionsWithLivePrices.ts`**
-
-Hook che combina `usePortfolio` con i prezzi live dal context:
-
-```typescript
-function usePositionsWithLivePrices() {
-  const { positions, summary, ... } = usePortfolio();
-  const { applyLivePricesToPositions, isLoading, lastFetched } = useLivePricesContext();
-  
-  const livePositions = useMemo(() => 
-    applyLivePricesToPositions(positions),
-    [positions, applyLivePricesToPositions]
-  );
-  
-  // Ricalcola summary con prezzi live
-  const liveSummary = useMemo(() => 
-    calculateSummary(livePositions),
-    [livePositions]
-  );
-  
-  return { positions: livePositions, summary: liveSummary, isLive: true, ... };
-}
-```
-
-### Fase 3: Aggiornare la Pagina Strategie Derivati
-
-**File: `src/pages/Derivatives.tsx`**
-
-Modifiche:
-1. Importare e usare `usePositionsWithLivePrices` invece di `usePortfolio`
-2. Aggiungere `LivePriceIndicator` nell'header
-3. Le categorie (Covered Call, Naked Put, etc.) useranno automaticamente i prezzi live
-4. I calcoli P/L si aggiorneranno in tempo reale
-
-```typescript
-// Prima
-const { portfolio, positions, isLoading } = usePortfolio();
-
-// Dopo
-const { portfolio, positions, isLoading, isLive, lastFetched, refresh } = usePositionsWithLivePrices();
-```
-
-**Miglioramenti UI**:
-- Badge "LIVE" pulsante accanto ai prezzi aggiornati
-- Indicatore stato connessione nell'header
-- Pulsante refresh manuale
-
-### Fase 4: Aggiornare il Risk Analyzer
-
-**File: `src/hooks/useRiskAnalysis.ts`**
-
-Modifiche:
-1. Accettare posizioni con prezzi live come parametro
-2. Ricalcolare tutti i rischi in tempo reale
-
-```typescript
-// Prima
-export function useRiskAnalysis() {
-  const { positions, isLoading } = usePortfolio();
-  // ... calcoli su prezzi statici
+**CSS animato:**
+```css
+.price-up {
+  color: #22c55e !important;  /* text-profit */
+  animation: pulse-green 0.5s ease-out;
 }
 
-// Dopo
-export function useRiskAnalysis(livePositions?: Position[]) {
-  const { positions: dbPositions, isLoading } = usePortfolio();
-  const positions = livePositions ?? dbPositions;
-  // ... calcoli su prezzi live
+.price-down {
+  color: #ef4444 !important;  /* text-loss */
+  animation: pulse-red 0.5s ease-out;
 }
 ```
-
-**File: `src/pages/RiskAnalyzer.tsx`**
-
-Modifiche:
-1. Usare `usePositionsWithLivePrices`
-2. Passare posizioni live a `useRiskAnalysis`
-3. Aggiungere `LivePriceIndicator` nell'header
-4. I valori di rischio si aggiorneranno automaticamente
-
-**Impatto sui calcoli**:
-- `totalStockRisk`: ricalcolato con prezzi azioni live
-- `totalNakedPutRisk`: invariato (basato su strike, non prezzo)
-- `totalLeapCallRisk`: invariato (basato su PMC, non prezzo)
-- `totalStrategyRisk`: Max Loss invariato (basato su spread width)
-
-### Fase 5: Aggiornare Dashboard per Netting Live
-
-**File: `src/hooks/useDerivativeNetting.ts`**
-
-Il netting già usa `current_price` dalle posizioni. Con posizioni live, il netting si aggiornerà automaticamente:
-- `nettingTotal`: aggiornato con prezzi opzioni live
-- `nettingExCoveredCall`: aggiornato (ITM/OTM check con prezzo live sottostante)
-
-**File: `src/components/dashboard/Dashboard.tsx`**
-
-Modifiche:
-1. Usare `usePositionsWithLivePrices`
-2. Il netting si aggiornerà automaticamente
-3. I grafici mostreranno valori live
-
-### Fase 6: Componenti UI Aggiuntivi
-
-**Nuovo file: `src/components/derivatives/LivePriceCell.tsx`**
-
-Cella specializzata per mostrare prezzi live nelle tabelle derivati:
-
-```typescript
-function LivePriceCell({ option, livePrice }) {
-  return (
-    <div className="flex items-center gap-1">
-      <span>{formatCurrency(livePrice?.price ?? option.current_price)}</span>
-      {livePrice && (
-        <Badge variant="outline" className="text-xs animate-pulse">
-          LIVE
-        </Badge>
-      )}
-    </div>
-  );
-}
-```
-
----
-
-## Dettagli Tecnici
-
-### Gestione dello Stato
-
-```text
-App.tsx
-  └─ LivePricesProvider
-       └─ AuthProvider
-            └─ PortfolioProvider
-                 └─ Routes
-                      ├─ Dashboard (usePositionsWithLivePrices)
-                      ├─ Derivatives (usePositionsWithLivePrices)
-                      └─ RiskAnalyzer (usePositionsWithLivePrices)
-```
-
-### Ottimizzazione Performance
-
-1. **Single Source of Truth**: un solo polling per tutta l'app
-2. **Memoizzazione**: `useMemo` per ricalcoli costosi
-3. **Debouncing**: evita ricalcoli troppo frequenti
-4. **Lazy Loading**: i prezzi si caricano solo quando la pagina è visibile
-
-### Gestione Errori
-
-- Se il fetch fallisce, si usano i prezzi del database come fallback
-- Indicatore visivo rosso se disconnesso
-- Toast notification per errori persistenti
 
 ---
 
@@ -247,43 +116,146 @@ App.tsx
 
 | File | Descrizione |
 |------|-------------|
-| `src/contexts/LivePricesContext.tsx` | Context provider per prezzi live centralizzato |
-| `src/hooks/usePositionsWithLivePrices.ts` | Hook che combina posizioni + prezzi live |
-| `src/components/derivatives/LivePriceCell.tsx` | Componente cella con prezzo live |
+| `supabase/functions/resolve-isin/index.ts` | Edge function per mapping ISIN → Ticker via OpenFIGI |
+| `src/lib/underlyingToTicker.ts` | Lookup table per underlying opzioni |
 
 ## File da Modificare
 
 | File | Modifiche |
 |------|-----------|
-| `src/App.tsx` | Wrap con `LivePricesProvider` |
-| `src/pages/Derivatives.tsx` | Usare hook live + aggiungere indicatore |
-| `src/pages/RiskAnalyzer.tsx` | Usare hook live + aggiungere indicatore |
-| `src/hooks/useRiskAnalysis.ts` | Accettare posizioni esterne |
-| `src/components/dashboard/Dashboard.tsx` | Usare hook live (opzionale, già funziona) |
+| `supabase/functions/fetch-market-prices/index.ts` | Aggiungere supporto ISIN, integrare JustETF per ETF, aggiungere mapping underlying |
+| `src/contexts/LivePricesContext.tsx` | Salvare prezzi precedenti, calcolare direzione, gestire timeout 45s |
+| `src/components/dashboard/LivePriceBadge.tsx` | Applicare classi CSS per variazione prezzo |
+| `src/index.css` | Aggiungere stili animati per price-up/price-down |
+| `supabase/migrations/` | Nuova tabella `isin_mappings` per cache |
+
+## Database: Nuova Tabella
+
+```sql
+CREATE TABLE isin_mappings (
+  isin TEXT PRIMARY KEY,
+  ticker TEXT NOT NULL,
+  exchange TEXT,
+  source TEXT NOT NULL, -- 'openfigi', 'yahoo', 'manual'
+  last_verified_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 
 ---
 
-## Risultato Finale
+## Architettura Aggiornata
 
-Dopo l'implementazione:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    LivePricesContext                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐      │
+│  │ previousPrices │  │ currentPrices │  │ priceDirections (45s) │      │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘      │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                   fetch-market-prices (Edge Function)                │
+│                                                                      │
+│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            │
+│  │  resolve-isin │  │ Yahoo Finance │  │    Tradier    │            │
+│  │  (OpenFIGI)   │  │  (Stock/ETF)  │  │   (Options)   │            │
+│  └───────┬───────┘  └───────┬───────┘  └───────┬───────┘            │
+│          │                  │                  │                     │
+│          ▼                  ▼                  ▼                     │
+│  ┌───────────────────────────────────────────────────────┐          │
+│  │           Underlying → Ticker Mapping                  │          │
+│  │  "APPLE COMPUTER, INC." → "AAPL"                      │          │
+│  │  "NVIDIA CORP" → "NVDA"                               │          │
+│  └───────────────────────────────────────────────────────┘          │
+│                                                                      │
+│  ┌───────────────────────────────────────────────────────┐          │
+│  │           JustETF (fallback per ETF europei)          │          │
+│  │  ISIN IE00B0M63623 → Prezzo NAV                       │          │
+│  └───────────────────────────────────────────────────────┘          │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-1. **Dashboard**: continua a funzionare, con netting che usa prezzi live
-2. **Strategie Derivati**: 
-   - Prezzi opzioni aggiornati ogni 5 min
-   - P/L ricalcolato in tempo reale
-   - Badge LIVE sui prezzi aggiornati
-3. **Risk Analyzer**:
-   - Esposizione equity ricalcolata con prezzi live
-   - Grafico distribuzione rischio aggiornato
-   - Currency exposure aggiornata
+---
+
+## Dettaglio Implementazione: Feedback Visivo 45s
+
+### LivePricesContext.tsx
+
+```typescript
+interface PriceState {
+  current: LivePriceData;
+  previous: LivePriceData | null;
+  direction: 'up' | 'down' | null;
+  directionExpiresAt: number | null;  // timestamp in ms
+}
+
+// Nel fetchPrices, confronta con i prezzi precedenti
+const newStockPrices = { ...data.stocks };
+for (const [symbol, newPrice] of Object.entries(newStockPrices)) {
+  const oldPrice = previousStockPrices[symbol];
+  if (oldPrice && newPrice.price && oldPrice.price) {
+    if (newPrice.price > oldPrice.price) {
+      newPrice.priceDirection = 'up';
+      newPrice.directionTimestamp = Date.now();
+    } else if (newPrice.price < oldPrice.price) {
+      newPrice.priceDirection = 'down';
+      newPrice.directionTimestamp = Date.now();
+    }
+  }
+}
+```
+
+### LivePriceBadge.tsx
+
+```typescript
+const isDirectionActive = livePrice.directionTimestamp && 
+  (Date.now() - livePrice.directionTimestamp) < 45000;
+
+const priceClass = isDirectionActive
+  ? livePrice.priceDirection === 'up' 
+    ? 'text-profit animate-pulse-once' 
+    : 'text-loss animate-pulse-once'
+  : '';
+```
+
+---
+
+## Priorità e Dipendenze
+
+1. **Fase 1 (Critica)**: Mapping ISIN → Ticker
+   - Senza questo, nessun prezzo stock/ETF funziona
+   
+2. **Fase 2 (Critica)**: Mapping Underlying → Ticker  
+   - Senza questo, nessun prezzo opzione funziona
+   
+3. **Fase 3 (Miglioramento)**: JustETF per ETF europei
+   - Fallback per ETF senza ticker Yahoo
+   
+4. **Fase 4 (UX)**: Feedback visivo 45 secondi
+   - Puramente estetico, non blocca funzionalità
+
+---
+
+## Verifica Token Tradier
+
+Prima di procedere, devo verificare che il token Tradier sia valido:
+
+1. **Controllare che sia un token di produzione** (non sandbox)
+2. **Verificare scadenza** - I token Tradier possono scadere
+3. **Rigenerare se necessario** - Dalla dashboard Tradier
+
+**Formato atteso:**
+- Produzione: `Bearer XXXXX` (token alfanumerico ~30 caratteri)
+- Sandbox: Richiede endpoint diverso (`sandbox.tradier.com`)
 
 ---
 
 ## Stima Effort
 
-- **Fase 1-2** (Context + Hook): ~2 messaggi
-- **Fase 3** (Derivatives): ~1 messaggio  
-- **Fase 4** (Risk Analyzer): ~1 messaggio
-- **Fase 5-6** (Dashboard + UI): ~1 messaggio
+- **Fase 1** (ISIN → Ticker): ~2 messaggi
+- **Fase 2** (Underlying → Ticker): ~1 messaggio  
+- **Fase 3** (JustETF): ~1 messaggio
+- **Fase 4** (Feedback 45s): ~1 messaggio
 
-**Totale stimato**: 4-5 messaggi per implementazione completa
+**Totale stimato**: 5 messaggi per implementazione completa
