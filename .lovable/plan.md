@@ -1,37 +1,130 @@
-# Sector Mapping - Implementazione Completata ✓
 
-## Problema Originale
-La Sector Allocation View mostrava tutto come "Other" perché i settori non venivano recuperati dinamicamente.
+# Piano: Gestione Semi-Manuale dei Settori
 
-## Soluzione Implementata
+## Situazione Attuale
 
-### 1. Edge Function `update-prices-cron`
-- Aggiunta funzione `fetchYahooSectorInfo()` con mapping esteso per ticker noti
-- Aggiunto handler per modalità `update-sectors` che popola settori mancanti
-- I settori vengono salvati nella tabella `isin_mappings`
+| Titoli con Settore | Titoli Senza Settore |
+|-------------------|---------------------|
+| NVIDIA → Technology | ALPHABET → ? |
+| APPLE → Technology | JPMORGAN → ? |
+| ALIBABA → Consumer Cyclical | FIRST SOLAR → ? |
+| PALANTIR → Technology | PALO ALTO → ? |
+| UNITEDHEALTH → Healthcare | SUPER MICRO → ? |
+| ... | ~25 altri titoli |
 
-### 2. Frontend Hook `useSectorMappings`
-- Quando l'utente apre la vista Sector, il hook:
-  1. Carica i mappings esistenti dal database
-  2. Identifica gli ISIN senza settore
-  3. Chiama automaticamente l'edge function per popolarli
-  4. Ricarica i dati aggiornati
+**Risposta alla tua domanda**: Sì, i dati sono condivisi! Una volta che viene salvato che "NVDA = Technology", **tutti gli utenti** beneficiano di questo dato perché la tabella `isin_mappings` ha policy RLS pubblica per la lettura.
 
-### 3. Flusso Automatico
+---
+
+## Soluzione Proposta
+
+### Approccio: Pannello Admin per Gestione Settori
+
+Creare un'interfaccia nell'Admin Panel che permette di:
+1. Vedere tutti i ticker senza settore assegnato
+2. Assegnare manualmente il settore da un dropdown
+3. Il dato viene salvato e diventa disponibile per tutti
+
 ```
-Upload Excel → Posizione salvata → Sector View → Auto-fetch settori → Visualizzazione corretta
+┌─────────────────────────────────────────────────────────────────┐
+│  Admin Panel > Gestione Settori                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Titoli senza settore: 25                                       │
+│                                                                 │
+│  ┌─────────────┬────────────┬───────────────────┬────────────┐ │
+│  │ ISIN        │ Ticker     │ Settore           │ Azione     │ │
+│  ├─────────────┼────────────┼───────────────────┼────────────┤ │
+│  │ US02079K... │ (ricerca)  │ [Seleziona...]  ▼ │ [Salva]    │ │
+│  │ US46625H... │ JPM        │ [Financials]    ▼ │ [Salva]    │ │
+│  │ US33643...  │ FSLR       │ [Energy]        ▼ │ [Salva]    │ │
+│  └─────────────┴────────────┴───────────────────┴────────────┘ │
+│                                                                 │
+│  [Popola tutti con Yahoo Finance]                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Ticker Mappati
-- **Technology**: NVDA, AAPL, MSFT, AMD, INTC, AVGO, CRM, ORCL, ADBE, PLTR, CRWV, etc.
-- **Communication Services**: META, GOOGL, NFLX, DIS
-- **Healthcare**: UNH, JNJ, PFE, LLY, NVO
-- **Financial Services**: JPM, V, MA, GS, PYPL
-- **Energy**: XOM, CVX, ENI.MI, CEG (Utilities)
-- **Consumer Cyclical**: AMZN, TSLA, BABA, 1211.HK (BYD)
-- **Commodities**: SGLD.L (Gold)
+---
 
-## Note
-- Gli ETF restano classificati come "ETF" (diversificati, nessun settore singolo)
-- L'API Yahoo v10/quoteSummary è stata bloccata (401), si usa mapping locale + v7 fallback
-- I nuovi ticker non mappati richiederanno aggiornamento del mapping o uso di API alternative
+## Modifiche Tecniche
+
+### 1. Aggiungere RLS per INSERT/UPDATE su isin_mappings (solo admin)
+
+**File**: Migrazione SQL
+
+```sql
+-- Permettere agli admin di inserire/aggiornare i mappings
+CREATE POLICY "Admins can manage isin mappings"
+  ON isin_mappings
+  FOR ALL
+  USING (has_role(auth.uid(), 'admin'))
+  WITH CHECK (has_role(auth.uid(), 'admin'));
+```
+
+### 2. Creare Componente SectorMappingManager
+
+**File**: `src/components/admin/SectorMappingManager.tsx`
+
+Componente che mostra:
+- Lista di ISIN senza settore
+- Dropdown per selezione settore (Technology, Financials, Healthcare, etc.)
+- Pulsante per salvare il mapping
+- Pulsante per tentare auto-popolamento via Yahoo
+
+### 3. Integrare nel Pannello Admin
+
+**File**: `src/components/admin/AdminPanel.tsx`
+
+Aggiungere una nuova tab "Gestione Settori"
+
+### 4. Ottimizzare Edge Function per Auto-Detect
+
+Migliorare `fetchYahooSectorInfo` per:
+- Usare la Yahoo Quote API v7 con campo `quoteType`
+- Fallback a lookup per nome azienda
+
+---
+
+## Vantaggi
+
+| Aspetto | Descrizione |
+|---------|-------------|
+| **Condivisione** | Un settore salvato è disponibile per tutti gli utenti |
+| **Controllo** | L'admin può correggere manualmente mappature errate |
+| **Flessibilità** | Mix di auto-popolamento + correzione manuale |
+| **Scalabilità** | I nuovi titoli vengono gestiti man mano che servono |
+
+---
+
+## File da Creare/Modificare
+
+| File | Azione |
+|------|--------|
+| Migrazione SQL | Crea | Policy RLS per admin |
+| `src/components/admin/SectorMappingManager.tsx` | Crea | UI gestione settori |
+| `src/components/admin/AdminPanel.tsx` | Modifica | Aggiungere tab settori |
+| `supabase/functions/update-prices-cron/index.ts` | Modifica | Migliorare auto-detect |
+
+---
+
+## Flusso Operativo
+
+1. **Admin** accede al pannello e vede i titoli senza settore
+2. **Admin** assegna manualmente il settore (es. ALPHABET → Technology)
+3. **Sistema** salva in `isin_mappings`
+4. **Tutti gli utenti** vedono automaticamente il settore corretto nella vista Sector Allocation
+
+---
+
+## Settori Standard (GICS)
+
+- Technology
+- Financials
+- Healthcare
+- Consumer Discretionary (Consumer Cyclical)
+- Consumer Staples (Consumer Defensive)
+- Industrials
+- Energy
+- Materials
+- Utilities
+- Real Estate
+- Communication Services
