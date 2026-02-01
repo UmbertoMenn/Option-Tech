@@ -69,10 +69,25 @@ function getOrCreateCurrency(
   return map.get(currency)!;
 }
 
+// Pattern per riconoscere ETF dai principali emittenti (sincronizzato con excelParser.ts)
+const ETF_ISSUER_PATTERNS = [
+  'ETF', 'UCITS',
+  'ISHARES', 'ISHSIII', 'ISHSIV', 'ISHSV', 'ISHSVII',
+  'VANGUARD', 'VNG',
+  'SPDR', 'SSG',
+  'LYXOR', 'AMUNDI',
+  'XTRACKERS', 'XTRK',
+  'INVESCO',
+  'VANECK',
+  'WISDOMTREE', 'WTR',
+  'UBS ETF',
+  'HSBC ETF',
+  'FRANKLIN'
+];
+
 function isETFByDescription(description: string): boolean {
-  const etfKeywords = ['ETF', 'ISHARES', 'VANGUARD', 'SPDR', 'LYXOR', 'XTRACKERS', 'AMUNDI', 'INVESCO'];
   const upperDesc = description.toUpperCase();
-  return etfKeywords.some(kw => upperDesc.includes(kw));
+  return ETF_ISSUER_PATTERNS.some(kw => upperDesc.includes(kw));
 }
 
 export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExposure[] {

@@ -5,6 +5,68 @@ interface ExcelRow {
   [key: string]: string | number | null | undefined;
 }
 
+// Pattern per riconoscere ETF dai principali emittenti
+const ETF_ISSUER_PATTERNS = [
+  'ETF', 'UCITS',
+  // iShares (BlackRock)
+  'ISHARES', 'ISHSIII', 'ISHSIV', 'ISHSV', 'ISHSVII',
+  // Vanguard
+  'VANGUARD', 'VNG',
+  // State Street (SPDR)
+  'SPDR', 'SSG',
+  // Lyxor (Amundi)
+  'LYXOR', 'AMUNDI',
+  // Xtrackers (DWS)
+  'XTRACKERS', 'XTRK',
+  // Invesco
+  'INVESCO',
+  // VanEck
+  'VANECK',
+  // WisdomTree
+  'WISDOMTREE', 'WTR',
+  // UBS
+  'UBS ETF',
+  // HSBC
+  'HSBC ETF',
+  // Franklin Templeton
+  'FRANKLIN'
+];
+
+// Index patterns che indicano un ETF quando combinati con ISIN IE/LU
+const ETF_INDEX_PATTERNS = ['MSCI', 'FTSE', 'S&P', 'STOXX', 'NASDAQ', 'DOW', 'RUSSELL', 'EURO'];
+
+/**
+ * Check if ISIN suggests European ETF domicile
+ */
+function isLikelyETFByISIN(isin: string | undefined): boolean {
+  if (!isin) return false;
+  const prefix = isin.substring(0, 2).toUpperCase();
+  return prefix === 'IE' || prefix === 'LU';
+}
+
+/**
+ * Advanced ETF detection based on description and ISIN
+ */
+function isETF(description: string, isin?: string): boolean {
+  const descUpper = description.toUpperCase();
+  
+  // Check emitter patterns
+  for (const pattern of ETF_ISSUER_PATTERNS) {
+    if (descUpper.includes(pattern)) {
+      return true;
+    }
+  }
+  
+  // Check ISIN prefix (IE/LU) + description patterns
+  if (isLikelyETFByISIN(isin)) {
+    if (ETF_INDEX_PATTERNS.some(p => descUpper.includes(p))) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 export async function parsePortfolioExcel(file: File): Promise<{
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
@@ -323,8 +385,8 @@ function parsePositionRow(
         /\b\d+[.,]\d+%\s/.test(descUpper)) { // Pattern like "0.125%" indicates a bond coupon
       finalAssetType = 'bond';
     }
-    // Match ETF or UCITS as whole words only, not as substrings
-    else if (/\bETF\b/.test(descUpper) || /\bUCITS\b/.test(descUpper)) {
+    // Use advanced ETF detection
+    else if (isETF(description, isin || undefined)) {
       finalAssetType = 'etf';
     }
   }

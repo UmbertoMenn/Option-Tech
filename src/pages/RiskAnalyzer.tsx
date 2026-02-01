@@ -35,6 +35,9 @@ export function RiskAnalyzer() {
     [analysis]
   );
   
+  // Pattern per riconoscere ETF (sincronizzato con excelParser.ts e currencyExposure.ts)
+  const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
+  
   // Extract ETF ISINs from stock details - look for instruments marked as ETF
   const etfIsins = useMemo(() => {
     const isins: string[] = [];
@@ -43,9 +46,8 @@ export function RiskAnalyzer() {
     for (const stock of analysis.stockDetails) {
       if (stock.isin && !seen.has(stock.isin)) {
         seen.add(stock.isin);
-        // Check underlying name for ETF keywords
-        const isETF = /ETF|ISHARES|VANGUARD|SPDR|LYXOR|XTRACKERS|AMUNDI|INVESCO|VANECK/i.test(stock.underlying);
-        if (isETF) {
+        // Check underlying name for ETF keywords with expanded patterns
+        if (ETF_PATTERN.test(stock.underlying)) {
           isins.push(stock.isin);
         }
       }
