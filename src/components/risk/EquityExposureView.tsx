@@ -252,7 +252,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {etfDetails.map((stock, index) => {
                   const protectedPct = stock.stockValue > 0 
                     ? (stock.protectedValue / stock.stockValue) * 100 
@@ -260,7 +260,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                   const riskPct = 100 - protectedPct;
                   
                   return (
-                    <div key={index} className="p-4 rounded-lg bg-muted/50 space-y-3">
+                    <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
                       <div className="flex justify-between items-start">
                         <div>
                           <div className="font-semibold flex items-center gap-2">
@@ -286,19 +286,19 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
-                          <span className="text-muted-foreground">Valore ETF:</span>
+                          <span className="text-muted-foreground">Valore:</span>
                           <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.stockValue, 0)}</span>
                         </div>
                         {stock.hasProtection && (
                           <>
                             <div>
-                              <span className="text-muted-foreground">PUT Strike:</span>
+                              <span className="text-muted-foreground">PUT:</span>
                               <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.protectionStrike || 0)}</span>
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Contratti:</span>
+                              <span className="text-muted-foreground">Ctr:</span>
                               <span className="ml-2 font-medium">{stock.protectionContracts}</span>
                             </div>
                           </>
@@ -306,8 +306,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                       </div>
                       
                       {/* Protection Bar */}
-                      <div className="space-y-1">
-                        <div className="h-4 rounded-full overflow-hidden flex">
+                      <div className="h-3 rounded-full overflow-hidden flex">
                           {protectedPct > 0 && (
                             <div 
                               className="bg-green-500 h-full flex items-center justify-center"
@@ -330,7 +329,6 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                               </span>
                             )}
                           </div>
-                        </div>
                       </div>
                     </div>
                   );
@@ -357,7 +355,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {pureStockDetails.map((stock, index) => {
                   const protectedPct = stock.stockValue > 0 
                     ? (stock.protectedValue / stock.stockValue) * 100 
@@ -365,7 +363,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                   const riskPct = 100 - protectedPct;
                   
                   return (
-                    <div key={index} className="p-4 rounded-lg bg-muted/50 space-y-3">
+                    <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
                       <div className="flex justify-between items-start">
                         <div>
                           <div className="font-semibold flex items-center gap-2">
@@ -391,19 +389,19 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
-                          <span className="text-muted-foreground">Valore Azioni:</span>
+                          <span className="text-muted-foreground">Valore:</span>
                           <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.stockValue, 0)}</span>
                         </div>
                         {stock.hasProtection && (
                           <>
                             <div>
-                              <span className="text-muted-foreground">PUT Strike:</span>
+                              <span className="text-muted-foreground">PUT:</span>
                               <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.protectionStrike || 0)}</span>
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Contratti:</span>
+                              <span className="text-muted-foreground">Ctr:</span>
                               <span className="ml-2 font-medium">{stock.protectionContracts}</span>
                             </div>
                           </>
@@ -411,8 +409,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                       </div>
                       
                       {/* Protection Bar */}
-                      <div className="space-y-1">
-                        <div className="h-4 rounded-full overflow-hidden flex">
+                      <div className="h-3 rounded-full overflow-hidden flex">
                           {protectedPct > 0 && (
                             <div 
                               className="bg-green-500 h-full flex items-center justify-center"
@@ -435,7 +432,6 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                               </span>
                             )}
                           </div>
-                        </div>
                       </div>
                     </div>
                   );
