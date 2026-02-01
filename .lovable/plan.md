@@ -1,179 +1,265 @@
 
-# Piano: Sincronizzazione Frontend con Aggiornamenti Server-Side
+# Piano: Implementare Yahoo Finance per Prezzi Opzioni
 
-## Problema Attuale
+## Conferma: Yahoo Finance Offre Dati Opzioni
 
-Il sistema presenta una **duplicazione di logica** e un **gap di sincronizzazione**:
+**Sì, Yahoo Finance offre dati sulle opzioni USA con un ritardo di circa 15 minuti**, completamente gratuito e senza necessità di API key.
 
-### Flusso Attuale (Problematico)
-
-| Componente | Cosa Fa | Problema |
-|------------|---------|----------|
-| **Cron Job (Server)** | Aggiorna `positions` nel DB ogni 5 min | ✅ Funziona |
-| **LivePricesContext (Client)** | Chiama `fetch-market-prices` ogni 5 min | ❌ Duplicato! |
-| **usePortfolio (Client)** | Legge dal DB una sola volta | ❌ Non vede gli aggiornamenti |
-| **Dashboard/Derivatives/Risk** | Usano dati misti | ⚠️ Inconsistenza |
-
-### Comportamento Attuale
-- **Utente online**: Il client chiama le API dei prezzi in parallelo al cron, sovrascrivendo i dati DB
-- **Utente offline**: I dati nel DB vengono aggiornati dal cron, ma quando l'utente torna online vede ancora i vecchi dati in cache
-- **Cambio pagina**: Nessun refresh dei dati - la cache di React Query mantiene dati stantii
+### Dati Disponibili
+- `lastPrice` - ultimo prezzo scambiato
+- `bid` / `ask` - denaro/lettera
+- `change` / `percentChange` - variazione giornaliera
+- `volume` - volume giornaliero
+- `openInterest` - open interest
+- `impliedVolatility` - volatilità implicita
 
 ---
 
-## Soluzione Proposta
+## Endpoint API
 
-Unificare il sistema in modo che:
-1. **Il cron job rimane l'unica fonte di aggiornamento prezzi**
-2. **Il client fa polling sul database** per leggere i dati aggiornati
-3. **Tutte le pagine vedono gli stessi dati** provenienti dal database
+```
+GET https://query1.finance.yahoo.com/v7/finance/options/{TICKER}?date={EXPIRY_UNIX}
+```
 
-### Nuova Architettura
+Esempio:
+```
+https://query1.finance.yahoo.com/v7/finance/options/TSLA?date=1745539200
+```
+
+Risposta:
+```json
+{
+  "optionChain": {
+    "result": [{
+      "options": [{
+        "calls": [
+          {
+            "contractSymbol": "TSLA250425C00050000",
+            "strike": 50.0,
+            "lastPrice": 174.51,
+            "bid": 176.30,
+            "ask": 178.90,
+            "change": -14.70,
+            "percentChange": -7.77,
+            "volume": 12,
+            "openInterest": 12,
+            "impliedVolatility": 5.04
+          }
+        ],
+        "puts": [...]
+      }]
+    }]
+  }
+}
+```
+
+---
+
+## Vantaggi Rispetto a Tradier
+
+| Aspetto | Tradier | Yahoo Finance |
+|---------|---------|---------------|
+| Costo | Richiede API Key (scaduta) | **Gratuito** |
+| Delay | Real-time (con abbonamento) | **~15 minuti** |
+| Dati Extra | Solo prezzo | **IV, Greeks, Open Interest** |
+| Rate Limit | Basso | Moderato |
+| Affidabilità | Dipende da subscription | Molto stabile |
+
+---
+
+## Strategia di Implementazione
+
+### Sfida Principale
+Yahoo non permette di richiedere opzioni specifiche per contract symbol. Bisogna:
+1. Raggruppare le opzioni per underlying ticker
+2. Raggruppare per data di scadenza
+3. Fare una chiamata per ogni combinazione ticker+expiry
+4. Cercare l'opzione specifica nella risposta
+
+### Logica
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                    CRON JOB (ogni 5 min)                            │
-│              update-prices-cron → positions table                   │
-└─────────────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    DATABASE (positions)                              │
-│  - current_price: aggiornato dal cron                               │
-│  - market_value: ricalcolato dal cron                               │
-│  - updated_at: timestamp ultimo aggiornamento                       │
-└─────────────────────────────────────────────────────────────────────┘
-                            │
-                            │ POLLING ogni 60 secondi (READ-ONLY)
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    FRONTEND                                          │
-│                                                                      │
-│  usePortfolio() → refetchInterval: 60000                            │
-│  LivePricesContext → SEMPLIFICATO (solo tracking direzione)         │
-│                                                                      │
-│  Dashboard ──┐                                                       │
-│  Derivatives ─┼── Tutti leggono dallo stesso hook                   │
-│  Risk Analyzer┘                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+Opzioni richieste:
+├── TSLA 2025-04-25 Call $250
+├── TSLA 2025-04-25 Put $200
+├── TSLA 2025-05-16 Call $300
+├── AAPL 2025-04-25 Call $200
+└── AAPL 2025-04-25 Put $180
+
+Chiamate API ottimizzate:
+1. GET /options/TSLA?date=1745539200  → contiene entrambe le opzioni Apr 25
+2. GET /options/TSLA?date=1747353600  → contiene opzione May 16
+3. GET /options/AAPL?date=1745539200  → contiene entrambe le opzioni Apr 25
 ```
 
 ---
 
-## Modifiche da Implementare
+## Modifiche al Codice
 
-### Fase 1: Aggiungere Polling al Database
+### File: `supabase/functions/fetch-market-prices/index.ts`
 
-**File: `src/hooks/usePortfolio.ts`**
-
-Modificare la query delle posizioni per fare polling ogni 60 secondi:
+#### 1. Aggiungere `'yahoo-options'` come source
 
 ```typescript
-const positionsQuery = useQuery({
-  queryKey: ['positions', portfolio?.id],
-  queryFn: async () => { ... },
-  enabled: !!portfolio?.id,
-  refetchInterval: 60000, // Polling ogni 60 secondi
-  staleTime: 30000, // Considera i dati freschi per 30 secondi
-});
-```
-
-### Fase 2: Semplificare LivePricesContext
-
-**File: `src/contexts/LivePricesContext.tsx`**
-
-Rimuovere il polling client-side delle API esterne. Il context diventa solo:
-1. **Storage per i prezzi precedenti** (per il feedback visivo 45s)
-2. **Tracking della direzione** (up/down)
-3. **Nessuna chiamata a fetch-market-prices**
-
-I dati vengono presi direttamente dal database (già aggiornati dal cron).
-
-### Fase 3: Semplificare usePositionsWithLivePrices
-
-**File: `src/hooks/usePositionsWithLivePrices.ts`**
-
-Invece di "applicare prezzi live" ai dati DB, ora:
-1. Legge i dati dal DB (già aggiornati dal cron)
-2. Confronta con i valori precedenti per calcolare la direzione
-3. Passa i dati direttamente alle pagine
-
-### Fase 4: Aggiornare il Feedback Visivo
-
-Il feedback visivo rosso/verde per 45 secondi deve ora basarsi su:
-1. Salvare l'ultimo `current_price` noto per ogni posizione
-2. Quando il polling porta nuovi dati, confrontare con il vecchio prezzo
-3. Applicare la classe CSS appropriata
-
----
-
-## Vantaggi della Nuova Architettura
-
-| Aspetto | Prima | Dopo |
-|---------|-------|------|
-| Chiamate API prezzi | Client + Server (duplicato) | Solo Server (cron) |
-| Consistenza dati | Potenziale mismatch | Sempre consistente |
-| Carico su API esterne | Ogni utente chiama Yahoo/Tradier | Una sola chiamata ogni 5 min |
-| Utente offline | Dati nel DB non visibili al ritorno | Vede subito dati aggiornati |
-| Pagine sincronizzate | Ognuna può avere dati diversi | Tutte vedono gli stessi dati |
-
----
-
-## Dettagli Tecnici
-
-### Polling con React Query
-
-```typescript
-// usePortfolio.ts
-const positionsQuery = useQuery({
-  queryKey: ['positions', portfolio?.id],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('positions')
-      .select('*')
-      .eq('portfolio_id', portfolio.id);
-    return data as Position[];
-  },
-  enabled: !!portfolio?.id,
-  refetchInterval: 60000,      // Poll ogni 60 secondi
-  refetchIntervalInBackground: false, // Non pollare in background
-  staleTime: 30000,            // Cache valida per 30s
-});
-```
-
-### Tracking Direzione Prezzi
-
-```typescript
-// LivePricesContext.tsx (semplificato)
-interface PriceHistory {
-  [positionId: string]: {
-    previousPrice: number;
-    currentPrice: number;
-    direction: 'up' | 'down' | null;
-    directionTimestamp: number | null;
-  };
+interface PriceData {
+  // ...
+  source: 'tradier' | 'yahoo' | 'justetf' | 'yahoo-options' | 'error';
+  // ...
 }
+```
 
-// Quando arrivano nuovi dati dal DB polling:
-function updatePriceHistory(positions: Position[]) {
-  const newHistory = {};
-  for (const pos of positions) {
-    const old = priceHistory[pos.id];
-    const direction = 
-      !old ? null :
-      pos.current_price > old.currentPrice ? 'up' :
-      pos.current_price < old.currentPrice ? 'down' : 
-      old.direction; // mantieni se invariato
-    
-    newHistory[pos.id] = {
-      previousPrice: old?.currentPrice ?? pos.current_price,
-      currentPrice: pos.current_price,
-      direction,
-      directionTimestamp: direction !== old?.direction ? Date.now() : old?.directionTimestamp,
-    };
+#### 2. Nuova funzione `fetchYahooOptionPrices`
+
+```typescript
+async function fetchYahooOptionPrices(
+  options: OptionRequest[]
+): Promise<Map<string, PriceData>> {
+  const results = new Map<string, PriceData>();
+  
+  if (options.length === 0) return results;
+
+  // Group options by ticker + expiry for efficient fetching
+  const groupedOptions = new Map<string, {
+    ticker: string;
+    expiryUnix: number;
+    expiryStr: string;
+    requests: OptionRequest[];
+  }>();
+
+  for (const opt of options) {
+    const ticker = underlyingToTicker(opt.underlying);
+    if (!ticker) {
+      results.set(opt.originalId, {
+        symbol: opt.underlying,
+        price: null,
+        source: 'error',
+        error: `Cannot convert underlying "${opt.underlying}" to ticker`,
+        // ... other fields
+      });
+      continue;
+    }
+
+    const expiryDate = new Date(opt.expiry);
+    const expiryUnix = Math.floor(expiryDate.getTime() / 1000);
+    const key = `${ticker}:${expiryUnix}`;
+
+    if (!groupedOptions.has(key)) {
+      groupedOptions.set(key, {
+        ticker,
+        expiryUnix,
+        expiryStr: opt.expiry,
+        requests: [],
+      });
+    }
+    groupedOptions.get(key)!.requests.push(opt);
   }
-  setPriceHistory(newHistory);
+
+  // Fetch each ticker+expiry combination
+  for (const [key, group] of groupedOptions) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/options/${group.ticker}?date=${group.expiryUnix}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`Yahoo Options error for ${group.ticker}: ${response.status}`);
+        for (const opt of group.requests) {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            source: 'error',
+            error: `Yahoo Options API returned ${response.status}`,
+            // ...
+          });
+        }
+        continue;
+      }
+
+      const data = await response.json();
+      const optionData = data?.optionChain?.result?.[0]?.options?.[0];
+      
+      if (!optionData) {
+        for (const opt of group.requests) {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            source: 'error',
+            error: 'No option data found for expiry',
+            // ...
+          });
+        }
+        continue;
+      }
+
+      // Build map of contracts by strike+type
+      const contractMap = new Map<string, any>();
+      for (const call of optionData.calls || []) {
+        contractMap.set(`C:${call.strike}`, call);
+      }
+      for (const put of optionData.puts || []) {
+        contractMap.set(`P:${put.strike}`, put);
+      }
+
+      // Match each requested option
+      for (const opt of group.requests) {
+        const key = `${opt.optionType === 'call' ? 'C' : 'P'}:${opt.strike}`;
+        const contract = contractMap.get(key);
+
+        if (contract) {
+          results.set(opt.originalId, {
+            symbol: contract.contractSymbol,
+            price: contract.lastPrice ?? null,
+            change: contract.change ?? null,
+            changePct: contract.percentChange ?? null,
+            bid: contract.bid ?? null,
+            ask: contract.ask ?? null,
+            volume: contract.volume ?? null,
+            lastUpdated: new Date().toISOString(),
+            source: 'yahoo-options',
+          });
+        } else {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            source: 'error',
+            error: `Option not found: ${opt.optionType} strike ${opt.strike}`,
+            // ...
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`Yahoo Options fetch error for ${group.ticker}:`, error);
+      for (const opt of group.requests) {
+        results.set(opt.originalId, {
+          symbol: opt.underlying,
+          price: null,
+          source: 'error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          // ...
+        });
+      }
+    }
+  }
+
+  return results;
 }
+```
+
+#### 3. Modificare la funzione principale
+
+Sostituire la chiamata a Tradier con Yahoo Options:
+
+```typescript
+// PRIMA (Tradier)
+const tradierApiKey = Deno.env.get('TRADIER_API_KEY');
+const optionPrices = await fetchTradierOptionPrices(options, tradierApiKey || '');
+
+// DOPO (Yahoo Finance)
+const optionPrices = await fetchYahooOptionPrices(options);
 ```
 
 ---
@@ -182,32 +268,35 @@ function updatePriceHistory(positions: Position[]) {
 
 | File | Modifiche |
 |------|-----------|
-| `src/hooks/usePortfolio.ts` | Aggiungere `refetchInterval: 60000` |
-| `src/contexts/LivePricesContext.tsx` | Semplificare: rimuovere fetch API, tenere solo tracking |
-| `src/hooks/usePositionsWithLivePrices.ts` | Usare dati DB direttamente, aggiungere tracking direzione |
-| `src/components/dashboard/LivePriceBadge.tsx` | Adattare per usare i nuovi dati |
-| `src/components/dashboard/LivePriceIndicator.tsx` | Mostrare "ultimo aggiornamento" dal DB |
+| `supabase/functions/fetch-market-prices/index.ts` | Aggiungere `fetchYahooOptionPrices`, rimuovere dipendenza da Tradier |
 
 ---
 
-## Indicatore "Ultimo Aggiornamento"
+## Considerazioni Performance
 
-Attualmente `LivePriceIndicator` mostra quando il client ha fatto l'ultimo fetch. Dovrà invece mostrare:
-- **L'orario dell'ultimo aggiornamento dal cron** (campo `updated_at` nelle positions)
-- Un badge che indica "Server-side" per rassicurare l'utente
+### Rate Limiting
+Yahoo Finance ha rate limits non documentati ma generosi. Per evitare blocchi:
+- Delay di 100ms tra richieste consecutive
+- Max ~100 richieste/minuto
+
+### Ottimizzazione
+Il raggruppamento per ticker+expiry riduce drasticamente le chiamate:
+- **Scenario**: 164 opzioni su 20 underlying con 5 expiries ciascuno
+- **Senza raggruppamento**: 164 chiamate
+- **Con raggruppamento**: ~100 chiamate (20 tickers × 5 expiries)
 
 ---
 
-## Risposta alla Tua Domanda
+## Vantaggi Finali
 
-**No, attualmente le pagine NON si aggiornano automaticamente quando il cron aggiorna il database.**
+1. **Nessuna API Key necessaria** - Non serve più Tradier o Massive.com
+2. **Dati gratuiti** - Yahoo Finance è completamente gratuito
+3. **15 min delay accettabile** - Per il monitoraggio portfolio è sufficiente
+4. **Dati extra** - Implied Volatility e Open Interest inclusi
+5. **Affidabilità** - Yahoo Finance è molto stabile
 
-Il cron job funziona correttamente lato server, ma:
-1. Il frontend non rileva le modifiche al database
-2. La cache di React Query mantiene i vecchi dati
-3. Il `LivePricesContext` fa chiamate duplicate alle API
+---
 
-Con le modifiche proposte:
-- Il database diventa la "single source of truth"
-- Tutte le pagine (Dashboard, Derivati, Risk Analyzer) vedranno gli stessi dati aggiornati
-- Il polling ogni 60 secondi garantisce che l'UI si aggiorni entro 1 minuto dall'aggiornamento server-side
+## Nota sulla Key Massive.com
+
+La chiave fornita (`1AsXKwR1s7IHTFGWzJjKEVNVzT8AbvVJ`) non sarà necessaria se usiamo Yahoo Finance. Tuttavia, posso conservarla come backup per Massive.com nel caso Yahoo dovesse essere bloccato o rate-limited in futuro.
