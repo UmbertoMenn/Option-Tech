@@ -4,7 +4,7 @@ import { useLivePricesContext, PositionWithLive } from '@/contexts/LivePricesCon
 import { PortfolioSummary, AssetType } from '@/types/portfolio';
 
 /**
- * Calculates portfolio summary from positions with live prices.
+ * Calculates portfolio summary from positions.
  * Derivatives are excluded from total value calculation.
  */
 function calculateSummary(positions: PositionWithLive[], cashValue: number): PortfolioSummary {
@@ -70,37 +70,34 @@ export function usePositionsWithLivePrices() {
   } = usePortfolio();
   
   const {
-    applyLivePricesToPositions,
-    setPositionsForFetch,
+    updatePriceHistory,
+    applyDirectionToPositions,
+    lastUpdated,
     isLoading: isLoadingPrices,
-    lastFetched,
     error,
     refresh,
-    getPriceForPosition,
-    stockPrices,
-    optionPrices,
   } = useLivePricesContext();
 
-  // Register positions for live price fetching
+  // Update price history whenever positions change (from DB polling)
   useEffect(() => {
     if (dbPositions.length > 0) {
-      setPositionsForFetch(dbPositions);
+      updatePriceHistory(dbPositions);
     }
-  }, [dbPositions, setPositionsForFetch]);
+  }, [dbPositions, updatePriceHistory]);
 
-  // Apply live prices to positions
+  // Apply direction tracking to positions for visual feedback
   const livePositions = useMemo(() => 
-    applyLivePricesToPositions(dbPositions),
-    [dbPositions, applyLivePricesToPositions, stockPrices, optionPrices]
+    applyDirectionToPositions(dbPositions),
+    [dbPositions, applyDirectionToPositions]
   );
 
-  // Recalculate summary with live prices
+  // Recalculate summary with current positions
   const liveSummary = useMemo(() => {
     if (livePositions.length === 0) return dbSummary;
     return calculateSummary(livePositions, portfolio?.cash_value || 0);
   }, [livePositions, portfolio?.cash_value, dbSummary]);
 
-  // Check if any positions have live prices
+  // Check if any positions have prices
   const hasLivePrices = livePositions.some(p => p._isLive);
 
   return {
@@ -109,11 +106,12 @@ export function usePositionsWithLivePrices() {
     summary: liveSummary,
     isLoading: isLoadingPortfolio,
     isLoadingPrices,
-    lastFetched,
+    lastFetched: lastUpdated,
     error,
     refresh,
     hasLivePrices,
-    getPriceForPosition,
+    // Legacy compatibility - now returns null since prices come from DB
+    getPriceForPosition: () => null,
     // Pass through mutation functions
     updatePositions,
     isUpdating,
