@@ -213,7 +213,73 @@ function inferSectorFromName(ticker: string, description?: string): { sector: st
   return { sector: null, industry: null };
 }
 
-// Fetch sector/industry - uses known mappings first, then tries Yahoo API
+// Valid GICS sectors for AI validation
+const VALID_GICS_SECTORS = [
+  'Technology', 'Financials', 'Financial Services', 'Healthcare',
+  'Consumer Discretionary', 'Consumer Cyclical', 'Consumer Staples', 'Consumer Defensive',
+  'Industrials', 'Energy', 'Materials', 'Basic Materials',
+  'Utilities', 'Real Estate', 'Communication Services'
+];
+
+// Fetch sector using Lovable AI when other methods fail
+async function fetchSectorWithAI(
+  ticker: string, 
+  description: string
+): Promise<{ sector: string | null; industry: string | null }> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!lovableApiKey) {
+    console.log('LOVABLE_API_KEY not configured, skipping AI sector lookup');
+    return { sector: null, industry: null };
+  }
+  
+  const prompt = `For the stock with ticker "${ticker}" (${description}), 
+    provide the GICS sector classification.
+    Valid sectors: ${VALID_GICS_SECTORS.join(', ')}.
+    Respond with ONLY the sector name, nothing else. No explanation.`;
+  
+  try {
+    console.log(`Calling Lovable AI for sector of ${ticker}...`);
+    
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 50,
+      }),
+    });
+    
+    if (!response.ok) {
+      console.error(`AI gateway error: ${response.status}`);
+      return { sector: null, industry: null };
+    }
+    
+    const data = await response.json();
+    const sectorText = data.choices?.[0]?.message?.content?.trim();
+    
+    // Validate it's a known sector
+    const normalizedSector = VALID_GICS_SECTORS.find(s => 
+      s.toLowerCase() === sectorText?.toLowerCase()
+    );
+    
+    if (normalizedSector) {
+      console.log(`AI resolved sector for ${ticker}: ${normalizedSector}`);
+      return { sector: normalizedSector, industry: null };
+    }
+    
+    console.log(`AI returned invalid sector for ${ticker}: ${sectorText}`);
+    return { sector: null, industry: null };
+  } catch (error) {
+    console.error('Error fetching sector with AI:', error);
+    return { sector: null, industry: null };
+  }
+}
+
+// Fetch sector/industry - uses known mappings first, then tries Yahoo API, then AI fallback
 async function fetchYahooSectorInfo(ticker: string, description?: string): Promise<{
   sector: string | null;
   industry: string | null;
@@ -253,7 +319,16 @@ async function fetchYahooSectorInfo(ticker: string, description?: string): Promi
       }
     }
   } catch (error) {
-    // Silently fail, will return null
+    // Silently fail, will try AI fallback
+  }
+  
+  // 3. NEW: Fallback to Lovable AI
+  if (description) {
+    console.log(`Yahoo failed for ${ticker}, trying Lovable AI...`);
+    const aiResult = await fetchSectorWithAI(ticker, description);
+    if (aiResult.sector) {
+      return aiResult;
+    }
   }
   
   console.log(`No sector found for ${ticker}`);

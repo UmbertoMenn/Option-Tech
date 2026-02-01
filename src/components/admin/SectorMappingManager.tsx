@@ -27,10 +27,12 @@ const GICS_SECTORS = [
 
 interface IsinMapping {
   isin: string;
-  ticker: string;
+  ticker: string | null;
   sector: string | null;
   industry: string | null;
   exchange: string | null;
+  description: string;
+  hasMapping: boolean;
 }
 
 export function SectorMappingManager() {
@@ -48,13 +50,47 @@ export function SectorMappingManager() {
   async function loadMappings() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('isin_mappings')
-        .select('*')
-        .order('ticker', { ascending: true });
+      // 1. Carica TUTTI gli ISIN stock dalle posizioni
+      const { data: positions, error: posError } = await supabase
+        .from('positions')
+        .select('isin, description')
+        .eq('asset_type', 'stock')
+        .not('isin', 'is', null);
 
-      if (error) throw error;
-      setMappings(data || []);
+      if (posError) throw posError;
+
+      // 2. Carica i mapping esistenti
+      const { data: existingMappings, error: mapError } = await supabase
+        .from('isin_mappings')
+        .select('*');
+
+      if (mapError) throw mapError;
+
+      // 3. Combina: mostra tutti gli ISIN stock con info mapping se disponibile
+      const uniqueIsins = [...new Set(positions?.map(p => p.isin).filter(Boolean) || [])] as string[];
+      
+      const combined: IsinMapping[] = uniqueIsins.map(isin => {
+        const mapping = existingMappings?.find(m => m.isin === isin);
+        const position = positions?.find(p => p.isin === isin);
+        return {
+          isin,
+          description: position?.description || '',
+          ticker: mapping?.ticker || null,
+          sector: mapping?.sector || null,
+          industry: mapping?.industry || null,
+          exchange: mapping?.exchange || null,
+          hasMapping: !!mapping,
+        };
+      });
+      
+      // Ordina per ticker (se presente) o descrizione
+      combined.sort((a, b) => {
+        const aKey = a.ticker || a.description;
+        const bKey = b.ticker || b.description;
+        return aKey.localeCompare(bKey);
+      });
+
+      setMappings(combined);
     } catch (error) {
       console.error('Error loading mappings:', error);
       toast.error('Errore caricamento mappature');
@@ -70,19 +106,25 @@ export function SectorMappingManager() {
     setSavingIsins(prev => new Set(prev).add(isin));
     
     try {
+      // Trova il mapping corrente per ottenere ticker se presente
+      const currentMapping = mappings.find(m => m.isin === isin);
+      
+      // UPSERT per creare o aggiornare il record
       const { error } = await supabase
         .from('isin_mappings')
-        .update({ 
+        .upsert({ 
+          isin,
+          ticker: currentMapping?.ticker || currentMapping?.description?.split(' ')[0] || isin,
           sector: newSector,
+          source: 'manual',
           last_verified_at: new Date().toISOString()
-        })
-        .eq('isin', isin);
+        }, { onConflict: 'isin' });
 
       if (error) throw error;
 
       // Update local state
       setMappings(prev => prev.map(m => 
-        m.isin === isin ? { ...m, sector: newSector } : m
+        m.isin === isin ? { ...m, sector: newSector, hasMapping: true } : m
       ));
       
       // Clear pending change
@@ -134,7 +176,8 @@ export function SectorMappingManager() {
   const filteredMappings = mappings.filter(m => {
     const matchesSearch = !searchQuery || 
       m.ticker?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.isin.toLowerCase().includes(searchQuery.toLowerCase());
+      m.isin.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.description?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesMissingFilter = !showOnlyMissing || !m.sector;
     
@@ -182,7 +225,7 @@ export function SectorMappingManager() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Cerca per ticker o ISIN..."
+              placeholder="Cerca per ticker, ISIN o descrizione..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 bg-background-secondary border-border"
@@ -214,11 +257,11 @@ export function SectorMappingManager() {
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-background-tertiary">
-                  <TableHead className="w-[200px]">Ticker</TableHead>
-                  <TableHead className="w-[200px]">ISIN</TableHead>
-                  <TableHead className="w-[120px]">Exchange</TableHead>
+                  <TableHead className="w-[150px]">Ticker</TableHead>
+                  <TableHead className="w-[250px]">Descrizione</TableHead>
+                  <TableHead className="w-[140px]">ISIN</TableHead>
                   <TableHead>Settore Attuale</TableHead>
-                  <TableHead className="w-[220px]">Nuovo Settore</TableHead>
+                  <TableHead className="w-[200px]">Nuovo Settore</TableHead>
                   <TableHead className="w-[100px] text-right">Azione</TableHead>
                 </TableRow>
               </TableHeader>
@@ -230,16 +273,16 @@ export function SectorMappingManager() {
                   return (
                     <TableRow 
                       key={mapping.isin} 
-                      className="border-border hover:bg-background-tertiary"
+                      className={`border-border hover:bg-background-tertiary ${!mapping.hasMapping ? 'bg-warning/5' : ''}`}
                     >
                       <TableCell className="font-mono font-medium">
-                        {mapping.ticker || '-'}
+                        {mapping.ticker || <span className="text-muted-foreground italic">—</span>}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[250px] truncate" title={mapping.description}>
+                        {mapping.description || '-'}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {mapping.isin}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {mapping.exchange || '-'}
                       </TableCell>
                       <TableCell>
                         {mapping.sector ? (

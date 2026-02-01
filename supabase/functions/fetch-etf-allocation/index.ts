@@ -242,6 +242,120 @@ function getIndexFallbackSectors(etfName: string): Record<string, number> {
   return {};
 }
 
+// Valid GICS sectors for AI validation
+const VALID_GICS_SECTORS = [
+  'Technology', 'Financials', 'Healthcare',
+  'Consumer Discretionary', 'Consumer Staples', 'Industrials',
+  'Energy', 'Materials', 'Utilities', 'Real Estate',
+  'Communication Services'
+];
+
+// Fetch ETF sector allocations using Lovable AI when scraping fails
+// Returns multi-sector breakdown with minimum 80% coverage (max 20% in Other)
+async function fetchETFSectorsWithAI(
+  isin: string,
+  etfName: string
+): Promise<Record<string, number>> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!lovableApiKey) {
+    console.log('LOVABLE_API_KEY not configured, skipping AI sector lookup for ETF');
+    return {};
+  }
+  
+  const prompt = `For the ETF "${etfName}" (ISIN: ${isin}), provide the sector allocation breakdown.
+
+IMPORTANT RULES:
+1. Return the TOP 5-8 sectors with their percentage allocations
+2. The percentages MUST sum to at least 80% (maximum 20% can go to "Other")
+3. Use ONLY these sector names: ${VALID_GICS_SECTORS.join(', ')}, Other
+4. For broad market ETFs (MSCI World, S&P 500, FTSE All-World, etc.) distribute across multiple sectors based on typical index weights
+5. For thematic/sector ETFs, concentrate on the main sector(s)
+6. Be accurate based on your knowledge of the index composition
+
+Respond in this EXACT JSON format only, no explanation:
+{"Technology": 24, "Financials": 15, "Healthcare": 12, "Consumer Discretionary": 11, "Industrials": 10, "Communication Services": 8, "Consumer Staples": 7, "Other": 13}`;
+
+  try {
+    console.log(`Calling Lovable AI for ETF sectors: ${etfName}...`);
+    
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 250,
+      }),
+    });
+    
+    if (!response.ok) {
+      console.error(`AI gateway error: ${response.status}`);
+      return {};
+    }
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content?.trim() || '';
+    
+    // Parse JSON response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('AI did not return valid JSON for ETF sectors');
+      return {};
+    }
+    
+    const parsed = JSON.parse(jsonMatch[0]);
+    
+    // Validate: only valid sectors, percentages are numbers
+    const result: Record<string, number> = {};
+    let total = 0;
+    
+    for (const [sector, pct] of Object.entries(parsed)) {
+      const isValidSector = VALID_GICS_SECTORS.includes(sector) || sector === 'Other';
+      if (isValidSector && typeof pct === 'number' && pct > 0) {
+        result[sector] = pct;
+        total += pct;
+      }
+    }
+    
+    // Validate minimum 80% coverage (max 20% in Other)
+    const otherPct = result['Other'] || 0;
+    
+    if (otherPct <= 20 && total >= 80) {
+      console.log(`AI resolved ETF sectors for ${etfName}: ${JSON.stringify(result)}`);
+      return result;
+    }
+    
+    // If Other > 20%, redistribute to make it compliant
+    if (otherPct > 20 && Object.keys(result).length > 1) {
+      const excess = otherPct - 20;
+      result['Other'] = 20;
+      
+      // Distribute excess proportionally to other sectors
+      const otherSectors = Object.entries(result).filter(([k]) => k !== 'Other');
+      const otherTotal = otherSectors.reduce((s, [, v]) => s + v, 0);
+      
+      if (otherTotal > 0) {
+        for (const [sector, pct] of otherSectors) {
+          result[sector] = pct + (excess * pct / otherTotal);
+        }
+      }
+      
+      console.log(`AI resolved ETF sectors (adjusted) for ${etfName}: ${JSON.stringify(result)}`);
+      return result;
+    }
+    
+    // If total < 80%, the AI response is not useful
+    console.log(`AI returned insufficient coverage for ${etfName}: ${total}%`);
+    return {};
+  } catch (error) {
+    console.error('Error fetching ETF sectors with AI:', error);
+    return {};
+  }
+}
+
 // Map countries to their primary currencies
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   'United States': 'USD',
@@ -820,6 +934,17 @@ serve(async (req) => {
 
     // Scrape fresh data
     const data = await scrapeJustETF(isin);
+
+    // NEW: AI Fallback for ETFs without sector data
+    if (Object.keys(data.sectorAllocations).length === 0) {
+      console.log(`No sector data scraped for ${isin}, trying Lovable AI...`);
+      const aiSectors = await fetchETFSectorsWithAI(isin, data.name);
+      
+      if (Object.keys(aiSectors).length > 0) {
+        Object.assign(data.sectorAllocations, aiSectors);
+        console.log(`AI populated sectors for ${data.name}:`, aiSectors);
+      }
+    }
 
     // Upsert to cache
     await supabase
