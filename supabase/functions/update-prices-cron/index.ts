@@ -279,6 +279,61 @@ async function fetchSectorWithAI(
   }
 }
 
+// NEW: Use AI to infer stock ticker from company name
+async function inferTickerWithAI(companyName: string): Promise<string | null> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  
+  if (!LOVABLE_API_KEY) {
+    console.log('No LOVABLE_API_KEY available for ticker inference');
+    return null;
+  }
+  
+  try {
+    console.log(`Calling AI to infer ticker for: ${companyName}`);
+    
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [{
+          role: "user",
+          content: `What is the US stock ticker symbol for the company "${companyName}"? 
+Reply with ONLY the ticker symbol (e.g., AAPL, MSFT, GOOGL, AMZN).
+If this is not a publicly traded US company or you're unsure, reply "UNKNOWN".
+Do not include any other text or explanation.`
+        }],
+        max_tokens: 20,
+      }),
+    });
+    
+    if (!response.ok) {
+      console.error(`AI ticker inference failed with status: ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    const tickerRaw = data.choices?.[0]?.message?.content?.trim().toUpperCase();
+    
+    // Clean up the response - remove any extra text
+    const ticker = tickerRaw?.split(/[\s,.\n]/)[0];
+    
+    if (ticker && ticker !== 'UNKNOWN' && ticker.length >= 1 && ticker.length <= 5 && /^[A-Z]+$/.test(ticker)) {
+      console.log(`AI inferred ticker for "${companyName}": ${ticker}`);
+      return ticker;
+    }
+    
+    console.log(`AI could not infer valid ticker for "${companyName}": ${tickerRaw}`);
+    return null;
+  } catch (error) {
+    console.error('Error inferring ticker with AI:', error);
+    return null;
+  }
+}
+
 // Fetch sector/industry - uses known mappings first, then tries Yahoo API, then AI fallback
 async function fetchYahooSectorInfo(ticker: string, description?: string): Promise<{
   sector: string | null;
@@ -827,8 +882,9 @@ serve(async (req) => {
         }
       }
       
-      // Special case mappings for known derivatives
+      // Special case mappings for known derivatives - EXPANDED
       const specialMappings: Record<string, string> = {
+        // Original mappings
         'IREN LTD': 'IREN',
         'MARA HOLDINGS': 'MARA', 
         'MARATHON DIGITAL': 'MARA',
@@ -840,13 +896,76 @@ serve(async (req) => {
         'NETEASE': 'NTES',
         'PALANTIR': 'PLTR',
         'CONSTELLATION': 'CEG',
+        
+        // NEW - Common names that fail regex
+        'AMAZON': 'AMZN',
+        'AMAZON.COM': 'AMZN',
+        'ORACLE': 'ORCL',
+        'ADVANCED MICRO DEVICES': 'AMD',
+        'AMD': 'AMD',
+        'MICRON': 'MU',
+        'ACCENTURE': 'ACN',
+        'APPLOVIN': 'APP',
+        'WESTERN DIGITAL': 'WDC',
+        'CELESTICA': 'CLS',
+        'REDDIT': 'RDDT',
+        'REDDITI': 'RDDT',
+        'REGULUS': 'RGLS',
+        'SALESFORCE': 'CRM',
+        'JD.COM': 'JD',
+        'JD(JD.COM': 'JD',
+        'NVIDIA': 'NVDA',
+        'BROADCOM': 'AVGO',
+        'QUALCOMM': 'QCOM',
+        'CISCO': 'CSCO',
+        'INTEL': 'INTC',
+        'ADOBE': 'ADBE',
+        'PAYPAL': 'PYPL',
+        'TESLA': 'TSLA',
+        'APPLE': 'AAPL',
+        'APPLE COMPUTER': 'AAPL',
+        'MICROSOFT': 'MSFT',
+        'META': 'META',
+        'META PLATFORMS': 'META',
+        'NETFLIX': 'NFLX',
+        'DISNEY': 'DIS',
+        'VISA': 'V',
+        'MASTERCARD': 'MA',
+        'JPMORGAN': 'JPM',
+        'J.P. MORGAN': 'JPM',
+        'JP MORGAN': 'JPM',
+        'GOLDMAN': 'GS',
+        'OKLO': 'OKLO',
+        'ROCKET LAB': 'RKLB',
+        'ROCKETLAB': 'RKLB',
+        'ASTERA': 'ALAB',
+        'KLA': 'KLAC',
+        'UBER': 'UBER',
+        'UBER TECHNOLOGIES': 'UBER',
+        'UNITEDHEALTH': 'UNH',
+        'UNITED HEALTH': 'UNH',
+        'LULULEMON': 'LULU',
+        'PROGRESSIVE': 'PGR',
+        'COREWEAVE': 'CRWV',
+        'EUROFOREX': 'SKIP', // Currency-related, not a stock
       };
       
       for (const [pattern, ticker] of Object.entries(specialMappings)) {
         if (upperName.includes(pattern)) {
+          if (ticker === 'SKIP') {
+            console.log(`Skipping non-stock underlying: ${name}`);
+            nameResults.push({ name, sector: null, source: 'skipped' });
+            continue;
+          }
           inferredTicker = ticker;
           break;
         }
+      }
+      
+      // If still no ticker, use AI to infer it
+      if (!inferredTicker) {
+        console.log(`Asking AI to infer ticker from: ${name}`);
+        inferredTicker = await inferTickerWithAI(name);
       }
       
       if (!inferredTicker) {
