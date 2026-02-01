@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,7 +33,7 @@ interface OptionRequest {
   originalId: string;
 }
 
-// ============ UNDERLYING TO TICKER MAPPING ============
+// ============ LOCAL UNDERLYING TO TICKER MAPPING (for fast lookup) ============
 
 const UNDERLYING_TO_TICKER: Record<string, string> = {
   'APPLE COMPUTER, INC.': 'AAPL', 'APPLE COMPUTER INC': 'AAPL', 'APPLE INC': 'AAPL', 'APPLE INC.': 'AAPL',
@@ -50,148 +50,254 @@ const UNDERLYING_TO_TICKER: Record<string, string> = {
   'PAYPAL HOLDINGS INC': 'PYPL', 'PAYPAL HOLDINGS': 'PYPL',
   'INTEL CORP': 'INTC', 'INTEL CORPORATION': 'INTC',
   'AMD': 'AMD', 'ADVANCED MICRO DEVICES': 'AMD', 'ADVANCED MICRO DEVICES INC': 'AMD',
-  'CISCO SYSTEMS INC': 'CSCO', 'CISCO SYSTEMS': 'CSCO',
-  'ORACLE CORP': 'ORCL', 'ORACLE CORPORATION': 'ORCL', 'ORACLE SYSTEMS INC.': 'ORCL', 'ORACLE SYSTEMS INC': 'ORCL',
-  'IBM': 'IBM', 'INTERNATIONAL BUSINESS MACHINES': 'IBM',
-  'QUALCOMM INC': 'QCOM', 'QUALCOMM INCORPORATED': 'QCOM',
-  'BROADCOM INC': 'AVGO', 'BROADCOM LTD': 'AVGO',
-  'UBER TECHNOLOGIES INC': 'UBER', 'UBER TECHNOLOGIES': 'UBER',
-  'AIRBNB INC': 'ABNB', 'AIRBNB': 'ABNB',
-  'COINBASE GLOBAL INC': 'COIN', 'COINBASE': 'COIN',
-  'PALANTIR TECHNOLOGIES INC': 'PLTR', 'PALANTIR': 'PLTR',
-  'SNOWFLAKE INC': 'SNOW', 'SNOWFLAKE': 'SNOW',
-  'CROWDSTRIKE HOLDINGS INC': 'CRWD', 'CROWDSTRIKE': 'CRWD',
-  'DATADOG INC': 'DDOG', 'DATADOG': 'DDOG',
-  'ZOOM VIDEO COMMUNICATIONS': 'ZM', 'ZOOM VIDEO COMMUNICATIONS INC': 'ZM',
-  'SHOPIFY INC': 'SHOP', 'SHOPIFY': 'SHOP',
-  'SPOTIFY TECHNOLOGY': 'SPOT', 'SPOTIFY TECHNOLOGY SA': 'SPOT',
-  'BLOCK INC': 'SQ', 'SQUARE INC': 'SQ',
-  'SERVICENOW INC': 'NOW', 'SERVICENOW': 'NOW',
-  'WORKDAY INC': 'WDAY', 'WORKDAY': 'WDAY',
-  'TWILIO INC': 'TWLO', 'TWILIO': 'TWLO',
-  'MONGODB INC': 'MDB', 'MONGODB': 'MDB',
-  'OKTA INC': 'OKTA', 'OKTA': 'OKTA',
-  'JPMORGAN CHASE': 'JPM', 'JPMORGAN CHASE & CO': 'JPM', 'JP MORGAN CHASE': 'JPM', 'J.P. MORGAN CHASE & CO.': 'JPM',
-  'BANK OF AMERICA': 'BAC', 'BANK OF AMERICA CORP': 'BAC',
-  'WELLS FARGO': 'WFC', 'WELLS FARGO & CO': 'WFC',
-  'GOLDMAN SACHS': 'GS', 'GOLDMAN SACHS GROUP': 'GS',
-  'MORGAN STANLEY': 'MS',
-  'CITIGROUP INC': 'C', 'CITIGROUP': 'C',
+  'JPMORGAN CHASE': 'JPM', 'JPMORGAN CHASE & CO': 'JPM', 'JP MORGAN CHASE': 'JPM',
   'VISA INC': 'V', 'VISA': 'V',
   'MASTERCARD INC': 'MA', 'MASTERCARD': 'MA',
-  'AMERICAN EXPRESS': 'AXP', 'AMERICAN EXPRESS CO': 'AXP',
-  'BERKSHIRE HATHAWAY': 'BRK.B', 'BERKSHIRE HATHAWAY INC': 'BRK.B',
-  'BLACKROCK INC': 'BLK', 'BLACKROCK': 'BLK',
-  'JOHNSON & JOHNSON': 'JNJ',
-  'UNITEDHEALTH GROUP': 'UNH', 'UNITEDHEALTH GROUP INC': 'UNH',
-  'PFIZER INC': 'PFE', 'PFIZER': 'PFE',
-  'MERCK & CO': 'MRK', 'MERCK': 'MRK',
-  'ABBVIE INC': 'ABBV', 'ABBVIE': 'ABBV',
-  'ELI LILLY': 'LLY', 'ELI LILLY AND CO': 'LLY',
-  'MODERNA INC': 'MRNA', 'MODERNA': 'MRNA',
-  'WALMART INC': 'WMT', 'WALMART': 'WMT',
-  'COSTCO WHOLESALE': 'COST', 'COSTCO WHOLESALE CORP': 'COST',
-  'HOME DEPOT INC': 'HD', 'HOME DEPOT': 'HD',
-  'NIKE INC': 'NKE', 'NIKE': 'NKE',
-  'STARBUCKS CORP': 'SBUX', 'STARBUCKS': 'SBUX',
-  'MCDONALDS CORP': 'MCD', "MCDONALD'S CORP": 'MCD',
-  'COCA-COLA CO': 'KO', 'COCA COLA CO': 'KO',
-  'PEPSICO INC': 'PEP', 'PEPSICO': 'PEP',
-  'PROCTER & GAMBLE': 'PG', 'PROCTER AND GAMBLE': 'PG',
-  'WALT DISNEY CO': 'DIS', 'DISNEY': 'DIS', 'DISNEY CO': 'DIS',
-  'EXXON MOBIL': 'XOM', 'EXXON MOBIL CORP': 'XOM',
-  'CHEVRON CORP': 'CVX', 'CHEVRON': 'CVX',
-  'BOEING CO': 'BA', 'BOEING': 'BA',
-  'CATERPILLAR INC': 'CAT', 'CATERPILLAR': 'CAT',
-  '3M COMPANY': 'MMM', '3M CO': 'MMM',
-  'GENERAL ELECTRIC': 'GE', 'GENERAL ELECTRIC CO': 'GE',
-  'HONEYWELL INTERNATIONAL': 'HON', 'HONEYWELL': 'HON',
-  'LOCKHEED MARTIN': 'LMT', 'LOCKHEED MARTIN CORP': 'LMT',
-  'RAYTHEON TECHNOLOGIES': 'RTX', 'RTX CORPORATION': 'RTX',
-  'UNION PACIFIC': 'UNP', 'UNION PACIFIC CORP': 'UNP',
-  'AT&T INC': 'T', 'AT&T': 'T',
-  'VERIZON COMMUNICATIONS': 'VZ', 'VERIZON': 'VZ',
-  'T-MOBILE US INC': 'TMUS', 'T-MOBILE': 'TMUS',
-  'SPDR S&P 500 ETF': 'SPY', 'SPY': 'SPY',
-  'INVESCO QQQ TRUST': 'QQQ', 'QQQ': 'QQQ',
-  'ISHARES RUSSELL 2000': 'IWM', 'IWM': 'IWM',
-  'SPDR GOLD SHARES': 'GLD', 'GLD': 'GLD',
-  'ISHARES MSCI EMERGING': 'EEM', 'EEM': 'EEM',
-  'VANGUARD TOTAL STOCK': 'VTI', 'VTI': 'VTI',
-  // New mappings based on logs
-  'ALIBABA GROUP HOLDING LTD': 'BABA', 'ALIBABA': 'BABA', 'ALIBABA GROUP': 'BABA',
-  'CONSTELLATION ENERGY CORPORATION': 'CEG', 'CONSTELLATION ENERGY': 'CEG',
-  'COREWEAVE INC': 'CRWV', 'COREWEAVE': 'CRWV',
-  'NETEASE INC': 'NTES', 'NETEASE': 'NTES',
-  'LULULEMON ATHLETICA INC': 'LULU', 'LULULEMON': 'LULU', 'LULULEMON ATHLETICA': 'LULU',
-  'PROGRESSIVE CORP': 'PGR', 'PROGRESSIVE': 'PGR',
-  // Additional mappings from logs
-  'SOUNDHOUND AI INC': 'SOUN', 'SOUNDHOUND AI': 'SOUN', 'SOUNDHOUND': 'SOUN',
-  'RIGETTI COMPUTING INC.': 'RGTI', 'RIGETTI COMPUTING INC': 'RGTI', 'RIGETTI COMPUTING': 'RGTI', 'RIGETTI': 'RGTI',
-  'JD.COM INC': 'JD', 'JD(JD.COM INC)': 'JD', 'JD.COM': 'JD',
-  'NUSCALE POWER CORP': 'SMR', 'NUSCALE POWER': 'SMR', 'NUSCALE': 'SMR',
-  'WESTERN DIGITAL CORP': 'WDC', 'WESTERN DIGITAL': 'WDC',
-  'KLA CORP': 'KLAC', 'KLA': 'KLAC',
-  'IREN LTD': 'IREN', 'IREN': 'IREN',
-  'PINDUODUO INC': 'PDD', 'PINDUODUO': 'PDD',
-  'REDDIT INC': 'RDDT', 'REDDITI INC': 'RDDT', 'REDDIT': 'RDDT',
-  'ROCKET LAB CORP': 'RKLB', 'ROCKET LAB': 'RKLB',
-  'APPLOVIN CORP': 'APP', 'APPLOVIN': 'APP',
-  'ASTERA LABS INC': 'ALAB', 'ASTERA LABS': 'ALAB',
-  'MICRON TECHNOLOGY INC': 'MU', 'MICRON TECHNOLOGY': 'MU', 'MICRON': 'MU',
-  'NEBIUS GROUP NV': 'NBIS', 'NEBIUS GROUP': 'NBIS', 'NEBIUS': 'NBIS',
-  'CELESTICA INC': 'CLS', 'CELESTICA': 'CLS',
-  'CLEANSPARK INC': 'CLSK', 'CLEANSPARK': 'CLSK',
-  'HIMS & HERS HEALTH INC': 'HIMS', 'HIMS & HERS HEALTH': 'HIMS', 'HIMS & HERS': 'HIMS',
-  'IONQ INC': 'IONQ', 'IONQ': 'IONQ',
-  'SUPER MICRO COMPUTER IN': 'SMCI', 'SUPER MICRO COMPUTER INC': 'SMCI', 'SUPER MICRO COMPUTER': 'SMCI', 'SUPERMICRO': 'SMCI',
-  'ACCENTURE PLC': 'ACN', 'ACCENTURE': 'ACN',
-  'FORTINET INC': 'FTNT', 'FORTINET': 'FTNT',
-  'OKLO INC': 'OKLO', 'OKLO': 'OKLO',
-  'APPLIED DIGITAL CORP': 'APLD', 'APPLIED DIGITAL': 'APLD',
-  'PALO ALTO NETWORKS INC': 'PANW', 'PALO ALTO NETWORKS': 'PANW', 'PALO ALTO': 'PANW',
+  'SPY': 'SPY', 'SPDR S&P 500 ETF': 'SPY',
+  'QQQ': 'QQQ', 'INVESCO QQQ TRUST': 'QQQ',
+  'IWM': 'IWM', 'ISHARES RUSSELL 2000': 'IWM',
 };
 
-function underlyingToTicker(underlying: string): string | null {
+// ============ DYNAMIC UNDERLYING RESOLUTION ============
+
+/**
+ * Resolve underlying name to ticker with dynamic Yahoo Search fallback
+ * 1. Try local lookup table (fast)
+ * 2. Check database cache (underlying_mappings)
+ * 3. Use Yahoo Finance Search API (fallback)
+ * 4. Cache results for future use
+ */
+async function resolveUnderlyingToTicker(
+  underlying: string,
+  supabase: SupabaseClient
+): Promise<string | null> {
   const normalized = underlying.toUpperCase().trim();
   
+  // 1. Try local lookup first (instant)
   if (UNDERLYING_TO_TICKER[normalized]) {
     return UNDERLYING_TO_TICKER[normalized];
   }
   
+  // Clean version for lookup
   const cleaned = normalized.replace(/[.,]+$/, '').replace(/\s+/g, ' ').trim();
   if (UNDERLYING_TO_TICKER[cleaned]) {
     return UNDERLYING_TO_TICKER[cleaned];
   }
   
-  // Check partial matches
+  // Check partial matches in local lookup
   for (const [key, ticker] of Object.entries(UNDERLYING_TO_TICKER)) {
     if (cleaned.startsWith(key) || key.startsWith(cleaned)) {
       return ticker;
     }
   }
   
-  // If looks like a ticker already
+  // If it looks like a ticker already (1-5 uppercase letters), return as-is
   if (/^[A-Z]{1,5}$/.test(cleaned)) {
     return cleaned;
   }
   
-  console.log(`[underlyingToTicker] No mapping for: "${underlying}"`);
+  // 2. Check database cache
+  try {
+    const { data: cached } = await supabase
+      .from('underlying_mappings')
+      .select('ticker')
+      .eq('underlying', normalized)
+      .maybeSingle();
+    
+    if (cached?.ticker) {
+      console.log(`[resolveUnderlying] Cache hit: "${underlying}" → ${cached.ticker}`);
+      return cached.ticker;
+    }
+  } catch (error) {
+    console.error(`[resolveUnderlying] Cache lookup error:`, error);
+  }
+  
+  // 3. Resolve via Yahoo Finance Search API
+  try {
+    const ticker = await resolveViaYahooSearch(normalized);
+    
+    if (ticker) {
+      // 4. Cache for future use
+      try {
+        await supabase.from('underlying_mappings').upsert({
+          underlying: normalized,
+          ticker,
+          source: 'yahoo',
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'underlying' });
+        console.log(`[resolveUnderlying] Resolved & cached: "${underlying}" → ${ticker}`);
+      } catch (cacheError) {
+        console.error(`[resolveUnderlying] Cache save error:`, cacheError);
+      }
+      
+      return ticker;
+    }
+  } catch (error) {
+    console.error(`[resolveUnderlying] Yahoo search error for "${underlying}":`, error);
+  }
+  
+  console.log(`[resolveUnderlying] Could not resolve: "${underlying}"`);
   return null;
+}
+
+/**
+ * Use Yahoo Finance Search API to find ticker from company name
+ */
+async function resolveViaYahooSearch(underlying: string): Promise<string | null> {
+  // Clean up search term: remove INC, CORP, etc.
+  const searchTerm = underlying
+    .replace(/\s+(INC|CORP|CORPORATION|CO|LTD|LLC|PLC|NV|SA|AG|SPA|AB|CLASS\s*[A-C]|CL\s*[A-C])\.?$/gi, '')
+    .replace(/[.,]+$/, '')
+    .trim();
+  
+  if (!searchTerm || searchTerm.length < 2) {
+    return null;
+  }
+  
+  try {
+    const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(searchTerm)}&quotesCount=5&newsCount=0`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    
+    if (!response.ok) {
+      console.error(`[YahooSearch] API returned ${response.status} for "${searchTerm}"`);
+      return null;
+    }
+    
+    const data = await response.json();
+    const quotes = data?.quotes || [];
+    
+    // Find best match: prefer EQUITY type and US market
+    const match = quotes.find((q: any) => 
+      q.quoteType === 'EQUITY' && 
+      q.symbol && 
+      !q.symbol.includes('.') // Prefer US tickers without exchange suffix
+    ) || quotes.find((q: any) => 
+      q.quoteType === 'EQUITY' && q.symbol
+    ) || quotes[0];
+    
+    if (match?.symbol) {
+      console.log(`[YahooSearch] Found: "${searchTerm}" → ${match.symbol} (${match.shortname || match.longname || 'N/A'})`);
+      return match.symbol;
+    }
+  } catch (error) {
+    console.error(`[YahooSearch] Fetch error for "${searchTerm}":`, error);
+  }
+  
+  return null;
+}
+
+/**
+ * Pre-resolve all unique underlyings for a batch of options
+ * This is more efficient than resolving one-by-one
+ */
+async function resolveAllUnderlyings(
+  options: OptionRequest[],
+  supabase: SupabaseClient
+): Promise<Map<string, string>> {
+  const results = new Map<string, string>();
+  const underlyings = [...new Set(options.map(o => o.underlying.toUpperCase().trim()))];
+  
+  if (underlyings.length === 0) return results;
+  
+  console.log(`[resolveAllUnderlyings] Processing ${underlyings.length} unique underlyings`);
+  
+  // 1. Check local lookup first
+  const needsDbCheck: string[] = [];
+  for (const u of underlyings) {
+    const cleaned = u.replace(/[.,]+$/, '').replace(/\s+/g, ' ').trim();
+    
+    if (UNDERLYING_TO_TICKER[u]) {
+      results.set(u, UNDERLYING_TO_TICKER[u]);
+    } else if (UNDERLYING_TO_TICKER[cleaned]) {
+      results.set(u, UNDERLYING_TO_TICKER[cleaned]);
+    } else if (/^[A-Z]{1,5}$/.test(cleaned)) {
+      results.set(u, cleaned);
+    } else {
+      // Check partial matches
+      let found = false;
+      for (const [key, ticker] of Object.entries(UNDERLYING_TO_TICKER)) {
+        if (cleaned.startsWith(key) || key.startsWith(cleaned)) {
+          results.set(u, ticker);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        needsDbCheck.push(u);
+      }
+    }
+  }
+  
+  console.log(`[resolveAllUnderlyings] Local lookup: ${results.size} found, ${needsDbCheck.length} need DB check`);
+  
+  // 2. Batch check database cache
+  if (needsDbCheck.length > 0) {
+    try {
+      const { data: cached } = await supabase
+        .from('underlying_mappings')
+        .select('underlying, ticker')
+        .in('underlying', needsDbCheck);
+      
+      const needsYahooSearch: string[] = [];
+      
+      for (const u of needsDbCheck) {
+        const cachedItem = cached?.find(c => c.underlying === u);
+        if (cachedItem?.ticker) {
+          results.set(u, cachedItem.ticker);
+        } else {
+          needsYahooSearch.push(u);
+        }
+      }
+      
+      console.log(`[resolveAllUnderlyings] DB cache: ${needsDbCheck.length - needsYahooSearch.length} found, ${needsYahooSearch.length} need Yahoo Search`);
+      
+      // 3. Resolve remaining via Yahoo Search (with rate limiting)
+      for (const underlying of needsYahooSearch) {
+        const ticker = await resolveViaYahooSearch(underlying);
+        
+        if (ticker) {
+          results.set(underlying, ticker);
+          
+          // Cache for future use
+          try {
+            await supabase.from('underlying_mappings').upsert({
+              underlying,
+              ticker,
+              source: 'yahoo',
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'underlying' });
+          } catch (cacheError) {
+            console.error(`[resolveAllUnderlyings] Cache error for ${underlying}:`, cacheError);
+          }
+        }
+        
+        // Rate limit: 100ms between Yahoo Search requests
+        if (needsYahooSearch.indexOf(underlying) < needsYahooSearch.length - 1) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    } catch (error) {
+      console.error(`[resolveAllUnderlyings] Error:`, error);
+    }
+  }
+  
+  console.log(`[resolveAllUnderlyings] Final: ${results.size}/${underlyings.length} resolved`);
+  return results;
 }
 
 // ============ ISIN RESOLUTION ============
 
-async function resolveIsins(isins: string[]): Promise<Map<string, string>> {
+async function resolveIsins(isins: string[], supabase: SupabaseClient): Promise<Map<string, string>> {
   const results = new Map<string, string>();
   
   if (isins.length === 0) return results;
   
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    
     // Check cache first
     const { data: cached } = await supabase
       .from('isin_mappings')
@@ -383,10 +489,11 @@ async function fetchYahooPrices(tickers: string[]): Promise<Map<string, PriceDat
   return results;
 }
 
-// ============ YAHOO FINANCE OPTIONS ============
+// ============ YAHOO FINANCE OPTIONS (with dynamic resolution) ============
 
 async function fetchYahooOptionPrices(
-  options: OptionRequest[]
+  options: OptionRequest[],
+  underlyingMap: Map<string, string>
 ): Promise<Map<string, PriceData>> {
   const results = new Map<string, PriceData>();
   
@@ -401,7 +508,9 @@ async function fetchYahooOptionPrices(
   }>();
 
   for (const opt of options) {
-    const ticker = underlyingToTicker(opt.underlying);
+    const normalizedUnderlying = opt.underlying.toUpperCase().trim();
+    const ticker = underlyingMap.get(normalizedUnderlying);
+    
     if (!ticker) {
       results.set(opt.originalId, {
         symbol: opt.underlying,
@@ -413,7 +522,7 @@ async function fetchYahooOptionPrices(
         volume: null,
         lastUpdated: new Date().toISOString(),
         source: 'error',
-        error: `Cannot convert underlying "${opt.underlying}" to ticker`,
+        error: `Cannot resolve underlying "${opt.underlying}" to ticker`,
       });
       continue;
     }
@@ -615,10 +724,18 @@ serve(async (req) => {
     
     console.log(`[fetch-market-prices] Request: ${tickers.length} tickers, ${isins.length} ISINs, ${options.length} options`);
     
-    // Step 1: Resolve ISINs to tickers
-    const isinToTicker = await resolveIsins(isins);
+    // Create Supabase client for caching
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
     
-    // Step 2: Combine tickers from direct input and ISIN resolution
+    // Step 1: Resolve ISINs to tickers
+    const isinToTicker = await resolveIsins(isins, supabase);
+    
+    // Step 2: Pre-resolve all unique option underlyings (batch, with caching)
+    const underlyingMap = await resolveAllUnderlyings(options, supabase);
+    
+    // Step 3: Combine tickers from direct input and ISIN resolution
     const allTickers = [...new Set([
       ...tickers.filter(t => t && t.length > 0),
       ...Array.from(isinToTicker.values()),
@@ -626,13 +743,13 @@ serve(async (req) => {
     
     console.log(`[fetch-market-prices] Fetching ${allTickers.length} tickers from Yahoo`);
     
-    // Step 3: Fetch all prices in parallel (stocks via Yahoo, options via Yahoo Options)
+    // Step 4: Fetch all prices in parallel (stocks via Yahoo, options via Yahoo Options)
     const [stockPrices, optionPrices] = await Promise.all([
       fetchYahooPrices(allTickers),
-      fetchYahooOptionPrices(options),
+      fetchYahooOptionPrices(options, underlyingMap),
     ]);
     
-    // Step 4: For ISINs that didn't resolve but are ETFs, try JustETF
+    // Step 5: For ISINs that didn't resolve but are ETFs, try JustETF
     const unresolvedIsins = isins.filter(isin => !isinToTicker.has(isin));
     
     for (const isin of unresolvedIsins) {
@@ -645,7 +762,7 @@ serve(async (req) => {
       }
     }
     
-    // Step 5: Build response - map ISINs to their resolved prices
+    // Step 6: Build response - map ISINs to their resolved prices
     const stocksResult: Record<string, PriceData> = {};
     
     // Add ticker-based prices
@@ -665,10 +782,11 @@ serve(async (req) => {
       stocks: stocksResult,
       options: Object.fromEntries(optionPrices),
       isinMappings: Object.fromEntries(isinToTicker),
+      underlyingMappings: Object.fromEntries(underlyingMap),
       fetchedAt: new Date().toISOString(),
     };
     
-    console.log(`[fetch-market-prices] Returning ${Object.keys(result.stocks).length} stocks, ${Object.keys(result.options).length} options`);
+    console.log(`[fetch-market-prices] Returning ${Object.keys(result.stocks).length} stocks, ${Object.keys(result.options).length} options, ${underlyingMap.size} underlying mappings`);
     
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -681,6 +799,7 @@ serve(async (req) => {
         stocks: {},
         options: {},
         isinMappings: {},
+        underlyingMappings: {},
         fetchedAt: new Date().toISOString(),
       }),
       { 
