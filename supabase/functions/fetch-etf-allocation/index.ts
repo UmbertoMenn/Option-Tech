@@ -121,20 +121,27 @@ function getCurrencyFromCountry(country: string): string {
 
 // Check if a name is a valid country (not a sector)
 function isValidCountry(name: string): boolean {
-  const upperName = name.toUpperCase();
+  // FIRST: Check if it's a known country - if so, always accept it
+  const currency = getCurrencyFromCountry(name);
+  if (currency !== 'OTHER') {
+    return true; // It's a known country, definitely valid
+  }
   
-  // If it contains a sector keyword, it's not a country
+  // Check if name is in our country map (exact match)
+  if (COUNTRY_TO_CURRENCY[name]) {
+    return true;
+  }
+  
+  // Only now check for sector keywords (for unknown names)
+  const upperName = name.toUpperCase();
   for (const sector of SECTOR_KEYWORDS) {
-    if (upperName.includes(sector.toUpperCase())) {
+    // Use word boundary matching to avoid partial matches
+    // e.g., "IT" should not match "Italy"
+    const sectorRegex = new RegExp(`\\b${sector.toUpperCase()}\\b`);
+    if (sectorRegex.test(upperName)) {
       console.log(`Filtering out sector: ${name}`);
       return false;
     }
-  }
-  
-  // Check if it's a known country
-  const currency = getCurrencyFromCountry(name);
-  if (currency !== 'OTHER') {
-    return true;
   }
   
   // For unknown entries, be conservative - only accept if it looks like a country name
@@ -186,68 +193,107 @@ async function scrapeJustETF(isin: string): Promise<{
   // Look for "hedged" specifically in the ETF name/title
   const isHedged = /hedged/i.test(name);
   
-  // Extract country allocations from the page
+  // Extract country allocations from the page using specific data-testid attributes
   const countryAllocations: Record<string, number> = {};
   const currencyAllocations: Record<string, number> = {};
   
-  // Try to find country breakdown section
-  // Look for patterns like "United States 65.23%"
-  const countryPatterns = [
-    // Pattern for table rows with country and percentage
-    /<tr[^>]*>[\s\S]*?<td[^>]*>([^<]+)<\/td>[\s\S]*?<td[^>]*>[\s\S]*?(\d+[.,]\d+)\s*%[\s\S]*?<\/tr>/gi,
-    // Pattern for divs with country allocation
-    /class="[^"]*country[^"]*"[^>]*>[\s\S]*?([A-Za-z\s]+)[\s\S]*?(\d+[.,]\d+)\s*%/gi,
-  ];
+  // Method 1: Look for country rows with specific data-testid (most reliable)
+  // Pattern: data-testid="etf-holdings_countries_row" with 
+  //          data-testid="tl_etf-holdings_countries_value_name" and 
+  //          data-testid="tl_etf-holdings_countries_value_percentage"
+  const countryRowRegex = /data-testid="etf-holdings_countries_row"[^>]*>[\s\S]*?data-testid="tl_etf-holdings_countries_value_name"[^>]*>([^<]+)<[\s\S]*?data-testid="tl_etf-holdings_countries_value_percentage"[^>]*>[\s]*([\d,\.]+)\s*%/gi;
   
-  // Try alternative approach - look for specific data attributes or structured data
-  const countryRegex = /(?:country|countries|geografia|paese)[^>]*>[\s\S]{0,500}?([A-Za-z\s]+)[\s\S]{0,100}?(\d+[.,]\d+)\s*%/gi;
   let match;
-  
-  while ((match = countryRegex.exec(html)) !== null) {
+  while ((match = countryRowRegex.exec(html)) !== null) {
     const country = match[1].trim();
     const percentage = parsePercentage(match[2]);
     
-    // IMPORTANT: Only add if it's a valid country (not a sector)
-    if (percentage > 0 && country.length > 2 && country.length < 50 && isValidCountry(country)) {
-      const normalizedCountry = country.replace(/\s+/g, ' ');
-      if (!countryAllocations[normalizedCountry]) {
-        countryAllocations[normalizedCountry] = percentage;
+    if (percentage > 0 && country.length > 1 && isValidCountry(country)) {
+      console.log(`Found country: ${country} = ${percentage}%`);
+      countryAllocations[country] = (countryAllocations[country] || 0) + percentage;
+    }
+  }
+  
+  // Method 2: Alternative pattern - look for table cells with country name and percentage
+  if (Object.keys(countryAllocations).length === 0) {
+    console.log('Method 1 failed, trying Method 2...');
+    // Look for patterns like: <td...>United States</td>...<span...>47.82%</span>
+    const altCountryRegex = /<tr[^>]*(?:countries|country)[^>]*>[\s\S]*?<td[^>]*>([A-Za-z\s\-]+)<\/td>[\s\S]*?(\d+[.,]\d+)\s*%/gi;
+    
+    while ((match = altCountryRegex.exec(html)) !== null) {
+      const country = match[1].trim();
+      const percentage = parsePercentage(match[2]);
+      
+      if (percentage > 0 && country.length > 2 && isValidCountry(country)) {
+        console.log(`Found country (Method 2): ${country} = ${percentage}%`);
+        countryAllocations[country] = (countryAllocations[country] || 0) + percentage;
       }
     }
   }
   
-  // If no country data found, try to find a JSON data block
-  const jsonDataMatch = html.match(/chartData[^=]*=\s*(\[[^\]]+\])/);
-  if (jsonDataMatch) {
-    try {
-      const chartData = JSON.parse(jsonDataMatch[1]);
-      for (const item of chartData) {
-        // Only add if it's a valid country (not a sector)
-        if (item.name && item.y && isValidCountry(item.name)) {
-          countryAllocations[item.name] = item.y;
+  // Method 3: Look for any pattern with country name followed by percentage
+  if (Object.keys(countryAllocations).length === 0) {
+    console.log('Method 2 failed, trying Method 3 (country keyword context)...');
+    const countryKeywordRegex = /(?:countries|country|Countries|Country)[^<]*<[\s\S]{0,2000}?([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)[^<\d]*(\d+[.,]\d+)\s*%/gi;
+    
+    while ((match = countryKeywordRegex.exec(html)) !== null) {
+      const country = match[1].trim();
+      const percentage = parsePercentage(match[2]);
+      
+      if (percentage > 0 && country.length > 2 && country.length < 30 && isValidCountry(country)) {
+        console.log(`Found country (Method 3): ${country} = ${percentage}%`);
+        if (!countryAllocations[country]) {
+          countryAllocations[country] = percentage;
         }
       }
-    } catch (e) {
-      console.log('Could not parse chart data');
     }
   }
   
-  // Validate total - if it exceeds 110%, we may have mixed sectors
+  // Method 4: Search for known country names in the HTML with nearby percentages
+  if (Object.keys(countryAllocations).length < 3) {
+    console.log('Trying Method 4 (known country search)...');
+    const knownCountries = [
+      'United States', 'Japan', 'United Kingdom', 'France', 'Germany', 'Canada',
+      'Switzerland', 'Australia', 'China', 'Netherlands', 'Hong Kong', 'Sweden',
+      'Taiwan', 'South Korea', 'India', 'Denmark', 'Spain', 'Italy', 'Singapore',
+      'Brazil', 'Finland', 'Belgium', 'Ireland', 'Norway', 'South Africa',
+      'Austria', 'New Zealand', 'Israel', 'Mexico', 'Thailand', 'Indonesia',
+      'Malaysia', 'Poland', 'Saudi Arabia', 'UAE', 'Qatar', 'Philippines', 'Other'
+    ];
+    
+    for (const country of knownCountries) {
+      // Look for country name followed by a percentage within reasonable distance
+      const countryPattern = new RegExp(
+        country.replace(/\s+/g, '\\s+') + '[^\\d]{0,100}?(\\d+[.,]\\d+)\\s*%',
+        'gi'
+      );
+      
+      const countryMatch = countryPattern.exec(html);
+      if (countryMatch && !countryAllocations[country]) {
+        const percentage = parsePercentage(countryMatch[1]);
+        if (percentage > 0 && percentage <= 100) {
+          console.log(`Found country (Method 4): ${country} = ${percentage}%`);
+          countryAllocations[country] = percentage;
+        }
+      }
+    }
+  }
+  
+  // Log final results
+  console.log(`Final country allocations for ${isin}:`, countryAllocations);
   const totalAllocations = Object.values(countryAllocations).reduce((a, b) => a + b, 0);
-  if (totalAllocations > 110) {
-    console.warn(`Total allocations ${totalAllocations}% exceeds 110%, filtering non-country entries...`);
-    // Re-filter with stricter validation - only keep known countries
+  console.log(`Total allocation: ${totalAllocations}%`);
+  
+  // Validate: if total is way off, something went wrong
+  if (totalAllocations > 120) {
+    console.warn(`Total ${totalAllocations}% is too high, filtering to known countries only...`);
     for (const [key, value] of Object.entries(countryAllocations)) {
-      const currency = getCurrencyFromCountry(key);
-      if (currency === 'OTHER' && !COUNTRY_TO_CURRENCY[key]) {
-        console.log(`Removing suspicious entry: ${key} (${value}%)`);
+      if (getCurrencyFromCountry(key) === 'OTHER' && !COUNTRY_TO_CURRENCY[key]) {
+        console.log(`Removing unknown entry: ${key}`);
         delete countryAllocations[key];
       }
     }
   }
-  
-  // Log final country allocations for debugging
-  console.log(`Final country allocations for ${isin}:`, countryAllocations);
   
   // Convert country allocations to currency allocations
   for (const [country, percentage] of Object.entries(countryAllocations)) {
