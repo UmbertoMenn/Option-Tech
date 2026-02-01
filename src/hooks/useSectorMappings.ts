@@ -16,6 +16,7 @@ export function useSectorMappings() {
   const [mappings, setMappings] = useState<Record<string, SectorMapping>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
+  const [resolvingCount, setResolvingCount] = useState(0);
   const isFetchingRef = useRef(false);
 
   const fetchMappings = useCallback(async (stocks: StockInfo[], derivativeNames: string[] = []) => {
@@ -86,6 +87,9 @@ export function useSectorMappings() {
       
       // 5. If there are items needing resolution, call edge function
       if (isinsToResolve.length > 0 || derivativeNamesToResolve.length > 0) {
+        const totalToResolve = isinsToResolve.length + derivativeNamesToResolve.length;
+        setResolvingCount(totalToResolve);
+        
         console.log('Triggering sector resolution:', { 
           isins: isinsToResolve.slice(0, 5), 
           names: derivativeNamesToResolve.slice(0, 5) 
@@ -104,7 +108,7 @@ export function useSectorMappings() {
             mode: 'resolve-and-get-sectors', 
             isins: isinsToResolve,
             descriptions,
-            names: derivativeNamesToResolve, // NEW: also send derivative underlyings
+            names: derivativeNamesToResolve,
           }
         });
         
@@ -184,11 +188,13 @@ export function useSectorMappings() {
         setMappings(newMappings);
       }
       
+      setResolvingCount(0);
       setHasFetched(true);
     } catch (err) {
       console.error('Error in fetchMappings:', err);
     } finally {
       setIsLoading(false);
+      setResolvingCount(0);
       isFetchingRef.current = false;
     }
   }, [hasFetched]);
@@ -200,5 +206,5 @@ export function useSectorMappings() {
     isFetchingRef.current = false;
   }, []);
 
-  return { mappings, fetchMappings, isLoading, reset };
+  return { mappings, fetchMappings, isLoading, resolvingCount, reset };
 }

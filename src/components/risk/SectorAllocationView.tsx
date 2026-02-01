@@ -10,7 +10,7 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
 import { 
   SectorExposure, 
   TopHolding, 
@@ -27,6 +27,8 @@ interface SectorAllocationViewProps {
   loadedETFCount: number;
   includeDerivatives: boolean;
   onIncludeDerivativesChange: (value: boolean) => void;
+  isResolvingSectors?: boolean;
+  resolvingCount?: number;
 }
 
 export function SectorAllocationView({
@@ -38,6 +40,8 @@ export function SectorAllocationView({
   loadedETFCount,
   includeDerivatives,
   onIncludeDerivativesChange,
+  isResolvingSectors,
+  resolvingCount,
 }: SectorAllocationViewProps) {
   const safeSectorExposure = sectorExposure.filter((s) => {
     return (
@@ -95,17 +99,31 @@ export function SectorAllocationView({
                 Settore principale: <span className="font-medium text-foreground">{safeSectorExposure[0].sector} ({safeSectorExposure[0].percentage.toFixed(1)}%)</span>
               </div>
             )}
-            <div className="text-xs text-muted-foreground mt-1">
-              {safeSectorExposure.length} settori identificati
-              {isLoadingETFData && (
-                <span className="ml-2 text-primary animate-pulse">
-                  Caricamento dati ETF ({loadedETFCount}/{etfCount})...
-                </span>
+            <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+              <div>
+                {safeSectorExposure.length} settori identificati
+                {isLoadingETFData && (
+                  <span className="ml-2 text-primary animate-pulse">
+                    Caricamento dati ETF ({loadedETFCount}/{etfCount})...
+                  </span>
+                )}
+                {!isLoadingETFData && etfCount > 0 && (
+                  <span className="ml-2 text-green-500">
+                    ✓ {loadedETFCount} ETF analizzati
+                  </span>
+                )}
+              </div>
+              {isResolvingSectors && resolvingCount && resolvingCount > 0 && (
+                <div className="flex items-center gap-1.5 text-blue-500">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Risoluzione AI in corso ({resolvingCount} strumenti)...</span>
+                </div>
               )}
-              {!isLoadingETFData && etfCount > 0 && (
-                <span className="ml-2 text-green-500">
-                  ✓ {loadedETFCount} ETF analizzati
-                </span>
+              {!isResolvingSectors && !isLoadingETFData && resolvingCount === 0 && (
+                <div className="flex items-center gap-1.5 text-green-500">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Settori aggiornati</span>
+                </div>
               )}
             </div>
             {!includeDerivatives && (
