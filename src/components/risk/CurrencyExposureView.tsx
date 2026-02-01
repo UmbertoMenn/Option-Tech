@@ -161,6 +161,31 @@ export function CurrencyExposureView({
       .filter((c) => c.currency !== 'EUR')
       .reduce((sum, c) => sum + c.totalRisk, 0);
   }, [safeCurrencyExposure]);
+  
+  // Group currencies beyond top 5 into "OTHER" for chart display
+  const MAX_CURRENCIES_IN_CHART = 5;
+  const chartData = useMemo(() => {
+    if (safeCurrencyExposure.length <= MAX_CURRENCIES_IN_CHART) {
+      return safeCurrencyExposure;
+    }
+    
+    const topCurrencies = safeCurrencyExposure.slice(0, MAX_CURRENCIES_IN_CHART);
+    const otherCurrencies = safeCurrencyExposure.slice(MAX_CURRENCIES_IN_CHART);
+    const otherTotal = otherCurrencies.reduce((sum, c) => sum + c.totalRisk, 0);
+    const otherPercentage = otherCurrencies.reduce((sum, c) => sum + c.percentage, 0);
+    
+    return [
+      ...topCurrencies,
+      {
+        currency: 'OTHER',
+        totalRisk: otherTotal,
+        totalRiskOriginal: otherTotal,
+        percentage: otherPercentage,
+        breakdown: { stocks: 0, bonds: 0, commodities: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
+        instruments: []
+      }
+    ];
+  }, [safeCurrencyExposure]);
 
   return (
     <div className="space-y-6">
@@ -239,14 +264,14 @@ export function CurrencyExposureView({
 
         {/* Large Thin Donut Chart */}
         <Card className="border-border bg-card">
-          <CardContent className="pt-4 pb-4">
+          <CardContent className="pt-6">
             {hasData ? (
               <div className="flex items-center gap-6">
                 <div className="w-40 h-40 flex-shrink-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={safeCurrencyExposure}
+                        data={chartData}
                         cx="50%"
                         cy="50%"
                         innerRadius={55}
@@ -254,7 +279,7 @@ export function CurrencyExposureView({
                         paddingAngle={2}
                         dataKey="totalRisk"
                       >
-                        {safeCurrencyExposure.map((entry, index) => (
+                        {chartData.map((entry, index) => (
                           <Cell 
                             key={`cell-${index}`} 
                             fill={getCurrencyColor(entry.currency)}
@@ -265,7 +290,7 @@ export function CurrencyExposureView({
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 space-y-2">
-                  {safeCurrencyExposure.map((curr) => (
+                  {chartData.map((curr) => (
                     <div key={curr.currency} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div 

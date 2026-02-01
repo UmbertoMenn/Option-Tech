@@ -502,7 +502,9 @@ export function calculateBondRisk(
   return bonds.map(bond => {
     const quantity = bond.quantity || 0;
     const price = bond.current_price || 0;
-    const value = quantity * price;
+    // Bonds are quoted as percentage of face value (e.g., 98.5 = 98.5% of 100)
+    // So we multiply by quantity and divide by 100 to get actual value
+    const value = (quantity * price) / 100;
     const exchangeRate = getEffectiveExchangeRate(bond);
     const currency = bond.currency || 'EUR';
     
