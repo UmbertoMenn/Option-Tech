@@ -1,158 +1,116 @@
 
+# Piano: Toggle Inclusione/Esclusione Derivati in Currency Exposure
 
-# Piano: Riconoscimento Avanzato degli ETF nel Parser Excel
+## Obiettivo
 
-## Problema Identificato
-
-Lo strumento "ISHSIII-MSCI S.A.C.UE DLA" (ISIN: IE00BYYR0489) è un ETF iShares ma viene classificato come "stock" perché:
-
-1. Il parser Excel cerca solo le parole "ETF" o "UCITS"
-2. "ISHSIII" è un'abbreviazione di "iShares III" che non viene riconosciuta
-3. La logica avanzata in altri file (currencyExposure.ts, RiskAnalyzer.tsx) usa pattern più ampi ma solo per l'analisi, non per la classificazione iniziale
-
-## Soluzione
-
-Espandere la logica di riconoscimento ETF nel parser Excel con:
-
-1. Lista completa di keyword emittenti ETF (ISHARES, ISHSIII, VANGUARD, SPDR, etc.)
-2. Riconoscimento pattern ISIN tipici degli ETF (prefissi IE, LU)
-3. Pattern aggiuntivi comuni negli ETF
+Aggiungere un controllo toggle nella vista Currency Exposure del Risk Analyzer che permette di includere o escludere i derivati dall'analisi valutaria con un click.
 
 ---
 
-## Modifiche a `src/lib/excelParser.ts`
+## Componenti Interessati
 
-### Aggiungere lista di emittenti ETF
+| Categoria | Inclusa nel Toggle |
+|-----------|-------------------|
+| Stocks & ETF | ❌ Sempre incluso |
+| Commodities | ❌ Sempre incluso |
+| **Naked PUT** | ✅ Toggle |
+| **Leap Call** | ✅ Toggle |
+| **Strategie** | ✅ Toggle |
 
-```typescript
-// Pattern per riconoscere ETF dai principali emittenti
-const ETF_ISSUER_PATTERNS = [
-  'ETF', 'UCITS',
-  // iShares (BlackRock)
-  'ISHARES', 'ISHSIII', 'ISHSIV', 'ISHSV', 'ISHSVII',
-  // Vanguard
-  'VANGUARD', 'VNG',
-  // State Street (SPDR)
-  'SPDR', 'SSG',
-  // Lyxor (Amundi)
-  'LYXOR', 'AMUNDI',
-  // Xtrackers (DWS)
-  'XTRACKERS', 'XTRK',
-  // Invesco
-  'INVESCO',
-  // VanEck
-  'VANECK',
-  // WisdomTree
-  'WISDOMTREE', 'WTR',
-  // UBS
-  'UBS ETF',
-  // HSBC
-  'HSBC ETF',
-  // Franklin Templeton
-  'FRANKLIN'
-];
-```
+---
 
-### Aggiungere riconoscimento ISIN
+## Modifiche Previste
+
+### 1. `src/lib/currencyExposure.ts`
+
+Aggiungere un parametro opzionale alla funzione `calculateCurrencyExposure`:
 
 ```typescript
-// ISINs che iniziano con IE (Irlanda) o LU (Lussemburgo) 
-// sono spesso ETF domiciliati in Europa
-function isLikelyETFByISIN(isin: string | undefined): boolean {
-  if (!isin) return false;
-  const prefix = isin.substring(0, 2).toUpperCase();
-  return prefix === 'IE' || prefix === 'LU';
+export interface CurrencyExposureOptions {
+  includeDerivatives?: boolean; // default: true
 }
-```
 
-### Migliorare la funzione di riconoscimento
-
-```typescript
-function isETF(description: string, isin?: string): boolean {
-  const descUpper = description.toUpperCase();
+export function calculateCurrencyExposure(
+  analysis: RiskAnalysis, 
+  options: CurrencyExposureOptions = {}
+): CurrencyExposure[] {
+  const { includeDerivatives = true } = options;
   
-  // Check emitter patterns
-  for (const pattern of ETF_ISSUER_PATTERNS) {
-    if (descUpper.includes(pattern)) {
-      return true;
-    }
+  // ... aggregazione stocks e commodities (sempre inclusi)
+  
+  if (includeDerivatives) {
+    // Aggregare nakedPuts, leapCalls, strategies
   }
   
-  // Check ISIN prefix (IE/LU) + description patterns
-  if (isLikelyETFByISIN(isin)) {
-    // If ISIN is Irish/Luxembourg and description contains 
-    // common ETF terms like "MSCI", "FTSE", "S&P", etc.
-    const etfIndexPatterns = ['MSCI', 'FTSE', 'S&P', 'STOXX', 'NASDAQ', 'DOW'];
-    if (etfIndexPatterns.some(p => descUpper.includes(p))) {
-      return true;
-    }
-  }
-  
-  return false;
+  // ...
 }
 ```
 
 ---
 
-## Sincronizzazione con Altri File
+### 2. `src/components/risk/CurrencyExposureView.tsx`
 
-Aggiornare la stessa lista anche in:
+Aggiungere un toggle switch nell'header della vista:
 
-| File | Funzione | Azione |
-|------|----------|--------|
-| `src/lib/currencyExposure.ts` | `isETFByDescription()` | Aggiungere pattern mancanti |
-| `src/pages/RiskAnalyzer.tsx` | Regex inline | Allineare con nuovi pattern |
+```typescript
+interface CurrencyExposureViewProps {
+  // ... props esistenti
+  includeDerivatives: boolean;
+  onIncludeDerivativesChange: (value: boolean) => void;
+}
+
+// Nel render, vicino alla card "Esposizione Valutaria Totale":
+<div className="flex items-center gap-2">
+  <Switch 
+    checked={includeDerivatives} 
+    onCheckedChange={onIncludeDerivativesChange}
+  />
+  <Label className="text-sm">Includi Derivati</Label>
+</div>
+```
 
 ---
 
-## Flusso di Correzione
+### 3. `src/pages/RiskAnalyzer.tsx`
+
+Gestire lo stato del toggle e ricalcolare l'esposizione:
+
+```typescript
+const [includeDerivatives, setIncludeDerivatives] = useState(true);
+
+const baseCurrencyExposure = useMemo(() => 
+  calculateCurrencyExposure(analysis, { includeDerivatives }), 
+  [analysis, includeDerivatives]
+);
+
+// Passare props al componente
+<CurrencyExposureView 
+  includeDerivatives={includeDerivatives}
+  onIncludeDerivativesChange={setIncludeDerivatives}
+  // ... altre props
+/>
+```
+
+---
+
+## UI Design
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  1. Aggiornare excelParser.ts                           │
+│  [Esposizione Valutaria Totale]    [🔘 Includi Derivati]│
 ├─────────────────────────────────────────────────────────┤
-│  • Aggiungere ETF_ISSUER_PATTERNS                       │
-│  • Aggiungere isLikelyETFByISIN()                       │
-│  • Modificare parsePositionRow per usare nuova logica   │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  2. Sincronizzare currencyExposure.ts                   │
-├─────────────────────────────────────────────────────────┤
-│  • Aggiornare isETFByDescription() con stessi pattern   │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  3. Sincronizzare RiskAnalyzer.tsx                      │
-├─────────────────────────────────────────────────────────┤
-│  • Aggiornare regex con nuovi pattern                   │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  4. Ricaricare Excel per aggiornare classificazioni     │
-├─────────────────────────────────────────────────────────┤
-│  • L'utente ricarica il file Excel                      │
-│  • Parser classifica correttamente ISHSIII come ETF     │
-│  • Currency Exposure include lo strumento               │
+│  €XXX,XXX                                               │
+│  Non-EUR totale: €YYY,YYY                              │
+│                                                         │
+│  (quando toggle OFF)                                    │
+│  ⚠️ Derivati esclusi dall'analisi                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Pattern da Riconoscere
-
-| Pattern | Esempio | Tipo |
-|---------|---------|------|
-| ISHSIII | ISHSIII-MSCI S.A.C.UE DLA | iShares ETF |
-| ISHSIV | ISHSIV-MSCI WORLD | iShares ETF |
-| VANGUARD | VANGUARD FTSE ALL-WORLD | Vanguard ETF |
-| VNG | VNG LIFESTRAT 80 | Vanguard ETF |
-| SPDR | SPDR S&P 500 | State Street ETF |
-| LYXOR | LYXOR MSCI EUROPE | Lyxor ETF |
-| XTRK | XTRK MSCI EM | Xtrackers ETF |
+Il toggle sarà posizionato nella card principale con:
+- Switch visibile con label "Includi Derivati"
+- Indicatore visivo quando i derivati sono esclusi
+- Ricalcolo immediato al click
 
 ---
 
@@ -160,24 +118,15 @@ Aggiornare la stessa lista anche in:
 
 | File | Azione |
 |------|--------|
-| `src/lib/excelParser.ts` | Aggiungere logica avanzata riconoscimento ETF |
-| `src/lib/currencyExposure.ts` | Sincronizzare pattern ETF |
-| `src/pages/RiskAnalyzer.tsx` | Sincronizzare pattern ETF |
+| `src/lib/currencyExposure.ts` | Aggiungere parametro `includeDerivatives` |
+| `src/components/risk/CurrencyExposureView.tsx` | Aggiungere toggle switch UI |
+| `src/pages/RiskAnalyzer.tsx` | Gestire stato e passare props |
 
 ---
 
 ## Risultato Atteso
 
-Dopo la modifica:
+- Toggle ON (default): Mostra esposizione completa con tutti i derivati
+- Toggle OFF: Mostra solo Stocks, ETF e Commodities
 
-| Strumento | Prima | Dopo |
-|-----------|-------|------|
-| ISHSIII-MSCI S.A.C.UE DLA | stock ❌ | etf ✅ |
-| ISHSIV-MSCI WORLD | stock ❌ | etf ✅ |
-| VNG LIFESTRAT 80 | stock ❌ | etf ✅ |
-
-L'ETF verrà:
-1. Classificato correttamente come "etf" nel database
-2. Incluso nell'analisi Currency Exposure
-3. Lo scraper fetch-etf-allocation recupererà la sua allocazione geografica
-
+La modifica è istantanea e il grafico a ciambella si aggiorna automaticamente.
