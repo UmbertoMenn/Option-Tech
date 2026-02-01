@@ -1,242 +1,182 @@
 
-# Piano: Calcolo Robusto del Max Loss per le Strategie di Derivati
+# Piano: Short Strangle - Max Loss solo lato PUT + Warning Illimitato
 
-## Problema Identificato
+## Obiettivo
 
-Il calcolo attuale del Max Loss in `src/lib/riskCalculator.ts` presenta diverse criticità:
-
-1. **Logica frammentata**: Il riconoscimento delle strategie si basa sui nomi (es. `Short Strangle`, `Bull Put Spread`) invece che sulla struttura matematica effettiva
-2. **Assunzioni errate sui premi**: Il calcolo GP usa `avg_cost` ma non considera correttamente il segno (acquisto/vendita)
-3. **Fallback imprecisi**: Quando la strategia non viene riconosciuta, il fallback non è sempre corretto
-4. **Nessun controllo di backup**: Non c'è validazione che il max loss calcolato abbia senso
-
-## Soluzione: Calcolo Universale Basato sulla Struttura
-
-Implementare un algoritmo universale che calcola il max loss **senza dipendere dal nome della strategia**, basandosi solo su:
-- **Segno della quantità**: qty < 0 = venduto, qty > 0 = comprato
-- **Tipo opzione**: call o put
-- **Strike price**
-- **Premio pagato/incassato**: avg_cost × |qty| × 100
+Per le strategie **Short Strangle**, calcolare il Max Loss considerando **solo la PUT venduta** (rischio definito) e aggiungere un **triangolino giallo** con tooltip che spiega la convenzione adottata.
 
 ---
 
-## Formula Universale del Max Loss
+## Motivazione
 
-### Principio Base
+Lo Short Strangle ha:
+- **Lato PUT**: Rischio definito = Strike PUT × Contratti × 100 - Premio netto
+- **Lato CALL**: Rischio teoricamente **illimitato** (il sottostante può salire all'infinito)
 
-Per QUALSIASI strategia di opzioni, il max loss si verifica in uno di questi scenari:
-1. **Sottostante → 0**: Massimo rischio lato PUT
-2. **Sottostante → ∞**: Massimo rischio lato CALL (teorico)
-3. **Sottostante → strike specifico**: Per strategie limitate
-
-### Calcolo del Payoff a Scadenza
-
-```text
-Per ogni opzione:
-  Payoff CALL = max(0, Prezzo - Strike) × 100 × qty
-  Payoff PUT  = max(0, Strike - Prezzo) × 100 × qty
-  
-  Premio = -qty × avg_cost × 100
-  (negativo per vendute = incassato, positivo per comprate = pagato)
-  
-  Risultato Netto = Σ(Payoff + Premio) per tutte le gambe
-```
-
-### Scenari di Calcolo
-
-| Scenario | Prezzo Sottostante | Rischio Principale |
-|----------|-------------------|-------------------|
-| PUT side | 0 | PUT vendute vanno ITM max |
-| CALL side | Max strike + 100% | CALL vendute vanno ITM |
-| Strike points | Ogni strike presente | Trova punto di max loss |
+Visualizzare il rischio CALL illimitato non ha senso pratico. La convenzione corretta è mostrare il rischio PUT (definito) con un indicatore che avverte della natura illimitata del rischio CALL.
 
 ---
 
-## Implementazione Tecnica
+## Modifiche Previste
 
-### 1. Nuova Funzione `calculateUniversalMaxLoss`
+### 1. `src/lib/universalMaxLoss.ts`
+
+Aggiungere funzione per riconoscere Short Strangle e calcolare solo il rischio PUT:
 
 ```typescript
-interface OptionLeg {
-  type: 'call' | 'put';
-  strike: number;
-  quantity: number;      // + = comprato, - = venduto
-  avgCost: number;       // premio per contratto
+/**
+ * Detect if the strategy is a Short Strangle (1+ sold PUT + 1+ sold CALL, no protection)
+ */
+function isShortStrangle(legs: OptionLeg[]): boolean {
+  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
+  const soldCalls = legs.filter(l => l.type === 'call' && l.quantity < 0);
+  const boughtPuts = legs.filter(l => l.type === 'put' && l.quantity > 0);
+  const boughtCalls = legs.filter(l => l.type === 'call' && l.quantity > 0);
+  
+  // Short Strangle: solo opzioni vendute, nessuna protezione
+  return soldPuts.length > 0 && soldCalls.length > 0 && 
+         boughtPuts.length === 0 && boughtCalls.length === 0;
 }
 
-function calculateUniversalMaxLoss(legs: OptionLeg[]): {
-  maxLoss: number;
-  worstPrice: number;
-  calculation: string;
-} {
-  // Trova tutti i punti critici (strike + estremi)
-  const strikes = legs.map(l => l.strike);
-  const minStrike = Math.min(...strikes);
-  const maxStrike = Math.max(...strikes);
+/**
+ * Calculate Short Strangle max loss using only the PUT side.
+ * Returns maxLoss @ price = 0 for the PUT leg minus net premium.
+ */
+function calculateShortStrangleMaxLoss(legs: OptionLeg[]): MaxLossResult {
+  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
   
-  // Punti da testare: 0, ogni strike, max strike + 100
-  const testPrices = [
-    0,
-    ...strikes,
-    maxStrike + 100,
-    maxStrike + 1000  // Per call scoperte
-  ];
+  // Max loss PUT side = Strike × |qty| × 100 per ogni PUT venduta
+  const putMaxLoss = soldPuts.reduce((sum, put) => {
+    return sum + put.strike * Math.abs(put.quantity) * 100;
+  }, 0);
   
-  let worstPayoff = Infinity;
-  let worstPrice = 0;
+  // Net premium received (credito netto)
+  const netPremium = legs.reduce((sum, l) => sum + (-l.quantity * l.avgCost * 100), 0);
   
-  for (const price of testPrices) {
-    const payoff = calculatePayoffAtPrice(legs, price);
-    if (payoff < worstPayoff) {
-      worstPayoff = payoff;
-      worstPrice = price;
-    }
-  }
+  // Max Loss = Rischio PUT - Premio netto incassato
+  const maxLoss = Math.max(0, putMaxLoss - netPremium);
   
-  // Payoff negativo = perdita → max loss = abs(payoff)
   return {
-    maxLoss: Math.max(0, -worstPayoff),
-    worstPrice,
-    calculation: `Payoff @ $${worstPrice} = ${worstPayoff.toFixed(0)}`
+    maxLoss,
+    worstPrice: 0,
+    calculation: `Short Strangle: PUT side risk @ $0 = ${putMaxLoss.toFixed(0)} - GP ${netPremium.toFixed(0)} = ${maxLoss.toFixed(0)}`,
+    isUnlimited: true  // Flag per UI
   };
 }
 ```
 
-### 2. Funzione Helper `calculatePayoffAtPrice`
+Modificare `calculateUniversalMaxLoss` per intercettare gli Short Strangle:
 
 ```typescript
-function calculatePayoffAtPrice(legs: OptionLeg[], price: number): number {
-  let totalPayoff = 0;
+export function calculateUniversalMaxLoss(legs: OptionLeg[]): MaxLossResult {
+  // ... existing code ...
   
-  for (const leg of legs) {
-    const contracts = Math.abs(leg.quantity);
-    const isLong = leg.quantity > 0;
-    const multiplier = 100;
-    
-    // Valore intrinseco a scadenza
-    let intrinsic: number;
-    if (leg.type === 'call') {
-      intrinsic = Math.max(0, price - leg.strike);
-    } else {
-      intrinsic = Math.max(0, leg.strike - price);
-    }
-    
-    // Payoff dell'opzione
-    const intrinsicValue = intrinsic * multiplier * contracts;
-    
-    // Premio: per LONG abbiamo pagato, per SHORT abbiamo incassato
-    const premium = leg.avgCost * multiplier * contracts;
-    
-    if (isLong) {
-      // Long: guadagno intrinseco - premio pagato
-      totalPayoff += intrinsicValue - premium;
-    } else {
-      // Short: premio incassato - perdita intrinseca
-      totalPayoff += premium - intrinsicValue;
-    }
+  // CASO SPECIALE: Short Strangle → usa solo rischio PUT
+  if (isShortStrangle(legs)) {
+    return calculateShortStrangleMaxLoss(legs);
   }
   
-  return totalPayoff;
-}
-```
-
-### 3. Controllo di Backup (Sanity Check)
-
-```typescript
-function validateMaxLoss(legs: OptionLeg[], calculatedMaxLoss: number): number {
-  // Backup 1: Per strategie con PUT vendute, max loss ≤ strike massimo × contratti × 100
-  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
-  const maxPutStrike = Math.max(...soldPuts.map(l => l.strike), 0);
-  const totalPutContracts = soldPuts.reduce((s, l) => s + Math.abs(l.quantity), 0);
-  const maxPutRisk = maxPutStrike * 100 * totalPutContracts;
-  
-  // Backup 2: Premium netto pagato/incassato
-  const netPremium = legs.reduce((sum, l) => {
-    return sum + (-l.quantity * l.avgCost * 100);
-  }, 0);
-  
-  // Se abbiamo spread (PUT comprate che proteggono), usa spread width
-  const boughtPuts = legs.filter(l => l.type === 'put' && l.quantity > 0);
-  if (boughtPuts.length > 0 && soldPuts.length > 0) {
-    const soldStrike = Math.max(...soldPuts.map(l => l.strike));
-    const boughtStrike = Math.min(...boughtPuts.map(l => l.strike));
-    const spreadWidth = Math.max(0, soldStrike - boughtStrike);
-    const spreadRisk = spreadWidth * 100 * totalPutContracts - Math.max(0, netPremium);
-    
-    // Max loss non può superare spread risk
-    return Math.min(calculatedMaxLoss, Math.max(0, spreadRisk));
-  }
-  
-  return calculatedMaxLoss;
+  // ... rest of existing universal calculation ...
 }
 ```
 
 ---
 
-## Mapping per Ogni Tipo di Strategia
+### 2. `src/lib/riskCalculator.ts`
 
-| Strategia | Formula Max Loss |
-|-----------|-----------------|
-| **Iron Condor** | max(PUT spread, CALL spread) × 100 × contratti - GP |
-| **Double Diagonal** | Come Iron Condor (scadenze diverse non cambiano il max loss a scadenza corta) |
-| **Bull Put Spread** | (Sold strike - Bought strike) × 100 × contratti - GP |
-| **Bear Call Spread** | (Bought strike - Sold strike) × 100 × contratti - GP |
-| **Short Strangle** | Sold PUT strike × 100 × contratti (rischio put side, call side infinito) |
-| **Long Strangle** | Premio totale pagato |
-| **Butterfly** | Larghezza ala × 100 × contratti - GP |
-| **Naked Call** | Illimitato → stima conservativa |
+Aggiungere campo `hasUnlimitedRisk` all'interfaccia `StrategyRiskDetail`:
 
-**Tutti calcolati con la formula universale!**
+```typescript
+export interface StrategyRiskDetail {
+  strategyName: string;
+  underlying: string;
+  maxLoss: number;
+  maxLossEUR: number;
+  currency: string;
+  exchangeRate: number;
+  calculation: string;
+  hasUnlimitedRisk: boolean;  // NUOVO: indica rischio teoricamente illimitato
+}
+```
+
+Passare il flag `isUnlimited` dal risultato del calcolo:
+
+```typescript
+function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { 
+  maxLoss: number; 
+  calculation: string;
+  isUnlimited: boolean;  // NUOVO
+} {
+  const legs = positionsToLegs(group.options.map(o => o.option));
+  const result = calculateUniversalMaxLoss(legs);
+  
+  return {
+    maxLoss: result.maxLoss,
+    calculation: `${group.strategyName}: ${result.calculation}`,
+    isUnlimited: result.isUnlimited
+  };
+}
+```
+
+---
+
+### 3. `src/components/risk/EquityExposureView.tsx`
+
+Aggiungere triangolino giallo con tooltip per strategie con rischio illimitato:
+
+```typescript
+{strat.hasUnlimitedRisk && (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger>
+        <AlertTriangle className="w-4 h-4 text-amber-500" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        <p className="font-medium text-amber-500">Rischio Illimitato</p>
+        <p className="text-sm">
+          Il Max Loss mostrato considera solo il lato PUT (rischio definito). 
+          Il lato CALL ha rischio teoricamente illimitato.
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+)}
+```
+
+---
+
+## UI Preview
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  Short Strangle  ⓘ  ⚠️                      €25,850        │
+│  ADOBE                                    ML: USD 25,850    │
+└─────────────────────────────────────────────────────────────┘
+                      ↑
+           Triangolo giallo: "Rischio Illimitato - 
+           Il Max Loss mostrato considera solo il lato PUT..."
+```
 
 ---
 
 ## File da Modificare
 
-| File | Modifiche |
-|------|-----------|
-| `src/lib/riskCalculator.ts` | Nuove funzioni universali + refactor calcoli esistenti |
+| File | Modifica |
+|------|----------|
+| `src/lib/universalMaxLoss.ts` | Aggiungere `isShortStrangle()` e `calculateShortStrangleMaxLoss()` |
+| `src/lib/riskCalculator.ts` | Aggiungere `hasUnlimitedRisk` a `StrategyRiskDetail` e passare flag |
+| `src/components/risk/EquityExposureView.tsx` | Aggiungere triangolino giallo con tooltip |
 
 ---
 
-## Esempio Pratico
+## Esempio Adobe
 
-Dati dal database - Accenture:
+Prima (calcolo errato con rischio CALL illimitato):
+- Max Loss: ~$299,850 (prezzo teorico @10x strike)
 
-| Tipo | Strike | Qty | Avg Cost |
-|------|--------|-----|----------|
-| PUT | 380 | -1 | 110.30 |
-| PUT | 220 | +1 | 12.20 |
-
-**Calcolo attuale** (probabilmente errato):
-- Potrebbe non riconoscere come Bull Put Spread
-
-**Nuovo calcolo universale**:
-
-```text
-Test @ $0:
-  PUT 380 venduta: 38000 intrinseco - 11030 premio = -26970
-  PUT 220 comprata: 22000 intrinseco - 1220 premio = +20780
-  Totale: -6190 → Max Loss = $6,190
-
-Test @ $220:
-  PUT 380 venduta: 16000 intrinseco - 11030 premio = -4970
-  PUT 220 comprata: 0 intrinseco - 1220 premio = -1220
-  Totale: -6190 → Max Loss = $6,190
-
-Spread Width = 380 - 220 = 160
-GP = 11030 - 1220 = 9810
-Max Loss = (160 × 100 × 1) - 9810 = 6190 ✓
-```
-
----
-
-## Output Finale
-
-```text
-Calcolo robusto del Max Loss:
-1. Analizza ogni gamba della strategia
-2. Calcola payoff a tutti i prezzi critici (0, strike, +∞)
-3. Trova il punto di massima perdita
-4. Applica controlli di backup
-5. Mostra formula trasparente nel tooltip
-```
+Dopo (solo rischio PUT):
+- Strike PUT: $275
+- Contratti: 1
+- GP: $735 + $915 = $1,650
+- **Max Loss PUT side: $275 × 100 - $1,650 = $25,850** ✓
+- **Indicatore**: ⚠️ Rischio Illimitato (lato CALL)
