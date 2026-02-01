@@ -1,178 +1,187 @@
 
 
-# Piano: Fix Auto-Creazione Settori per Stock Mancanti
+# Piano: Fix Sector Resolution per Stock e Derivati
 
-## Problema Identificato
+## Problemi Identificati
 
-Il sistema ha le funzioni AI (`fetchSectorWithAI`) implementate correttamente, ma **non vengono mai chiamate** perché:
+L'analisi ha rivelato **tre problemi distinti** che causano la classificazione "Other":
 
-| Fase | Codice Attuale | Problema |
-|------|----------------|----------|
-| Upload Excel | Posizioni salvate con ISIN | ✅ OK |
-| Risk Analyzer | `useSectorMappings` cerca in `isin_mappings` | ❌ Molti ISIN non esistono nella tabella |
-| Edge function `update-sectors` | Aggiorna solo record con `sector IS NULL` | ❌ Cerca solo record **già esistenti** |
+| Problema | File | Causa |
+|----------|------|-------|
+| 1. Alphabet, CACI non risolti | `useSectorMappings.ts` | L'edge function viene chiamata ma non trova i settori (possibile problema AI) |
+| 2. Derivati tutti in "Other" | `sectorExposure.ts` | Usano solo `getStockSector()` statico, ignorano `sectorMappings` |
+| 3. Sottostanti derivati non raccolti | `RiskAnalyzer.tsx` | Solo `stockDetails` viene passato a `fetchSectorMappings` |
 
-**Dati dal database**:
-- 60 posizioni stock con ISIN
-- Solo 31 record in `isin_mappings` (18 senza sector)
-- Molti stock (Alphabet, JPM, ecc.) non hanno proprio il record
+### Dati dal Database
 
----
-
-## Causa Root
-
-La funzione `updateMissingSectors` (linee 525-582 in `update-prices-cron/index.ts`) fa:
-```typescript
-// PROBLEMA: cerca solo record GIÀ ESISTENTI con sector=null
-let query = supabase
-  .from('isin_mappings')
-  .select('isin, ticker')
-  .is('sector', null);  // ← Solo esistenti!
+```
+Alphabet (US02079K3059): NON ESISTE in isin_mappings → Mai risolto
+CACI (US1271903049): sector = null, source = unknown → AI ha fallito
+Derivati: Usano "underlying" (nome) ma sectorExposure usa solo STOCK_SECTORS statico
 ```
 
-**Non crea mai nuovi record per ISIN sconosciuti.**
-
 ---
 
-## Soluzione
+## Soluzione Completa
 
-Modificare `useSectorMappings.ts` per:
-1. Identificare ISIN che **non esistono** in `isin_mappings`
-2. Chiamare l'edge function con modalità `resolve-and-get-sectors` 
-3. L'edge function dovrà **creare i record** con ISIN → Ticker → Sector (via Yahoo + AI fallback)
+### Modifica 1: Raccogliere Anche i Sottostanti Derivati
 
-### Modifiche Tecniche
+**File**: `src/pages/RiskAnalyzer.tsx`
 
-#### 1. Nuovo Modo `resolve-and-get-sectors` in Edge Function
-
-**File**: `supabase/functions/update-prices-cron/index.ts`
-
-Aggiungere un nuovo handler che:
-1. Riceve lista di ISIN
-2. Per ogni ISIN:
-   - Se esiste in `isin_mappings` con sector → skip
-   - Se esiste senza sector → aggiorna con AI
-   - Se **non esiste** → crea nuovo record (resolve ticker + get sector via AI)
+Estendere `stocksForSectorMapping` per includere anche i nomi dei sottostanti derivati:
 
 ```typescript
-// Nuovo handler per risolvere ISIN mancanti completamente
-if (body.mode === 'resolve-and-get-sectors') {
-  const isins = body.isins || [];
-  const results = [];
+// Estrarre sottostanti da TUTTI i tipi di posizione
+const stocksForSectorMapping = useMemo(() => {
+  const stocks: Array<{ isin: string; description: string }> = [];
+  const names: string[] = [];  // Per derivati senza ISIN
+  const seen = new Set<string>();
   
-  for (const isin of isins) {
-    // 1. Check if mapping exists
-    const { data: existing } = await supabase
-      .from('isin_mappings')
-      .select('ticker, sector')
-      .eq('isin', isin)
-      .single();
-    
-    if (existing?.sector) {
-      // Already has sector, skip
-      results.push({ isin, sector: existing.sector, source: 'cache' });
-      continue;
+  // 1. Stock diretti (con ISIN)
+  for (const stock of analysis.stockDetails) {
+    if (stock.isin && !seen.has(stock.isin)) {
+      seen.add(stock.isin);
+      if (!ETF_PATTERN.test(stock.underlying)) {
+        stocks.push({ isin: stock.isin, description: stock.underlying });
+      }
     }
-    
-    // 2. Need to resolve or update
-    let ticker = existing?.ticker;
-    
-    if (!ticker) {
-      // Resolve ISIN to ticker via Yahoo Search
-      const searchResult = await searchYahooByISIN(isin);
-      ticker = searchResult?.ticker || null;
-    }
-    
-    if (!ticker) {
-      results.push({ isin, sector: null, error: 'Could not resolve ticker' });
-      continue;
-    }
-    
-    // 3. Get sector (Yahoo + AI fallback)
-    const sectorInfo = await fetchYahooSectorInfo(ticker, '');
-    
-    // 4. Save to database (UPSERT)
-    await supabase.from('isin_mappings').upsert({
-      isin,
-      ticker,
-      sector: sectorInfo.sector,
-      industry: sectorInfo.industry,
-      source: sectorInfo.sector ? 'ai' : 'unknown',
-      last_verified_at: new Date().toISOString()
-    }, { onConflict: 'isin' });
-    
-    results.push({ 
-      isin, 
-      ticker, 
-      sector: sectorInfo.sector, 
-      source: 'resolved' 
-    });
   }
   
-  return new Response(JSON.stringify({ success: true, results }), ...);
+  // 2. Naked PUTs (solo nome)
+  for (const np of analysis.nakedPutDetails) {
+    if (!seen.has(np.underlying)) {
+      seen.add(np.underlying);
+      names.push(np.underlying);
+    }
+  }
+  
+  // 3. Leap CALLs (solo nome)
+  for (const lc of analysis.leapCallDetails) {
+    if (!seen.has(lc.underlying)) {
+      seen.add(lc.underlying);
+      names.push(lc.underlying);
+    }
+  }
+  
+  // 4. Strategie (solo nome)
+  for (const strat of analysis.strategyDetails) {
+    if (!seen.has(strat.underlying)) {
+      seen.add(strat.underlying);
+      names.push(strat.underlying);
+    }
+  }
+  
+  return { stocks, names };
+}, [analysis]);
+```
+
+### Modifica 2: `sectorExposure.ts` - Usare Mapping Dinamici per Derivati
+
+**File**: `src/lib/sectorExposure.ts`
+
+Modificare le funzioni per i derivati per usare prima i mapping dinamici:
+
+```typescript
+// Nuova funzione helper per trovare settore con fallback
+function getStockSectorWithMapping(
+  name: string, 
+  sectorMappings: Record<string, SectorMapping>,
+  isin?: string
+): string {
+  // 1. Try by ISIN from dynamic mapping
+  if (isin && sectorMappings[isin]?.sector) {
+    return normalizeSectorName(sectorMappings[isin].sector);
+  }
+  
+  // 2. Try to find by ticker in sectorMappings
+  const normalizedName = name.toUpperCase();
+  for (const [mappingIsin, mapping] of Object.entries(sectorMappings)) {
+    if (mapping.ticker && normalizedName.includes(mapping.ticker.toUpperCase())) {
+      return normalizeSectorName(mapping.sector);
+    }
+    // Also match by description
+    if (normalizedName.includes(mapping.ticker?.toUpperCase() || '')) {
+      return normalizeSectorName(mapping.sector);
+    }
+  }
+  
+  // 3. Fallback to static mapping
+  return getStockSector(name);
+}
+
+// In calculateSectorExposure, usare questa funzione per i derivati:
+// Naked PUTs
+for (const np of analysis.nakedPutDetails) {
+  const sector = getStockSectorWithMapping(np.underlying, sectorMappings);
+  // ...
+}
+
+// Leap CALLs
+for (const lc of analysis.leapCallDetails) {
+  const sector = getStockSectorWithMapping(lc.underlying, sectorMappings);
+  // ...
+}
+
+// Strategies
+for (const strat of analysis.strategyDetails) {
+  const sector = getStockSectorWithMapping(strat.underlying, sectorMappings);
+  // ...
 }
 ```
 
-#### 2. Modificare `useSectorMappings.ts`
+### Modifica 3: Supporto per Risoluzione per Nome
 
 **File**: `src/hooks/useSectorMappings.ts`
 
-Cambiare la logica per:
-1. Trovare ISIN **completamente mancanti** (non in tabella)
-2. Chiamare il nuovo endpoint `resolve-and-get-sectors`
+Estendere per supportare anche la risoluzione per nome (per derivati):
 
 ```typescript
-const fetchMappings = useCallback(async (isins: string[]) => {
-  // 1. Fetch existing mappings
-  const { data } = await supabase
-    .from('isin_mappings')
-    .select('isin, ticker, sector, industry')
-    .in('isin', isins);
+export interface StockInfo {
+  isin?: string;       // Opzionale (per stock diretti)
+  description: string; // Sempre presente
+}
+
+const fetchMappings = useCallback(async (stocks: StockInfo[]) => {
+  // Separare stock con ISIN da quelli con solo nome
+  const withIsin = stocks.filter(s => s.isin);
+  const withNameOnly = stocks.filter(s => !s.isin);
   
-  // 2. Build lookup and find missing
-  const existingIsins = new Set(data?.map(d => d.isin) || []);
-  const missingIsins = isins.filter(isin => !existingIsins.has(isin));
-  const needsSectorUpdate = data?.filter(d => d.ticker && !d.sector).map(d => d.isin) || [];
+  // 1. Risolvere quelli con ISIN (come prima)
+  // ...
   
-  // 3. All ISINs that need resolution (missing + no sector)
-  const toResolve = [...new Set([...missingIsins, ...needsSectorUpdate])];
-  
-  if (toResolve.length > 0) {
-    // Call new endpoint that creates records
-    await supabase.functions.invoke('update-prices-cron', {
-      body: { mode: 'resolve-and-get-sectors', isins: toResolve }
-    });
-    
-    // Re-fetch after resolution
-    const { data: updatedData } = await supabase
-      .from('isin_mappings')
-      .select('isin, ticker, sector, industry')
-      .in('isin', isins);
-    
-    // Update state with new mappings
-    const newMappings = {};
-    for (const row of updatedData || []) {
-      if (row.sector) {
-        newMappings[row.isin] = { ticker: row.ticker, sector: row.sector, industry: row.industry };
-      }
-    }
-    setMappings(newMappings);
-  }
+  // 2. Per quelli con solo nome, cercare nella cache locale STOCK_SECTORS
+  // o usare AI se non trovati
+  // ...
 }, [hasFetched]);
 ```
 
-#### 3. Passare Descrizione Stock per Migliore Risoluzione AI
+### Modifica 4: Edge Function - Supporto Risoluzione per Nome
 
-Il problema è che l'AI ha bisogno della descrizione per capire il settore (es. "AZ.ALPHABET INC-CL A").
+**File**: `supabase/functions/update-prices-cron/index.ts`
 
-Modificare per passare le descrizioni:
+Aggiungere supporto per risolvere settori partendo dal nome descrittivo:
 
 ```typescript
-// In useSectorMappings.ts - ricevere anche le descrizioni
-fetchMappings(stockIsins, stockDescriptions) 
-
-// In edge function - usare descrizione per AI fallback
-const sectorInfo = await fetchYahooSectorInfo(ticker, description);
+if (body.mode === 'resolve-and-get-sectors') {
+  const isins = body.isins || [];
+  const descriptions = body.descriptions || {};
+  const names = body.names || [];  // NUOVO: nomi senza ISIN
+  
+  // ... gestione ISIN come prima ...
+  
+  // Gestione nomi (per derivati)
+  for (const name of names) {
+    // 1. Cercare ticker nella descrizione
+    const ticker = extractTickerFromName(name);
+    
+    // 2. Se trovato, usare AI per settore
+    if (ticker) {
+      const sectorInfo = await fetchSectorWithAI(ticker, name);
+      // Salvare con chiave = nome normalizzato
+      results.push({ name, ticker, sector: sectorInfo.sector });
+    }
+  }
+}
 ```
 
 ---
@@ -180,30 +189,33 @@ const sectorInfo = await fetchYahooSectorInfo(ticker, description);
 ## Flusso Risultante
 
 ```text
-1. Utente carica Excel con "AZ.ALPHABET INC-CL A" (ISIN: US02079K3059)
-   │
-   ▼
-2. Posizione salvata in `positions` con ISIN
-   │
-   ▼
-3. Utente apre Risk Analyzer → Sector view
-   │
-   ▼
-4. useSectorMappings cerca US02079K3059 in isin_mappings → NON ESISTE
-   │
-   ▼
-5. Chiama edge function mode='resolve-and-get-sectors'
-   │
-   ├─ Yahoo Search: US02079K3059 → GOOGL
-   ├─ Yahoo Quote API → 401 Error
-   └─ Lovable AI: "Settore di GOOGL (Alphabet)?" → "Communication Services"
-   │
-   ▼
-6. CREA nuovo record in isin_mappings:
-   { isin: US02079K3059, ticker: GOOGL, sector: "Communication Services" }
-   │
-   ▼
-7. Risk Analyzer mostra: ALPHABET → Communication Services ✓
+Utente apre Risk Analyzer → Settori
+         │
+         ▼
+stocksForSectorMapping raccoglie:
+├─ Stock con ISIN: [Alphabet, CACI, NVIDIA, ...]
+└─ Sottostanti derivati: [IREN LTD, MARA, ...]
+         │
+         ▼
+useSectorMappings chiama edge function con:
+├─ isins: [US02079K3059, US1271903049, ...]
+├─ descriptions: {US02079K3059: "ALPHABET INC-CL A", ...}
+└─ names: ["IREN LTD", "MARA HOLDINGS", ...]  (derivati)
+         │
+         ▼
+Edge function per ogni ISIN/nome:
+├─ Yahoo Search → ticker
+├─ fetchSectorWithAI(ticker, description) → settore
+└─ UPSERT in isin_mappings (o cache temporanea per nomi)
+         │
+         ▼
+sectorExposure usa sectorMappings per TUTTI:
+├─ Stock: lookup per ISIN
+├─ Derivati: lookup per ticker/nome
+└─ Fallback: STOCK_SECTORS statico
+         │
+         ▼
+Risultato: ~95% stock e derivati con settore corretto
 ```
 
 ---
@@ -212,18 +224,36 @@ const sectorInfo = await fetchYahooSectorInfo(ticker, description);
 
 | File | Modifiche |
 |------|-----------|
-| `supabase/functions/update-prices-cron/index.ts` | Aggiungere handler `resolve-and-get-sectors` che crea nuovi record |
-| `src/hooks/useSectorMappings.ts` | Identificare ISIN mancanti e chiamare nuovo endpoint |
-| `src/pages/RiskAnalyzer.tsx` | Passare descrizioni stock al hook |
+| `src/pages/RiskAnalyzer.tsx` | Raccogliere anche sottostanti derivati |
+| `src/hooks/useSectorMappings.ts` | Supportare risoluzione per nome + migliorare logging |
+| `src/lib/sectorExposure.ts` | Usare sectorMappings anche per derivati |
+| `supabase/functions/update-prices-cron/index.ts` | Supportare risoluzione per nome |
+
+---
+
+## Debug Aggiuntivo
+
+Per capire perché Alphabet e CACI non vengono risolti, aggiungeremo logging dettagliato:
+
+```typescript
+// In edge function, dopo chiamata AI:
+console.log(`AI Response for ${ticker}:`, {
+  rawResponse: data.choices?.[0]?.message?.content,
+  parsedSector: sectorText,
+  isValid: validSectors.includes(sectorText)
+});
+```
+
+Questo permetterà di vedere esattamente cosa restituisce l'AI e perché il settore non viene salvato.
 
 ---
 
 ## Risultato Atteso
 
-| Prima | Dopo |
-|-------|------|
-| 60 stock, 31 record in `isin_mappings` | 60 stock, 60 record in `isin_mappings` |
-| ~50% stock in "Other" | <5% in "Other" |
-| AI mai chiamata | AI chiamata automaticamente per ogni stock sconosciuto |
-| Richiede Admin Panel | Zero intervento manuale |
+| Categoria | Prima | Dopo |
+|-----------|-------|------|
+| Stock diretti | ~50% in Other | <5% in Other |
+| Naked PUTs | 100% in Other | Settore corretto |
+| Leap CALLs | 100% in Other | Settore corretto |
+| Strategie | 100% in Other | Settore corretto |
 
