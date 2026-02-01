@@ -1,367 +1,254 @@
 
-# Piano: Aggiungere Vista "Sector Allocation" al Risk Analyzer
 
-## Obiettivo
+# Piano: Correggere Scraping Settori ETF da justETF
 
-Aggiungere una terza vista al carousel del Risk Analyzer chiamata **"Sector Allocation"** che mostri:
-1. **Esposizione azionaria per settore** con toggle includi/escludi derivati
-2. **Decomposizione settoriale degli ETF** (dati da justETF)
-3. **Top 20 titoli per esposizione** combinando azioni singole e holdings ETF
+## Problema Identificato
 
----
+Lo scraping dei dati settoriali da justETF **non funziona** per due motivi:
 
-## Architettura della Soluzione
+1. **I dati sono caricati dinamicamente via JavaScript** - La sezione Holdings/Sectors è lazy-loaded e non presente nell'HTML statico
+2. **Cache esistente senza settori** - Gli ETF cachati prima dell'aggiornamento hanno `sector_allocations: {}` e `top_holdings: []`
 
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            RiskAnalyzer.tsx                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐ │
-│  │                    RiskViewModeSelector                             │ │
-│  │          [Equity] ─── [Currency] ─── [Sector] ◄── NUOVO             │ │
-│  └─────────────────────────────────────────────────────────────────────┘ │
-│                                  ↓                                       │
-│  ┌──────────────┐  ┌───────────────┐  ┌─────────────────────────────┐   │
-│  │EquityExposure│  │CurrencyExposure│  │ SectorAllocationView ◄─ NUOVO │  │
-│  └──────────────┘  └───────────────┘  └─────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                       Dati Richiesti                                     │
-├──────────────────────────────────────────────────────────────────────────┤
-│ • Azioni singole → Settore assegnato staticamente o inferito            │
-│ • ETF → Fetch sector allocations da justETF (nuovo campo)               │
-│ • Top Holdings ETF → Fetch top holdings da justETF (nuovo campo)        │
-└──────────────────────────────────────────────────────────────────────────┘
+### Evidenza dal Database
+```
+sector_allocations: map[]  (vuoto per tutti gli ETF)
+top_holdings: []  (vuoto per tutti gli ETF)
 ```
 
 ---
 
-## Modifiche Previste
+## Soluzione Proposta
+
+### Approccio: Usare URL diretto della sezione Holdings
+
+justETF ha una pagina dedicata per le holdings che contiene i dati in modo più accessibile:
+- URL: `https://www.justetf.com/en/etf-profile.html?isin={ISIN}#holdings`
+- Oppure: `https://www.justetf.com/servlet/download?isin={ISIN}&documentType=MR` per il factsheet PDF
+
+La soluzione migliore è accedere all'API interna di justETF o scaricare il factsheet che contiene tutti i dati.
+
+### Alternativa: Fallback con dati statici per ETF comuni
+
+Per gli ETF più popolari (MSCI World, S&P 500, etc.), possiamo usare dati settoriali standard basati sulla composizione tipica dell'indice.
+
+---
+
+## Modifiche Tecniche
 
 ### 1. Aggiornare Edge Function `fetch-etf-allocation`
 
 **File**: `supabase/functions/fetch-etf-allocation/index.ts`
 
-Estendere lo scraper per estrarre anche:
-- **Sector allocations**: `{ Technology: 28.45, Financials: 14.23, ... }`
-- **Top 10 Holdings**: `[{ name: 'NVIDIA Corp.', percentage: 5.21, isin?: 'US67066G1040' }, ...]`
+#### Strategia Multi-Step:
 
 ```typescript
-// Nuovi campi da aggiungere allo scraping
-interface JustETFData {
-  // Campi esistenti
-  name: string;
-  countryAllocations: Record<string, number>;
-  currencyAllocations: Record<string, number>;
-  isHedged: boolean;
-  // NUOVI campi
-  sectorAllocations: Record<string, number>;  // es. { Technology: 28.45, Financials: 14.23 }
-  topHoldings: Array<{ name: string; percentage: number; isin?: string }>;
+async function scrapeJustETF(isin: string) {
+  // STEP 1: Tentare scraping dalla pagina principale
+  const mainPageData = await scrapeMainPage(isin);
+  
+  // STEP 2: Se settori vuoti, tentare la pagina holdings dedicata
+  if (Object.keys(mainPageData.sectorAllocations).length === 0) {
+    const holdingsData = await scrapeHoldingsTab(isin);
+    mainPageData.sectorAllocations = holdingsData.sectors;
+    mainPageData.topHoldings = holdingsData.holdings;
+  }
+  
+  // STEP 3: Se ancora vuoti, usare fallback basato su indice
+  if (Object.keys(mainPageData.sectorAllocations).length === 0) {
+    mainPageData.sectorAllocations = getIndexFallbackSectors(mainPageData.name);
+  }
+  
+  return mainPageData;
 }
 ```
 
-Aggiungere regex per estrarre i settori dalla pagina justETF:
+#### Nuova Funzione: Scraping Tab Holdings
+
 ```typescript
-// Sectors extraction (similar pattern to countries)
-const sectorRowRegex = /data-testid="etf-holdings_sectors_row"[\s\S]*?data-testid="tl_etf-holdings_sectors_value_name"[^>]*>([^<]+)<[\s\S]*?data-testid="tl_etf-holdings_sectors_value_percentage"[^>]*>[\s]*([\d,\.]+)\s*%/gi;
-
-// Top Holdings extraction
-const holdingsRowRegex = /data-testid="etf-holdings_components_row"[\s\S]*?<a[^>]*stock-profiles\/([A-Z0-9]+)[^>]*>([^<]+)<[\s\S]*?(\d+[.,]\d+)\s*%/gi;
+async function scrapeHoldingsTab(isin: string): Promise<{
+  sectors: Record<string, number>;
+  holdings: TopHolding[];
+}> {
+  // Tentare di recuperare i dati dalla sezione holdings
+  // che potrebbe essere disponibile in un formato diverso
+  
+  // Pattern alternativi da cercare nell'HTML completo:
+  // 1. Tabelle con class="allocation-table" 
+  // 2. Dati inline in script tags (JSON embedded)
+  // 3. API calls visibili nell'HTML
+  
+  const url = `https://www.justetf.com/en/etf-profile.html?isin=${isin}`;
+  const response = await fetch(url, { 
+    headers: { 
+      'User-Agent': '...',
+      'Accept': 'text/html,application/xhtml+xml',
+      // Tentare header che potrebbero far caricare più contenuto
+    } 
+  });
+  
+  const html = await response.text();
+  
+  // Cercare pattern alternativi:
+  
+  // Pattern 1: Dati JSON embedded in script
+  const jsonMatch = html.match(/var\s+etfData\s*=\s*(\{[\s\S]*?\});/);
+  if (jsonMatch) {
+    const data = JSON.parse(jsonMatch[1]);
+    return {
+      sectors: data.sectorAllocations || {},
+      holdings: data.topHoldings || []
+    };
+  }
+  
+  // Pattern 2: Tabelle allocation con dati strutturati
+  // ...altri pattern...
+  
+  return { sectors: {}, holdings: [] };
+}
 ```
 
----
+#### Fallback per Indici Comuni
 
-### 2. Aggiornare Tabella Database `etf_allocations`
+```typescript
+const INDEX_SECTOR_FALLBACKS: Record<string, Record<string, number>> = {
+  'MSCI WORLD': {
+    'Technology': 24,
+    'Financials': 15,
+    'Healthcare': 12,
+    'Consumer Discretionary': 11,
+    'Industrials': 10,
+    'Communication Services': 8,
+    'Consumer Staples': 7,
+    'Energy': 4,
+    'Materials': 4,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'S&P 500': {
+    'Technology': 32,
+    'Healthcare': 12,
+    'Financials': 11,
+    'Consumer Discretionary': 10,
+    'Industrials': 8,
+    'Communication Services': 9,
+    'Consumer Staples': 6,
+    'Energy': 4,
+    'Utilities': 2,
+    'Real Estate': 2,
+    'Materials': 4,
+  },
+  'MSCI EMERGING': {
+    'Technology': 20,
+    'Financials': 22,
+    'Consumer Discretionary': 14,
+    'Communication Services': 10,
+    'Materials': 8,
+    'Energy': 6,
+    'Industrials': 6,
+    'Consumer Staples': 5,
+    'Healthcare': 4,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'MSCI EUROPE': {
+    'Financials': 17,
+    'Healthcare': 15,
+    'Industrials': 14,
+    'Consumer Staples': 11,
+    'Consumer Discretionary': 10,
+    'Materials': 8,
+    'Energy': 7,
+    'Technology': 8,
+    'Utilities': 4,
+    'Communication Services': 3,
+    'Real Estate': 3,
+  },
+};
 
-**Migrazione SQL**:
+function getIndexFallbackSectors(etfName: string): Record<string, number> {
+  const upperName = etfName.toUpperCase();
+  
+  for (const [index, sectors] of Object.entries(INDEX_SECTOR_FALLBACKS)) {
+    if (upperName.includes(index)) {
+      console.log(`Using fallback sectors for index: ${index}`);
+      return sectors;
+    }
+  }
+  
+  // Fallback generico per ETF azionari globali
+  return {};
+}
+```
+
+### 2. Invalidare Cache Esistente
+
+Opzione A: Aggiungere parametro per forzare refresh
+```typescript
+// Nel frontend, quando si accede alla vista Sector:
+fetchAllocation(isin, true); // forceRefresh = true
+```
+
+Opzione B: Migrazione SQL per invalidare cache senza settori
 ```sql
-ALTER TABLE etf_allocations 
-ADD COLUMN IF NOT EXISTS sector_allocations jsonb DEFAULT '{}',
-ADD COLUMN IF NOT EXISTS top_holdings jsonb DEFAULT '[]';
+-- Invalida ETF senza dati settoriali per forzare ri-scraping
+UPDATE etf_allocations 
+SET last_fetched_at = '2020-01-01' 
+WHERE sector_allocations = '{}' OR sector_allocations IS NULL;
 ```
 
----
-
-### 3. Aggiornare Hook `useETFAllocations`
+### 3. Aggiornare `useETFAllocations` per Re-fetch Intelligente
 
 **File**: `src/hooks/useETFAllocations.ts`
 
-Estendere l'interfaccia `ETFAllocation`:
 ```typescript
-export interface ETFAllocation {
-  isin: string;
-  name: string;
-  countryAllocations: Record<string, number>;
-  currencyAllocations: Record<string, number>;
-  sectorAllocations: Record<string, number>;     // NUOVO
-  topHoldings: Array<{                           // NUOVO
-    name: string;
-    percentage: number;
-    isin?: string;
-  }>;
-  isHedged: boolean;
-  cached?: boolean;
-}
-```
-
----
-
-### 4. Creare Libreria `sectorExposure.ts`
-
-**File**: `src/lib/sectorExposure.ts`
-
-Funzioni per:
-1. **Assegnare settori alle azioni singole** (mapping statico o inferenza da nome)
-2. **Decomporre ETF per settore** (simile a `etfCurrencyDecomposition.ts`)
-3. **Aggregare esposizione per settore**
-4. **Calcolare top holdings combinati**
-
-```typescript
-// Mapping settori per azioni singole (basato su ticker noti)
-const STOCK_SECTORS: Record<string, string> = {
-  'AAPL': 'Technology',
-  'MSFT': 'Technology',
-  'GOOGL': 'Technology',
-  'AMZN': 'Consumer Discretionary',
-  'JPM': 'Financials',
-  'JNJ': 'Healthcare',
-  // ... altri ticker comuni
-};
-
-export interface SectorExposure {
-  sector: string;
-  totalRisk: number;         // In EUR
-  percentage: number;
-  instruments: SectorInstrument[];
-}
-
-export interface SectorInstrument {
-  name: string;
-  riskEUR: number;
-  isETF: boolean;
-  isFromETFDecomposition: boolean;  // true se derivato da ETF
-  sourceETF?: string;               // Nome ETF di provenienza
-}
-
-export interface TopHolding {
-  name: string;
-  totalExposure: number;      // In EUR
-  percentage: number;
-  sources: Array<{
-    source: string;           // Nome azione/ETF
-    exposure: number;
-    isDirectHolding: boolean; // true se azione diretta, false se da ETF
-  }>;
-}
-
-// Calcola esposizione settoriale
-export function calculateSectorExposure(
-  analysis: RiskAnalysis,
-  etfAllocations: Record<string, ETFAllocation>,
-  options: { includeDerivatives: boolean }
-): SectorExposure[];
-
-// Calcola top holdings aggregati
-export function calculateTopHoldings(
-  analysis: RiskAnalysis,
-  etfAllocations: Record<string, ETFAllocation>,
-  limit: number = 20
-): TopHolding[];
-```
-
----
-
-### 5. Aggiornare `RiskViewModeSelector`
-
-**File**: `src/components/risk/RiskViewModeSelector.tsx`
-
-Aggiungere la vista 'sector':
-```typescript
-export type RiskViewMode = 'equity' | 'currency' | 'sector';
-
-const VIEW_LABELS: Record<RiskViewMode, string> = {
-  equity: 'Equity Exposure',
-  currency: 'Currency Exposure',
-  sector: 'Sector Allocation',  // NUOVO
-};
-
-const VIEWS: RiskViewMode[] = ['equity', 'currency', 'sector'];
-```
-
----
-
-### 6. Creare Componente `SectorAllocationView`
-
-**File**: `src/components/risk/SectorAllocationView.tsx`
-
-Struttura UI:
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│  SECTOR ALLOCATION                                                      │
-├─────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────┐  ┌───────────────────────────────┐ │
-│  │ Esposizione Settoriale Totale   │  │      Donut Chart Settori      │ │
-│  │ €XXX,XXX                        │  │      [Technology] 35%         │ │
-│  │ Toggle: [x] Includi Derivati    │  │      [Financials] 20%         │ │
-│  │ ETF analizzati: 5/5 ✓           │  │      [Healthcare] 15%         │ │
-│  └─────────────────────────────────┘  │      ...                      │ │
-│                                       └───────────────────────────────┘ │
-├─────────────────────────────────────────────────────────────────────────┤
-│  DETTAGLIO PER SETTORE (Accordion)                                      │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ ▼ Technology                     15 strumenti    €XXX,XXX  (35%)  │  │
-│  │   ├─ 📈 NVIDIA           [Diretto]              €45,000           │  │
-│  │   ├─ 📈 APPLE            [Diretto]              €32,000           │  │
-│  │   ├─ 📊 iShares MSCI World [28.5% Tech]         €28,500           │  │
-│  │   └─ ...                                                          │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ ▶ Financials                      8 strumenti    €XXX,XXX  (20%)  │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│  ...                                                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  TOP 20 HOLDINGS                                                        │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ 1. NVIDIA Corp.              €65,000  (8.5%)                      │  │
-│  │    ├─ Diretto: 200 azioni × $140                                  │  │
-│  │    └─ Via ETF: iShares MSCI World (5.2%)                          │  │
-│  │ 2. Apple                     €52,000  (6.8%)                      │  │
-│  │    └─ Via ETF: iShares MSCI World (5.0%), Vanguard S&P500 (7.1%)  │  │
-│  │ 3. Microsoft                 €48,000  (6.2%)                      │  │
-│  │    └─ Diretto: 150 azioni × $420                                  │  │
-│  │ ...                                                               │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### 7. Aggiornare `RiskAnalyzer.tsx`
-
-**File**: `src/pages/RiskAnalyzer.tsx`
-
-Integrare la nuova vista:
-```typescript
-import { SectorAllocationView } from '@/components/risk/SectorAllocationView';
-import { calculateSectorExposure, calculateTopHoldings } from '@/lib/sectorExposure';
-
-// Nel componente:
-// Fetch ETF allocations when switching to sector view (like currency view)
-useEffect(() => {
-  if (etfIsins.length > 0 && (viewMode === 'currency' || viewMode === 'sector') && !hasFetchedETFs) {
-    setHasFetchedETFs(true);
-    fetchMultipleAllocations(etfIsins);
+const fetchAllocation = useCallback(async (
+  isin: string, 
+  forceRefresh = false
+): Promise<ETFAllocation | null> => {
+  // Se cached ma senza settori, forzare refresh
+  if (!forceRefresh && allocations[isin]) {
+    const hasNoSectors = Object.keys(allocations[isin].sectorAllocations || {}).length === 0;
+    if (hasNoSectors) {
+      console.log(`${isin} has no sector data, forcing refresh`);
+      forceRefresh = true;
+    }
   }
-}, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
-
-// Calcola sector exposure
-const sectorExposure = useMemo(() => {
-  return calculateSectorExposure(analysis, allocations, { includeDerivatives });
-}, [analysis, allocations, includeDerivatives]);
-
-const topHoldings = useMemo(() => {
-  return calculateTopHoldings(analysis, allocations, 20);
-}, [analysis, allocations]);
-
-// Nel render:
-{viewMode === 'sector' && (
-  <ErrorBoundary title="Errore nella vista Sector Allocation">
-    <SectorAllocationView 
-      sectorExposure={sectorExposure}
-      topHoldings={topHoldings}
-      grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
-      isLoadingETFData={isETFDataLoading}
-      etfCount={etfIsins.length}
-      loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
-      includeDerivatives={includeDerivatives}
-      onIncludeDerivativesChange={setIncludeDerivatives}
-    />
-  </ErrorBoundary>
-)}
+  
+  // ... resto del codice ...
+}, [allocations, loading]);
 ```
 
 ---
 
-## Flusso Dati per Sector Allocation
+## Ordine di Implementazione
 
-```text
-                    RiskAnalyzer
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-   stockDetails     etfAllocations   derivatives
-   (azioni singole)  (da justETF)    (se toggle on)
-        │                │                │
-        ▼                ▼                ▼
-   ┌─────────────────────────────────────────┐
-   │         calculateSectorExposure()       │
-   ├─────────────────────────────────────────┤
-   │ 1. Assegna settore a azioni singole     │
-   │    (STOCK_SECTORS mapping)              │
-   │ 2. Decompone ETF per settore            │
-   │    (sectorAllocations × riskEUR)        │
-   │ 3. Aggrega per settore                  │
-   └─────────────────────────────────────────┘
-                         │
-                         ▼
-                  SectorExposure[]
-                         │
-                         ▼
-             SectorAllocationView
-```
+1. **Aggiornare Edge Function** con:
+   - Pattern di scraping migliorati
+   - Fallback per indici comuni
+   - Logging dettagliato per debug
+
+2. **Invalidare cache esistente** senza settori
+
+3. **Aggiornare hook frontend** per forzare re-fetch quando mancano settori
+
+4. **Testare** con ETF reali (IE00B4L5Y983 - iShares MSCI World)
 
 ---
 
-## Colori Settori
+## File da Modificare
 
-```typescript
-export const SECTOR_COLORS: Record<string, string> = {
-  'Technology': '#3b82f6',        // Blue
-  'Financials': '#10b981',        // Emerald
-  'Healthcare': '#ef4444',        // Red
-  'Consumer Discretionary': '#f59e0b', // Amber
-  'Industrials': '#8b5cf6',       // Violet
-  'Consumer Staples': '#06b6d4',  // Cyan
-  'Energy': '#f97316',            // Orange
-  'Materials': '#84cc16',         // Lime
-  'Utilities': '#6366f1',         // Indigo
-  'Real Estate': '#ec4899',       // Pink
-  'Communication Services': '#14b8a6', // Teal
-  'Other': '#6b7280',             // Gray
-};
-```
-
----
-
-## File da Creare/Modificare
-
-| File | Azione | Descrizione |
-|------|--------|-------------|
-| `supabase/functions/fetch-etf-allocation/index.ts` | Modifica | Aggiungere scraping settori e top holdings |
-| Migrazione SQL | Crea | Aggiungere colonne `sector_allocations` e `top_holdings` |
-| `src/hooks/useETFAllocations.ts` | Modifica | Estendere interfaccia `ETFAllocation` |
-| `src/lib/sectorExposure.ts` | Crea | Logica calcolo esposizione settoriale |
-| `src/components/risk/RiskViewModeSelector.tsx` | Modifica | Aggiungere vista 'sector' |
-| `src/components/risk/SectorAllocationView.tsx` | Crea | Nuovo componente vista |
-| `src/pages/RiskAnalyzer.tsx` | Modifica | Integrare nuova vista nel carousel |
-
----
-
-## Considerazioni Tecniche
-
-1. **Fallback settore azioni**: Per azioni senza mapping, usare "Other" o tentare inferenza dal nome
-2. **Cache ETF**: I dati settoriali vengono cachati insieme agli altri dati ETF (7 giorni)
-3. **Performance**: Limitare la lista top holdings a 20 elementi per evitare rendering pesante
-4. **ETF senza dati settoriali**: Se justETF non restituisce settori, mostrare messaggio informativo
-5. **Aggregazione duplicati**: Se un titolo appare sia come azione diretta sia come holding ETF, sommare le esposizioni
+| File | Modifiche |
+|------|-----------|
+| `supabase/functions/fetch-etf-allocation/index.ts` | Migliorare scraping + aggiungere fallback |
+| `src/hooks/useETFAllocations.ts` | Re-fetch intelligente se settori mancanti |
+| Migrazione SQL | Invalidare cache senza settori |
 
 ---
 
 ## Risultato Atteso
 
-Una nuova vista nel Risk Analyzer che permette di:
-- Visualizzare l'allocazione settoriale complessiva del portafoglio
-- Vedere come gli ETF contribuiscono all'esposizione settoriale
-- Identificare i 20 titoli con maggiore esposizione (considerando sia holdings dirette che via ETF)
-- Filtrare includendo/escludendo derivati con il toggle
+- ETF con dati settoriali effettivi (quando disponibili) o fallback ragionevoli
+- La vista Sector Allocation mostrerà:
+  - ETF → decomposizione per settore basata su percentuali
+  - Esempio: ETF con €100,000 e 24% Technology → €24,000 in Technology
+
