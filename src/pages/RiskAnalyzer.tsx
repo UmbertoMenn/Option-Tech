@@ -26,7 +26,7 @@ export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
-  const [includeDerivatives, setIncludeDerivatives] = useState(true);
+  const [includeDerivatives, setIncludeDerivatives] = useState(false);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
