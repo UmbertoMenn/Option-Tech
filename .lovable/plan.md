@@ -1,72 +1,103 @@
 
-# Piano: Differenziazione Icone Strategie Derivati
+# Piano: Fix Badge "P!" (Protezione Parziale) per Override Manuali
 
-## Obiettivo
-Cambiare le icone per Double Diagonal e Naked Put per distinguerle visivamente da Iron Condor, e modificare il colore della sezione "Altre Strategie".
+## Problema
+Quando un'opzione PUT viene spostata manualmente nella categoria "Protezioni" tramite il sistema di override, il badge "P!" (protezione parziale) non viene mostrato, anche se l'esposizione netta è maggiore di 0.
+
+**Causa**: Nel codice di `categorizeDerivatives` (linee 142-152), quando viene applicato un override per la categoria "protection", `isPartial` è sempre hardcodato a `false`.
+
+```typescript
+case 'protection':
+  if (position.option_type === 'put' && position.quantity > 0) {
+    longPuts.push({
+      option: position,
+      underlying: linkedStock || null,
+      contracts: position.quantity,
+      isPartial: false  // ← PROBLEMA: sempre false
+    });
+  }
+```
 
 ---
 
-## Stato Attuale
+## Soluzione
+Calcolare dinamicamente se la protezione è parziale anche per gli override manuali, verificando l'esposizione netta del sottostante.
 
-| Sezione | Icona | Colore |
-|---------|-------|--------|
-| Covered Call | Shield | text-primary |
-| Protezioni - Long Put | Shield | text-primary |
-| Iron Condor | Target | text-amber-500 |
-| Double Diagonal | Target | text-purple-500 |
-| Naked Put | Target | text-primary |
-| Leap Call | TrendingUp | text-green-500 |
-| Altre Strategie | TrendingDown | text-muted-foreground |
+### Logica Protezione Parziale
+- **Protezione totale**: `esposizione netta ≤ 0`
+- **Protezione parziale**: `esposizione netta > 0`
 
----
-
-## Modifiche Proposte
-
-| Sezione | Nuova Icona | Nuovo Colore | Motivazione |
-|---------|-------------|--------------|-------------|
-| Double Diagonal | `Layers` | text-purple-500 | Rappresenta le scadenze stratificate/diagonali |
-| Naked Put | `CircleDollarSign` | text-orange-500 | Rappresenta il rischio monetario delle put scoperte |
-| Altre Strategie | `Puzzle` | text-cyan-500 | Colore più vivace per strategie non classificate |
+```
+esposizione netta = (azioni possedute / 100) - (PUT comprate - PUT vendute)
+```
 
 ---
 
 ## Dettaglio Tecnico
 
 ### File da Modificare
-`src/pages/Derivatives.tsx`
+`src/lib/derivativeStrategies.ts`
 
-### Modifiche
+### Modifiche al Codice
 
-1. **Import aggiuntivi** - Aggiungere le nuove icone da lucide-react:
-   - `Layers` (per Double Diagonal)
-   - `CircleDollarSign` (per Naked Put)
-   - `Puzzle` (per Altre Strategie)
+**Linee 142-152** - Calcolare `isPartial` dinamicamente:
 
-2. **Double Diagonal (linea ~247)**
-   - Da: `<Target className="w-5 h-5 text-purple-500" />`
-   - A: `<Layers className="w-5 h-5 text-purple-500" />`
-
-3. **Naked Put (linea ~287)**
-   - Da: `<Target className="w-5 h-5 text-primary" />`
-   - A: `<CircleDollarSign className="w-5 h-5 text-orange-500" />`
-
-4. **Altre Strategie (linea ~367)**
-   - Da: `<TrendingDown className="w-5 h-5 text-muted-foreground" />`
-   - A: `<Puzzle className="w-5 h-5 text-cyan-500" />`
+```typescript
+case 'protection':
+  if (position.option_type === 'put' && position.quantity > 0) {
+    // Calculate if this is a partial protection
+    let isPartial = false;
+    
+    if (linkedStock && linkedStock.quantity > 0) {
+      // Calculate net exposure for this underlying
+      const stockContracts = Math.floor(linkedStock.quantity / 100);
+      const optionContracts = position.quantity;
+      
+      // Find other PUT positions on the same underlying
+      const underlyingKey = normalizeForMatching(position.underlying || position.description);
+      const otherPuts = derivatives.filter(d => 
+        d.id !== position.id &&
+        d.option_type === 'put' &&
+        normalizeForMatching(d.underlying || d.description) === underlyingKey
+      );
+      
+      const otherBoughtContracts = otherPuts
+        .filter(p => p.quantity > 0)
+        .reduce((sum, p) => sum + p.quantity, 0);
+      const otherSoldContracts = otherPuts
+        .filter(p => p.quantity < 0)
+        .reduce((sum, p) => sum + Math.abs(p.quantity), 0);
+      
+      // Total bought contracts including this position
+      const totalBoughtContracts = optionContracts + otherBoughtContracts;
+      const totalSoldContracts = otherSoldContracts;
+      
+      // Net exposure = stock contracts - (bought - sold)
+      const netExposure = stockContracts - (totalBoughtContracts - totalSoldContracts);
+      
+      isPartial = netExposure > 0;
+    }
+    
+    longPuts.push({
+      option: position,
+      underlying: linkedStock || null,
+      contracts: position.quantity,
+      isPartial
+    });
+    usedDerivatives.add(position.id);
+  }
+  break;
+```
 
 ---
 
-## Risultato Finale
+## Comportamento Atteso
 
-| Sezione | Icona | Colore |
-|---------|-------|--------|
-| Covered Call | Shield | text-primary (blu) |
-| Protezioni - Long Put | Shield | text-primary (blu) |
-| Iron Condor | Target | text-amber-500 (giallo/oro) |
-| Double Diagonal | Layers | text-purple-500 (viola) |
-| Naked Put | CircleDollarSign | text-orange-500 (arancione) |
-| Leap Call | TrendingUp | text-green-500 (verde) |
-| Altre Strategie | Puzzle | text-cyan-500 (ciano) |
+| Scenario | Azioni | PUT Comprate | Esposizione | Badge |
+|----------|--------|--------------|-------------|-------|
+| NETEASE 80 azioni + 1 PUT 80 | 80 | 1 | 80/100 - 1 = -0.2 ≤ 0 | Nessuno (totale) |
+| NETEASE 200 azioni + 1 PUT 80 | 200 | 1 | 200/100 - 1 = 1 > 0 | P! (parziale) |
+| Override senza stock collegato | 0 | 1 | N/A | Nessuno |
 
 ---
 
@@ -74,4 +105,10 @@ Cambiare le icone per Double Diagonal e Naked Put per distinguerle visivamente d
 
 | File | Tipo Modifica |
 |------|---------------|
-| `src/pages/Derivatives.tsx` | Aggiornamento import e icone |
+| `src/lib/derivativeStrategies.ts` | Calcolo dinamico isPartial per override |
+
+---
+
+## Stima Effort
+- Modifica singola funzione: ~15 minuti
+- Testing: ~10 minuti
