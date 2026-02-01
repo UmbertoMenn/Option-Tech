@@ -1,114 +1,160 @@
 
-# Piano: Fix Badge "P!" (Protezione Parziale) per Override Manuali
 
-## Problema
-Quando un'opzione PUT viene spostata manualmente nella categoria "Protezioni" tramite il sistema di override, il badge "P!" (protezione parziale) non viene mostrato, anche se l'esposizione netta è maggiore di 0.
+# Piano: Sistema Aggiornamento Prezzi Live con Cron Job
 
-**Causa**: Nel codice di `categorizeDerivatives` (linee 142-152), quando viene applicato un override per la categoria "protection", `isPartial` è sempre hardcodato a `false`.
+## Problema Identificato
+
+### Sintomi
+1. **Prezzi errati nel database**: ETF come ISHSIII-MSCI S.A.C.UE DLA mostra 403€ invece di ~5.60€ (6871% di errore)
+2. **142 posizioni falliscono** ad ogni ciclo di aggiornamento
+3. **Tabella `isin_mappings` vuota**: il sistema non può convertire ISIN → ticker Yahoo
+4. **Cron job attivo 24/7**: invece di solo orari di mercato (lun-ven 9-23 italiane)
+5. **Codice sorgente mancante**: l'edge function `update-prices-cron` è deployata ma non c'è il codice nel repository
+
+### Causa Root
+L'edge function esistente ha un bug nella risoluzione ISIN→ticker: quando non trova una corrispondenza esatta, sembra applicare un ticker sbagliato (probabilmente dal fallback della Yahoo Search API che restituisce risultati non correlati).
+
+---
+
+## Soluzione Proposta
+
+### 1. Ricreare Edge Function `update-prices-cron`
+Scrivere una nuova versione dell'edge function con:
+
+- **Risoluzione ISIN intelligente**: 
+  - Lookup nella tabella `isin_mappings` (cache persistente)
+  - Se non trovato, usa Yahoo Finance Search API
+  - Valida che il risultato sia coerente (verifica che il nome contenga keywords simili)
+  - Salva il mapping per usi futuri
+
+- **Validazione prezzi**:
+  - Rifiuta prezzi che differiscono di oltre 50% dal prezzo precedente (sanity check)
+  - Logga le anomalie per review manuale
+
+- **Supporto multi-asset**:
+  - Azioni USA: ticker diretto (es. AAPL, TSLA)
+  - ETF europei: suffisso borsa (es. IUSS.L, IUSS.DE, IUSS.MI)
+  - Commodities: ticker specifici (es. GC=F per oro)
+
+### 2. Aggiornare Cron Job con Orario Italiano
+Modificare lo schedule da `*/5 * * * *` a:
+```
+*/5 8-22 * * 1-5
+```
+Questo significa: ogni 5 minuti, dalle 8:00 alle 22:59 UTC (9:00-23:59 italiane), solo lunedì-venerdì.
+
+### 3. Popolare `isin_mappings` con ETF Noti
+Inserire i mapping corretti per gli ETF presenti nel portfolio:
+
+| ISIN | Ticker Yahoo | Nome |
+|------|--------------|------|
+| IE00BYYR0489 | IUSS.DE | iShares MSCI Saudi Arabia |
+| IE00B0M63623 | ITWN.L | iShares MSCI Taiwan |
+| IE00BZCQB185 | NDIA.L | iShares MSCI India |
+| IE00B4L5YX21 | SJPA.L | iShares Core MSCI Japan |
+| IE000YYE6WK5 | DFND.DE | VanEck Defense |
+| IE0006WW1TQ4 | XDWU.DE | Xtrackers MSCI World ex USA |
+| IE00B9CQXS71 | GLDV.L | SPDR S&P Global Dividend |
+| IE00B579F325 | SGLD.L | Invesco Physical Gold |
+
+### 4. Correggere Prezzi Errati
+Aggiornare manualmente i prezzi corrotti nel database prima di riattivare il cron.
+
+---
+
+## Architettura Tecnica
+
+```text
+┌─────────────────────┐     ogni 5 min      ┌───────────────────────┐
+│    pg_cron Job      │ ──────────────────► │  update-prices-cron   │
+│  (lun-ven 9-23 IT)  │                     │    Edge Function      │
+└─────────────────────┘                     └───────────┬───────────┘
+                                                        │
+                              ┌─────────────────────────┼────────────────────────┐
+                              │                         │                        │
+                              ▼                         ▼                        ▼
+                    ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+                    │  isin_mappings  │      │ Yahoo Finance   │      │    positions    │
+                    │    (cache)      │      │   Search API    │      │   (update)      │
+                    └─────────────────┘      └─────────────────┘      └─────────────────┘
+```
+
+### Flusso di Risoluzione Ticker
+
+```text
+1. Posizione con ISIN (es. IE00BYYR0489)
+   │
+   ├─► Cerca in isin_mappings → trovato? → usa ticker salvato
+   │
+   └─► Non trovato? → Yahoo Search API con ISIN
+         │
+         ├─► Risultato valido? → salva in isin_mappings → usa ticker
+         │
+         └─► Nessun risultato? → marca come "non aggiornabile"
+```
+
+### Validazione Prezzo
+```text
+nuovo_prezzo = yahoo_api_result
+
+if (vecchio_prezzo esiste):
+    variazione = |nuovo - vecchio| / vecchio * 100
+    
+    if (variazione > 50%):
+        ⚠️ RIFIUTA aggiornamento
+        📝 Log anomalia per review
+    else:
+        ✅ Applica aggiornamento
+else:
+    ✅ Applica aggiornamento (prima volta)
+```
+
+---
+
+## Dettaglio Implementazione
+
+### File da Creare
+`supabase/functions/update-prices-cron/index.ts`
+
+### Struttura Edge Function
 
 ```typescript
-case 'protection':
-  if (position.option_type === 'put' && position.quantity > 0) {
-    longPuts.push({
-      option: position,
-      underlying: linkedStock || null,
-      contracts: position.quantity,
-      isPartial: false  // ← PROBLEMA: sempre false
-    });
-  }
+// 1. Recupera posizioni da aggiornare (azioni, ETF, commodities)
+// 2. Per ogni posizione:
+//    a. Risolvi ISIN → ticker (con cache)
+//    b. Chiama Yahoo Finance Quote API
+//    c. Valida prezzo (sanity check)
+//    d. Aggiorna database
+// 3. Log risultati in price_update_logs
 ```
 
----
+### Modifiche Database
 
-## Soluzione
-Calcolare dinamicamente se la protezione è parziale anche per gli override manuali, verificando l'esposizione netta del sottostante.
-
-### Logica Protezione Parziale
-- **Protezione totale**: `esposizione netta ≤ 0`
-- **Protezione parziale**: `esposizione netta > 0`
-
-```
-esposizione netta = (azioni possedute / 100) - (PUT comprate - PUT vendute)
-```
-
----
-
-## Dettaglio Tecnico
-
-### File da Modificare
-`src/lib/derivativeStrategies.ts`
-
-### Modifiche al Codice
-
-**Linee 142-152** - Calcolare `isPartial` dinamicamente:
-
-```typescript
-case 'protection':
-  if (position.option_type === 'put' && position.quantity > 0) {
-    // Calculate if this is a partial protection
-    let isPartial = false;
-    
-    if (linkedStock && linkedStock.quantity > 0) {
-      // Calculate net exposure for this underlying
-      const stockContracts = Math.floor(linkedStock.quantity / 100);
-      const optionContracts = position.quantity;
-      
-      // Find other PUT positions on the same underlying
-      const underlyingKey = normalizeForMatching(position.underlying || position.description);
-      const otherPuts = derivatives.filter(d => 
-        d.id !== position.id &&
-        d.option_type === 'put' &&
-        normalizeForMatching(d.underlying || d.description) === underlyingKey
-      );
-      
-      const otherBoughtContracts = otherPuts
-        .filter(p => p.quantity > 0)
-        .reduce((sum, p) => sum + p.quantity, 0);
-      const otherSoldContracts = otherPuts
-        .filter(p => p.quantity < 0)
-        .reduce((sum, p) => sum + Math.abs(p.quantity), 0);
-      
-      // Total bought contracts including this position
-      const totalBoughtContracts = optionContracts + otherBoughtContracts;
-      const totalSoldContracts = otherSoldContracts;
-      
-      // Net exposure = stock contracts - (bought - sold)
-      const netExposure = stockContracts - (totalBoughtContracts - totalSoldContracts);
-      
-      isPartial = netExposure > 0;
-    }
-    
-    longPuts.push({
-      option: position,
-      underlying: linkedStock || null,
-      contracts: position.quantity,
-      isPartial
-    });
-    usedDerivatives.add(position.id);
-  }
-  break;
-```
-
----
-
-## Comportamento Atteso
-
-| Scenario | Azioni | PUT Comprate | Esposizione | Badge |
-|----------|--------|--------------|-------------|-------|
-| NETEASE 80 azioni + 1 PUT 80 | 80 | 1 | 80/100 - 1 = -0.2 ≤ 0 | Nessuno (totale) |
-| NETEASE 200 azioni + 1 PUT 80 | 200 | 1 | 200/100 - 1 = 1 > 0 | P! (parziale) |
-| Override senza stock collegato | 0 | 1 | N/A | Nessuno |
+1. **Aggiornare cron job** con nuovo schedule
+2. **Popolare isin_mappings** con ETF noti
+3. **Correggere prezzi errati** (ISHSIII, Taiwan, ecc.)
 
 ---
 
 ## File Coinvolti
 
-| File | Tipo Modifica |
-|------|---------------|
-| `src/lib/derivativeStrategies.ts` | Calcolo dinamico isPartial per override |
+| File | Azione |
+|------|--------|
+| `supabase/functions/update-prices-cron/index.ts` | Creare (nuova edge function) |
+| Database: `cron.job` | Aggiornare schedule |
+| Database: `isin_mappings` | Popolare con mapping ETF |
+| Database: `positions` | Correggere prezzi errati |
 
 ---
 
 ## Stima Effort
-- Modifica singola funzione: ~15 minuti
-- Testing: ~10 minuti
+
+| Attività | Tempo |
+|----------|-------|
+| Creare edge function | 45 min |
+| Popolare isin_mappings | 15 min |
+| Aggiornare cron schedule | 5 min |
+| Correggere prezzi errati | 10 min |
+| Testing | 20 min |
+| **Totale** | **~1.5 ore** |
+
