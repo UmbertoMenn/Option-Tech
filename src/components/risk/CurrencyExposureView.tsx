@@ -162,11 +162,12 @@ export function CurrencyExposureView({
       .reduce((sum, c) => sum + c.totalRisk, 0);
   }, [safeCurrencyExposure]);
   
-  // Group currencies beyond top 5 into "OTHER" for chart display
+  // Group currencies beyond top 5 into "ALTRI" for chart display
   const MAX_CURRENCIES_IN_CHART = 5;
   const chartData = useMemo(() => {
+    // First, check if we even need to group
     if (safeCurrencyExposure.length <= MAX_CURRENCIES_IN_CHART) {
-      return safeCurrencyExposure;
+      return safeCurrencyExposure.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` }));
     }
     
     const topCurrencies = safeCurrencyExposure.slice(0, MAX_CURRENCIES_IN_CHART);
@@ -174,15 +175,21 @@ export function CurrencyExposureView({
     const otherTotal = otherCurrencies.reduce((sum, c) => sum + c.totalRisk, 0);
     const otherPercentage = otherCurrencies.reduce((sum, c) => sum + c.percentage, 0);
     
+    // Only add "ALTRI" if there are actually other currencies to group
+    if (otherTotal <= 0) {
+      return topCurrencies.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` }));
+    }
+    
     return [
-      ...topCurrencies,
+      ...topCurrencies.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` })),
       {
-        currency: 'OTHER',
+        currency: 'ALTRI',
         totalRisk: otherTotal,
         totalRiskOriginal: otherTotal,
         percentage: otherPercentage,
         breakdown: { stocks: 0, bonds: 0, commodities: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
-        instruments: []
+        instruments: [],
+        chartKey: 'ALTRI-grouped'
       }
     ];
   }, [safeCurrencyExposure]);
@@ -291,7 +298,7 @@ export function CurrencyExposureView({
                 </div>
                 <div className="flex-1 space-y-2">
                   {chartData.map((curr) => (
-                    <div key={curr.currency} className="flex items-center justify-between text-sm">
+                    <div key={curr.chartKey} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div 
                           className="w-3 h-3 rounded-full" 

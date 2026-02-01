@@ -36,7 +36,8 @@ export const CURRENCY_COLORS: Record<string, string> = {
   'CHF': 'hsl(0, 84%, 60%)',    // Red
   'CAD': 'hsl(189, 94%, 43%)',  // Cyan
   'AUD': 'hsl(25, 95%, 53%)',   // Orange
-  'OTHER': 'hsl(215, 14%, 46%)' // Gray
+  'ALTRI': 'hsl(330, 70%, 55%)',// Pink/Magenta for grouped currencies
+  'OTHER': 'hsl(215, 14%, 46%)' // Gray fallback
 };
 
 export function getCurrencyColor(currency: string): string {
