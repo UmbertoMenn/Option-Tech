@@ -48,9 +48,20 @@ export function LivePriceBadge({
     return () => clearTimeout(timer);
   }, [livePrice?.directionTimestamp, livePrice?.priceDirection]);
   
-  if (!livePrice || livePrice.source === 'error') {
-    // Show current price from portfolio if no live data
-    if (currentPrice) {
+  // If no live price data, show current price from database
+  if (!livePrice) {
+    if (currentPrice !== null) {
+      return (
+        <span className="font-mono text-foreground">
+          {formatCurrency(currentPrice, currency)}
+        </span>
+      );
+    }
+    return <span className="text-muted-foreground">-</span>;
+  }
+  
+  if (livePrice.source === 'error') {
+    if (currentPrice !== null) {
       return (
         <span className="font-mono text-muted-foreground">
           {formatCurrency(currentPrice, currency)}
@@ -107,7 +118,7 @@ export function LivePriceBadge({
             </div>
           )}
           
-          {/* Live indicator dot */}
+          {/* Live indicator dot - shows when data comes from server-side updates */}
           <span className="relative flex h-2 w-2 ml-1">
             <span className={cn(
               "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
@@ -126,7 +137,7 @@ export function LivePriceBadge({
       </TooltipTrigger>
       <TooltipContent>
         <div className="text-xs space-y-1">
-          <p>Prezzo live: {formatCurrency(price, currency)}</p>
+          <p>Prezzo: {formatCurrency(price, currency)}</p>
           {change !== null && (
             <p className={isPositive ? 'text-profit' : isNegative ? 'text-loss' : ''}>
               Variazione: {isPositive ? '+' : ''}{formatCurrency(change, currency)} ({changePct?.toFixed(2)}%)
@@ -141,7 +152,7 @@ export function LivePriceBadge({
             <p>Bid/Ask: {formatCurrency(livePrice.bid, currency)} / {formatCurrency(livePrice.ask, currency)}</p>
           )}
           <p className="text-muted-foreground">
-            Fonte: {livePrice.source === 'tradier' ? 'Tradier' : livePrice.source === 'justetf' ? 'JustETF' : 'Yahoo Finance'}
+            Aggiornato dal server ogni 5 min
           </p>
           {showDirection && livePrice.priceDirection && (
             <p className={livePrice.priceDirection === 'up' ? 'text-profit' : 'text-loss'}>

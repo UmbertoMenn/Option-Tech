@@ -66,6 +66,9 @@ export function usePortfolio() {
       return data as unknown as Position[];
     },
     enabled: !!portfolio?.id,
+    refetchInterval: 60000, // Poll every 60 seconds for server-side price updates
+    staleTime: 30000, // Consider data fresh for 30 seconds
+    refetchIntervalInBackground: false, // Don't poll when tab is not visible
   });
 
   const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, portfolio?.cash_value || 0) : null;

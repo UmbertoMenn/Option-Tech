@@ -1,4 +1,3 @@
-import { useCallback, useEffect } from 'react';
 import { Position } from '@/types/portfolio';
 import { useLivePricesContext, LivePriceData, PositionWithLive } from '@/contexts/LivePricesContext';
 
@@ -12,38 +11,28 @@ interface UseLivePricesOptions {
 /**
  * @deprecated Use useLivePricesContext() directly instead.
  * This hook is kept for backward compatibility.
+ * Prices are now updated server-side via cron job and read from database.
  */
 export function useLivePrices(
   positions: Position[],
   options: UseLivePricesOptions = {}
 ) {
-  const { enabled = true } = options;
-  
   const {
-    stockPrices,
-    optionPrices,
+    priceHistory,
     isLoading,
     lastFetched,
     error,
     refresh,
-    getPriceForPosition,
-    setPositionsForFetch,
+    getPriceDirectionForPosition,
   } = useLivePricesContext();
   
-  // Register positions for fetching when they change
-  useEffect(() => {
-    if (enabled && positions.length > 0) {
-      setPositionsForFetch(positions);
-    }
-  }, [positions, enabled, setPositionsForFetch]);
-  
   return {
-    stockPrices,
-    optionPrices,
+    stockPrices: {},  // Legacy compatibility - prices now come from DB
+    optionPrices: {}, // Legacy compatibility - prices now come from DB
     isLoading,
     lastFetched,
     error,
     refresh,
-    getPriceForPosition,
+    getPriceForPosition: () => null, // Legacy compatibility
   };
 }
