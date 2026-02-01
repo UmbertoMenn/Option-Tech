@@ -1,181 +1,221 @@
 
-# Piano: Aggiornamento Solo Azioni + Correzione Controvalore con Cambio
+# Piano: Eliminazione Utente Demo + Edge Function Admin per Gestione Utenti
 
-## Problema Identificato
+## Fase 1: Eliminazione Utente Demo
 
-### 1. Cron Job Aggiorna Troppi Asset
-Attualmente l'edge function `update-prices-cron` aggiorna:
-- Azioni (stock) ✓ da mantenere
-- ETF ✗ da rimuovere
-- Commodities ✗ da rimuovere
+Elimineremo l'utente duplicato "NOME COGNOME" e tutti i suoi dati correlati dal database.
 
-### 2. Market Value Non Considera il Cambio
-Il calcolo attuale nel cron job:
+### Dati da Eliminare
+
+| Tabella | Righe da eliminare |
+|---------|-------------------|
+| `positions` | 84 posizioni |
+| `deposits` | Tutti i depositi |
+| `historical_data` | Tutti i dati storici |
+| `derivative_overrides` | Eventuali override |
+| `portfolios` | 1 portfolio |
+| `user_roles` | 1 ruolo |
+| `profiles` | 1 profilo |
+| `auth.users` | 1 utente |
+
+### Ordine di Eliminazione (rispetto delle FK)
+
+```text
+1. positions         (dipende da portfolios)
+2. deposits          (dipende da portfolios)
+3. historical_data   (dipende da portfolios)
+4. derivative_overrides (dipende da portfolios)
+5. portfolios        (dipende da user_id)
+6. user_roles        (dipende da user_id)
+7. profiles          (dipende da user_id)
+8. auth.users        (richiede service_role_key)
 ```
-market_value = current_price × quantity
-```
-
-Dovrebbe essere:
-```
-market_value = current_price × quantity / exchange_rate  (per valute diverse da EUR)
-```
-
-**Esempio AMD (currency: USD, exchange_rate: 1.197)**:
-| Campo | Valore Attuale | Valore Corretto |
-|-------|----------------|-----------------|
-| current_price | 236.73 USD | 236.73 USD |
-| quantity | 700 | 700 |
-| market_value | 165,711 (errato) | **138,438 EUR** |
 
 ---
 
-## Soluzione Proposta
+## Fase 2: Edge Function per Eliminazione Utenti
 
-### Modifiche all'Edge Function
+### Nuovo File: `supabase/functions/admin-delete-user/index.ts`
 
-**File**: `supabase/functions/update-prices-cron/index.ts`
-
-**1. Limitare agli Asset Type "stock" soltanto**:
 ```typescript
-// DA
-.in('asset_type', ['stock', 'etf', 'commodity', 'Stock', 'ETF', 'Commodity']);
+// Endpoint: POST /admin-delete-user
+// Body: { userId: string }
+// Header: Authorization: Bearer <user_token>
 
-// A
-.in('asset_type', ['stock', 'Stock']);
+// Logica:
+1. Verifica che il chiamante sia admin (query user_roles)
+2. Verifica che l'utente target esista
+3. Impedisce l'auto-eliminazione
+4. Elimina tutti i dati in ordine corretto
+5. Elimina l'utente da auth.users usando service_role_key
 ```
 
-**2. Aggiornare il Tasso di Cambio in Tempo Reale**:
-Aggiungere una funzione per recuperare i tassi di cambio EUR/USD e EUR/HKD da Yahoo Finance (EURUSD=X, EURHKD=X).
+### Sicurezza
 
-**3. Correggere il Calcolo del Market Value**:
+- Verifica JWT del chiamante
+- Controlla ruolo admin nel database
+- Usa `SUPABASE_SERVICE_ROLE_KEY` (gia configurato) per eliminare da `auth.users`
+- Log dell'operazione per audit
+
+### Configurazione
+
+```toml
+# supabase/config.toml
+[functions.admin-delete-user]
+verify_jwt = false  # Validazione manuale nel codice
+```
+
+---
+
+## Fase 3: Aggiornamento AdminPanel
+
+### Modifiche a `src/components/admin/AdminPanel.tsx`
+
 ```typescript
-// Recupera exchange rate attuale
-let exchangeRate = 1;
-if (position.currency === 'USD') {
-  exchangeRate = await fetchExchangeRate('EURUSD=X');
-} else if (position.currency === 'HKD') {
-  exchangeRate = await fetchExchangeRate('EURHKD=X');
+// Prima (riga 138-144)
+async function handleDeleteUser(userId: string) {
+  toast.error('Eliminazione utenti richiede accesso diretto al backend');
 }
 
-// Calcola market_value in EUR
-const newMarketValue = (priceData.price * position.quantity) / exchangeRate;
-
-// Aggiorna anche l'exchange_rate nella posizione
-await supabase
-  .from('positions')
-  .update({
-    current_price: priceData.price,
-    market_value: newMarketValue,
-    exchange_rate: exchangeRate,
-    updated_at: new Date().toISOString(),
-  })
-  .eq('id', position.id);
-```
-
----
-
-## Architettura Aggiornata
-
-```text
-┌─────────────────────┐     ogni 5 min      ┌───────────────────────┐
-│    pg_cron Job      │ ──────────────────► │  update-prices-cron   │
-│  (lun-ven 9-23 IT)  │                     │    Edge Function      │
-└─────────────────────┘                     └───────────┬───────────┘
-                                                        │
-                              ┌─────────────────────────┼────────────────────────┐
-                              │                         │                        │
-                              ▼                         ▼                        ▼
-                    ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-                    │ Yahoo Finance   │      │ Yahoo Finance   │      │    positions    │
-                    │  Stock Prices   │      │  Exchange Rates │      │   (SOLO AZIONI) │
-                    │  (AAPL, GOOGL)  │      │  (EURUSD=X)     │      │                 │
-                    └─────────────────┘      └─────────────────┘      └─────────────────┘
-```
-
----
-
-## Flusso di Calcolo Corretto
-
-```text
-Per ogni azione (stock):
-│
-├─► Recupera prezzo da Yahoo (es. 236.73 USD)
-│
-├─► Recupera cambio EUR/USD live (es. 1.04)
-│
-├─► Calcola: market_value = (236.73 × 700) / 1.04 = 159,324 EUR
-│
-└─► Aggiorna database: current_price, market_value, exchange_rate
-```
-
----
-
-## Dettaglio Tecnico
-
-### Nuova Funzione per Exchange Rates
-
-```typescript
-async function fetchExchangeRate(pair: string): Promise<number> {
-  // pair = "EURUSD=X" o "EURHKD=X"
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${pair}`;
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0...' },
-    });
-    
-    const data = await response.json();
-    const rate = data.chart?.result?.[0]?.meta?.regularMarketPrice;
-    
-    return rate || 1;
-  } catch (error) {
-    console.error(`Failed to fetch ${pair}:`, error);
-    return 1; // fallback a 1 (nessuna conversione)
-  }
+// Dopo
+async function handleDeleteUser(userId: string) {
+  // 1. Mostra dialog di conferma
+  // 2. Chiama edge function admin-delete-user
+  // 3. Ricarica lista utenti
 }
 ```
 
-### Posizioni da Aggiornare
+### Nuovi Elementi UI
 
-| Valuta | Count | Ticker Cambio |
-|--------|-------|---------------|
-| USD | 32 azioni | EURUSD=X |
-| HKD | 2 azioni (Alibaba HK, Tencent) | EURHKD=X |
-| EUR | 0 azioni | N/A |
-
----
-
-## Correzione Dati Esistenti
-
-Dopo il deploy, eseguire un aggiornamento manuale per correggere i market_value esistenti con i nuovi tassi di cambio.
+- Dialog di conferma con nome utente
+- Loading state durante l'eliminazione
+- Protezione: impossibile eliminare se stessi
+- Messaggio di successo/errore
 
 ---
 
-## File da Modificare
+## Flusso Completo
+
+```text
+┌─────────────────┐     click     ┌─────────────────┐
+│  Admin Panel    │ ────────────► │ Confirm Dialog  │
+│  (Trash icon)   │               │ "Vuoi eliminare │
+└─────────────────┘               │  Mario Rossi?"  │
+                                  └────────┬────────┘
+                                           │ confirm
+                                           ▼
+                         ┌─────────────────────────────┐
+                         │   Edge Function             │
+                         │   admin-delete-user         │
+                         │                             │
+                         │ 1. Verifica admin           │
+                         │ 2. Elimina posizioni        │
+                         │ 3. Elimina portfolio        │
+                         │ 4. Elimina profilo          │
+                         │ 5. Elimina auth.users       │
+                         └──────────────┬──────────────┘
+                                        │
+                                        ▼
+                         ┌─────────────────────────────┐
+                         │   Toast: "Utente eliminato" │
+                         │   + Refresh lista           │
+                         └─────────────────────────────┘
+```
+
+---
+
+## File da Creare/Modificare
 
 | File | Azione |
 |------|--------|
-| `supabase/functions/update-prices-cron/index.ts` | Modificare filtro asset_type + aggiungere logica exchange rate |
-| Database: `positions` | I market_value verranno corretti automaticamente al prossimo ciclo |
+| `supabase/functions/admin-delete-user/index.ts` | Creare (nuova edge function) |
+| `supabase/config.toml` | Aggiungere configurazione function |
+| `src/components/admin/AdminPanel.tsx` | Modificare handleDeleteUser |
+| Database | Eliminare utente demo con migration |
+
+---
+
+## Dettaglio Tecnico: Edge Function
+
+```typescript
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+    // 1. Verifica token chiamante
+    const authHeader = req.headers.get("Authorization");
+    const { data: { user: caller } } = await supabase.auth.getUser(
+      authHeader?.replace("Bearer ", "")
+    );
+
+    if (!caller) {
+      return new Response(JSON.stringify({ error: "Non autorizzato" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    // 2. Verifica ruolo admin
+    const { data: adminRole } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", caller.id)
+      .eq("role", "admin")
+      .single();
+
+    if (!adminRole) {
+      return new Response(JSON.stringify({ error: "Richiede privilegi admin" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    // 3. Parse body
+    const { userId } = await req.json();
+
+    if (!userId || userId === caller.id) {
+      return new Response(JSON.stringify({ error: "Operazione non permessa" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    // 4. Elimina dati in ordine
+    // ... (posizioni, deposits, portfolios, user_roles, profiles)
+
+    // 5. Elimina da auth.users
+    const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+
+    if (authError) throw authError;
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+});
+```
 
 ---
 
 ## Risultato Atteso
 
-**Prima (errato)**:
-```
-AMD: 700 × 236.73 = 165,711 EUR ❌
-```
-
-**Dopo (corretto)**:
-```
-AMD: 700 × 236.73 / 1.04 = 159,324 EUR ✓
-```
-
----
-
-## Note Importanti
-
-- Gli ETF e le commodities NON verranno più aggiornati automaticamente
-- Se in futuro si volessero aggiornare anche ETF/commodities, sarà sufficiente riaggiungere gli asset_type al filtro
-- Il tasso di cambio viene salvato nella colonna `exchange_rate` per ogni posizione, permettendo un calcolo retroattivo corretto
-
+Dopo l'implementazione:
+- L'utente demo "NOME COGNOME" sara eliminato
+- Il cron job aggiorneraA solo 17 azioni (il tuo portfolio)
+- Dal pannello admin potrai eliminare/aggiungere utenti direttamente
