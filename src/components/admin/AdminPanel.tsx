@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2 } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatDate } from '@/lib/formatters';
@@ -22,13 +22,17 @@ interface UserWithRole {
 }
 
 export function AdminPanel() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserName, setNewUserName] = useState('');
+  
+  // Delete confirmation state
+  const [userToDelete, setUserToDelete] = useState<UserWithRole | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (isAdmin) {
@@ -128,20 +132,58 @@ export function AdminPanel() {
       
       // Wait a bit for the trigger to create the profile
       setTimeout(loadUsers, 1000);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
       toast.error('Errore creazione utente', {
-        description: error.message,
+        description: errorMessage,
       });
     }
   }
 
-  async function handleDeleteUser(userId: string) {
-    // Note: Deleting users requires admin privileges on auth.users
-    // For now, we'll just show a message
-    toast.error('Eliminazione utenti richiede accesso diretto al backend', {
-      description: 'Contatta l\'amministratore di sistema.',
-    });
+  async function handleDeleteUser() {
+    if (!userToDelete) return;
+    
+    setIsDeleting(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      if (!token) {
+        toast.error('Sessione scaduta, effettua nuovamente il login');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+        body: { userId: userToDelete.id },
+      });
+
+      if (error) throw error;
+      
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      toast.success('Utente eliminato con successo', {
+        description: `${userToDelete.full_name || userToDelete.email} è stato rimosso`,
+      });
+      
+      setUserToDelete(null);
+      loadUsers();
+    } catch (error: unknown) {
+      console.error('Delete error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
+      toast.error('Errore eliminazione utente', {
+        description: errorMessage,
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   }
+
+  const canDeleteUser = (targetUser: UserWithRole) => {
+    // Cannot delete yourself
+    return targetUser.id !== user?.id;
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -247,19 +289,22 @@ export function AdminPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.id} className="border-border hover:bg-background-tertiary">
+                  {users.map((targetUser) => (
+                    <TableRow key={targetUser.id} className="border-border hover:bg-background-tertiary">
                       <TableCell className="font-medium">
-                        {user.full_name || 'Nome non impostato'}
+                        {targetUser.full_name || 'Nome non impostato'}
+                        {targetUser.id === user?.id && (
+                          <Badge variant="outline" className="ml-2 text-xs">Tu</Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {user.email}
+                        {targetUser.email}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {formatDate(user.created_at)}
+                        {formatDate(targetUser.created_at)}
                       </TableCell>
                       <TableCell>
-                        {user.isAdmin ? (
+                        {targetUser.isAdmin ? (
                           <Badge className="bg-warning/10 text-warning border-warning/30">
                             <ShieldCheck className="w-3 h-3 mr-1" />
                             Admin
@@ -273,16 +318,18 @@ export function AdminPanel() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleToggleAdmin(user.id, user.isAdmin)}
+                            onClick={() => handleToggleAdmin(targetUser.id, targetUser.isAdmin)}
+                            disabled={targetUser.id === user?.id}
                           >
                             <Shield className="w-4 h-4 mr-1" />
-                            {user.isAdmin ? 'Rimuovi Admin' : 'Rendi Admin'}
+                            {targetUser.isAdmin ? 'Rimuovi Admin' : 'Rendi Admin'}
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             className="text-loss hover:text-loss"
-                            onClick={() => handleDeleteUser(user.id)}
+                            onClick={() => setUserToDelete(targetUser)}
+                            disabled={!canDeleteUser(targetUser)}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -296,6 +343,49 @@ export function AdminPanel() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Stai per eliminare definitivamente l'utente <strong className="text-foreground">{userToDelete?.full_name || userToDelete?.email}</strong>.
+              <br /><br />
+              Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
+              <br /><br />
+              <strong>Questa azione non può essere annullata.</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setUserToDelete(null)}
+              disabled={isDeleting}
+            >
+              Annulla
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteUser}
+              disabled={isDeleting}
+              className="bg-loss hover:bg-loss/90"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Eliminazione...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Elimina Utente
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

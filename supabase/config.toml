@@ -2,3 +2,6 @@ project_id = "uareyloxlpvaxmzygpgo"
 
 [functions.update-prices-cron]
 verify_jwt = false
+
+[functions.admin-delete-user]
+verify_jwt = false
