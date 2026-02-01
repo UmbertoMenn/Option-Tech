@@ -1,254 +1,249 @@
 
+# Piano: Recuperare Settori Dinamicamente da Yahoo Finance
 
-# Piano: Correggere Scraping Settori ETF da justETF
+## Problema
 
-## Problema Identificato
+L'approccio attuale con mapping hardcoded non è scalabile e non funziona con titoli nuovi o meno comuni.
 
-Lo scraping dei dati settoriali da justETF **non funziona** per due motivi:
+## Soluzione
 
-1. **I dati sono caricati dinamicamente via JavaScript** - La sezione Holdings/Sectors è lazy-loaded e non presente nell'HTML statico
-2. **Cache esistente senza settori** - Gli ETF cachati prima dell'aggiornamento hanno `sector_allocations: {}` e `top_holdings: []`
+Sfruttare la **Yahoo Finance Search API** che già restituisce il settore nel campo `sector`:
 
-### Evidenza dal Database
+```json
+{
+  "symbol": "NVDA",
+  "sector": "Technology",
+  "industry": "Semiconductors"
+}
 ```
-sector_allocations: map[]  (vuoto per tutti gli ETF)
-top_holdings: []  (vuoto per tutti gli ETF)
-```
+
+Questo dato può essere salvato nel database e riutilizzato automaticamente.
 
 ---
 
-## Soluzione Proposta
+## Architettura della Soluzione
 
-### Approccio: Usare URL diretto della sezione Holdings
-
-justETF ha una pagina dedicata per le holdings che contiene i dati in modo più accessibile:
-- URL: `https://www.justetf.com/en/etf-profile.html?isin={ISIN}#holdings`
-- Oppure: `https://www.justetf.com/servlet/download?isin={ISIN}&documentType=MR` per il factsheet PDF
-
-La soluzione migliore è accedere all'API interna di justETF o scaricare il factsheet che contiene tutti i dati.
-
-### Alternativa: Fallback con dati statici per ETF comuni
-
-Per gli ETF più popolari (MSCI World, S&P 500, etc.), possiamo usare dati settoriali standard basati sulla composizione tipica dell'indice.
+```text
+┌────────────────────────────────────────────────────────────────────┐
+│                   Posizione: "AZ.NVIDIA CORP"                      │
+│                   ISIN: US67066G1040                               │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│              Edge Function: update-prices-cron                      │
+│  1. Cerca ISIN su Yahoo → trova ticker "NVDA"                      │
+│  2. Yahoo Search restituisce: sector="Technology"                  │
+│  3. Salva nel DB: isin_mappings (ticker + sector + industry)       │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│              Frontend: sectorExposure.ts                           │
+│  1. Carica mappings da isin_mappings                               │
+│  2. Per ogni posizione, cerca sector nel mapping                   │
+│  3. Se non trovato, cerca per nome nella cache                     │
+│  4. Calcola esposizione settoriale                                 │
+└────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Modifiche Tecniche
 
-### 1. Aggiornare Edge Function `fetch-etf-allocation`
+### 1. Aggiungere Colonne alla Tabella `isin_mappings`
 
-**File**: `supabase/functions/fetch-etf-allocation/index.ts`
-
-#### Strategia Multi-Step:
-
-```typescript
-async function scrapeJustETF(isin: string) {
-  // STEP 1: Tentare scraping dalla pagina principale
-  const mainPageData = await scrapeMainPage(isin);
-  
-  // STEP 2: Se settori vuoti, tentare la pagina holdings dedicata
-  if (Object.keys(mainPageData.sectorAllocations).length === 0) {
-    const holdingsData = await scrapeHoldingsTab(isin);
-    mainPageData.sectorAllocations = holdingsData.sectors;
-    mainPageData.topHoldings = holdingsData.holdings;
-  }
-  
-  // STEP 3: Se ancora vuoti, usare fallback basato su indice
-  if (Object.keys(mainPageData.sectorAllocations).length === 0) {
-    mainPageData.sectorAllocations = getIndexFallbackSectors(mainPageData.name);
-  }
-  
-  return mainPageData;
-}
-```
-
-#### Nuova Funzione: Scraping Tab Holdings
-
-```typescript
-async function scrapeHoldingsTab(isin: string): Promise<{
-  sectors: Record<string, number>;
-  holdings: TopHolding[];
-}> {
-  // Tentare di recuperare i dati dalla sezione holdings
-  // che potrebbe essere disponibile in un formato diverso
-  
-  // Pattern alternativi da cercare nell'HTML completo:
-  // 1. Tabelle con class="allocation-table" 
-  // 2. Dati inline in script tags (JSON embedded)
-  // 3. API calls visibili nell'HTML
-  
-  const url = `https://www.justetf.com/en/etf-profile.html?isin=${isin}`;
-  const response = await fetch(url, { 
-    headers: { 
-      'User-Agent': '...',
-      'Accept': 'text/html,application/xhtml+xml',
-      // Tentare header che potrebbero far caricare più contenuto
-    } 
-  });
-  
-  const html = await response.text();
-  
-  // Cercare pattern alternativi:
-  
-  // Pattern 1: Dati JSON embedded in script
-  const jsonMatch = html.match(/var\s+etfData\s*=\s*(\{[\s\S]*?\});/);
-  if (jsonMatch) {
-    const data = JSON.parse(jsonMatch[1]);
-    return {
-      sectors: data.sectorAllocations || {},
-      holdings: data.topHoldings || []
-    };
-  }
-  
-  // Pattern 2: Tabelle allocation con dati strutturati
-  // ...altri pattern...
-  
-  return { sectors: {}, holdings: [] };
-}
-```
-
-#### Fallback per Indici Comuni
-
-```typescript
-const INDEX_SECTOR_FALLBACKS: Record<string, Record<string, number>> = {
-  'MSCI WORLD': {
-    'Technology': 24,
-    'Financials': 15,
-    'Healthcare': 12,
-    'Consumer Discretionary': 11,
-    'Industrials': 10,
-    'Communication Services': 8,
-    'Consumer Staples': 7,
-    'Energy': 4,
-    'Materials': 4,
-    'Utilities': 3,
-    'Real Estate': 2,
-  },
-  'S&P 500': {
-    'Technology': 32,
-    'Healthcare': 12,
-    'Financials': 11,
-    'Consumer Discretionary': 10,
-    'Industrials': 8,
-    'Communication Services': 9,
-    'Consumer Staples': 6,
-    'Energy': 4,
-    'Utilities': 2,
-    'Real Estate': 2,
-    'Materials': 4,
-  },
-  'MSCI EMERGING': {
-    'Technology': 20,
-    'Financials': 22,
-    'Consumer Discretionary': 14,
-    'Communication Services': 10,
-    'Materials': 8,
-    'Energy': 6,
-    'Industrials': 6,
-    'Consumer Staples': 5,
-    'Healthcare': 4,
-    'Utilities': 3,
-    'Real Estate': 2,
-  },
-  'MSCI EUROPE': {
-    'Financials': 17,
-    'Healthcare': 15,
-    'Industrials': 14,
-    'Consumer Staples': 11,
-    'Consumer Discretionary': 10,
-    'Materials': 8,
-    'Energy': 7,
-    'Technology': 8,
-    'Utilities': 4,
-    'Communication Services': 3,
-    'Real Estate': 3,
-  },
-};
-
-function getIndexFallbackSectors(etfName: string): Record<string, number> {
-  const upperName = etfName.toUpperCase();
-  
-  for (const [index, sectors] of Object.entries(INDEX_SECTOR_FALLBACKS)) {
-    if (upperName.includes(index)) {
-      console.log(`Using fallback sectors for index: ${index}`);
-      return sectors;
-    }
-  }
-  
-  // Fallback generico per ETF azionari globali
-  return {};
-}
-```
-
-### 2. Invalidare Cache Esistente
-
-Opzione A: Aggiungere parametro per forzare refresh
-```typescript
-// Nel frontend, quando si accede alla vista Sector:
-fetchAllocation(isin, true); // forceRefresh = true
-```
-
-Opzione B: Migrazione SQL per invalidare cache senza settori
 ```sql
--- Invalida ETF senza dati settoriali per forzare ri-scraping
-UPDATE etf_allocations 
-SET last_fetched_at = '2020-01-01' 
-WHERE sector_allocations = '{}' OR sector_allocations IS NULL;
+ALTER TABLE isin_mappings
+ADD COLUMN IF NOT EXISTS sector text,
+ADD COLUMN IF NOT EXISTS industry text;
 ```
 
-### 3. Aggiornare `useETFAllocations` per Re-fetch Intelligente
+### 2. Aggiornare Edge Function `update-prices-cron`
 
-**File**: `src/hooks/useETFAllocations.ts`
+**File**: `supabase/functions/update-prices-cron/index.ts`
+
+Modificare `searchYahooByISIN` per estrarre e salvare anche `sector` e `industry`:
 
 ```typescript
-const fetchAllocation = useCallback(async (
-  isin: string, 
-  forceRefresh = false
-): Promise<ETFAllocation | null> => {
-  // Se cached ma senza settori, forzare refresh
-  if (!forceRefresh && allocations[isin]) {
-    const hasNoSectors = Object.keys(allocations[isin].sectorAllocations || {}).length === 0;
-    if (hasNoSectors) {
-      console.log(`${isin} has no sector data, forcing refresh`);
-      forceRefresh = true;
+async function searchYahooByISIN(isin: string): Promise<{
+  ticker: string;
+  name: string;
+  exchange: string;
+  sector?: string;    // NUOVO
+  industry?: string;  // NUOVO
+} | null> {
+  const data = await response.json();
+  const quotes = data.quotes || [];
+  
+  const bestMatch = quotes[0];
+  
+  return {
+    ticker: bestMatch.symbol,
+    name: bestMatch.shortname || bestMatch.longname || '',
+    exchange: bestMatch.exchange || '',
+    sector: bestMatch.sector || null,      // NUOVO
+    industry: bestMatch.industry || null,  // NUOVO
+  };
+}
+
+// Salvare nel database
+await supabase.from('isin_mappings').upsert({
+  isin,
+  ticker: searchResult.ticker,
+  exchange: searchResult.exchange,
+  sector: searchResult.sector,      // NUOVO
+  industry: searchResult.industry,  // NUOVO
+  source: 'yahoo_search',
+  last_verified_at: new Date().toISOString(),
+}, { onConflict: 'isin' });
+```
+
+### 3. Creare Nuovo Hook `useSectorMappings`
+
+**File**: `src/hooks/useSectorMappings.ts`
+
+Hook per caricare le mappature settoriali dal database:
+
+```typescript
+export function useSectorMappings() {
+  const [mappings, setMappings] = useState<Record<string, {
+    ticker: string;
+    sector: string;
+    industry: string;
+  }>>({});
+  
+  const fetchMappings = useCallback(async (isins: string[]) => {
+    const { data } = await supabase
+      .from('isin_mappings')
+      .select('isin, ticker, sector, industry')
+      .in('isin', isins)
+      .not('sector', 'is', null);
+    
+    // Costruisci mappa per lookup rapido
+    // ...
+  }, []);
+  
+  return { mappings, fetchMappings };
+}
+```
+
+### 4. Aggiornare `sectorExposure.ts`
+
+**File**: `src/lib/sectorExposure.ts`
+
+Modificare `calculateSectorExposure` per accettare anche le mappature settoriali:
+
+```typescript
+export function calculateSectorExposure(
+  analysis: RiskAnalysis,
+  etfAllocations: Record<string, ETFAllocation>,
+  sectorMappings: Record<string, { sector: string }>,  // NUOVO
+  options: SectorExposureOptions = {}
+): SectorExposure[] {
+  // Per azioni singole:
+  for (const stock of analysis.stockDetails) {
+    if (!isETFByName(stock.underlying)) {
+      // 1. Prima cerca nel mapping dinamico (per ISIN)
+      let sector = 'Other';
+      if (stock.isin && sectorMappings[stock.isin]?.sector) {
+        sector = sectorMappings[stock.isin].sector;
+      } else {
+        // 2. Fallback al mapping statico (per ticker noti)
+        sector = getStockSector(stock.underlying);
+      }
+      // ...
     }
   }
+}
+```
+
+### 5. Aggiornare `RiskAnalyzer.tsx`
+
+**File**: `src/pages/RiskAnalyzer.tsx`
+
+Integrare il nuovo hook:
+
+```typescript
+const { mappings: sectorMappings, fetchMappings } = useSectorMappings();
+
+// Fetch sector mappings when switching to sector view
+useEffect(() => {
+  const stockIsins = analysis.stockDetails
+    .filter(s => s.isin && !isETFByName(s.underlying))
+    .map(s => s.isin!);
   
-  // ... resto del codice ...
-}, [allocations, loading]);
+  if (stockIsins.length > 0 && viewMode === 'sector') {
+    fetchMappings(stockIsins);
+  }
+}, [analysis.stockDetails, viewMode]);
+
+// Passa le mappature a calculateSectorExposure
+const sectorExposure = useMemo(() => {
+  return calculateSectorExposure(analysis, allocations, sectorMappings, { includeDerivatives });
+}, [analysis, allocations, sectorMappings, includeDerivatives]);
 ```
 
 ---
 
-## Ordine di Implementazione
+## Flusso Completo
 
-1. **Aggiornare Edge Function** con:
-   - Pattern di scraping migliorati
-   - Fallback per indici comuni
-   - Logging dettagliato per debug
-
-2. **Invalidare cache esistente** senza settori
-
-3. **Aggiornare hook frontend** per forzare re-fetch quando mancano settori
-
-4. **Testare** con ETF reali (IE00B4L5Y983 - iShares MSCI World)
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: Upload Excel con nuove posizioni                              │
+│  └─ Posizione: "AZ.NVIDIA CORP", ISIN: US67066G1040                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: Edge Function update-prices-cron (automatico/cron)            │
+│  └─ Yahoo Search: "US67066G1040" → {ticker: "NVDA", sector: "Technology"}│
+│  └─ Salva in isin_mappings: (isin, ticker, sector, industry)           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: Utente apre Sector Allocation View                            │
+│  └─ Frontend carica isin_mappings per ISIN delle posizioni             │
+│  └─ calculateSectorExposure usa sector dal mapping dinamico            │
+│  └─ NVIDIA → Technology ✓ (dinamicamente, senza hardcoding)            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## File da Modificare
+## Vantaggi
 
-| File | Modifiche |
-|------|-----------|
-| `supabase/functions/fetch-etf-allocation/index.ts` | Migliorare scraping + aggiungere fallback |
-| `src/hooks/useETFAllocations.ts` | Re-fetch intelligente se settori mancanti |
-| Migrazione SQL | Invalidare cache senza settori |
+| Aspetto | Prima (Hardcoded) | Dopo (Dinamico) |
+|---------|-------------------|-----------------|
+| **Nuovi titoli** | Non riconosciuti | Riconosciuti automaticamente |
+| **Manutenzione** | Aggiornamento manuale codice | Zero manutenzione |
+| **Copertura** | ~200 ticker noti | Tutti i ticker su Yahoo Finance |
+| **Aggiornamenti** | Mai | Ad ogni aggiornamento prezzi |
+
+---
+
+## File da Modificare/Creare
+
+| File | Azione | Descrizione |
+|------|--------|-------------|
+| Migrazione SQL | Crea | Aggiungere colonne `sector`, `industry` a `isin_mappings` |
+| `supabase/functions/update-prices-cron/index.ts` | Modifica | Estrarre e salvare sector/industry da Yahoo Search |
+| `src/hooks/useSectorMappings.ts` | Crea | Hook per caricare mappature settoriali |
+| `src/lib/sectorExposure.ts` | Modifica | Accettare mappature dinamiche |
+| `src/pages/RiskAnalyzer.tsx` | Modifica | Integrare useSectorMappings |
+
+---
+
+## Edge Case: Titoli senza ISIN nel Database
+
+Per i titoli che hanno solo la description (es. opzioni), manterremo il fallback al mapping statico o inferenza dal nome. Ma per le posizioni principali (azioni, ETF) che hanno sempre ISIN, il sistema sarà completamente dinamico.
 
 ---
 
 ## Risultato Atteso
 
-- ETF con dati settoriali effettivi (quando disponibili) o fallback ragionevoli
-- La vista Sector Allocation mostrerà:
-  - ETF → decomposizione per settore basata su percentuali
-  - Esempio: ETF con €100,000 e 24% Technology → €24,000 in Technology
-
+- **Qualsiasi titolo nuovo** importato via Excel verrà classificato automaticamente
+- **Il settore viene recuperato da Yahoo Finance** (fonte autorevole)
+- **I dati sono cachati nel database** per riutilizzo futuro
+- **Zero manutenzione** per aggiungere nuovi titoli
