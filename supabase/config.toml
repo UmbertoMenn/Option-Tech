@@ -1,1 +1,4 @@
 project_id = "uareyloxlpvaxmzygpgo"
+
+[functions.update-prices-cron]
+verify_jwt = false
