@@ -308,8 +308,8 @@ serve(async (req) => {
     // Fetch positions to update (Stocks, ETFs, Commodities only)
     const { data: positions, error: fetchError } = await supabase
       .from('positions')
-      .select('id, description, isin, ticker, current_price, asset_type, quantity, currency')
-      .in('asset_type', ['Stock', 'ETF', 'Commodity']);
+      .select('id, description, isin, ticker, current_price, asset_type, quantity, currency, portfolio_id')
+      .in('asset_type', ['stock', 'etf', 'commodity', 'Stock', 'ETF', 'Commodity']);
 
     if (fetchError) {
       throw new Error(`Failed to fetch positions: ${fetchError.message}`);
