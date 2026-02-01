@@ -105,6 +105,161 @@ async function getExchangeRateForCurrency(currency: string | null): Promise<numb
   return await fetchExchangeRate(pair);
 }
 
+// Sector mapping based on well-known tickers and patterns
+const KNOWN_SECTORS: Record<string, { sector: string; industry: string }> = {
+  // Tech
+  'NVDA': { sector: 'Technology', industry: 'Semiconductors' },
+  'AAPL': { sector: 'Technology', industry: 'Consumer Electronics' },
+  'MSFT': { sector: 'Technology', industry: 'Software - Infrastructure' },
+  'GOOGL': { sector: 'Communication Services', industry: 'Internet Content & Information' },
+  'GOOG': { sector: 'Communication Services', industry: 'Internet Content & Information' },
+  'META': { sector: 'Communication Services', industry: 'Internet Content & Information' },
+  'AMZN': { sector: 'Consumer Cyclical', industry: 'Internet Retail' },
+  'TSLA': { sector: 'Consumer Cyclical', industry: 'Auto Manufacturers' },
+  'AMD': { sector: 'Technology', industry: 'Semiconductors' },
+  'INTC': { sector: 'Technology', industry: 'Semiconductors' },
+  'AVGO': { sector: 'Technology', industry: 'Semiconductors' },
+  'CRM': { sector: 'Technology', industry: 'Software - Application' },
+  'ORCL': { sector: 'Technology', industry: 'Software - Infrastructure' },
+  'ADBE': { sector: 'Technology', industry: 'Software - Application' },
+  'NFLX': { sector: 'Communication Services', industry: 'Entertainment' },
+  'CSCO': { sector: 'Technology', industry: 'Communication Equipment' },
+  'IBM': { sector: 'Technology', industry: 'Information Technology Services' },
+  'QCOM': { sector: 'Technology', industry: 'Semiconductors' },
+  'TXN': { sector: 'Technology', industry: 'Semiconductors' },
+  'NOW': { sector: 'Technology', industry: 'Software - Application' },
+  'PLTR': { sector: 'Technology', industry: 'Software - Application' },
+  'CRWV': { sector: 'Technology', industry: 'Software - Infrastructure' },
+  'SNOW': { sector: 'Technology', industry: 'Software - Application' },
+  
+  // Healthcare
+  'JNJ': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  'UNH': { sector: 'Healthcare', industry: 'Healthcare Plans' },
+  'PFE': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  'ABBV': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  'MRK': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  'LLY': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  'NVO': { sector: 'Healthcare', industry: 'Drug Manufacturers - General' },
+  
+  // Financials
+  'JPM': { sector: 'Financial Services', industry: 'Banks - Diversified' },
+  'V': { sector: 'Financial Services', industry: 'Credit Services' },
+  'MA': { sector: 'Financial Services', industry: 'Credit Services' },
+  'BAC': { sector: 'Financial Services', industry: 'Banks - Diversified' },
+  'GS': { sector: 'Financial Services', industry: 'Capital Markets' },
+  'MS': { sector: 'Financial Services', industry: 'Capital Markets' },
+  'BRK-B': { sector: 'Financial Services', industry: 'Insurance - Diversified' },
+  'PYPL': { sector: 'Financial Services', industry: 'Credit Services' },
+  
+  // Energy
+  'XOM': { sector: 'Energy', industry: 'Oil & Gas Integrated' },
+  'CVX': { sector: 'Energy', industry: 'Oil & Gas Integrated' },
+  'COP': { sector: 'Energy', industry: 'Oil & Gas Exploration & Production' },
+  'ENI.MI': { sector: 'Energy', industry: 'Oil & Gas Integrated' },
+  'CEG': { sector: 'Utilities', industry: 'Utilities - Independent Power Producers' },
+  
+  // Consumer
+  'WMT': { sector: 'Consumer Defensive', industry: 'Discount Stores' },
+  'PG': { sector: 'Consumer Defensive', industry: 'Household & Personal Products' },
+  'KO': { sector: 'Consumer Defensive', industry: 'Beverages - Non-Alcoholic' },
+  'PEP': { sector: 'Consumer Defensive', industry: 'Beverages - Non-Alcoholic' },
+  'COST': { sector: 'Consumer Defensive', industry: 'Discount Stores' },
+  'DIS': { sector: 'Communication Services', industry: 'Entertainment' },
+  
+  // Chinese tech
+  'BABA': { sector: 'Consumer Cyclical', industry: 'Internet Retail' },
+  '9988.HK': { sector: 'Consumer Cyclical', industry: 'Internet Retail' },
+  'NTES': { sector: 'Communication Services', industry: 'Electronic Gaming & Multimedia' },
+  '1211.HK': { sector: 'Consumer Cyclical', industry: 'Auto Manufacturers' },
+  'BYD': { sector: 'Consumer Cyclical', industry: 'Auto Manufacturers' },
+  
+  // Defense/Aerospace
+  'LMT': { sector: 'Industrials', industry: 'Aerospace & Defense' },
+  'RTX': { sector: 'Industrials', industry: 'Aerospace & Defense' },
+  'BA': { sector: 'Industrials', industry: 'Aerospace & Defense' },
+  'GE': { sector: 'Industrials', industry: 'Specialty Industrial Machinery' },
+};
+
+// Infer sector from ticker patterns for ETFs and unknown stocks
+function inferSectorFromName(ticker: string, description?: string): { sector: string | null; industry: string | null } {
+  // Check known sectors first
+  const upperTicker = ticker.toUpperCase();
+  const baseTicker = upperTicker.replace(/\.(L|DE|MI|PA|AS|SW|HK)$/, '');
+  
+  if (KNOWN_SECTORS[upperTicker]) {
+    return KNOWN_SECTORS[upperTicker];
+  }
+  if (KNOWN_SECTORS[baseTicker]) {
+    return KNOWN_SECTORS[baseTicker];
+  }
+  
+  // Try to infer from description
+  const desc = (description || '').toUpperCase();
+  const tickerDesc = `${upperTicker} ${desc}`;
+  
+  // ETFs don't have sectors (they're diversified)
+  if (tickerDesc.includes('ETF') || tickerDesc.includes('ISHARES') || 
+      tickerDesc.includes('VANGUARD') || tickerDesc.includes('SPDR') ||
+      tickerDesc.includes('INVESCO') || tickerDesc.includes('XTRACKERS')) {
+    return { sector: 'ETF', industry: 'Exchange Traded Fund' };
+  }
+  
+  // Gold/Commodities
+  if (tickerDesc.includes('GOLD') || tickerDesc.includes('GLD') || 
+      tickerDesc.includes('SGLD') || tickerDesc.includes('IAU')) {
+    return { sector: 'Commodities', industry: 'Gold' };
+  }
+  
+  return { sector: null, industry: null };
+}
+
+// Fetch sector/industry - uses known mappings first, then tries Yahoo API
+async function fetchYahooSectorInfo(ticker: string, description?: string): Promise<{
+  sector: string | null;
+  industry: string | null;
+}> {
+  // 1. Check known sectors
+  const knownInfo = inferSectorFromName(ticker, description);
+  if (knownInfo.sector) {
+    console.log(`Using known sector for ${ticker}: ${knownInfo.sector}`);
+    return knownInfo;
+  }
+  
+  // 2. Try Yahoo Finance quote API (v7) with cookies - sometimes works
+  try {
+    // First get a crumb cookie
+    const crumbUrl = 'https://fc.yahoo.com/';
+    await fetch(crumbUrl);
+    
+    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}&fields=sector,industry`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      const quote = data.quoteResponse?.result?.[0];
+      
+      if (quote?.sector) {
+        console.log(`Yahoo v7 returned sector for ${ticker}: ${quote.sector}`);
+        return {
+          sector: quote.sector,
+          industry: quote.industry || null,
+        };
+      }
+    }
+  } catch (error) {
+    // Silently fail, will return null
+  }
+  
+  console.log(`No sector found for ${ticker}`);
+  return { sector: null, industry: null };
+}
+
 // Yahoo Finance Quote API
 async function fetchYahooPrice(ticker: string): Promise<PriceResult | null> {
   try {
@@ -262,7 +417,11 @@ async function resolveISINToTicker(
     return null;
   }
   
-  // 4. Save to cache (including sector and industry)
+  // 4. NUOVO: Fetch sector/industry using the Quote Summary API
+  const sectorInfo = await fetchYahooSectorInfo(searchResult.ticker);
+  console.log(`Fetched sector info for ${searchResult.ticker}: ${sectorInfo.sector || 'N/A'}`);
+  
+  // 5. Save to cache with sector info from Quote Summary API
   const upsertData: any = {
     isin,
     ticker: searchResult.ticker,
@@ -271,20 +430,81 @@ async function resolveISINToTicker(
     last_verified_at: new Date().toISOString(),
   };
   
-  // Add sector and industry if available
-  if (searchResult.sector) {
-    upsertData.sector = searchResult.sector;
+  // Add sector and industry from Quote Summary API
+  if (sectorInfo.sector) {
+    upsertData.sector = sectorInfo.sector;
   }
-  if (searchResult.industry) {
-    upsertData.industry = searchResult.industry;
+  if (sectorInfo.industry) {
+    upsertData.industry = sectorInfo.industry;
   }
   
   await supabase
     .from('isin_mappings')
     .upsert(upsertData, { onConflict: 'isin' });
   
-  console.log(`Saved mapping: ${isin} -> ${searchResult.ticker} (sector: ${searchResult.sector || 'N/A'})`);
+  console.log(`Saved mapping: ${isin} -> ${searchResult.ticker} (sector: ${sectorInfo.sector || 'N/A'})`);
   return searchResult.ticker;
+}
+
+// Update sectors for ISINs that are missing sector data
+async function updateMissingSectors(supabase: any, isins?: string[]): Promise<{
+  updated: number;
+  failed: number;
+}> {
+  let query = supabase
+    .from('isin_mappings')
+    .select('isin, ticker')
+    .is('sector', null);
+  
+  // If specific ISINs provided, filter by them
+  if (isins && isins.length > 0) {
+    query = query.in('isin', isins);
+  }
+  
+  const { data: missing, error } = await query;
+  
+  if (error) {
+    console.error('Error fetching missing sectors:', error);
+    return { updated: 0, failed: 0 };
+  }
+  
+  console.log(`Found ${missing?.length || 0} mappings with missing sectors`);
+  
+  let updated = 0;
+  let failed = 0;
+  
+  for (const row of missing || []) {
+    if (row.ticker) {
+      const sectorInfo = await fetchYahooSectorInfo(row.ticker);
+      
+      if (sectorInfo.sector) {
+        const { error: updateError } = await supabase
+          .from('isin_mappings')
+          .update({
+            sector: sectorInfo.sector,
+            industry: sectorInfo.industry,
+            last_verified_at: new Date().toISOString(),
+          })
+          .eq('isin', row.isin);
+        
+        if (updateError) {
+          console.error(`Failed to update sector for ${row.isin}:`, updateError);
+          failed++;
+        } else {
+          console.log(`Updated sector for ${row.ticker}: ${sectorInfo.sector}`);
+          updated++;
+        }
+      } else {
+        console.log(`No sector found for ${row.ticker}`);
+        failed++;
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  
+  return { updated, failed };
 }
 
 // Determine the best ticker to use for a position
@@ -375,6 +595,40 @@ function validatePriceChange(oldPrice: number | null, newPrice: number): { valid
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Parse request body to check for mode
+  let body: { mode?: string; isins?: string[] } = {};
+  try {
+    body = await req.json();
+  } catch {
+    // No body or invalid JSON, use default mode
+  }
+
+  // Handle update-sectors mode
+  if (body.mode === 'update-sectors') {
+    console.log('Running in update-sectors mode');
+    const startTime = Date.now();
+    
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const result = await updateMissingSectors(supabase, body.isins);
+    const duration = Date.now() - startTime;
+    
+    console.log(`Sector update completed in ${duration}ms: ${result.updated} updated, ${result.failed} failed`);
+    
+    return new Response(
+      JSON.stringify({
+        success: true,
+        mode: 'update-sectors',
+        duration: `${duration}ms`,
+        updated: result.updated,
+        failed: result.failed,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   const startTime = Date.now();
