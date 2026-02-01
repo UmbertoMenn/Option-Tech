@@ -32,6 +32,8 @@ interface EquityExposureViewProps {
 export function EquityExposureView({ analysis }: EquityExposureViewProps) {
   const {
     totalStockRisk,
+    totalETFRisk,
+    totalPureStockRisk,
     totalCommodityRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
@@ -46,14 +48,26 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
 
   const getPercentage = (value: number) => grandTotal > 0 ? (value / grandTotal) * 100 : 0;
 
+  // Separate ETF and pure stock details
+  const etfDetails = stockDetails.filter(s => s.isETF);
+  const pureStockDetails = stockDetails.filter(s => !s.isETF);
+
   const riskCategories = [
     { 
+      label: 'Rischio ETF Azionari', 
+      value: totalETFRisk, 
+      percentage: getPercentage(totalETFRisk),
+      color: 'bg-cyan-500',
+      icon: TrendingUp,
+      description: 'ETF (al netto di protezioni PUT)'
+    },
+    { 
       label: 'Rischio Stocks', 
-      value: totalStockRisk, 
-      percentage: getPercentage(totalStockRisk),
+      value: totalPureStockRisk, 
+      percentage: getPercentage(totalPureStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
-      description: 'Azioni e ETF (al netto di protezioni PUT)'
+      description: 'Azioni individuali (al netto di protezioni PUT)'
     },
     { 
       label: 'Rischio Commodities', 
@@ -111,7 +125,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
               <div className="p-1.5 rounded bg-primary/20">
                 <ShieldAlert className="w-4 h-4 text-primary" />
               </div>
-              <span className="text-sm font-medium text-primary">Esposizione Totale</span>
+              <span className="text-sm font-medium text-primary">Esposizione Totale in Equity e Commodities</span>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
@@ -140,7 +154,8 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                           fill={entry.color.replace('bg-', '').replace('-500', '')}
                           className={entry.color}
                           style={{ 
-                            fill: entry.color === 'bg-blue-500' ? '#3b82f6' :
+                            fill: entry.color === 'bg-cyan-500' ? '#06b6d4' :
+                                  entry.color === 'bg-blue-500' ? '#3b82f6' :
                                   entry.color === 'bg-orange-500' ? '#f97316' :
                                   entry.color === 'bg-red-500' ? '#ef4444' :
                                   entry.color === 'bg-amber-500' ? '#f59e0b' :
@@ -159,7 +174,8 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                       <div 
                         className="w-3 h-3 rounded-full" 
                         style={{ 
-                          backgroundColor: cat.color === 'bg-blue-500' ? '#3b82f6' :
+                          backgroundColor: cat.color === 'bg-cyan-500' ? '#06b6d4' :
+                                           cat.color === 'bg-blue-500' ? '#3b82f6' :
                                            cat.color === 'bg-orange-500' ? '#f97316' :
                                            cat.color === 'bg-red-500' ? '#ef4444' :
                                            cat.color === 'bg-amber-500' ? '#f59e0b' :
@@ -219,8 +235,113 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
 
       {/* Detailed Sections */}
       <Accordion type="multiple" className="space-y-4">
-        {/* Stock Details */}
-        {stockDetails.length > 0 && (
+        {/* ETF Details */}
+        {etfDetails.length > 0 && (
+          <AccordionItem value="etfs" className="border rounded-lg bg-card">
+            <AccordionTrigger className="px-6 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 rounded bg-cyan-500/20">
+                  <TrendingUp className="w-4 h-4 text-cyan-500" />
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold">Dettaglio ETF Azionari</div>
+                  <div className="text-sm text-muted-foreground">
+                    {etfDetails.length} ETF • Rischio totale: {formatEUR(totalETFRisk)}
+                  </div>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-4">
+              <div className="space-y-4">
+                {etfDetails.map((stock, index) => {
+                  const protectedPct = stock.stockValue > 0 
+                    ? (stock.protectedValue / stock.stockValue) * 100 
+                    : 0;
+                  const riskPct = 100 - protectedPct;
+                  
+                  return (
+                    <div key={index} className="p-4 rounded-lg bg-muted/50 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-semibold flex items-center gap-2">
+                            {stock.underlying}
+                            {stock.hasProtection && (
+                              <Badge variant="outline" className="text-green-600 border-green-600">
+                                <Shield className="w-3 h-3 mr-1" />
+                                Protetto
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {formatNumber(stock.stockQuantity)} quote @ {stock.currency} {formatNumber(stock.stockPrice, 2)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold text-cyan-500">
+                            Rischio: {formatEUR(stock.riskEUR)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {stock.currency} {formatNumber(stock.riskOriginal, 0)} / {stock.exchangeRate.toFixed(4)}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Valore ETF:</span>
+                          <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.stockValue, 0)}</span>
+                        </div>
+                        {stock.hasProtection && (
+                          <>
+                            <div>
+                              <span className="text-muted-foreground">PUT Strike:</span>
+                              <span className="ml-2 font-medium">{stock.currency} {formatNumber(stock.protectionStrike || 0)}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Contratti:</span>
+                              <span className="ml-2 font-medium">{stock.protectionContracts}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      
+                      {/* Protection Bar */}
+                      <div className="space-y-1">
+                        <div className="h-4 rounded-full overflow-hidden flex">
+                          {protectedPct > 0 && (
+                            <div 
+                              className="bg-green-500 h-full flex items-center justify-center"
+                              style={{ width: `${protectedPct}%` }}
+                            >
+                              {protectedPct > 15 && (
+                                <span className="text-xs text-white font-medium">
+                                  Protetto {protectedPct.toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div 
+                            className="bg-cyan-500 h-full flex items-center justify-center"
+                            style={{ width: `${riskPct}%` }}
+                          >
+                            {riskPct > 15 && (
+                              <span className="text-xs text-white font-medium">
+                                Rischio {riskPct.toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+        {/* Pure Stock Details */}
+        {pureStockDetails.length > 0 && (
           <AccordionItem value="stocks" className="border rounded-lg bg-card">
             <AccordionTrigger className="px-6 hover:no-underline">
               <div className="flex items-center gap-3">
@@ -230,14 +351,14 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                 <div className="text-left">
                   <div className="font-semibold">Dettaglio Stocks</div>
                   <div className="text-sm text-muted-foreground">
-                    {stockDetails.length} titoli • Rischio totale: {formatEUR(totalStockRisk)}
+                    {pureStockDetails.length} azioni • Rischio totale: {formatEUR(totalPureStockRisk)}
                   </div>
                 </div>
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-4">
-                {stockDetails.map((stock, index) => {
+                {pureStockDetails.map((stock, index) => {
                   const protectedPct = stock.stockValue > 0 
                     ? (stock.protectedValue / stock.stockValue) * 100 
                     : 0;
@@ -261,7 +382,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-semibold text-red-500">
+                          <div className="font-semibold text-blue-500">
                             Rischio: {formatEUR(stock.riskEUR)}
                           </div>
                           <div className="text-xs text-muted-foreground">
@@ -305,7 +426,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                             </div>
                           )}
                           <div 
-                            className="bg-red-500 h-full flex items-center justify-center"
+                            className="bg-blue-500 h-full flex items-center justify-center"
                             style={{ width: `${riskPct}%` }}
                           >
                             {riskPct > 15 && (

@@ -12,6 +12,8 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     if (!positions || positions.length === 0) {
       return {
         totalStockRisk: 0,
+        totalETFRisk: 0,
+        totalPureStockRisk: 0,
         totalCommodityRisk: 0,
         totalNakedPutRisk: 0,
         totalLeapCallRisk: 0,

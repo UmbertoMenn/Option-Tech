@@ -25,6 +25,7 @@ export interface StockRiskDetail {
   exchangeRate: number;
   hasProtection: boolean;
   isin?: string;                // ISIN for ETF lookups
+  isETF: boolean;               // Flag per distinguere ETF da azioni
 }
 
 export interface NakedPutRiskDetail {
@@ -73,7 +74,9 @@ export interface CommodityRiskDetail {
 
 export interface RiskAnalysis {
   // Totali EUR
-  totalStockRisk: number;
+  totalStockRisk: number;       // Rischio totale Azioni + ETF (per retrocompatibilità)
+  totalETFRisk: number;         // Rischio solo ETF
+  totalPureStockRisk: number;   // Rischio solo Azioni (no ETF)
   totalCommodityRisk: number;
   totalNakedPutRisk: number;
   totalLeapCallRisk: number;
@@ -185,7 +188,8 @@ export function calculateStockRisk(
       currency,
       exchangeRate,
       hasProtection: protectionContracts > 0,
-      isin: stock.isin || undefined
+      isin: stock.isin || undefined,
+      isETF: stock.asset_type === 'etf'
     });
   }
   
@@ -572,6 +576,8 @@ export function analyzePortfolioRisk(
   
   // Sum up totals in EUR
   const totalStockRisk = stockDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+  const totalETFRisk = stockDetails.filter(s => s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
+  const totalPureStockRisk = stockDetails.filter(s => !s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
   const totalCommodityRisk = commodityDetails.reduce((sum, c) => sum + c.riskEUR, 0);
   const totalNakedPutRisk = nakedPutDetails.reduce((sum, n) => sum + n.riskEUR, 0);
   const totalLeapCallRisk = leapCallDetails.reduce((sum, l) => sum + l.riskEUR, 0);
@@ -580,6 +586,8 @@ export function analyzePortfolioRisk(
   
   return {
     totalStockRisk,
+    totalETFRisk,
+    totalPureStockRisk,
     totalCommodityRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
