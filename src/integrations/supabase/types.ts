@@ -445,6 +445,33 @@ export type Database = {
         }
         Relationships: []
       }
+      underlying_mappings: {
+        Row: {
+          created_at: string | null
+          id: string
+          source: string | null
+          ticker: string
+          underlying: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          source?: string | null
+          ticker: string
+          underlying: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          source?: string | null
+          ticker?: string
+          underlying?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
