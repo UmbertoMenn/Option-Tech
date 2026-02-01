@@ -6,6 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Sector keywords to filter out from country allocations
+const SECTOR_KEYWORDS = [
+  'Financials', 'Financial', 'Technology', 'Healthcare', 
+  'Consumer', 'Energy', 'Industrials', 'Materials', 
+  'Utilities', 'Real Estate', 'Communication', 
+  'IT', 'Discretionary', 'Staples', 'Services', 
+  'Sector', 'Industry', 'Basic', 'Telecom',
+  'Information', 'Defensive', 'Cyclical', 'Sensitive',
+  'Government', 'Corporate', 'Bond', 'Fixed Income',
+  'Equity', 'Stock', 'Cash', 'Money Market'
+];
+
 // Map countries to their primary currencies
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   'United States': 'USD',
@@ -107,6 +119,34 @@ function getCurrencyFromCountry(country: string): string {
   return 'OTHER';
 }
 
+// Check if a name is a valid country (not a sector)
+function isValidCountry(name: string): boolean {
+  const upperName = name.toUpperCase();
+  
+  // If it contains a sector keyword, it's not a country
+  for (const sector of SECTOR_KEYWORDS) {
+    if (upperName.includes(sector.toUpperCase())) {
+      console.log(`Filtering out sector: ${name}`);
+      return false;
+    }
+  }
+  
+  // Check if it's a known country
+  const currency = getCurrencyFromCountry(name);
+  if (currency !== 'OTHER') {
+    return true;
+  }
+  
+  // For unknown entries, be conservative - only accept if it looks like a country name
+  // (no numbers, reasonable length, no special characters)
+  const looksLikeCountry = name.length >= 3 && 
+                           name.length <= 30 && 
+                           !/\d/.test(name) &&
+                           /^[A-Za-z\s\-']+$/.test(name);
+  
+  return looksLikeCountry;
+}
+
 function parsePercentage(text: string): number {
   // Extract percentage from text like "65.23%" or "65,23%"
   const match = text.replace(',', '.').match(/(\d+\.?\d*)/);
@@ -167,7 +207,8 @@ async function scrapeJustETF(isin: string): Promise<{
     const country = match[1].trim();
     const percentage = parsePercentage(match[2]);
     
-    if (percentage > 0 && country.length > 2 && country.length < 50) {
+    // IMPORTANT: Only add if it's a valid country (not a sector)
+    if (percentage > 0 && country.length > 2 && country.length < 50 && isValidCountry(country)) {
       const normalizedCountry = country.replace(/\s+/g, ' ');
       if (!countryAllocations[normalizedCountry]) {
         countryAllocations[normalizedCountry] = percentage;
@@ -181,7 +222,8 @@ async function scrapeJustETF(isin: string): Promise<{
     try {
       const chartData = JSON.parse(jsonDataMatch[1]);
       for (const item of chartData) {
-        if (item.name && item.y) {
+        // Only add if it's a valid country (not a sector)
+        if (item.name && item.y && isValidCountry(item.name)) {
           countryAllocations[item.name] = item.y;
         }
       }
@@ -189,6 +231,23 @@ async function scrapeJustETF(isin: string): Promise<{
       console.log('Could not parse chart data');
     }
   }
+  
+  // Validate total - if it exceeds 110%, we may have mixed sectors
+  const totalAllocations = Object.values(countryAllocations).reduce((a, b) => a + b, 0);
+  if (totalAllocations > 110) {
+    console.warn(`Total allocations ${totalAllocations}% exceeds 110%, filtering non-country entries...`);
+    // Re-filter with stricter validation - only keep known countries
+    for (const [key, value] of Object.entries(countryAllocations)) {
+      const currency = getCurrencyFromCountry(key);
+      if (currency === 'OTHER' && !COUNTRY_TO_CURRENCY[key]) {
+        console.log(`Removing suspicious entry: ${key} (${value}%)`);
+        delete countryAllocations[key];
+      }
+    }
+  }
+  
+  // Log final country allocations for debugging
+  console.log(`Final country allocations for ${isin}:`, countryAllocations);
   
   // Convert country allocations to currency allocations
   for (const [country, percentage] of Object.entries(countryAllocations)) {
