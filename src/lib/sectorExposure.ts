@@ -1,5 +1,6 @@
 import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { RiskAnalysis } from './riskCalculator';
+import { SectorMapping } from '@/hooks/useSectorMappings';
 
 // Sector colors for charts
 export const SECTOR_COLORS: Record<string, string> = {
@@ -181,6 +182,7 @@ function getStockSector(name: string): string {
 
 export interface SectorExposureOptions {
   includeDerivatives?: boolean;
+  sectorMappings?: Record<string, SectorMapping>;
 }
 
 export function calculateSectorExposure(
@@ -188,7 +190,7 @@ export function calculateSectorExposure(
   etfAllocations: Record<string, ETFAllocation>,
   options: SectorExposureOptions = {}
 ): SectorExposure[] {
-  const { includeDerivatives = true } = options;
+  const { includeDerivatives = true, sectorMappings = {} } = options;
   const bySector = new Map<string, SectorExposure>();
   
   const getOrCreateSector = (sector: string): SectorExposure => {
@@ -254,8 +256,17 @@ export function calculateSectorExposure(
         isFromETFDecomposition: false,
       });
     } else {
-      // Single stock - assign sector based on name/ticker
-      const sector = getStockSector(stock.underlying);
+      // Single stock - assign sector based on dynamic mapping first, then fallback
+      let sector: string;
+      
+      // 1. Try dynamic mapping from database (by ISIN)
+      if (stock.isin && sectorMappings[stock.isin]?.sector) {
+        sector = normalizeSectorName(sectorMappings[stock.isin].sector);
+      } else {
+        // 2. Fallback to static ticker mapping
+        sector = getStockSector(stock.underlying);
+      }
+      
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += stock.riskEUR;
       sectorExposure.instruments.push({

@@ -243,24 +243,30 @@ export type Database = {
         Row: {
           created_at: string
           exchange: string | null
+          industry: string | null
           isin: string
           last_verified_at: string
+          sector: string | null
           source: string
           ticker: string
         }
         Insert: {
           created_at?: string
           exchange?: string | null
+          industry?: string | null
           isin: string
           last_verified_at?: string
+          sector?: string | null
           source: string
           ticker: string
         }
         Update: {
           created_at?: string
           exchange?: string | null
+          industry?: string | null
           isin?: string
           last_verified_at?: string
+          sector?: string | null
           source?: string
           ticker?: string
         }

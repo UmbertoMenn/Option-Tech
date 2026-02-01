@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useETFAllocations } from '@/hooks/useETFAllocations';
+import { useSectorMappings } from '@/hooks/useSectorMappings';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
@@ -31,6 +32,7 @@ export function RiskAnalyzer() {
   const { isLoading, ...analysis } = riskAnalysis;
   
   const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
+  const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading } = useSectorMappings();
   
   // Calculate base currency exposure from existing data
   const baseCurrencyExposure = useMemo(() => 
@@ -66,6 +68,30 @@ export function RiskAnalyzer() {
     }
   }, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
   
+  // Extract stock ISINs (non-ETF) for sector mapping
+  const stockIsins = useMemo(() => {
+    const isins: string[] = [];
+    const seen = new Set<string>();
+    
+    for (const stock of analysis.stockDetails) {
+      if (stock.isin && !seen.has(stock.isin)) {
+        seen.add(stock.isin);
+        // Only include non-ETF stocks
+        if (!ETF_PATTERN.test(stock.underlying)) {
+          isins.push(stock.isin);
+        }
+      }
+    }
+    return isins;
+  }, [analysis.stockDetails]);
+  
+  // Fetch sector mappings when switching to sector view
+  useEffect(() => {
+    if (stockIsins.length > 0 && viewMode === 'sector') {
+      fetchSectorMappings(stockIsins);
+    }
+  }, [stockIsins, viewMode, fetchSectorMappings]);
+  
   // Apply ETF decomposition to currency exposure
   const currencyExposure = useMemo(() => {
     if (Object.keys(allocations).length === 0) {
@@ -74,10 +100,10 @@ export function RiskAnalyzer() {
     return applyETFDecomposition(baseCurrencyExposure, allocations);
   }, [baseCurrencyExposure, allocations]);
   
-  // Calculate sector exposure
+  // Calculate sector exposure with dynamic mappings
   const sectorExposure = useMemo(() => {
-    return calculateSectorExposure(analysis, allocations, { includeDerivatives });
-  }, [analysis, allocations, includeDerivatives]);
+    return calculateSectorExposure(analysis, allocations, { includeDerivatives, sectorMappings });
+  }, [analysis, allocations, includeDerivatives, sectorMappings]);
   
   // Calculate top holdings
   const topHoldings = useMemo(() => {

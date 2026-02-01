@@ -149,8 +149,14 @@ async function fetchYahooPrice(ticker: string): Promise<PriceResult | null> {
   }
 }
 
-// Yahoo Finance Search API - for ISIN resolution
-async function searchYahooByISIN(isin: string): Promise<{ ticker: string; name: string; exchange: string } | null> {
+// Yahoo Finance Search API - for ISIN resolution (now also returns sector/industry)
+async function searchYahooByISIN(isin: string): Promise<{ 
+  ticker: string; 
+  name: string; 
+  exchange: string;
+  sector?: string;
+  industry?: string;
+} | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(isin)}&quotesCount=5&newsCount=0`;
     
@@ -198,6 +204,8 @@ async function searchYahooByISIN(isin: string): Promise<{ ticker: string; name: 
       ticker: bestMatch.symbol,
       name: bestMatch.shortname || bestMatch.longname || '',
       exchange: bestMatch.exchange || '',
+      sector: bestMatch.sector || null,
+      industry: bestMatch.industry || null,
     };
   } catch (error) {
     console.error(`Error searching ISIN ${isin}:`, error);
@@ -254,18 +262,28 @@ async function resolveISINToTicker(
     return null;
   }
   
-  // 4. Save to cache
+  // 4. Save to cache (including sector and industry)
+  const upsertData: any = {
+    isin,
+    ticker: searchResult.ticker,
+    exchange: searchResult.exchange,
+    source: 'yahoo_search',
+    last_verified_at: new Date().toISOString(),
+  };
+  
+  // Add sector and industry if available
+  if (searchResult.sector) {
+    upsertData.sector = searchResult.sector;
+  }
+  if (searchResult.industry) {
+    upsertData.industry = searchResult.industry;
+  }
+  
   await supabase
     .from('isin_mappings')
-    .upsert({
-      isin,
-      ticker: searchResult.ticker,
-      exchange: searchResult.exchange,
-      source: 'yahoo_search',
-      last_verified_at: new Date().toISOString(),
-    }, { onConflict: 'isin' });
+    .upsert(upsertData, { onConflict: 'isin' });
   
-  console.log(`Saved mapping: ${isin} -> ${searchResult.ticker}`);
+  console.log(`Saved mapping: ${isin} -> ${searchResult.ticker} (sector: ${searchResult.sector || 'N/A'})`);
   return searchResult.ticker;
 }
 
