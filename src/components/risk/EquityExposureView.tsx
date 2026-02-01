@@ -581,52 +581,53 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
               </div>
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
-              <div className="space-y-3">
+              <div className="space-y-1">
                 {strategyDetails.map((strat, index) => (
-                  <div key={index} className="p-4 rounded-lg bg-muted/50 flex justify-between items-center">
-                    <div>
-                      <div className="font-semibold flex items-center gap-2">
-                        {strat.strategyName}
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <AlertTriangle className="w-4 h-4 text-muted-foreground" />
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-xs">
-                              <p className="font-medium">Calcolo Max Loss:</p>
-                              <p className="text-sm">{strat.calculation}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        {strat.hasUnlimitedRisk && (
+                  <div key={index} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <BarChart3 className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{strat.underlying}</span>
+                          <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-purple-500/10 text-purple-500 border-purple-500/30">
+                            {strat.strategyName}
+                          </Badge>
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger>
-                                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground" />
                               </TooltipTrigger>
                               <TooltipContent className="max-w-xs">
-                                <p className="font-medium text-amber-500">Rischio Illimitato</p>
-                                <p className="text-sm">
-                                  Il Max Loss mostrato considera solo il lato PUT (rischio definito). 
-                                  Il lato CALL ha rischio teoricamente illimitato.
-                                </p>
+                                <p className="font-medium">Calcolo Max Loss:</p>
+                                <p className="text-sm">{strat.calculation}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                        )}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {strat.underlying}
+                          {strat.hasUnlimitedRisk && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="font-medium text-amber-500">Rischio Illimitato</p>
+                                  <p className="text-sm">
+                                    Il Max Loss mostrato considera solo il lato PUT (rischio definito). 
+                                    Il lato CALL ha rischio teoricamente illimitato.
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          ML: {strat.currency} {formatNumber(strat.maxLoss, 0)}
+                        </span>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-semibold text-purple-500">
-                        {formatEUR(strat.maxLossEUR)}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Max Loss: {strat.currency} {formatNumber(strat.maxLoss, 0)}
-                      </div>
-                    </div>
+                    <span className="font-medium text-sm text-purple-500 flex-shrink-0">
+                      {formatEUR(strat.maxLossEUR)}
+                    </span>
                   </div>
                 ))}
               </div>
