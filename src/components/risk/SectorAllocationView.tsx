@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -8,14 +9,14 @@ import {
   AccordionItem, 
   AccordionTrigger 
 } from '@/components/ui/accordion';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { TrendingUp, Building2, Loader2, ChevronDown, BarChart3 } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { Building2, TrendingUp, BarChart3, AlertTriangle } from 'lucide-react';
 import { 
   SectorExposure, 
   TopHolding, 
-  getSectorColor,
-  SECTOR_COLORS 
+  getSectorColor 
 } from '@/lib/sectorExposure';
+import { formatEUR } from '@/lib/formatters';
 
 interface SectorAllocationViewProps {
   sectorExposure: SectorExposure[];
@@ -28,21 +29,6 @@ interface SectorAllocationViewProps {
   onIncludeDerivativesChange: (value: boolean) => void;
 }
 
-function formatEUR(value: number): string {
-  return new Intl.NumberFormat('it-IT', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatNumber(value: number, decimals: number = 0): string {
-  return new Intl.NumberFormat('it-IT', {
-    maximumFractionDigits: decimals,
-    minimumFractionDigits: decimals,
-  }).format(value);
-}
-
 export function SectorAllocationView({
   sectorExposure,
   topHoldings,
@@ -53,137 +39,144 @@ export function SectorAllocationView({
   includeDerivatives,
   onIncludeDerivativesChange,
 }: SectorAllocationViewProps) {
-  // Prepare chart data
-  const chartData = sectorExposure
-    .filter(s => s.percentage >= 1)
-    .map(s => ({
-      name: s.sector,
-      value: s.totalRisk,
-      percentage: s.percentage,
-      color: getSectorColor(s.sector),
-    }));
+  const safeSectorExposure = sectorExposure.filter((s) => {
+    return (
+      typeof s.sector === 'string' &&
+      Number.isFinite(s.totalRisk) &&
+      s.totalRisk > 0 &&
+      Number.isFinite(s.percentage)
+    );
+  });
+
+  const hasData = safeSectorExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
   
-  // Group small sectors into "Other"
-  const smallSectors = sectorExposure.filter(s => s.percentage < 1);
-  if (smallSectors.length > 0) {
-    const otherTotal = smallSectors.reduce((sum, s) => sum + s.totalRisk, 0);
-    const otherPercentage = smallSectors.reduce((sum, s) => sum + s.percentage, 0);
-    if (otherTotal > 0) {
-      chartData.push({
-        name: 'Other',
-        value: otherTotal,
-        percentage: otherPercentage,
-        color: SECTOR_COLORS['Other'],
-      });
-    }
-  }
+  // Calculate total for sectors other than the top one
+  const otherSectorsTotal = useMemo(() => {
+    if (safeSectorExposure.length <= 1) return 0;
+    return safeSectorExposure.slice(1).reduce((sum, s) => sum + s.totalRisk, 0);
+  }, [safeSectorExposure]);
+  
+  // Prepare chart data
+  const chartData = safeSectorExposure.map(s => ({
+    name: s.sector,
+    value: s.totalRisk,
+    percentage: s.percentage,
+    color: getSectorColor(s.sector),
+  }));
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Total and Controls */}
-        <Card className="border-border bg-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="w-5 h-5 text-primary" />
-              Esposizione Settoriale Totale
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-3xl font-bold text-primary">
-              {formatEUR(grandTotal)}
+      {/* Total Exposure Card with Large Donut Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Total Card */}
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded bg-primary/20">
+                  <Building2 className="w-4 h-4 text-primary" />
+                </div>
+                <span className="text-sm font-medium text-primary">Esposizione Settoriale Totale</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="include-derivatives-sector"
+                  checked={includeDerivatives}
+                  onCheckedChange={onIncludeDerivativesChange}
+                />
+                <Label htmlFor="include-derivatives-sector" className="text-sm text-muted-foreground cursor-pointer">
+                  Includi Derivati
+                </Label>
+              </div>
             </div>
-            
-            {/* Toggle for derivatives */}
-            <div className="flex items-center justify-between">
-              <Label htmlFor="include-derivatives-sector" className="text-sm">
-                Includi Derivati
-              </Label>
-              <Switch
-                id="include-derivatives-sector"
-                checked={includeDerivatives}
-                onCheckedChange={onIncludeDerivativesChange}
-              />
-            </div>
-            
-            {/* ETF Loading Status */}
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              {isLoadingETFData ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Caricamento dati ETF... ({loadedETFCount}/{etfCount})</span>
-                </>
-              ) : etfCount > 0 ? (
-                <>
-                  <span className="text-green-500">✓</span>
-                  <span>ETF analizzati: {loadedETFCount}/{etfCount}</span>
-                </>
-              ) : (
-                <span>Nessun ETF nel portafoglio</span>
+            <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+            {hasData && safeSectorExposure.length > 0 && (
+              <div className="text-sm text-muted-foreground mt-1">
+                Settore principale: <span className="font-medium text-foreground">{safeSectorExposure[0].sector} ({safeSectorExposure[0].percentage.toFixed(1)}%)</span>
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground mt-1">
+              {safeSectorExposure.length} settori identificati
+              {isLoadingETFData && (
+                <span className="ml-2 text-primary animate-pulse">
+                  Caricamento dati ETF ({loadedETFCount}/{etfCount})...
+                </span>
+              )}
+              {!isLoadingETFData && etfCount > 0 && (
+                <span className="ml-2 text-green-500">
+                  ✓ {loadedETFCount} ETF analizzati
+                </span>
               )}
             </div>
-            
-            {/* Sector count */}
-            <div className="text-sm text-muted-foreground">
-              {sectorExposure.length} settori identificati
-            </div>
+            {!includeDerivatives && (
+              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  Derivati esclusi dall'analisi (Naked PUT, Leap Call, Strategie)
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
-        
-        {/* Donut Chart */}
+
+        {/* Large Thin Donut Chart */}
         <Card className="border-border bg-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Allocazione Settoriale</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    dataKey="value"
-                    nameKey="name"
-                    paddingAngle={2}
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number, name: string) => [
-                      formatEUR(value),
-                      name,
-                    ]}
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            
-            {/* Legend */}
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              {chartData.slice(0, 6).map((sector) => (
-                <div key={sector.name} className="flex items-center gap-2 text-xs">
-                  <div
-                    className="w-3 h-3 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: sector.color }}
-                  />
-                  <span className="truncate">{sector.name}</span>
-                  <span className="text-muted-foreground ml-auto">
-                    {sector.percentage.toFixed(1)}%
-                  </span>
+          <CardContent className="pt-4 pb-4">
+            {hasData ? (
+              <div className="flex items-center gap-6">
+                <div className="w-40 h-40 flex-shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={70}
+                        dataKey="value"
+                        nameKey="name"
+                        paddingAngle={2}
+                        strokeWidth={0}
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
+                <div className="flex-1 space-y-1.5 max-h-40 overflow-y-auto">
+                  {chartData.slice(0, 8).map((sector) => (
+                    <div key={sector.name} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: sector.color }}
+                        />
+                        <span className="truncate max-w-[120px]">{sector.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground text-xs">
+                          {sector.percentage.toFixed(1)}%
+                        </span>
+                        <span className="font-medium min-w-[70px] text-right">
+                          {formatEUR(sector.value)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {chartData.length > 8 && (
+                    <div className="text-xs text-muted-foreground text-center pt-1">
+                      +{chartData.length - 8} altri settori
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">
+                Nessun dato settoriale disponibile
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -198,38 +191,34 @@ export function SectorAllocationView({
         </CardHeader>
         <CardContent>
           <Accordion type="single" collapsible className="w-full">
-            {sectorExposure.map((sector, index) => (
-              <AccordionItem key={sector.sector} value={sector.sector}>
-                <AccordionTrigger className="hover:no-underline py-3">
-                  <div className="flex items-center justify-between w-full pr-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: getSectorColor(sector.sector) }}
-                      />
-                      <span className="font-medium">{sector.sector}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {sector.instruments.length} strumenti
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className="text-muted-foreground">
-                        {sector.percentage.toFixed(1)}%
-                      </span>
-                      <span className="font-medium" style={{ color: getSectorColor(sector.sector) }}>
-                        {formatEUR(sector.totalRisk)}
-                      </span>
-                    </div>
+            {safeSectorExposure.map((sector) => (
+              <AccordionItem key={sector.sector} value={sector.sector} className="border-0">
+                <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-background/50 rounded-lg">
+                  <div className="flex items-center gap-2 flex-1">
+                    <div
+                      className="w-3 h-3 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: getSectorColor(sector.sector) }}
+                    />
+                    <span className="text-sm font-medium">{sector.sector}</span>
+                    <Badge variant="secondary" className="ml-auto mr-2 text-xs">
+                      {sector.instruments.length}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground mr-2">
+                      {sector.percentage.toFixed(1)}%
+                    </span>
+                    <span className="font-medium text-sm" style={{ color: getSectorColor(sector.sector) }}>
+                      {formatEUR(sector.totalRisk)}
+                    </span>
                   </div>
                 </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-1 pl-6">
-                    {sector.instruments.slice(0, 10).map((instrument, idx) => (
+                <AccordionContent className="pt-1 pb-2 px-2">
+                  <div className="space-y-1 pl-4">
+                    {sector.instruments.slice(0, 15).map((instrument, idx) => (
                       <div
                         key={idx}
                         className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           {instrument.isETF ? (
                             <BarChart3 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                           ) : (
@@ -237,8 +226,13 @@ export function SectorAllocationView({
                           )}
                           <span className="text-sm truncate">{instrument.name}</span>
                           {instrument.isFromETFDecomposition && instrument.percentage && (
-                            <Badge variant="outline" className="text-xs px-1.5 py-0">
+                            <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
                               {instrument.percentage.toFixed(1)}%
+                            </Badge>
+                          )}
+                          {instrument.isETF && !instrument.isFromETFDecomposition && (
+                            <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
+                              ETF
                             </Badge>
                           )}
                         </div>
@@ -247,9 +241,9 @@ export function SectorAllocationView({
                         </span>
                       </div>
                     ))}
-                    {sector.instruments.length > 10 && (
+                    {sector.instruments.length > 15 && (
                       <div className="text-xs text-muted-foreground text-center py-2">
-                        + altri {sector.instruments.length - 10} strumenti
+                        + altri {sector.instruments.length - 15} strumenti
                       </div>
                     )}
                   </div>
@@ -272,10 +266,7 @@ export function SectorAllocationView({
           {topHoldings.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
               {isLoadingETFData ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Caricamento dati holdings ETF...</span>
-                </div>
+                <span className="animate-pulse">Caricamento dati holdings ETF...</span>
               ) : (
                 <span>Nessun dato disponibile sui top holdings degli ETF</span>
               )}
@@ -297,12 +288,13 @@ export function SectorAllocationView({
                         {holding.sources.slice(0, 3).map((source, idx) => (
                           <span key={idx}>
                             {source.isDirectHolding ? (
-                              <Badge variant="outline" className="text-xs px-1 py-0">
+                              <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-green-500/10 text-green-500 border-green-500/30">
                                 Diretto
                               </Badge>
                             ) : (
                               <span className="text-muted-foreground">
-                                via {source.source} ({source.percentage?.toFixed(1)}%)
+                                via {source.source.length > 20 ? source.source.substring(0, 20) + '...' : source.source}
+                                {source.percentage ? ` (${source.percentage.toFixed(1)}%)` : ''}
                               </span>
                             )}
                             {idx < Math.min(2, holding.sources.length - 1) && ', '}
