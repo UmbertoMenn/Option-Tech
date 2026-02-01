@@ -8,7 +8,11 @@ import {
   DoubleDiagonalPosition,
   GroupedOtherStrategy
 } from './derivativeStrategies';
-
+import { 
+  calculateUniversalMaxLoss, 
+  positionsToLegs,
+  OptionLeg 
+} from './universalMaxLoss';
 // ============= INTERFACES =============
 
 export interface StockRiskDetail {
@@ -250,243 +254,74 @@ export function calculateLeapCallRisk(
 }
 
 /**
- * Calculate the initial premium (GP) from avg_cost values.
- * Sold options (qty < 0) contribute positive premium (we receive money).
- * Bought options (qty > 0) contribute negative premium (we pay money).
- * Net GP = premium received - premium paid
+ * Helper: Convert Position objects to OptionLeg format.
  */
-function calculateInitialPremium(positions: Position[]): number {
-  let netPremium = 0;
-  for (const pos of positions) {
-    const avgCost = pos.avg_cost || 0;
-    const qty = pos.quantity || 0;
-    // For sold options (qty < 0): we received premium = avgCost * |qty| * 100
-    // For bought options (qty > 0): we paid premium = avgCost * qty * 100
-    // Net = received - paid = -qty * avgCost * 100 (since qty is negative for sold)
-    netPremium += -qty * avgCost * 100;
-  }
-  return netPremium;
+function positionToLeg(p: Position): OptionLeg {
+  return {
+    type: (p.option_type || 'put') as 'call' | 'put',
+    strike: p.strike_price || 0,
+    quantity: p.quantity || 0,
+    avgCost: p.avg_cost || 0
+  };
 }
 
 /**
- * Calculate Iron Condor max loss.
- * Formula: max(PUT spread width, CALL spread width) × 100 × contratti - GP
- * GP is calculated from initial premiums (avg_cost), not current market values.
+ * Calculate Iron Condor max loss using universal formula.
+ * This replaces the old name-based calculation with a payoff-based approach.
  */
 function calculateIronCondorMaxLoss(ic: IronCondorPosition): { maxLoss: number; calculation: string } {
-  const putSpreadWidth = Math.abs((ic.soldPut.strike_price || 0) - (ic.boughtPut.strike_price || 0));
-  const callSpreadWidth = Math.abs((ic.boughtCall.strike_price || 0) - (ic.soldCall.strike_price || 0));
-  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
+  const legs: OptionLeg[] = [
+    positionToLeg(ic.soldPut),
+    positionToLeg(ic.boughtPut),
+    positionToLeg(ic.soldCall),
+    positionToLeg(ic.boughtCall)
+  ];
   
-  // GP = Gain Potenziale (premi incassati - premi pagati) from INITIAL premiums
-  const gp = calculateInitialPremium([ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall]);
-  
-  const grossMaxLoss = maxSpreadWidth * 100 * ic.contracts;
-  const maxLoss = grossMaxLoss - gp;
+  const result = calculateUniversalMaxLoss(legs);
   
   return {
-    maxLoss: Math.max(0, maxLoss),
-    calculation: `Max(${putSpreadWidth}, ${callSpreadWidth}) × 100 × ${ic.contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+    maxLoss: result.maxLoss,
+    calculation: result.calculation
   };
 }
 
 /**
- * Calculate Double Diagonal max loss.
- * Similar to Iron Condor.
+ * Calculate Double Diagonal max loss using universal formula.
  */
 function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: number; calculation: string } {
-  const putSpreadWidth = Math.abs((dd.soldPut.strike_price || 0) - (dd.boughtPut.strike_price || 0));
-  const callSpreadWidth = Math.abs((dd.boughtCall.strike_price || 0) - (dd.soldCall.strike_price || 0));
-  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
+  const legs: OptionLeg[] = [
+    positionToLeg(dd.soldPut),
+    positionToLeg(dd.boughtPut),
+    positionToLeg(dd.soldCall),
+    positionToLeg(dd.boughtCall)
+  ];
   
-  const gp = calculateInitialPremium([dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall]);
-  const grossMaxLoss = maxSpreadWidth * 100 * dd.contracts;
-  const maxLoss = grossMaxLoss - gp;
+  const result = calculateUniversalMaxLoss(legs);
   
   return {
-    maxLoss: Math.max(0, maxLoss),
-    calculation: `Max(${putSpreadWidth}, ${callSpreadWidth}) × 100 × ${dd.contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
+    maxLoss: result.maxLoss,
+    calculation: result.calculation
   };
 }
 
 /**
- * Calculate strategy risk for grouped other strategies.
+ * Calculate strategy risk for grouped other strategies using universal formula.
  */
 function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss: number; calculation: string } {
-  const strategyName = group.strategyName || 'Unknown';
-  const options = group.options;
+  const legs = positionsToLegs(group.options.map(o => o.option));
   
-  // Sort options by strike
-  const sortedOptions = [...options].sort((a, b) => 
-    (a.option.strike_price || 0) - (b.option.strike_price || 0)
-  );
-  
-  const puts = sortedOptions.filter(o => o.option.option_type === 'put');
-  const calls = sortedOptions.filter(o => o.option.option_type === 'call');
-  
-  // Calculate initial premium (GP) from avg_cost values
-  const gp = calculateInitialPremium(options.map(o => o.option));
-  
-  // SHORT STRANGLE: Risk = Strike PUT venduta × 100 × contratti
-  if (strategyName === 'Short Strangle' || strategyName === 'Short Straddle') {
-    const soldPuts = puts.filter(p => p.option.quantity < 0);
-    if (soldPuts.length > 0) {
-      const soldPut = soldPuts[0];
-      const strike = soldPut.option.strike_price || 0;
-      const contracts = Math.abs(soldPut.option.quantity);
-      const maxLoss = strike * 100 * contracts;
-      return {
-        maxLoss,
-        calculation: `Strike PUT ${strike} × 100 × ${contracts} = ${maxLoss.toFixed(0)} (rischio infinito)`
-      };
-    }
+  if (legs.length === 0) {
+    return { maxLoss: 0, calculation: 'Nessuna gamba' };
   }
   
-  // LONG STRANGLE / LONG STRADDLE: Risk = premium paid
-  if (strategyName === 'Long Strangle' || strategyName === 'Long Straddle') {
-    // We paid for these options, risk is the premium paid
-    const premiumPaid = options.reduce((sum, o) => {
-      const avgCost = o.option.avg_cost || 0;
-      const qty = Math.abs(o.option.quantity);
-      return sum + avgCost * qty * 100;
-    }, 0);
-    return {
-      maxLoss: premiumPaid,
-      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
-    };
-  }
+  const result = calculateUniversalMaxLoss(legs);
   
-  // VERTICAL SPREADS (Bull Put, Bear Put, Bull Call, Bear Call)
-  if (strategyName?.includes('Spread') && !strategyName.includes('Diagonal') && !strategyName.includes('Calendar')) {
-    const relevantOptions = strategyName.includes('Put') ? puts : calls;
-    if (relevantOptions.length >= 2) {
-      const strikes = relevantOptions.map(o => o.option.strike_price || 0).sort((a, b) => a - b);
-      const spreadWidth = strikes[strikes.length - 1] - strikes[0];
-      const contracts = Math.abs(relevantOptions[0].option.quantity);
-      const grossMaxLoss = spreadWidth * 100 * contracts;
-      const maxLoss = grossMaxLoss - gp;
-      return {
-        maxLoss: Math.max(0, maxLoss),
-        calculation: `(${strikes[strikes.length - 1]} - ${strikes[0]}) × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${Math.max(0, maxLoss).toFixed(0)}`
-      };
-    }
-  }
+  // Add strategy name to calculation if available
+  const strategyPrefix = group.strategyName ? `${group.strategyName}: ` : '';
   
-  // DIAGONAL/CALENDAR SPREADS: Risk = premium paid for long leg
-  if (strategyName?.includes('Diagonal') || strategyName?.includes('Calendar')) {
-    // Use net debit when present; otherwise (credit structures) avoid returning 0 by using
-    // a conservative PUT-based exposure (sold put strike, optionally reduced by bought put strike).
-    const netDebit = -gp; // If gp is negative, we paid net premium
-
-    if (netDebit > 0) {
-      return {
-        maxLoss: netDebit,
-        calculation: `Debito netto (premio pagato) = ${netDebit.toFixed(0)}`
-      };
-    }
-
-    // Credit / zero-debit: fallback to PUT short-side risk
-    const soldPuts = puts.filter(p => p.option.quantity < 0);
-    const boughtPuts = puts.filter(p => p.option.quantity > 0);
-
-    if (soldPuts.length > 0) {
-      const soldPut = soldPuts.sort((a, b) => (b.option.strike_price || 0) - (a.option.strike_price || 0))[0];
-      const soldStrike = soldPut.option.strike_price || 0;
-      const contracts = Math.abs(soldPut.option.quantity || 0);
-
-      const bestBoughtPut = boughtPuts
-        .sort((a, b) => (a.option.strike_price || 0) - (b.option.strike_price || 0))[0];
-      const boughtStrike = bestBoughtPut?.option.strike_price ?? null;
-
-      // If we have a bought put, approximate as a spread risk; otherwise treat as naked.
-      // For calendar (same strike), spreadWidth = 0 → fall back to naked strike risk.
-      const spreadWidth = boughtStrike !== null ? Math.max(0, soldStrike - boughtStrike) : 0;
-      const baseRisk = spreadWidth > 0 ? spreadWidth * 100 * contracts : soldStrike * 100 * contracts;
-      const maxLoss = Math.max(0, baseRisk - gp); // credit reduces max loss
-
-      return {
-        maxLoss,
-        calculation:
-          boughtStrike !== null
-            ? `MaxLoss ≈ (${soldStrike} - ${boughtStrike}) × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
-            : `MaxLoss ≈ ${soldStrike} × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${maxLoss.toFixed(0)}`
-      };
-    }
-
-    // If no sold PUT exists, fall back to premium-based estimate (rare for diagonal/calendar)
-    const boughtOptions = options.filter(o => o.option.quantity > 0);
-    const premiumPaid = boughtOptions.reduce((sum, o) => {
-      const avgCost = o.option.avg_cost || 0;
-      const qty = o.option.quantity;
-      return sum + avgCost * qty * 100;
-    }, 0);
-    return {
-      maxLoss: premiumPaid,
-      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
-    };
-  }
-  
-  // BROKEN WING BUTTERFLY / BUTTERFLY
-  if (strategyName?.includes('Butterfly')) {
-    // 3 strikes: bought low, sold middle (2x), bought high
-    const strikes = [...new Set(sortedOptions.map(o => o.option.strike_price || 0))].sort((a, b) => a - b);
-    if (strikes.length >= 2) {
-      const lowerWidth = strikes.length > 1 ? strikes[1] - strikes[0] : 0;
-      const upperWidth = strikes.length > 2 ? strikes[2] - strikes[1] : lowerWidth;
-      const maxWidth = Math.max(lowerWidth, upperWidth);
-      const contracts = Math.abs(sortedOptions[0]?.option.quantity || 1);
-      const grossMaxLoss = maxWidth * 100 * contracts;
-      const maxLoss = grossMaxLoss - gp;
-      return {
-        maxLoss: Math.max(0, maxLoss),
-        calculation: `Max width ${maxWidth} × 100 × ${contracts} - ${gp.toFixed(0)} GP = ${Math.max(0, maxLoss).toFixed(0)}`
-      };
-    }
-  }
-  
-  // DEFAULT: For strategies with sold PUTs, use strike as max loss
-  const soldOptions = options.filter(o => o.option.quantity < 0);
-  if (soldOptions.length > 0) {
-    const soldPuts = soldOptions.filter(o => o.option.option_type === 'put');
-    if (soldPuts.length > 0) {
-      const totalPutRisk = soldPuts.reduce((sum, p) => {
-        return sum + (p.option.strike_price || 0) * Math.abs(p.option.quantity) * 100;
-      }, 0);
-      return {
-        maxLoss: totalPutRisk,
-        calculation: `Somma strike PUT vendute × 100 × contratti = ${totalPutRisk.toFixed(0)}`
-      };
-    }
-    // For sold CALLs without underlying, risk is theoretically infinite
-    // Use a conservative estimate based on premium received
-    const soldCalls = soldOptions.filter(o => o.option.option_type === 'call');
-    if (soldCalls.length > 0) {
-      const premiumReceived = soldCalls.reduce((sum, c) => {
-        return sum + (c.option.avg_cost || 0) * Math.abs(c.option.quantity) * 100;
-      }, 0);
-      return {
-        maxLoss: premiumReceived * 10, // Conservative estimate: 10x premium
-        calculation: `CALL vendute senza copertura - rischio teorico illimitato (stima ${(premiumReceived * 10).toFixed(0)})`
-      };
-    }
-  }
-  
-  // Fallback: For bought options, risk is premium paid
-  const boughtOptions = options.filter(o => o.option.quantity > 0);
-  if (boughtOptions.length > 0) {
-    const premiumPaid = boughtOptions.reduce((sum, o) => {
-      return sum + (o.option.avg_cost || 0) * o.option.quantity * 100;
-    }, 0);
-    return {
-      maxLoss: premiumPaid,
-      calculation: `Premio pagato = ${premiumPaid.toFixed(0)}`
-    };
-  }
-  
-  // Final fallback
   return {
-    maxLoss: Math.abs(gp),
-    calculation: `Premio netto = ${Math.abs(gp).toFixed(0)}`
+    maxLoss: result.maxLoss,
+    calculation: `${strategyPrefix}${result.calculation}`
   };
 }
 
