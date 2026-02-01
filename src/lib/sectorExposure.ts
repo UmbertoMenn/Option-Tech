@@ -180,6 +180,40 @@ function getStockSector(name: string): string {
   return 'Other';
 }
 
+// NEW: Get sector with dynamic mapping support for derivatives
+function getStockSectorWithMapping(
+  name: string, 
+  sectorMappings: Record<string, SectorMapping>,
+  isin?: string
+): string {
+  // 1. Try by ISIN from dynamic mapping
+  if (isin && sectorMappings[isin]?.sector) {
+    return normalizeSectorName(sectorMappings[isin].sector);
+  }
+  
+  // 2. Try by name key (for derivatives)
+  const upperName = name.toUpperCase();
+  if (sectorMappings[`name:${upperName}`]?.sector) {
+    return normalizeSectorName(sectorMappings[`name:${upperName}`].sector);
+  }
+  
+  // 3. Try to find by ticker in sectorMappings
+  for (const [key, mapping] of Object.entries(sectorMappings)) {
+    if (key.startsWith('ticker:') && mapping.ticker && upperName.includes(mapping.ticker.toUpperCase())) {
+      return normalizeSectorName(mapping.sector);
+    }
+    // Also match ISIN entries by ticker
+    if (!key.startsWith('ticker:') && !key.startsWith('name:') && mapping.ticker) {
+      if (upperName.includes(mapping.ticker.toUpperCase()) && mapping.ticker.length >= 2) {
+        return normalizeSectorName(mapping.sector);
+      }
+    }
+  }
+  
+  // 4. Fallback to static mapping
+  return getStockSector(name);
+}
+
 export interface SectorExposureOptions {
   includeDerivatives?: boolean;
   sectorMappings?: Record<string, SectorMapping>;
@@ -278,11 +312,11 @@ export function calculateSectorExposure(
     }
   }
   
-  // Process derivatives if enabled
+  // Process derivatives if enabled - NOW USES DYNAMIC MAPPINGS
   if (includeDerivatives) {
-    // Naked PUTs - assign by underlying sector
+    // Naked PUTs - assign by underlying sector using dynamic mappings
     for (const np of analysis.nakedPutDetails) {
-      const sector = getStockSector(np.underlying);
+      const sector = getStockSectorWithMapping(np.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += np.riskEUR;
       sectorExposure.instruments.push({
@@ -293,9 +327,9 @@ export function calculateSectorExposure(
       });
     }
     
-    // Leap CALLs - assign by underlying sector
+    // Leap CALLs - assign by underlying sector using dynamic mappings
     for (const lc of analysis.leapCallDetails) {
-      const sector = getStockSector(lc.underlying);
+      const sector = getStockSectorWithMapping(lc.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += lc.riskEUR;
       sectorExposure.instruments.push({
@@ -306,9 +340,9 @@ export function calculateSectorExposure(
       });
     }
     
-    // Strategies - assign by underlying sector
+    // Strategies - assign by underlying sector using dynamic mappings
     for (const strat of analysis.strategyDetails) {
-      const sector = getStockSector(strat.underlying);
+      const sector = getStockSectorWithMapping(strat.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += strat.maxLossEUR;
       sectorExposure.instruments.push({

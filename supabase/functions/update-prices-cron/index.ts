@@ -717,10 +717,13 @@ serve(async (req) => {
     
     const isins = body.isins || [];
     const descriptions = (body as any).descriptions || {};
+    const names = (body as any).names || []; // NEW: derivative underlying names
     const results: Array<{ isin: string; ticker?: string; sector?: string | null; source: string; error?: string }> = [];
+    const nameResults: Array<{ name: string; ticker?: string; sector?: string | null; industry?: string | null; source: string }> = [];
     
-    console.log(`Resolving sectors for ${isins.length} ISINs`);
+    console.log(`Resolving sectors for ${isins.length} ISINs and ${names.length} names`);
     
+    // =================== PROCESS ISINs ===================
     for (const isin of isins) {
       // 1. Check if mapping already exists with sector
       const { data: existing } = await supabase
@@ -759,6 +762,12 @@ serve(async (req) => {
       console.log(`Fetching sector for ${ticker} (${description})...`);
       const sectorInfo = await fetchYahooSectorInfo(ticker, description);
       
+      // Log AI response for debugging
+      console.log(`Sector result for ${ticker}:`, { 
+        sector: sectorInfo.sector || 'null', 
+        industry: sectorInfo.industry || 'null' 
+      });
+      
       // 5. Save to database (UPSERT)
       const upsertData: any = {
         isin,
@@ -795,19 +804,90 @@ serve(async (req) => {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     
-    const duration = Date.now() - startTime;
-    const resolved = results.filter(r => r.sector).length;
+    // =================== PROCESS DERIVATIVE NAMES ===================
+    // These are underlying names without ISINs (e.g., "IREN LTD", "MARA HOLDINGS")
+    for (const name of names) {
+      console.log(`Processing derivative underlying: ${name}`);
+      
+      // 1. Try to extract/infer ticker from name
+      const upperName = name.toUpperCase();
+      
+      // Common patterns to extract ticker
+      const tickerPatterns = [
+        /^([A-Z]{1,5})(?:\s|$)/, // First word if uppercase
+        /\b([A-Z]{2,5})\s+(?:INC|CORP|LTD|HOLDINGS?|CO|LLC|PLC|AG|SE)\b/i, // Before company suffix
+      ];
+      
+      let inferredTicker: string | null = null;
+      for (const pattern of tickerPatterns) {
+        const match = upperName.match(pattern);
+        if (match && match[1]) {
+          inferredTicker = match[1];
+          break;
+        }
+      }
+      
+      // Special case mappings for known derivatives
+      const specialMappings: Record<string, string> = {
+        'IREN LTD': 'IREN',
+        'MARA HOLDINGS': 'MARA', 
+        'MARATHON DIGITAL': 'MARA',
+        'RIOT PLATFORMS': 'RIOT',
+        'RIOT BLOCKCHAIN': 'RIOT',
+        'COINBASE': 'COIN',
+        'MICROSTRATEGY': 'MSTR',
+        'ALPHABET': 'GOOGL',
+        'NETEASE': 'NTES',
+        'PALANTIR': 'PLTR',
+        'CONSTELLATION': 'CEG',
+      };
+      
+      for (const [pattern, ticker] of Object.entries(specialMappings)) {
+        if (upperName.includes(pattern)) {
+          inferredTicker = ticker;
+          break;
+        }
+      }
+      
+      if (!inferredTicker) {
+        console.log(`Could not infer ticker from name: ${name}`);
+        nameResults.push({ name, sector: null, source: 'error' });
+        continue;
+      }
+      
+      // 2. Get sector using AI
+      console.log(`Getting sector for ${inferredTicker} (from name: ${name})...`);
+      const sectorInfo = await fetchSectorWithAI(inferredTicker, name);
+      
+      nameResults.push({
+        name,
+        ticker: inferredTicker,
+        sector: sectorInfo.sector,
+        industry: sectorInfo.industry,
+        source: sectorInfo.sector ? 'ai' : 'unknown',
+      });
+      
+      console.log(`Sector for ${name} (${inferredTicker}): ${sectorInfo.sector || 'unknown'}`);
+      
+      // Small delay
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
     
-    console.log(`Sector resolution completed in ${duration}ms: ${resolved}/${isins.length} resolved`);
+    const duration = Date.now() - startTime;
+    const resolvedIsins = results.filter(r => r.sector).length;
+    const resolvedNames = nameResults.filter(r => r.sector).length;
+    
+    console.log(`Sector resolution completed in ${duration}ms: ${resolvedIsins}/${isins.length} ISINs, ${resolvedNames}/${names.length} names`);
     
     return new Response(
       JSON.stringify({
         success: true,
         mode: 'resolve-and-get-sectors',
         duration: `${duration}ms`,
-        total: isins.length,
-        resolved,
+        total: isins.length + names.length,
+        resolved: resolvedIsins + resolvedNames,
         results,
+        nameResults, // NEW: include name resolution results
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

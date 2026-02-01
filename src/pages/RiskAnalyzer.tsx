@@ -68,11 +68,13 @@ export function RiskAnalyzer() {
     }
   }, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
   
-  // Extract stock info (non-ETF) for sector mapping - includes ISIN + description
+  // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
   const stocksForSectorMapping = useMemo(() => {
     const stocks: Array<{ isin: string; description: string }> = [];
+    const names: string[] = []; // Derivative underlyings without ISIN
     const seen = new Set<string>();
     
+    // 1. Stock diretti (con ISIN)
     for (const stock of analysis.stockDetails) {
       if (stock.isin && !seen.has(stock.isin)) {
         seen.add(stock.isin);
@@ -82,13 +84,39 @@ export function RiskAnalyzer() {
         }
       }
     }
-    return stocks;
-  }, [analysis.stockDetails]);
+    
+    // 2. Naked PUTs (solo nome sottostante)
+    for (const np of analysis.nakedPutDetails) {
+      if (!seen.has(np.underlying)) {
+        seen.add(np.underlying);
+        names.push(np.underlying);
+      }
+    }
+    
+    // 3. Leap CALLs (solo nome sottostante)
+    for (const lc of analysis.leapCallDetails) {
+      if (!seen.has(lc.underlying)) {
+        seen.add(lc.underlying);
+        names.push(lc.underlying);
+      }
+    }
+    
+    // 4. Strategie (solo nome sottostante)
+    for (const strat of analysis.strategyDetails) {
+      if (!seen.has(strat.underlying)) {
+        seen.add(strat.underlying);
+        names.push(strat.underlying);
+      }
+    }
+    
+    return { stocks, names };
+  }, [analysis]);
   
   // Fetch sector mappings when switching to sector view
   useEffect(() => {
-    if (stocksForSectorMapping.length > 0 && viewMode === 'sector') {
-      fetchSectorMappings(stocksForSectorMapping);
+    const { stocks, names } = stocksForSectorMapping;
+    if ((stocks.length > 0 || names.length > 0) && viewMode === 'sector') {
+      fetchSectorMappings(stocks, names);
     }
   }, [stocksForSectorMapping, viewMode, fetchSectorMappings]);
   
