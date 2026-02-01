@@ -706,6 +706,113 @@ serve(async (req) => {
     );
   }
 
+  // NEW: Handle resolve-and-get-sectors mode - creates/updates isin_mappings with sectors
+  if (body.mode === 'resolve-and-get-sectors') {
+    console.log('Running in resolve-and-get-sectors mode');
+    const startTime = Date.now();
+    
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const isins = body.isins || [];
+    const descriptions = (body as any).descriptions || {};
+    const results: Array<{ isin: string; ticker?: string; sector?: string | null; source: string; error?: string }> = [];
+    
+    console.log(`Resolving sectors for ${isins.length} ISINs`);
+    
+    for (const isin of isins) {
+      // 1. Check if mapping already exists with sector
+      const { data: existing } = await supabase
+        .from('isin_mappings')
+        .select('ticker, sector, industry')
+        .eq('isin', isin)
+        .single();
+      
+      if (existing?.sector) {
+        // Already has sector, skip
+        results.push({ isin, ticker: existing.ticker, sector: existing.sector, source: 'cache' });
+        console.log(`Cache hit for ${isin}: ${existing.sector}`);
+        continue;
+      }
+      
+      // 2. Need to resolve or update
+      let ticker = existing?.ticker || null;
+      const description = descriptions[isin] || '';
+      
+      // 3. If no ticker, resolve ISIN via Yahoo Search
+      if (!ticker) {
+        console.log(`Resolving ticker for ISIN ${isin}...`);
+        const searchResult = await searchYahooByISIN(isin);
+        
+        if (searchResult) {
+          ticker = searchResult.ticker;
+          console.log(`Yahoo Search resolved ${isin} to ${ticker}`);
+        } else {
+          results.push({ isin, sector: null, source: 'error', error: 'Could not resolve ticker' });
+          console.log(`Failed to resolve ticker for ISIN ${isin}`);
+          continue;
+        }
+      }
+      
+      // 4. Get sector using Yahoo + AI fallback
+      console.log(`Fetching sector for ${ticker} (${description})...`);
+      const sectorInfo = await fetchYahooSectorInfo(ticker, description);
+      
+      // 5. Save to database (UPSERT)
+      const upsertData: any = {
+        isin,
+        ticker,
+        source: sectorInfo.sector ? 'ai' : 'unknown',
+        last_verified_at: new Date().toISOString(),
+      };
+      
+      if (sectorInfo.sector) {
+        upsertData.sector = sectorInfo.sector;
+      }
+      if (sectorInfo.industry) {
+        upsertData.industry = sectorInfo.industry;
+      }
+      
+      const { error: upsertError } = await supabase
+        .from('isin_mappings')
+        .upsert(upsertData, { onConflict: 'isin' });
+      
+      if (upsertError) {
+        console.error(`Failed to upsert mapping for ${isin}:`, upsertError);
+        results.push({ isin, ticker, sector: null, source: 'error', error: upsertError.message });
+      } else {
+        results.push({ 
+          isin, 
+          ticker, 
+          sector: sectorInfo.sector, 
+          source: sectorInfo.sector ? 'resolved' : 'unknown' 
+        });
+        console.log(`Saved sector for ${isin} (${ticker}): ${sectorInfo.sector || 'unknown'}`);
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    const duration = Date.now() - startTime;
+    const resolved = results.filter(r => r.sector).length;
+    
+    console.log(`Sector resolution completed in ${duration}ms: ${resolved}/${isins.length} resolved`);
+    
+    return new Response(
+      JSON.stringify({
+        success: true,
+        mode: 'resolve-and-get-sectors',
+        duration: `${duration}ms`,
+        total: isins.length,
+        resolved,
+        results,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
   const startTime = Date.now();
   const results: UpdateResult[] = [];
   let logId: string | null = null;

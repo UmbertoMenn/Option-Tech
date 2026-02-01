@@ -68,9 +68,9 @@ export function RiskAnalyzer() {
     }
   }, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
   
-  // Extract stock ISINs (non-ETF) for sector mapping
-  const stockIsins = useMemo(() => {
-    const isins: string[] = [];
+  // Extract stock info (non-ETF) for sector mapping - includes ISIN + description
+  const stocksForSectorMapping = useMemo(() => {
+    const stocks: Array<{ isin: string; description: string }> = [];
     const seen = new Set<string>();
     
     for (const stock of analysis.stockDetails) {
@@ -78,19 +78,19 @@ export function RiskAnalyzer() {
         seen.add(stock.isin);
         // Only include non-ETF stocks
         if (!ETF_PATTERN.test(stock.underlying)) {
-          isins.push(stock.isin);
+          stocks.push({ isin: stock.isin, description: stock.underlying });
         }
       }
     }
-    return isins;
+    return stocks;
   }, [analysis.stockDetails]);
   
   // Fetch sector mappings when switching to sector view
   useEffect(() => {
-    if (stockIsins.length > 0 && viewMode === 'sector') {
-      fetchSectorMappings(stockIsins);
+    if (stocksForSectorMapping.length > 0 && viewMode === 'sector') {
+      fetchSectorMappings(stocksForSectorMapping);
     }
-  }, [stockIsins, viewMode, fetchSectorMappings]);
+  }, [stocksForSectorMapping, viewMode, fetchSectorMappings]);
   
   // Apply ETF decomposition to currency exposure
   const currencyExposure = useMemo(() => {

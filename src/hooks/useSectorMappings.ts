@@ -7,14 +7,22 @@ export interface SectorMapping {
   industry: string;
 }
 
+export interface StockInfo {
+  isin: string;
+  description: string;
+}
+
 export function useSectorMappings() {
   const [mappings, setMappings] = useState<Record<string, SectorMapping>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
   const isFetchingRef = useRef(false);
 
-  const fetchMappings = useCallback(async (isins: string[]) => {
-    if (isins.length === 0 || hasFetched || isFetchingRef.current) return;
+  const fetchMappings = useCallback(async (stocks: StockInfo[]) => {
+    if (stocks.length === 0 || hasFetched || isFetchingRef.current) return;
+    
+    const isins = stocks.map(s => s.isin).filter(Boolean);
+    if (isins.length === 0) return;
     
     isFetchingRef.current = true;
     setIsLoading(true);
@@ -31,46 +39,61 @@ export function useSectorMappings() {
         return;
       }
       
-      // 2. Build lookup map and find ISINs with missing sectors
+      // 2. Build lookup map
+      const existingIsins = new Set(data?.map((d: any) => d.isin) || []);
       const newMappings: Record<string, SectorMapping> = {};
-      const missingIsins: string[] = [];
       
-      for (const isin of isins) {
-        const row = data?.find((d: any) => d.isin === isin);
-        if (row?.sector) {
+      for (const row of data || []) {
+        if (row.sector) {
           newMappings[row.isin] = {
             ticker: row.ticker || '',
             sector: row.sector,
             industry: row.industry || '',
           };
-        } else if (row?.ticker) {
-          // Has ticker but no sector - needs update
-          missingIsins.push(isin);
         }
       }
       
-      setMappings(newMappings);
-      console.log(`Loaded ${Object.keys(newMappings).length} sector mappings, ${missingIsins.length} missing`);
+      // 3. Find ISINs that need resolution:
+      //    - Missing from isin_mappings entirely
+      //    - Exist but have no sector
+      const missingIsins = isins.filter(isin => !existingIsins.has(isin));
+      const needsSectorUpdate = data?.filter((d: any) => d.ticker && !d.sector).map((d: any) => d.isin) || [];
       
-      // 3. If there are missing sectors, trigger edge function to fetch them
-      if (missingIsins.length > 0) {
-        console.log('Triggering sector update for:', missingIsins);
+      const toResolve = [...new Set([...missingIsins, ...needsSectorUpdate])];
+      
+      console.log(`Sector mappings: ${Object.keys(newMappings).length} cached, ${toResolve.length} need resolution`);
+      
+      // 4. If there are ISINs needing resolution, call edge function
+      if (toResolve.length > 0) {
+        console.log('Triggering sector resolution for:', toResolve);
+        
+        // Build descriptions map for AI fallback
+        const descriptions: Record<string, string> = {};
+        for (const stock of stocks) {
+          if (toResolve.includes(stock.isin)) {
+            descriptions[stock.isin] = stock.description;
+          }
+        }
         
         const { error: invokeError } = await supabase.functions.invoke('update-prices-cron', {
-          body: { mode: 'update-sectors', isins: missingIsins }
+          body: { 
+            mode: 'resolve-and-get-sectors', 
+            isins: toResolve,
+            descriptions 
+          }
         });
         
         if (invokeError) {
-          console.error('Error invoking update-sectors:', invokeError);
+          console.error('Error invoking resolve-and-get-sectors:', invokeError);
         } else {
-          // Re-fetch mappings after update
+          // Re-fetch mappings after resolution
           const { data: updatedData } = await supabase
             .from('isin_mappings')
             .select('isin, ticker, sector, industry')
-            .in('isin', missingIsins) as any;
+            .in('isin', isins) as any;
           
           if (updatedData) {
-            const updatedMappings = { ...newMappings };
+            const updatedMappings: Record<string, SectorMapping> = {};
             for (const row of updatedData) {
               if (row.sector) {
                 updatedMappings[row.isin] = {
@@ -81,9 +104,11 @@ export function useSectorMappings() {
               }
             }
             setMappings(updatedMappings);
-            console.log(`Updated to ${Object.keys(updatedMappings).length} sector mappings`);
+            console.log(`Updated to ${Object.keys(updatedMappings).length} sector mappings after resolution`);
           }
         }
+      } else {
+        setMappings(newMappings);
       }
       
       setHasFetched(true);
