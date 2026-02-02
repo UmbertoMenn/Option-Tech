@@ -1,78 +1,62 @@
-# Piano: Rimuovere ETF e Aggiungere Leap Call alle Holdings Consolidate
 
-## Stato: ✅ COMPLETATO
+# Piano: Correzione Calcolo Naked Put ITM nel Netting
 
-## Obiettivo Raggiunto
+## Obiettivo
+Allineare il calcolo delle Naked Put ITM a quello delle Covered Call ITM, usando il valore intrinseco invece del costo di riacquisto a mercato.
 
-1. ✅ **Rimossa** la scomposizione degli ETF (top holdings) dalle Holdings Consolidate
-2. ✅ **Aggiunta** l'esposizione delle Leap Call (premio pagato) alle Holdings Consolidate
-3. ✅ **Rimosso** tutto il codice backend per scraping/AI delle top holdings ETF (~250 righe)
+## Problema Attuale
+- **Covered Call ITM**: usa `(sottostante - strike) × contratti × 100 / cambio` ✓
+- **Naked Put ITM**: usa `prezzo_mercato × quantità × 100 / cambio` ✗
 
-## Modifiche Effettuate
+## Soluzione
 
-### 1. Edge Function: `supabase/functions/fetch-etf-allocation/index.ts`
+### File: `src/hooks/useDerivativeNetting.ts`
 
-**Rimosso completamente:**
-- `EXCLUDED_HOLDING_NAMES` - Array nomi esclusi per holdings
-- `hasValidTopHoldings()` - Funzione validazione holdings
-- `fetchETFTopHoldingsFromProvider()` - Dispatcher provider scraping
-- `scrapeSSGAHoldings()` - Scraping SSGA
-- `parseSSGAHoldings()` - Parser SSGA
-- `fetchETFTopHoldingsWithAI()` - Fallback AI Gemini per holdings
-- Logica top holdings in `scrapeJustETF()` - Sezione "TOP HOLDINGS"
-- Chiamata AI fallback nel `serve()` per top holdings
+Modificare il blocco `else if (nakedPut)` (linee 118-133) per calcolare il valore intrinseco delle Naked Put ITM invece del costo di riacquisto:
 
-**Mantenuto:**
-- Scraping sector/country/currency allocations
-- Fallback AI per sector allocations
+**Logica corretta:**
+- **Put OTM** (strike < sottostante): esclusa dal netting (scadrà senza valore)
+- **Put ITM** (strike >= sottostante): sottrarre il valore intrinseco
+  - Formula: `(strike - sottostante) × contratti × 100 / cambio`
 
-### 2. Logic: `src/lib/sectorExposure.ts`
+### Modifica Specifica
 
-**Modificata interfaccia `ConsolidatedHolding`:**
-- Rimossa `etfExposure`
-- Aggiunta `leapCallRisk`
-- Modificato `sources.type` da `'etf' | 'stock' | 'nakedPut'` a `'stock' | 'nakedPut' | 'leapCall'`
+```typescript
+} else if (nakedPut) {
+  const strikePrice = derivative.strike_price ?? 0;
+  const underlyingPrice = nakedPut.underlying?.current_price ?? 0;
+  
+  // Netting ex CC: include sempre il costo di riacquisto a mercato
+  nettingExCoveredCall += nettingValue;
+  
+  // Netting ex CC e NP OTM: gestione basata su ITM/OTM
+  if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
+    // OTM: esclusa (scadrà senza valore)
+  } else if (underlyingPrice > 0 && strikePrice >= underlyingPrice) {
+    // ITM: sottrai valore intrinsico (coerente con covered call ITM)
+    const contracts = Math.abs(quantity);
+    const intrinsicValue = (contracts * multiplier * (strikePrice - underlyingPrice)) / exchangeRate;
+    nettingExCCAndNP -= intrinsicValue;
+  } else {
+    // Prezzo sottostante non disponibile: fallback al costo di mercato
+    nettingExCCAndNP += nettingValue;
+  }
+}
+```
 
-**Modificata interfaccia `ConsolidatedHoldingWithDetails`:**
-- Rimossa `etfDetails`
-- Aggiunta `leapCallDetails` con: strike, contracts, avgCost, premiumPaid, expiry
+### Aggiornamento Documentazione
+Aggiornare il commento JSDoc per riflettere la nuova logica:
+- Netting ex CC e NP OTM:
+  - OTM naked puts: escluse
+  - ITM naked puts: sottrarre `(strike - sottostante) × contratti × 100 / cambio`
 
-**Modificato `calculateConsolidatedTopHoldings()`:**
-- Rimossa sezione "1. Add ETF holdings"
-- Rinumerate sezioni (1=Stock, 2=Naked PUT, 3=Leap Call)
-- Aggiunta sezione "4. Add Leap Call risk (premium paid)"
-- Formula aggiornata: `totalExposure = stockPart + nakedPutRisk + leapCallRisk`
+## Riepilogo Impatto
+| Tipo | OTM | ITM |
+|------|-----|-----|
+| Covered Call | Esclusa | Sottrai intrinseco: `(sotto - strike)` |
+| Naked Put | Esclusa | Sottrai intrinseco: `(strike - sotto)` |
 
-### 3. UI: `src/components/risk/EquityExposureView.tsx`
-
-**Modificato:**
-- Rimosso badge ETF (cyan)
-- Aggiunto badge LEAP (amber)
-- Aggiornata descrizione: "Stock diretti + Naked PUT + Leap Call"
-
-### 4. UI: `src/components/risk/HoldingBreakdownDialog.tsx`
-
-**Modificato:**
-- Rimossa sezione "ETF Details"
-- Aggiunta sezione "Leap Call Details" con:
-  - Strike, contratti, PMC, scadenza
-  - Subtotale LEAP in amber
-
-### 5. Hook: `src/hooks/useETFAllocations.ts`
-
-**Semplificato:**
-- Rimossa logica di force refresh per `hasNoTopHoldings`
-
-## Risultato
-
-Le **Holdings Consolidate** ora mostrano:
-
-| Fonte | Colore Badge | Calcolo |
-|-------|-------------|---------|
-| **Stock** | Blu/Verde | Valore azioni (con/senza protezioni) |
-| **PUT** | Rosso | Strike × Contratti × 100 / Cambio |
-| **LEAP** | Ambra | PMC × Contratti × 100 / Cambio |
-
-Formula: `TotalExposure = StockRisk(+/-protezioni) + NakedPutRisk + LeapCallRisk`
-
-L'edge function è alleggerita di ~250 righe, nessuna chiamata AI per top holdings ETF, e il Risk Analyzer continua a funzionare per sector/currency/country allocations.
+## Dettagli Tecnici
+- **File modificato**: `src/hooks/useDerivativeNetting.ts`
+- **Linee interessate**: 118-138
+- **Nessuna nuova dipendenza richiesta**
