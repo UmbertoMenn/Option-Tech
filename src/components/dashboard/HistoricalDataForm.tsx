@@ -18,6 +18,7 @@ interface HistoricalDataFormProps {
   currentTotalValue: number;
   currentNettingTotal: number;
   currentNettingExCC: number;
+  currentNettingExCCNP: number;
 }
 
 export function HistoricalDataForm({
@@ -28,6 +29,7 @@ export function HistoricalDataForm({
   currentTotalValue,
   currentNettingTotal,
   currentNettingExCC,
+  currentNettingExCCNP,
 }: HistoricalDataFormProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -38,6 +40,7 @@ export function HistoricalDataForm({
   const [formTotalValue, setFormTotalValue] = useState('');
   const [formNettingTotal, setFormNettingTotal] = useState('');
   const [formNettingExCC, setFormNettingExCC] = useState('');
+  const [formNettingExCCNP, setFormNettingExCCNP] = useState('');
 
   const parseValue = (val: string) => {
     return parseFloat(val.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
@@ -48,6 +51,7 @@ export function HistoricalDataForm({
     setFormTotalValue('');
     setFormNettingTotal('');
     setFormNettingExCC('');
+    setFormNettingExCCNP('');
     setIsAddingNew(false);
     setEditingId(null);
   };
@@ -60,6 +64,7 @@ export function HistoricalDataForm({
       total_value: parseValue(formTotalValue),
       netting_total: parseValue(formNettingTotal),
       netting_ex_cc: parseValue(formNettingExCC),
+      netting_ex_cc_np: parseValue(formNettingExCCNP),
       deposits: 0,
       average_balance: 0,
     });
@@ -73,6 +78,7 @@ export function HistoricalDataForm({
     setFormTotalValue(entry.total_value.toString());
     setFormNettingTotal(entry.netting_total.toString());
     setFormNettingExCC(entry.netting_ex_cc.toString());
+    setFormNettingExCCNP((entry.netting_ex_cc_np ?? 0).toString());
     setIsAddingNew(false);
   };
 
@@ -85,6 +91,7 @@ export function HistoricalDataForm({
     setFormTotalValue(currentTotalValue.toString());
     setFormNettingTotal(currentNettingTotal.toString());
     setFormNettingExCC(currentNettingExCC.toString());
+    setFormNettingExCCNP(currentNettingExCCNP.toString());
   };
 
   const isEditing = editingId !== null || isAddingNew;
@@ -165,7 +172,7 @@ export function HistoricalDataForm({
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-xs">Netting ex CC ($)</Label>
+                            <Label className="text-xs">Netting ex. Covered Call ($)</Label>
                             <Input
                               type="text"
                               placeholder="es. 98.000"
@@ -174,6 +181,17 @@ export function HistoricalDataForm({
                               className="font-mono text-sm"
                             />
                           </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-xs">Netting ex. Covered Call e NP ($)</Label>
+                          <Input
+                            type="text"
+                            placeholder="es. 99.000"
+                            value={formNettingExCCNP}
+                            onChange={(e) => setFormNettingExCCNP(e.target.value)}
+                            className="font-mono text-sm"
+                          />
                         </div>
 
                         <div className="flex gap-2 pt-2">
@@ -206,7 +224,8 @@ export function HistoricalDataForm({
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
                             <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
-                            <span className="col-span-2">Netting ex CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
+                            <span>Netting ex. CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
+                            <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -256,17 +275,15 @@ export function HistoricalDataForm({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-xs">Patrimonio Totale ($)</Label>
-                  <Input
-                    type="text"
-                    placeholder="es. 100.000"
-                    value={formTotalValue}
-                    onChange={(e) => setFormTotalValue(e.target.value)}
-                    className="font-mono text-sm"
-                  />
-                </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Patrimonio Totale ($)</Label>
+                <Input
+                  type="text"
+                  placeholder="es. 100.000"
+                  value={formTotalValue}
+                  onChange={(e) => setFormTotalValue(e.target.value)}
+                  className="font-mono text-sm"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -281,7 +298,7 @@ export function HistoricalDataForm({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Netting ex CC ($)</Label>
+                  <Label className="text-xs">Netting ex. Covered Call ($)</Label>
                   <Input
                     type="text"
                     placeholder="es. 98.000"
@@ -290,6 +307,17 @@ export function HistoricalDataForm({
                     className="font-mono text-sm"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Netting ex. Covered Call e NP ($)</Label>
+                <Input
+                  type="text"
+                  placeholder="es. 99.000"
+                  value={formNettingExCCNP}
+                  onChange={(e) => setFormNettingExCCNP(e.target.value)}
+                  className="font-mono text-sm"
+                />
               </div>
 
               <div className="flex gap-2 pt-2">

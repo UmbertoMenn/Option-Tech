@@ -87,8 +87,8 @@ function calculateTimeWeightedAverage(
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
   base: { patrimonio: 'Valore Assets (ex. Derivatives)', pl: 'Profitto/Perdita' },
   netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
-  netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex CC)', pl: 'P/L (Netting ex CC)' },
-  netting_ex_cc_np: { patrimonio: 'Patrimonio (Netting ex CC e NP)', pl: 'P/L (Netting ex CC e NP)' },
+  netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex. Covered Call)', pl: 'P/L (Netting ex. Covered Call)' },
+  netting_ex_cc_np: { patrimonio: 'Patrimonio (Netting ex. Covered Call e NP)', pl: 'P/L (Netting ex. Covered Call e NP)' },
 };
 
 export function StatsCards({ 
@@ -152,6 +152,9 @@ export function StatsCards({
       case 'netting_ex_cc':
         historicalValue = selectedHistoricalEntry.netting_ex_cc;
         break;
+      case 'netting_ex_cc_np':
+        historicalValue = selectedHistoricalEntry.netting_ex_cc_np ?? selectedHistoricalEntry.netting_ex_cc;
+        break;
       default:
         historicalValue = selectedHistoricalEntry.total_value;
     }
@@ -206,9 +209,8 @@ export function StatsCards({
         historicalValue = historical.netting_ex_cc;
         break;
       case 'netting_ex_cc_np':
-        // Use netting_ex_cc historical value as base (no historical data for this new view yet)
         currentValue = nettingExCCAndNP;
-        historicalValue = historical.netting_ex_cc;
+        historicalValue = historical.netting_ex_cc_np ?? historical.netting_ex_cc;
         break;
       default:
         currentValue = summary.totalValue;
@@ -275,7 +277,9 @@ export function StatsCards({
               ? selectedHistoricalEntry!.netting_total 
               : viewMode === 'netting_ex_cc' 
                 ? selectedHistoricalEntry!.netting_ex_cc 
-                : selectedHistoricalEntry!.total_value
+                : viewMode === 'netting_ex_cc_np'
+                  ? (selectedHistoricalEntry!.netting_ex_cc_np ?? selectedHistoricalEntry!.netting_ex_cc)
+                  : selectedHistoricalEntry!.total_value
           )
         : '—',
       icon: Target,

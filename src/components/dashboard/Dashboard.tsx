@@ -106,6 +106,7 @@ export function Dashboard() {
                     total_value: summary?.totalValue ?? 0,
                     netting_total: netting.nettingTotal,
                     netting_ex_cc: netting.nettingExCoveredCall,
+                    netting_ex_cc_np: netting.nettingExCCAndNP,
                     deposits: 0,
                     average_balance: 0,
                   });
@@ -196,6 +197,7 @@ export function Dashboard() {
                   currentTotalValue={summary?.totalValue ?? 0}
                   currentNettingTotal={netting.nettingTotal}
                   currentNettingExCC={netting.nettingExCoveredCall}
+                  currentNettingExCCNP={netting.nettingExCCAndNP}
                 />
                 <DepositsSection
                   deposits={deposits}

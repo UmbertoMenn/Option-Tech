@@ -199,6 +199,7 @@ export type Database = {
           deposits: number
           id: string
           netting_ex_cc: number
+          netting_ex_cc_np: number
           netting_total: number
           portfolio_id: string
           snapshot_date: string
@@ -211,6 +212,7 @@ export type Database = {
           deposits?: number
           id?: string
           netting_ex_cc?: number
+          netting_ex_cc_np?: number
           netting_total?: number
           portfolio_id: string
           snapshot_date: string
@@ -223,6 +225,7 @@ export type Database = {
           deposits?: number
           id?: string
           netting_ex_cc?: number
+          netting_ex_cc_np?: number
           netting_total?: number
           portfolio_id?: string
           snapshot_date?: string

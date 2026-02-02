@@ -35,6 +35,7 @@ export function useHistoricalData(portfolioId: string | undefined) {
           total_value: entry.total_value,
           netting_total: entry.netting_total,
           netting_ex_cc: entry.netting_ex_cc,
+          netting_ex_cc_np: entry.netting_ex_cc_np,
           deposits: entry.deposits,
           average_balance: entry.average_balance,
         }, {

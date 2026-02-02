@@ -10,8 +10,8 @@ interface ViewModeSelectorProps {
 
 const VIEW_LABELS: Record<ViewMode, string> = {
   base: 'Base',
-  netting_ex_cc: 'Netting ex CC',
-  netting_ex_cc_np: 'Netting ex CC e NP OTM',
+  netting_ex_cc: 'Netting ex. Covered Call',
+  netting_ex_cc_np: 'Netting ex. Covered Call e Naked Put OTM',
   netting_total: 'Netting Totale',
 };
 
