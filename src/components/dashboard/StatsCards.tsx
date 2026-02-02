@@ -111,15 +111,7 @@ export function StatsCards({
 }: StatsCardsProps) {
   const [isEditingGiacenza, setIsEditingGiacenza] = useState(false);
   const [giacenzaInputValue, setGiacenzaInputValue] = useState('');
-  const initialValue = portfolio?.initial_value || 0;
-  const portfolioDeposits = portfolio?.deposits || 0;
-  const portfolioAverageBalance = portfolio?.average_balance || 0;
-  const initialDate = portfolio?.initial_date;
-  const averageBalanceDate = portfolio?.average_balance_date;
-  const initialPlusDeposits = initialValue + portfolioDeposits;
-  
-  const hasInitialData = initialValue > 0;
-  const hasPortfolioAverageBalance = portfolioAverageBalance > 0;
+  // Legacy fields removed - only use historical_data for P/L calculations
   
   // Find selected historical entry
   const selectedHistoricalEntry = selectedHistoricalDate 
@@ -193,14 +185,11 @@ export function StatsCards({
     }
   };
 
-  // P/L calculation based on historical data and viewMode
+  // P/L calculation based on historical data only
   const calculatePL = () => {
+    // No historical data selected = no P/L calculation
     if (!hasHistoricalData) {
-      // Fallback to old calculation if no historical data selected
-      if (!hasInitialData) return { absolute: 0, percent: 0 };
-      const absolutePL = summary.totalValue - initialPlusDeposits;
-      const percentPL = hasPortfolioAverageBalance ? (absolutePL / portfolioAverageBalance) * 100 : 0;
-      return { absolute: absolutePL, percent: percentPL };
+      return { absolute: 0, percent: 0 };
     }
 
     const historical = selectedHistoricalEntry!;
@@ -239,7 +228,7 @@ export function StatsCards({
   const plData = calculatePL();
   const plAbsolute = plData.absolute;
   const plPercent = plData.percent;
-  const canCalculatePL = hasInitialData || hasHistoricalData;
+  const canCalculatePL = hasHistoricalData;
 
   const parseInputValue = (val: string): number => {
     // Support Italian number formats
@@ -313,7 +302,7 @@ export function StatsCards({
       label: VIEW_LABELS[viewMode].pl,
       value: canCalculatePL ? formatProfitLoss(plAbsolute) : '—',
       icon: plAbsolute >= 0 ? TrendingUp : TrendingDown,
-      change: canCalculatePL && (hasPortfolioAverageBalance || (hasHistoricalData && averageBalance > 0)) ? formatPercentage(plPercent) : null,
+      change: canCalculatePL && averageBalance > 0 ? formatPercentage(plPercent) : null,
       isProfit: plAbsolute >= 0,
       dimmed: !canCalculatePL,
       subtext: null,
