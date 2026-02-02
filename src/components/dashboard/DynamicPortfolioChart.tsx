@@ -76,6 +76,7 @@ const CHART_TITLES: Record<ViewMode, string> = {
   base: 'Composizione Portafoglio (Derivati esclusi)',
   netting_total: 'Valore Portafoglio (Netting Totale Derivati)',
   netting_ex_cc: 'Valore Portafoglio (Netting ex. Covered Call)',
+  netting_ex_cc_np: 'Valore Portafoglio (Netting ex. CC e NP OTM)',
 };
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode }: DynamicPortfolioChartProps) {
@@ -108,6 +109,21 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
           />
           <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
             Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio.
+          </p>
+        </div>
+      );
+    }
+
+    if (viewMode === 'netting_ex_cc_np') {
+      return (
+        <div className="flex flex-col">
+          <NettingChart
+            baseValue={summary?.totalValue ?? 0}
+            nettedValue={netting.nettingExCCAndNP}
+            label="Netting ex. CC e NP OTM"
+          />
+          <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
+            Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM (strike inferiore al prezzo del sottostante). La logica è che, se ho venduto una PUT e il prezzo del sottostante è sopra lo strike, l'opzione scadrà senza valore e non ha senso spendere soldi per riacquistarla.
           </p>
         </div>
       );

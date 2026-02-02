@@ -8,6 +8,8 @@ export interface NettingResult {
   nettingExCoveredCall: number;
   // Total netting including all derivatives
   nettingTotal: number;
+  // Netting excluding OTM covered calls AND OTM naked puts
+  nettingExCCAndNP: number;
 }
 
 /**
@@ -51,6 +53,7 @@ export function useDerivativeNetting(
       return {
         nettingExCoveredCall: summary?.totalValue ?? 0,
         nettingTotal: summary?.totalValue ?? 0,
+        nettingExCCAndNP: summary?.totalValue ?? 0,
       };
     }
 
@@ -60,10 +63,11 @@ export function useDerivativeNetting(
       return {
         nettingExCoveredCall: summary.totalValue,
         nettingTotal: summary.totalValue,
+        nettingExCCAndNP: summary.totalValue,
       };
     }
 
-    // Categorize derivatives to identify covered calls (with overrides)
+    // Categorize derivatives to identify covered calls and naked puts (with overrides)
     const categories = categorizeDerivatives(derivatives, positions, overrides);
     
     // Create map of covered call IDs to their data for ITM/OTM check
@@ -71,9 +75,15 @@ export function useDerivativeNetting(
       categories.coveredCalls.map(cc => [cc.option.id, cc])
     );
     
+    // Create map of naked put IDs to their data for ITM/OTM check
+    const nakedPutMap = new Map(
+      categories.nakedPuts.map(np => [np.option.id, np])
+    );
+    
     // Calculate netting for each derivative
     let totalNetting = 0;
     let nettingExCoveredCall = 0;
+    let nettingExCCAndNP = 0;
     
     for (const derivative of derivatives) {
       const price = derivative.current_price ?? 0;
@@ -89,6 +99,7 @@ export function useDerivativeNetting(
       
       // For netting ex covered call: special handling for covered calls
       const coveredCall = coveredCallMap.get(derivative.id);
+      const nakedPut = nakedPutMap.get(derivative.id);
       
       if (coveredCall) {
         // This is a covered call - check if ITM or OTM
@@ -101,17 +112,36 @@ export function useDerivativeNetting(
           const contracts = Math.abs(quantity);
           const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
           nettingExCoveredCall -= intrinsicValue;
+          nettingExCCAndNP -= intrinsicValue;
         }
         // OTM covered call (strike >= underlyingPrice): don't subtract anything
-      } else {
-        // Not a covered call - include full netting value (already in EUR)
+      } else if (nakedPut) {
+        // This is a naked put - check if OTM for nettingExCCAndNP
+        const strikePrice = derivative.strike_price ?? 0;
+        const underlyingPrice = nakedPut.underlying?.current_price ?? 0;
+        
+        // Include full netting value in nettingExCoveredCall (naked puts are always included)
         nettingExCoveredCall += nettingValue;
+        
+        // For nettingExCCAndNP: exclude OTM naked puts (strike < underlying price)
+        if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
+          // OTM naked put: don't include buyback cost (option will expire worthless)
+          // nettingValue is already negative for sold options, so not adding it = excluding the cost
+        } else {
+          // ITM naked put or no underlying price available: include buyback cost
+          nettingExCCAndNP += nettingValue;
+        }
+      } else {
+        // Not a covered call or naked put - include full netting value
+        nettingExCoveredCall += nettingValue;
+        nettingExCCAndNP += nettingValue;
       }
     }
     
     return {
       nettingExCoveredCall: summary.totalValue + nettingExCoveredCall,
       nettingTotal: summary.totalValue + totalNetting,
+      nettingExCCAndNP: summary.totalValue + nettingExCCAndNP,
     };
   }, [positions, summary, overrides]);
 }

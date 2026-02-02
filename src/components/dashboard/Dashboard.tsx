@@ -157,6 +157,7 @@ export function Dashboard() {
             portfolio={portfolio}
             nettingTotal={netting.nettingTotal}
             nettingExCC={netting.nettingExCoveredCall}
+            nettingExCCAndNP={netting.nettingExCCAndNP}
             viewMode={viewMode}
             historicalData={historicalData}
             selectedHistoricalDate={selectedHistoricalDate}

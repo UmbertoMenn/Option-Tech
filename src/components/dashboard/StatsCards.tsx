@@ -22,6 +22,7 @@ interface StatsCardsProps {
   portfolio: Portfolio | null;
   nettingTotal: number;
   nettingExCC: number;
+  nettingExCCAndNP: number;
   viewMode: ViewMode;
   historicalData: HistoricalDataEntry[];
   selectedHistoricalDate: string | null;
@@ -87,13 +88,15 @@ const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
   base: { patrimonio: 'Valore Assets (ex. Derivatives)', pl: 'Profitto/Perdita' },
   netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
   netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex CC)', pl: 'P/L (Netting ex CC)' },
+  netting_ex_cc_np: { patrimonio: 'Patrimonio (Netting ex CC e NP)', pl: 'P/L (Netting ex CC e NP)' },
 };
 
 export function StatsCards({ 
   summary, 
   portfolio, 
   nettingTotal, 
-  nettingExCC, 
+  nettingExCC,
+  nettingExCCAndNP,
   viewMode,
   historicalData,
   selectedHistoricalDate,
@@ -185,6 +188,7 @@ export function StatsCards({
     switch (viewMode) {
       case 'netting_total': return nettingTotal;
       case 'netting_ex_cc': return nettingExCC;
+      case 'netting_ex_cc_np': return nettingExCCAndNP;
       default: return summary.totalValue;
     }
   };
@@ -210,6 +214,11 @@ export function StatsCards({
         break;
       case 'netting_ex_cc':
         currentValue = nettingExCC;
+        historicalValue = historical.netting_ex_cc;
+        break;
+      case 'netting_ex_cc_np':
+        // Use netting_ex_cc historical value as base (no historical data for this new view yet)
+        currentValue = nettingExCCAndNP;
         historicalValue = historical.netting_ex_cc;
         break;
       default:
