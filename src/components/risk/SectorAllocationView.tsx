@@ -154,7 +154,7 @@ export function SectorAllocationView({
               <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
                 <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
                 <span className="text-xs text-amber-600 dark:text-amber-400">
-                  Derivati esclusi dall'analisi (Naked PUT, Leap Call, Strategie)
+                  Derivati esclusi dall'analisi (Naked Put, Leap Call, Strategie)
                 </span>
               </div>
             )}
