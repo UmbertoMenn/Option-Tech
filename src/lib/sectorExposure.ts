@@ -159,13 +159,13 @@ export interface TopHolding {
 // Interface for Consolidated Top 10 Holdings
 export interface ConsolidatedHolding {
   name: string;
-  etfExposure: number;           // Exposure via ETF (€)
   stockRisk: number;             // Direct stock risk WITHOUT protections (€)
   stockRiskWithProtection: number; // Direct stock risk WITH protections (€)
   nakedPutRisk: number;          // Naked PUT risk (€)
+  leapCallRisk: number;          // Leap Call risk - premium paid (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
-    type: 'etf' | 'stock' | 'nakedPut';
+    type: 'stock' | 'nakedPut' | 'leapCall';
     name: string;
     exposure: number;
     percentage?: number;
@@ -602,10 +602,12 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     riskEUR: number;
     expiry: string;
   }>;
-  etfDetails: Array<{
-    etfName: string;
-    holdingPercentage: number;
-    exposure: number;
+  leapCallDetails: Array<{
+    strike: number;
+    contracts: number;
+    avgCost: number;
+    premiumPaid: number;
+    expiry: string;
   }>;
   stockDetails: Array<{
     quantity: number;
@@ -642,16 +644,24 @@ export function calculateConsolidatedTopHoldings(
   // Pattern per riconoscere ETF
   const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
   
+  const formatExpiry = (expiry: string) => {
+    if (!expiry) return '-';
+    const date = new Date(expiry);
+    const month = date.toLocaleDateString('it-IT', { month: 'short' }).toUpperCase();
+    const year = date.getFullYear().toString().slice(-2);
+    return `${month}/${year}`;
+  };
+  
   const createHolding = (name: string): ConsolidatedHoldingWithDetails => ({
     name: name.trim(),
-    etfExposure: 0,
     stockRisk: 0,
     stockRiskWithProtection: 0,
     nakedPutRisk: 0,
+    leapCallRisk: 0,
     totalExposure: 0,
     sources: [],
     nakedPutDetails: [],
-    etfDetails: [],
+    leapCallDetails: [],
     stockDetails: [],
   });
   
@@ -690,38 +700,7 @@ export function calculateConsolidatedTopHoldings(
     }
   };
   
-  // 1. Add ETF holdings (top 10 from each ETF)
-  for (const stock of analysis.stockDetails) {
-    const isETF = ETF_PATTERN.test(stock.underlying);
-    
-    if (isETF && stock.isin && etfAllocations[stock.isin]) {
-      const allocation = etfAllocations[stock.isin];
-      const topHoldings = allocation.topHoldings || [];
-      
-      // Take top 10 holdings from each ETF
-      for (const etfHolding of topHoldings.slice(0, 10)) {
-        if (etfHolding.percentage > 0) {
-          const exposure = stock.riskEUR * (etfHolding.percentage / 100);
-          const holding = getOrCreateHolding(etfHolding.name);
-          
-          holding.etfExposure += exposure;
-          holding.sources.push({
-            type: 'etf',
-            name: allocation.name || stock.underlying,
-            exposure,
-            percentage: etfHolding.percentage,
-          });
-          holding.etfDetails.push({
-            etfName: allocation.name || stock.underlying,
-            holdingPercentage: etfHolding.percentage,
-            exposure,
-          });
-        }
-      }
-    }
-  }
-  
-  // 2. Add direct stock risk
+  // 1. Add direct stock risk (skip ETFs)
   for (const stock of analysis.stockDetails) {
     const isETF = ETF_PATTERN.test(stock.underlying);
     
@@ -770,6 +749,25 @@ export function calculateConsolidatedTopHoldings(
     });
   }
   
+  // 4. Add Leap Call risk (premium paid)
+  for (const lc of analysis.leapCallDetails) {
+    const holding = getOrCreateHolding(lc.underlying);
+    
+    holding.leapCallRisk += lc.riskEUR;
+    holding.sources.push({
+      type: 'leapCall',
+      name: `LEAP ${lc.strike} ${formatExpiry(lc.expiry)}`,
+      exposure: lc.riskEUR,
+    });
+    holding.leapCallDetails.push({
+      strike: lc.strike,
+      contracts: lc.contracts,
+      avgCost: lc.avgCost,
+      premiumPaid: lc.riskEUR,
+      expiry: lc.expiry,
+    });
+  }
+  
   // Combine both maps
   const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
   
@@ -779,7 +777,7 @@ export function calculateConsolidatedTopHoldings(
       ? holding.stockRiskWithProtection 
       : holding.stockRisk;
     
-    holding.totalExposure = holding.etfExposure + stockPart + holding.nakedPutRisk;
+    holding.totalExposure = stockPart + holding.nakedPutRisk + holding.leapCallRisk;
     
     // Sort sources by exposure
     holding.sources.sort((a, b) => b.exposure - a.exposure);

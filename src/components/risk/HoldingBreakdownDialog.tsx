@@ -6,33 +6,8 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { formatEUR, formatNumber } from '@/lib/formatters';
-import { ConsolidatedHolding } from '@/lib/sectorExposure';
+import { ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
 import { TrendingDown, TrendingUp, BarChart3 } from 'lucide-react';
-
-// Extended interface with details for breakdown
-interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
-  nakedPutDetails?: Array<{
-    strike: number;
-    contracts: number;
-    riskEUR: number;
-    expiry: string;
-  }>;
-  etfDetails?: Array<{
-    etfName: string;
-    holdingPercentage: number;
-    exposure: number;
-  }>;
-  stockDetails?: Array<{
-    quantity: number;
-    price: number;
-    currency: string;
-    value: number;
-    valueWithProtection: number;
-    protectionContracts: number;
-    protectionStrike: number | null;
-    hasProtection: boolean;
-  }>;
-}
 
 interface HoldingBreakdownDialogProps {
   holding: ConsolidatedHoldingWithDetails | null;
@@ -154,35 +129,35 @@ export function HoldingBreakdownDialog({
             </div>
           )}
 
-          {/* ETF Details */}
-          {holding.etfDetails.length > 0 && (
+          {/* Leap Call Details */}
+          {holding.leapCallDetails.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <BarChart3 className="w-4 h-4 text-cyan-500" />
-                Esposizione via ETF
+                <TrendingUp className="w-4 h-4 text-amber-500" />
+                Leap Call
               </div>
               <div className="rounded-lg border bg-muted/30 divide-y">
-                {holding.etfDetails.map((etf, i) => (
+                {holding.leapCallDetails.map((lc, i) => (
                   <div key={i} className="p-3 flex justify-between items-center">
                     <div>
-                      <div className="text-sm font-medium truncate max-w-[200px]">
-                        {etf.etfName}
+                      <div className="text-sm font-medium">
+                        Strike {formatNumber(lc.strike)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {etf.holdingPercentage.toFixed(2)}% del fondo
+                        {lc.contracts} ctr × PMC {formatNumber(lc.avgCost, 2)} • {formatExpiry(lc.expiry)}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-cyan-500">
-                        {formatEUR(etf.exposure)}
+                      <div className="font-medium text-amber-500">
+                        {formatEUR(lc.premiumPaid)}
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="text-right text-sm font-medium">
-                Subtotale ETF:{' '}
-                <span className="text-cyan-500">{formatEUR(holding.etfExposure)}</span>
+                Subtotale LEAP:{' '}
+                <span className="text-amber-500">{formatEUR(holding.leapCallRisk)}</span>
               </div>
             </div>
           )}
@@ -199,9 +174,9 @@ export function HoldingBreakdownDialog({
                 PUT: {formatEUR(holding.nakedPutRisk)}
               </Badge>
             )}
-            {holding.etfExposure > 0 && (
-              <Badge variant="outline" className="bg-cyan-500/10 text-cyan-500 border-cyan-500/30">
-                ETF: {formatEUR(holding.etfExposure)}
+            {holding.leapCallRisk > 0 && (
+              <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/30">
+                LEAP: {formatEUR(holding.leapCallRisk)}
               </Badge>
             )}
           </div>

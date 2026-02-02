@@ -18,36 +18,6 @@ const SECTOR_KEYWORDS = [
   'Equity', 'Stock', 'Cash', 'Money Market'
 ];
 
-// Names to exclude from top holdings (countries, generic terms, sectors)
-const EXCLUDED_HOLDING_NAMES = [
-  // Generic/placeholder terms
-  'Other', 'Others', 'Cash', 'Liquidità', 'Liquidity', 'N/A', 'Unknown',
-  // Countries that might get scraped from wrong sections
-  'United States', 'USA', 'Japan', 'Canada', 'United Kingdom', 'UK',
-  'Germany', 'France', 'China', 'Switzerland', 'Australia', 'Netherlands',
-  'Sweden', 'Spain', 'Italy', 'Hong Kong', 'Taiwan', 'South Korea', 'India',
-  'Brazil', 'Mexico', 'Singapore', 'Denmark', 'Finland', 'Belgium', 'Ireland',
-  'Norway', 'South Africa', 'Austria', 'New Zealand', 'Israel', 'Poland',
-  // Sector names that might get scraped incorrectly
-  'Technology', 'Financials', 'Healthcare', 'Consumer Discretionary',
-  'Consumer Staples', 'Industrials', 'Energy', 'Materials', 'Utilities',
-  'Real Estate', 'Communication Services', 'Information Technology',
-];
-
-// Helper function to validate if holdings are real companies (not countries/sectors/generic terms)
-function hasValidTopHoldings(holdings: TopHolding[]): boolean {
-  if (holdings.length === 0) return false;
-  
-  // Check if at least 3 holdings are valid company names (not in excluded list)
-  const validHoldings = holdings.filter(h => 
-    !EXCLUDED_HOLDING_NAMES.some(invalid => 
-      h.name.toUpperCase() === invalid.toUpperCase()
-    )
-  );
-  
-  return validHoldings.length >= 3;
-}
-
 // Fallback sector allocations for major index ETFs (when scraping fails)
 const INDEX_SECTOR_FALLBACKS: Record<string, Record<string, number>> = {
   'MSCI WORLD': {
@@ -386,238 +356,6 @@ Respond in this EXACT JSON format only, no explanation:
   }
 }
 
-// Fetch ETF top holdings by scraping official provider websites (more accurate than AI)
-// Supports SPDR/SSGA, iShares, Vanguard, etc.
-async function fetchETFTopHoldingsFromProvider(
-  isin: string,
-  etfName: string
-): Promise<TopHolding[]> {
-  const upperName = etfName.toUpperCase();
-  
-  // SPDR ETFs - State Street Global Advisors
-  if (upperName.includes('SPDR') || upperName.includes('SSG')) {
-    return await scrapeSSGAHoldings(isin, etfName);
-  }
-  
-  // iShares ETFs - BlackRock (future implementation)
-  if (upperName.includes('ISHARES') || upperName.includes('ISHS')) {
-    console.log(`iShares ETF detected for ${isin}, provider scraping not yet implemented`);
-  }
-  
-  // Vanguard ETFs (future implementation)
-  if (upperName.includes('VANGUARD') || upperName.includes('VNG')) {
-    console.log(`Vanguard ETF detected for ${isin}, provider scraping not yet implemented`);
-  }
-  
-  return [];
-}
-
-// Scrape State Street Global Advisors (SSGA) for SPDR ETF holdings
-async function scrapeSSGAHoldings(isin: string, etfName: string): Promise<TopHolding[]> {
-  try {
-    // SSGA uses ticker-based URLs, try common SPDR tickers
-    const tickers = ['zprg', 'gldv', 'spyd', 'sdy', 'nobl'];
-    const regions = ['it/en_gb/intermediary', 'us/en/individual', 'uk/en/professional'];
-    
-    for (const region of regions) {
-      // Try to find the ETF by searching SSGA
-      const searchUrl = `https://www.ssga.com/${region}/etfs/library-content/products/fund-data/etfs/emea/holdings-daily-emea-en-zprg-gy.xlsx`;
-      console.log(`Trying SSGA region: ${region} for ${isin}`);
-      
-      // For SPDR S&P Global Dividend Aristocrats specifically (IE00B9CQXS71)
-      if (isin === 'IE00B9CQXS71') {
-        const url = `https://www.ssga.com/${region}/etfs/spdr-sp-global-dividend-aristocrats-ucits-etf-dist-zprg-gy`;
-        
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-        });
-        
-        if (response.ok) {
-          const html = await response.text();
-          const holdings = parseSSGAHoldings(html);
-          if (holdings.length > 0) {
-            console.log(`SSGA scraping successful for ${isin}: ${holdings.length} holdings`);
-            return holdings;
-          }
-        }
-      }
-    }
-    
-    console.log(`SSGA scraping failed for ${isin}, no holdings found`);
-    return [];
-  } catch (error) {
-    console.error(`Error scraping SSGA for ${isin}:`, error);
-    return [];
-  }
-}
-
-// Parse SSGA HTML to extract top holdings
-function parseSSGAHoldings(html: string): TopHolding[] {
-  const holdings: TopHolding[] = [];
-  
-  // Look for the Top Holdings table pattern on SSGA
-  // Pattern: | Security Name | Weight |
-  // Followed by rows like: | Flowers Foods Inc. | 2,03% |
-  
-  // Method 1: Table with "Security Name" and "Weight" headers
-  const tableRegex = /Security\s*Name[\s\S]*?Weight[\s\S]*?((?:\|[^|]+\|[^|]+\|\s*\n?)+)/gi;
-  const tableMatch = tableRegex.exec(html);
-  
-  if (tableMatch) {
-    const tableContent = tableMatch[1];
-    const rowRegex = /\|\s*([^|]+)\s*\|\s*(\d+[.,]\d+)\s*%\s*\|/g;
-    let rowMatch;
-    
-    while ((rowMatch = rowRegex.exec(tableContent)) !== null && holdings.length < 15) {
-      const name = rowMatch[1].trim();
-      const percentage = parseFloat(rowMatch[2].replace(',', '.'));
-      
-      if (percentage > 0 && name.length > 2 && !name.includes('---')) {
-        holdings.push({ name, percentage });
-      }
-    }
-  }
-  
-  // Method 2: Look for markdown table rows with company names and percentages
-  if (holdings.length === 0) {
-    // Pattern matches: | Company Name | X,XX% |
-    const mdRowRegex = /\|\s*([A-Z][^|]{3,50}(?:Inc\.|Corp\.|Ltd\.|PLC|AG|SA|SE|NV|Co\.)?[^|]*)\s*\|\s*(\d+[.,]\d+)\s*%\s*\|/gi;
-    let match;
-    
-    while ((match = mdRowRegex.exec(html)) !== null && holdings.length < 15) {
-      const name = match[1].trim();
-      const percentage = parseFloat(match[2].replace(',', '.'));
-      
-      // Filter out headers and non-company names
-      if (percentage > 0 && percentage < 20 && 
-          name.length > 2 && 
-          !name.toLowerCase().includes('security') &&
-          !name.toLowerCase().includes('name') &&
-          !name.toLowerCase().includes('weight') &&
-          !name.includes('---')) {
-        holdings.push({ name, percentage });
-      }
-    }
-  }
-  
-  // Method 3: Look for specific holding patterns
-  if (holdings.length === 0) {
-    // Look for company names followed by percentage in any format
-    const generalRegex = /([A-Z][A-Za-z\s&\-\.,']+(?:Inc\.|Corp\.|Ltd\.|PLC|AG|SA|SE|NV|Co\.|Corporation|Company|Limited))[^0-9]*(\d+[.,]\d+)\s*%/g;
-    let match;
-    
-    while ((match = generalRegex.exec(html)) !== null && holdings.length < 15) {
-      const name = match[1].trim();
-      const percentage = parseFloat(match[2].replace(',', '.'));
-      
-      if (percentage > 0 && percentage < 20 && name.length > 3) {
-        // Avoid duplicates
-        if (!holdings.some(h => h.name === name)) {
-          holdings.push({ name, percentage });
-        }
-      }
-    }
-  }
-  
-  // Sort by percentage descending
-  holdings.sort((a, b) => b.percentage - a.percentage);
-  
-  return holdings.slice(0, 15);
-}
-
-// Fetch ETF top holdings using Lovable AI as last resort fallback
-// Returns top 10-15 holdings with percentage weights
-async function fetchETFTopHoldingsWithAI(
-  isin: string,
-  etfName: string
-): Promise<TopHolding[]> {
-  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-  if (!lovableApiKey) {
-    console.log('LOVABLE_API_KEY not configured, skipping AI top holdings lookup for ETF');
-    return [];
-  }
-  
-  // First try provider scraping (more accurate)
-  const providerHoldings = await fetchETFTopHoldingsFromProvider(isin, etfName);
-  if (providerHoldings.length >= 5) {
-    return providerHoldings;
-  }
-  
-  console.log(`Provider scraping returned only ${providerHoldings.length} holdings, falling back to AI...`);
-  
-  const prompt = `For the ETF "${etfName}" (ISIN: ${isin}), provide the top 10-15 largest holdings.
-
-IMPORTANT RULES:
-1. Return the TOP 10-15 company holdings with their percentage weights
-2. Use the company NAME, not ticker (e.g., "Apple Inc." not "AAPL")
-3. Be accurate based on your knowledge of the index/ETF composition
-4. For broad market ETFs (MSCI World, S&P 500, etc.) include the major tech companies and largest cap stocks
-5. The percentages should be realistic (typically largest holding is 3-7% for diversified ETFs, higher for concentrated ETFs)
-
-Respond in this EXACT JSON array format only, no explanation:
-[{"name": "Apple Inc.", "percentage": 5.2}, {"name": "Microsoft Corp.", "percentage": 4.8}, {"name": "NVIDIA Corp.", "percentage": 4.1}]`;
-
-  try {
-    console.log(`Calling Lovable AI for ETF top holdings: ${etfName}...`);
-    
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 500,
-      }),
-    });
-    
-    if (!response.ok) {
-      console.error(`AI gateway error for holdings: ${response.status}`);
-      return providerHoldings; // Return whatever we got from provider
-    }
-    
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content?.trim() || '';
-    
-    // Parse JSON array response
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.error('AI did not return valid JSON array for ETF holdings');
-      return providerHoldings;
-    }
-    
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    // Validate: array of objects with name and percentage
-    const result: TopHolding[] = [];
-    
-    for (const item of parsed) {
-      if (typeof item.name === 'string' && typeof item.percentage === 'number' && item.percentage > 0) {
-        result.push({
-          name: item.name.trim(),
-          percentage: item.percentage,
-        });
-      }
-    }
-    
-    if (result.length > 0) {
-      console.log(`AI resolved ${result.length} top holdings for ${etfName}`);
-      return result.slice(0, 15); // Max 15 holdings
-    }
-    
-    console.log(`AI returned no valid holdings for ${etfName}`);
-    return providerHoldings;
-  } catch (error) {
-    console.error('Error fetching ETF top holdings with AI:', error);
-    return providerHoldings;
-  }
-}
-
 // Map countries to their primary currencies
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   'United States': 'USD',
@@ -760,18 +498,11 @@ function parsePercentage(text: string): number {
   return match ? parseFloat(match[1]) : 0;
 }
 
-interface TopHolding {
-  name: string;
-  percentage: number;
-  isin?: string;
-}
-
 async function scrapeJustETF(isin: string): Promise<{
   name: string;
   countryAllocations: Record<string, number>;
   currencyAllocations: Record<string, number>;
   sectorAllocations: Record<string, number>;
-  topHoldings: TopHolding[];
   isHedged: boolean;
 }> {
   const url = `https://www.justetf.com/en/etf-profile.html?isin=${isin}`;
@@ -805,7 +536,6 @@ async function scrapeJustETF(isin: string): Promise<{
   const countryAllocations: Record<string, number> = {};
   const currencyAllocations: Record<string, number> = {};
   const sectorAllocations: Record<string, number> = {};
-  const topHoldings: TopHolding[] = [];
   
   // ==================== COUNTRY ALLOCATIONS ====================
   // Method 1: Look for country rows with specific data-testid (most reliable)
@@ -977,22 +707,15 @@ async function scrapeJustETF(isin: string): Promise<{
   if (Object.keys(sectorAllocations).length === 0) {
     console.log('Trying Sector Method 3 (known sector search)...');
     const knownSectors = [
-      'Technology', 'Information Technology', 'IT',
-      'Financials', 'Financial Services',
-      'Healthcare', 'Health Care',
-      'Consumer Discretionary', 'Consumer Cyclical',
-      'Consumer Staples', 'Consumer Defensive',
-      'Industrials',
-      'Energy',
-      'Materials', 'Basic Materials',
-      'Utilities',
-      'Real Estate',
-      'Communication Services', 'Telecommunications',
-      'Other'
+      'Technology', 'Information Technology', 'Financials', 'Financial Services',
+      'Healthcare', 'Health Care', 'Consumer Discretionary', 'Consumer Cyclical',
+      'Consumer Staples', 'Consumer Defensive', 'Industrials', 'Energy',
+      'Materials', 'Basic Materials', 'Utilities', 'Real Estate',
+      'Communication Services', 'Telecommunications'
     ];
     
-    // Look for sector section context first
-    const sectorSectionMatch = html.match(/(?:sector|Sector|SECTOR)[^<]{0,50}allocation/i);
+    // Look for sector context section
+    const sectorSectionMatch = html.match(/(?:sectors|sector\s*allocation|by\s*sector)/i);
     if (sectorSectionMatch) {
       const sectionStart = sectorSectionMatch.index || 0;
       const sectionHtml = html.substring(sectionStart, sectionStart + 3000);
@@ -1050,99 +773,13 @@ async function scrapeJustETF(isin: string): Promise<{
   }
   
   console.log(`Final sector allocations for ${isin}:`, sectorAllocations);
-  
-  // ==================== TOP HOLDINGS ====================
-  console.log('Extracting top holdings...');
-  
-  // Method 1: Look for holdings rows with specific data-testid
-  const holdingsRowRegex = /data-testid="etf-holdings_components_row"[^>]*>[\s\S]*?(?:<a[^>]*>([^<]+)<\/a>|data-testid="tl_etf-holdings_components_value_name"[^>]*>([^<]+)<)[\s\S]*?(\d+[.,]\d+)\s*%/gi;
-  
-  while ((match = holdingsRowRegex.exec(html)) !== null) {
-    const holdingName = (match[1] || match[2] || '').trim();
-    const percentage = parsePercentage(match[3]);
-    
-    if (percentage > 0 && holdingName.length > 1 && topHoldings.length < 15) {
-      console.log(`Found holding: ${holdingName} = ${percentage}%`);
-      topHoldings.push({ name: holdingName, percentage });
-    }
-  }
-  
-  // Method 2: Alternative pattern for holdings
-  if (topHoldings.length === 0) {
-    console.log('Holdings Method 1 failed, trying Method 2...');
-    // Look for company names with percentages in holdings section
-    const altHoldingsRegex = /<tr[^>]*(?:holding|component)[^>]*>[\s\S]*?(?:<a[^>]*>([^<]+)<\/a>|<td[^>]*>([A-Za-z][^<]{2,40})<\/td>)[\s\S]*?(\d+[.,]\d+)\s*%/gi;
-    
-    while ((match = altHoldingsRegex.exec(html)) !== null) {
-      const holdingName = (match[1] || match[2] || '').trim();
-      const percentage = parsePercentage(match[3]);
-      
-      if (percentage > 0 && holdingName.length > 1 && topHoldings.length < 15) {
-        // Filter out sector names
-        const isSector = SECTOR_KEYWORDS.some(kw => 
-          holdingName.toUpperCase().includes(kw.toUpperCase())
-        );
-        // Filter out excluded names (countries, generic terms)
-        const isExcluded = EXCLUDED_HOLDING_NAMES.some(name =>
-          holdingName.toUpperCase() === name.toUpperCase()
-        );
-        if (!isSector && !isExcluded) {
-          console.log(`Found holding (Method 2): ${holdingName} = ${percentage}%`);
-          topHoldings.push({ name: holdingName, percentage });
-        }
-      }
-    }
-  }
-  
-  // Method 3: Look for known major company names
-  if (topHoldings.length === 0) {
-    console.log('Trying Holdings Method 3 (known companies search)...');
-    const knownCompanies = [
-      'Apple', 'Microsoft', 'NVIDIA', 'Alphabet', 'Amazon', 'Meta', 'Tesla',
-      'Berkshire Hathaway', 'JPMorgan', 'Johnson & Johnson', 'Visa', 'Mastercard',
-      'UnitedHealth', 'Eli Lilly', 'Broadcom', 'Home Depot', 'Procter & Gamble',
-      'Nestle', 'LVMH', 'Samsung', 'ASML', 'Novo Nordisk', 'AstraZeneca', 'Shell',
-      'Taiwan Semiconductor', 'TSMC', 'Tencent', 'Alibaba'
-    ];
-    
-    // Look for holdings section context
-    const holdingsSectionMatch = html.match(/(?:top\s*holdings|largest\s*positions|components)/i);
-    if (holdingsSectionMatch) {
-      const sectionStart = holdingsSectionMatch.index || 0;
-      const sectionHtml = html.substring(sectionStart, sectionStart + 5000);
-      
-      for (const company of knownCompanies) {
-        if (topHoldings.length >= 15) break;
-        
-        const companyPattern = new RegExp(
-          company.replace(/\s+/g, '\\s*') + '[^\\d]{0,50}?(\\d+[.,]\\d+)\\s*%',
-          'gi'
-        );
-        
-        const companyMatch = companyPattern.exec(sectionHtml);
-        if (companyMatch) {
-          const percentage = parsePercentage(companyMatch[1]);
-          if (percentage > 0 && percentage <= 20) {
-            console.log(`Found holding (Method 3): ${company} = ${percentage}%`);
-            topHoldings.push({ name: company, percentage });
-          }
-        }
-      }
-    }
-  }
-  
-  // Sort holdings by percentage descending
-  topHoldings.sort((a, b) => b.percentage - a.percentage);
-  
-  console.log(`Final top holdings for ${isin}:`, topHoldings);
-  console.log(`Parsed allocations for ${isin}:`, { countryAllocations, currencyAllocations, sectorAllocations, isHedged, topHoldingsCount: topHoldings.length });
+  console.log(`Parsed allocations for ${isin}:`, { countryAllocations, currencyAllocations, sectorAllocations, isHedged });
   
   return {
     name,
     countryAllocations,
     currencyAllocations,
     sectorAllocations,
-    topHoldings,
     isHedged,
   };
 }
@@ -1188,7 +825,7 @@ serve(async (req) => {
               countryAllocations: cached.country_allocations,
               currencyAllocations: cached.currency_allocations,
               sectorAllocations: cached.sector_allocations || {},
-              topHoldings: cached.top_holdings || [],
+              topHoldings: [], // No longer returning top holdings
               isHedged: cached.is_hedged,
               cached: true,
             }),
@@ -1212,19 +849,7 @@ serve(async (req) => {
       }
     }
 
-    // AI Fallback for ETFs without VALID top holdings data
-    // Check if scraped holdings are valid companies (not countries/sectors/generic terms)
-    if (!hasValidTopHoldings(data.topHoldings)) {
-      console.log(`No valid top holdings scraped for ${isin} (found ${data.topHoldings.length} invalid entries), trying Lovable AI...`);
-      const aiHoldings = await fetchETFTopHoldingsWithAI(isin, data.name);
-      
-      if (aiHoldings.length > 0) {
-        data.topHoldings = aiHoldings; // Replace invalid data with AI data
-        console.log(`AI populated top holdings for ${data.name}:`, aiHoldings);
-      }
-    }
-
-    // Upsert to cache
+    // Upsert to cache (no longer storing top_holdings)
     await supabase
       .from('etf_allocations')
       .upsert({
@@ -1233,7 +858,7 @@ serve(async (req) => {
         country_allocations: data.countryAllocations,
         currency_allocations: data.currencyAllocations,
         sector_allocations: data.sectorAllocations,
-        top_holdings: data.topHoldings,
+        top_holdings: [], // Empty array, no longer used
         is_hedged: data.isHedged,
         last_fetched_at: new Date().toISOString(),
       }, { onConflict: 'isin' });
@@ -1242,6 +867,7 @@ serve(async (req) => {
       JSON.stringify({
         isin,
         ...data,
+        topHoldings: [], // No longer returning top holdings
         cached: false,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
