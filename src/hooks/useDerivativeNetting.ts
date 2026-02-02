@@ -116,19 +116,24 @@ export function useDerivativeNetting(
         }
         // OTM covered call (strike >= underlyingPrice): don't subtract anything
       } else if (nakedPut) {
-        // This is a naked put - check if OTM for nettingExCCAndNP
+        // This is a naked put - check if ITM/OTM for nettingExCCAndNP
         const strikePrice = derivative.strike_price ?? 0;
         const underlyingPrice = nakedPut.underlying?.current_price ?? 0;
         
         // Include full netting value in nettingExCoveredCall (naked puts are always included)
         nettingExCoveredCall += nettingValue;
         
-        // For nettingExCCAndNP: exclude OTM naked puts (strike < underlying price)
+        // For nettingExCCAndNP: use intrinsic value for ITM, exclude OTM
         if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
-          // OTM naked put: don't include buyback cost (option will expire worthless)
-          // nettingValue is already negative for sold options, so not adding it = excluding the cost
+          // OTM naked put (strike < underlying): excluded (will expire worthless)
+        } else if (underlyingPrice > 0 && strikePrice >= underlyingPrice) {
+          // ITM naked put: subtract intrinsic value (consistent with covered call ITM)
+          // Formula: (strike - underlying) × contracts × 100 / exchange_rate
+          const contracts = Math.abs(quantity);
+          const intrinsicValue = (contracts * multiplier * (strikePrice - underlyingPrice)) / exchangeRate;
+          nettingExCCAndNP -= intrinsicValue;
         } else {
-          // ITM naked put or no underlying price available: include buyback cost
+          // No underlying price available: fallback to market buyback cost
           nettingExCCAndNP += nettingValue;
         }
       } else {
