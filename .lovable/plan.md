@@ -1,134 +1,139 @@
 
-# Piano: Aggiungere Percentuali all'Equity Exposure
+# Piano: Aggiungere Vista "Netting ex CC OTM e NP OTM" al Carousel Dashboard
 
 ## Obiettivo
 
-Implementare due miglioramenti nella vista Equity Exposure del Risk Analyzer:
+Aggiungere una nuova vista nel carousel della dashboard principale, posizionata dopo "Netting ex CC", che mostri il valore netto del portafoglio escludendo anche il costo di riacquisto delle Naked PUT OTM (out-of-the-money).
 
-1. **Card Principale**: Mostrare la percentuale del rischio totale rispetto al valore degli asset del portafoglio (grandTotal / Valore Asset Portfolio × 100)
+## Logica di Calcolo
 
-2. **Barra Naked PUT**: Aggiungere una percentuale accanto al valore del rischio Naked PUT che indica il rapporto con il valore totale dei Bond (totalNakedPutRisk / totalBondRisk × 100), con un tooltip esplicativo
+La nuova vista "Netting ex CC OTM e NP OTM" si basa sul valore "Netting ex CC" con una modifica:
+
+- **Netting ex CC**: Esclude le Covered Call OTM; per le ITM sottrae il valore intrinsico
+- **Netting ex CC OTM e NP OTM**: Come sopra, ma esclude anche il costo di riacquisto delle Naked PUT OTM
+
+### Definizione Naked PUT OTM
+Una PUT venduta (Naked PUT) e OTM quando:
+- **Strike < Prezzo Sottostante** (l'opzione scadra senza valore)
+
+Per le Naked PUT OTM, non ha senso spendere soldi per riacquistarle se il mercato e favorevole.
+
+### Formula
+
+```
+Netting ex CC OTM e NP OTM = Netting ex CC - Costo Riacquisto Naked PUT OTM
+```
+
+Il costo di riacquisto di una Naked PUT e:
+```
+Costo = (prezzo_corrente × quantita × 100) / cambio
+```
+
+Per le PUT vendute (quantita negativa), questo valore e gia negativo nel netting, quindi escludendole non le sottraiamo.
 
 ---
 
-## Analisi Tecnica
+## Implementazione Tecnica
 
-### Dati Disponibili
+### 1. Modificare `useDerivativeNetting.ts`
 
-Dall'analisi di `useRiskAnalysis.ts` e `riskCalculator.ts`:
-
-- `grandTotal`: Somma di tutti i rischi (disponibile in analysis)
-- `totalBondRisk`: Rischio totale obbligazioni (disponibile in analysis)
-- `totalNakedPutRisk`: Rischio Naked PUT (disponibile in analysis)
-
-Dall'analisi di `usePortfolio.ts`:
-
-- Il valore totale degli asset (esclusi derivati) e calcolato in `summary.totalValue`
-
-### Problema
-
-Attualmente `EquityExposureView` riceve solo l'oggetto `analysis: RiskAnalysis`. Per calcolare la percentuale rispetto al valore degli asset del portafoglio, e necessario passare anche il valore totale del portafoglio.
-
----
-
-## Implementazione
-
-### 1. Modificare l'interfaccia di EquityExposureView
-
-File: `src/components/risk/EquityExposureView.tsx`
+Aggiungere un nuovo campo `nettingExCCAndNP` al risultato:
 
 ```typescript
-interface EquityExposureViewProps {
-  analysis: RiskAnalysis;
-  portfolioTotalValue?: number;  // Nuovo: valore totale asset portafoglio
+export interface NettingResult {
+  nettingExCoveredCall: number;
+  nettingTotal: number;
+  nettingExCCAndNP: number;  // NUOVO: esclude anche Naked PUT OTM
 }
 ```
 
-### 2. Aggiungere la percentuale nella Card Principale
+**Logica**:
+1. Identificare le Naked PUT dalla categorizzazione esistente
+2. Per ogni Naked PUT, verificare se e OTM (strike < prezzo sottostante)
+3. Se OTM, non sottrarre il costo di riacquisto
+4. Se ITM o prezzo sottostante non disponibile, includere il costo di riacquisto
 
-Sotto "Somma di tutte le categorie di rischio", aggiungere:
+### 2. Modificare `ViewModeSelector.tsx`
 
-```typescript
-// Nel CardContent della card principale
-<div className="text-xs text-muted-foreground mt-1">
-  Somma di tutte le categorie di rischio
-</div>
-{portfolioTotalValue && portfolioTotalValue > 0 && (
-  <div className="text-xs text-muted-foreground mt-0.5">
-    ({((grandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
-  </div>
-)}
-```
-
-### 3. Aggiungere percentuale Naked PUT vs Bond
-
-Modificare l'array `riskCategories` per includere una percentuale opzionale vs bond:
+Aggiungere il nuovo tipo di vista:
 
 ```typescript
-const nakedPutVsBondPct = analysis.totalBondRisk > 0 
-  ? (analysis.totalNakedPutRisk / analysis.totalBondRisk) * 100 
-  : null;
+export type ViewMode = 'base' | 'netting_total' | 'netting_ex_cc' | 'netting_ex_cc_np';
+
+const VIEW_LABELS: Record<ViewMode, string> = {
+  netting_ex_cc: 'Netting ex CC',
+  netting_ex_cc_np: 'Netting ex CC OTM e NP OTM',  // NUOVO
+  netting_total: 'Netting Totale',
+  base: 'Base',
+};
+
+const VIEWS: ViewMode[] = ['base', 'netting_ex_cc', 'netting_ex_cc_np', 'netting_total'];
 ```
 
-Nel rendering della barra Naked PUT, aggiungere accanto al valore:
+### 3. Modificare `DynamicPortfolioChart.tsx`
+
+Aggiungere il rendering per la nuova vista:
 
 ```typescript
-// Per la categoria Naked PUT, aggiungere dopo il valore:
-{cat.label === 'Rischio Naked PUT' && nakedPutVsBondPct !== null && (
-  <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="text-xs text-red-400 ml-2 cursor-help">
-          [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs text-sm">
-        <p>Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio.</p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
-)}
+const CHART_TITLES: Record<ViewMode, string> = {
+  // ...existing
+  netting_ex_cc_np: 'Valore Portafoglio (Netting ex. CC OTM e NP OTM)',
+};
+
+// Nel renderChart():
+if (viewMode === 'netting_ex_cc_np') {
+  return (
+    <div className="flex flex-col">
+      <NettingChart
+        baseValue={summary?.totalValue ?? 0}
+        nettedValue={netting.nettingExCCAndNP}
+        label="Netting ex. CC OTM e NP OTM"
+      />
+      <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
+        Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto 
+        delle Naked PUT OTM (strike inferiore al prezzo del sottostante). 
+        La logica e che, se ho venduto una PUT e il prezzo del sottostante e sopra lo strike, 
+        l'opzione scadra senza valore e non ha senso spendere soldi per riacquistarla.
+      </p>
+    </div>
+  );
+}
 ```
 
-### 4. Passare portfolioTotalValue da RiskAnalyzer
+### 4. Modificare `StatsCards.tsx`
 
-File: `src/pages/RiskAnalyzer.tsx`
-
-Aggiungere l'import di `usePortfolio` e passare il valore:
+Aggiungere le label per la nuova vista:
 
 ```typescript
-// Aggiungere in RiskAnalyzer:
-const { summary } = usePortfolio();
-
-// Nel rendering:
-<EquityExposureView 
-  analysis={analysis} 
-  portfolioTotalValue={summary?.totalValue} 
-/>
+const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
+  // ...existing
+  netting_ex_cc_np: { 
+    patrimonio: 'Patrimonio (Netting ex CC e NP OTM)', 
+    pl: 'P/L (Netting ex CC e NP OTM)' 
+  },
+};
 ```
+
+E aggiornare `getPatrimonioValue()`:
+
+```typescript
+case 'netting_ex_cc_np': return netting.nettingExCCAndNP;
+```
+
+### 5. Modificare `Dashboard.tsx`
+
+Passare il nuovo valore di netting ai componenti figli.
 
 ---
 
-## Risultato Visivo
+## Schema Riassuntivo delle Viste
 
-### Card Principale
-
-```
-Esposizione Totale in Equity e Commodities (i)
-€ 1.234.567
-Somma di tutte le categorie di rischio
-(75.3% del valore asset)
-```
-
-### Barra Naked PUT
-
-```
-Rischio Naked PUT         € 45.000 (3.6%) [120% vs Bond]
-Strike × Contratti × 100
-[████████                    ]
-```
-
-Il testo "[120% vs Bond]" appare in rosso chiaro e al passaggio del mouse mostra il tooltip: "Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio."
+| Vista | Logica |
+|-------|--------|
+| Base | Valore asset (derivati esclusi) |
+| Netting ex CC | Base + tutti i derivati, escluse CC OTM; CC ITM al valore intrinseco |
+| **Netting ex CC OTM e NP OTM** | Come sopra, ma esclude anche NP OTM |
+| Netting Totale | Base + tutti i derivati a prezzo di mercato |
 
 ---
 
@@ -136,5 +141,8 @@ Il testo "[120% vs Bond]" appare in rosso chiaro e al passaggio del mouse mostra
 
 | File | Modifiche |
 |------|-----------|
-| `src/components/risk/EquityExposureView.tsx` | Aggiungere prop `portfolioTotalValue`, percentuale nella card principale, percentuale vs bond per Naked PUT con tooltip |
-| `src/pages/RiskAnalyzer.tsx` | Importare `usePortfolio`, passare `summary?.totalValue` a EquityExposureView |
+| `src/hooks/useDerivativeNetting.ts` | Aggiungere calcolo `nettingExCCAndNP` e identificazione Naked PUT OTM |
+| `src/components/dashboard/ViewModeSelector.tsx` | Aggiungere vista `netting_ex_cc_np` |
+| `src/components/dashboard/DynamicPortfolioChart.tsx` | Aggiungere rendering e descrizione per nuova vista |
+| `src/components/dashboard/StatsCards.tsx` | Aggiungere label e logica per nuova vista |
+| `src/components/dashboard/Dashboard.tsx` | Passare nuovo valore netting ai componenti |
