@@ -1,138 +1,116 @@
 
-# Piano: Correggere il Matching delle Protezioni nel Calcolo del Rischio
+# Piano: Correggere il Calcolo del Rischio con Protezioni Parziali
 
 ## Problema Identificato
 
-Le protezioni PUT acquistate su NVIDIA non vengono applicate nel calcolo del rischio perché la logica di matching tra opzioni e sottostanti è **incoerente** tra i due moduli:
+Il calcolo del rischio per AMD mostra un valore errato perché:
 
-### Logica in `derivativeStrategies.ts` (FUNZIONA)
+1. **La PUT 115 DEC/27 non viene usata come protezione** - Il codice raggruppa tutte le opzioni su AMD in "Altre Strategie" anziché riconoscere la PUT comprata come protezione
+2. **La formula usa un solo strike** - Il codice attuale usa solo lo strike più alto per tutte le azioni protette, senza considerare correttamente la protezione parziale
 
-Usa una logica sofisticata con `findUnderlyingStock()`:
-1. Normalizza i testi rimuovendo prefissi (AZ.), suffissi (CORP, INC, etc.)
-2. Usa matching per token (NVIDIA contiene NVIDIA)
-3. Gestisce alias speciali (GOOGLE = ALPHABET)
-4. Cerca per ticker se disponibile
+### Dati AMD dal Database
 
-**Risultato**: PUT su "NVIDIA CORP" viene correttamente associata a stock "NVDA"
+| Tipo | Strike | Quantità | Scadenza |
+|------|--------|----------|----------|
+| Stock | - | 700 azioni @ $236.73 | - |
+| PUT | 115 | +5 (comprata) | DEC/27 |
+| PUT | 240 | -2 (venduta) | FEB/26 |
+| PUT | 250 | -1 (venduta) | FEB/26 |
+| CALL | 230 | -2 (venduta) | FEB/26 |
+| CALL | 250 | -5 (venduta) | DEC/27 |
 
-### Logica in `riskCalculator.ts` (NON FUNZIONA)
+### Calcolo Corretto (Formula Utente)
 
-Usa una semplice comparazione di stringhe normalizzate:
-
-```typescript
-// Stock: usa ticker O description
-const stockKey = normalizeForMatching(stock.ticker || stock.description);
-// → "NVDA" per NVIDIA
-
-// PUT: usa underlying O description  
-const underlyingKey = normalizeForMatching(lp.option.underlying || lp.option.description);
-// → "NVIDIA" per PUT su NVIDIA
 ```
+Rischio = (Azioni_non_protette × Prezzo) + (Azioni_protette × (Prezzo - Strike))
 
-**Problema**: `"NVDA" !== "NVIDIA"` → protezioni non trovate!
-
-### Dati Reali dal Database
-
-**Portfolio Principale:**
-| Tipo | Descrizione | Quantità |
-|------|-------------|----------|
-| Stock | AZ.NVIDIA CORP (ticker: NVDA) | 1300 |
-| PUT | NVIDIA CORP PUT 90 DEC/27 | +9 (acquistata) |
-| PUT | NVIDIA CORP PUT 195 FEB/26 | -3 (venduta) |
-| PUT | NVIDIA CORP PUT 180 MAR/26 | -1 (venduta) |
-
-La PUT 90 DEC/27 (+9 contratti) dovrebbe proteggere 900 azioni, ma non viene riconosciuta.
+Per AMD con 5 PUT 115 (protezione per 500 azioni su 700):
+- Non protette: (700 - 500) × $236.73 = $47,346
+- Protette: 500 × ($236.73 - $115) = $60,865
+- Totale: $107,211 USD / 1.1869 = €90,360 EUR
+```
 
 ---
 
-## Soluzione
+## Causa Radice
 
-Modificare `src/lib/riskCalculator.ts` per usare una logica di matching coerente con `derivativeStrategies.ts`.
+### 1. Classificazione Derivati
 
-### Approccio
+In `derivativeStrategies.ts`, quando un sottostante ha **più opzioni**, tutte vengono raggruppate in "Altre Strategie". La PUT 115 comprata non viene estratta separatamente come protezione anche se il sottostante esiste.
 
-1. **Importare la logica di matching da derivativeStrategies** (evita duplicazione)
-2. **Cambiare il sistema di raggruppamento** delle protezioni per usare matching flessibile invece di stringhe esatte
+### 2. Formula Rischio (Problema Secondario)
+
+Anche se la formula algebrica è equivalente a quella corretta, il codice attuale:
+- Prende un solo strike (il più alto)
+- Non considera PUT multiple a strike diversi
+- Non bilancia correttamente protezione vs azioni
 
 ---
 
-## Dettagli Tecnici
+## Soluzione Proposta
 
-### 1. Esportare le utility di matching da derivativeStrategies.ts
+### Approccio 1: Estrarre le Long PUT dal calcolo strategie (CONSIGLIATO)
+
+Modificare `riskCalculator.ts` per cercare protezioni **direttamente dalle posizioni del portafoglio**, non solo dalla categoria `longPuts`:
 
 ```typescript
-// Rendere pubbliche le funzioni esistenti
-export function normalizeForMatching(text: string): string { ... }
-export function getCanonicalKey(text: string): string | null { ... }
-export function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined { ... }
+function findProtectivePuts(
+  stock: Position,
+  allPositions: Position[],
+  existingLongPuts: LongPutPosition[]
+): { puts: Position[], totalContracts: number } {
+  // 1. Cerca nelle longPuts classificate
+  const fromCategory = existingLongPuts.filter(lp => matchesUnderlying(lp.option, stock));
+  
+  // 2. Cerca PUT comprate non classificate nelle posizioni
+  const allDerivatives = allPositions.filter(p => 
+    p.asset_type === 'derivative' && 
+    p.option_type === 'put' && 
+    p.quantity > 0 // PUT comprata
+  );
+  const fromPositions = allDerivatives.filter(put => matchesUnderlying(put, stock));
+  
+  // Unisci evitando duplicati
+  const seenIds = new Set(fromCategory.map(lp => lp.option.id));
+  const additional = fromPositions.filter(p => !seenIds.has(p.id));
+  
+  const totalFromCategory = fromCategory.reduce((sum, lp) => sum + lp.contracts, 0);
+  const totalFromPositions = additional.reduce((sum, p) => sum + (p.quantity || 0), 0);
+  
+  return {
+    puts: [...fromCategory.map(lp => lp.option), ...additional],
+    totalContracts: totalFromCategory + totalFromPositions
+  };
+}
 ```
 
-### 2. Modificare calculateStockRisk in riskCalculator.ts
+### Approccio 2: Formula Rischio Corretta per Protezione Parziale
 
-**Prima** (matching esatto per stringa):
+Correggere la formula in `calculateStockRisk` per gestire correttamente le protezioni parziali con strike diversi:
+
 ```typescript
-const putsByUnderlying = new Map<string, LongPutPosition[]>();
-for (const lp of longPuts) {
-  const underlyingKey = normalizeForMatching(lp.option.underlying || lp.option.description);
-  putsByUnderlying.set(underlyingKey, [...]);
+// Trova protezioni per questo stock
+const { puts, totalContracts } = findProtectivePuts(stock, allPositions, longPuts);
+
+// Calcola azioni protette (max = azioni totali)
+const protectedShares = Math.min(totalContracts * 100, stock.quantity || 0);
+const unprotectedShares = (stock.quantity || 0) - protectedShares;
+
+// Se ci sono PUT multiple, usa lo strike medio ponderato
+let effectiveStrike = 0;
+if (puts.length > 0) {
+  const totalWeight = puts.reduce((sum, p) => sum + Math.abs(p.quantity || 0), 0);
+  effectiveStrike = puts.reduce((sum, p) => 
+    sum + (p.strike_price || 0) * Math.abs(p.quantity || 0), 0
+  ) / totalWeight;
 }
 
-// Lookup con stringa esatta - FALLISCE per NVDA vs NVIDIA
-const protectivePuts = putsByUnderlying.get(stockKey) || [];
-```
-
-**Dopo** (matching flessibile):
-```typescript
-// Per ogni stock, trova le protezioni con matching flessibile
-const protectivePuts = longPuts.filter(lp => {
-  // Usa la stessa logica di findUnderlyingStock ma al contrario:
-  // verifica se questa PUT protegge questo stock
-  return matchesUnderlying(lp.option, stock);
-});
-```
-
-### 3. Nuova funzione matchesUnderlying
-
-```typescript
-function matchesUnderlying(option: Position, stock: Position): boolean {
-  // 1. Normalizza i testi
-  const optionText = normalizeForMatching(
-    `${option.underlying || ''} ${option.description || ''}`
-  );
-  const stockText = normalizeForMatching(
-    `${stock.ticker || ''} ${stock.description || ''}`
-  );
-  
-  // 2. Match diretto
-  if (optionText === stockText) return true;
-  
-  // 3. Match per ticker contenuto
-  if (stock.ticker) {
-    const tickerNorm = normalizeForMatching(stock.ticker);
-    if (optionText.includes(tickerNorm)) return true;
-  }
-  
-  // 4. Match per token
-  const optionTokens = optionText.split(' ').filter(t => t.length > 2);
-  const stockTokens = stockText.split(' ').filter(t => t.length > 2);
-  
-  // Se il nome dello stock è contenuto nell'opzione
-  if (stockTokens.length > 0) {
-    const matchCount = stockTokens.filter(t => optionTokens.includes(t)).length;
-    // Per nomi singoli, basta 1 match; per nomi composti, almeno metà
-    const threshold = stockTokens.length === 1 ? 1 : Math.ceil(stockTokens.length / 2);
-    if (matchCount >= threshold) return true;
-  }
-  
-  // 5. Alias speciali (GOOGLE = ALPHABET, etc.)
-  const optionCanonical = getCanonicalKey(optionText);
-  const stockCanonical = getCanonicalKey(stockText);
-  if (optionCanonical && stockCanonical && optionCanonical === stockCanonical) {
-    return true;
-  }
-  
-  return false;
-}
+// Formula corretta:
+// Rischio = (Azioni_non_protette × Prezzo) + (Azioni_protette × max(0, Prezzo - Strike))
+const price = stock.current_price || 0;
+const unprotectedRisk = unprotectedShares * price;
+const protectedRisk = protectedShares * Math.max(0, price - effectiveStrike);
+const riskOriginal = unprotectedRisk + protectedRisk;
 ```
 
 ---
@@ -141,28 +119,99 @@ function matchesUnderlying(option: Position, stock: Position): boolean {
 
 | File | Modifica |
 |------|----------|
-| `src/lib/derivativeStrategies.ts` | Esportare `normalizeForMatching`, `getCanonicalKey`, `SPECIAL_ALIASES` |
-| `src/lib/riskCalculator.ts` | Importare utility da derivativeStrategies; riscrivere logica matching in `calculateStockRisk` |
+| `src/lib/riskCalculator.ts` | Aggiungere `findProtectivePuts`, modificare `calculateStockRisk` per passare `allPositions` e usare formula corretta |
+| `src/hooks/useRiskAnalysis.ts` | Passare `positions` a `analyzePortfolioRisk` per permettere lookup diretto delle PUT |
 
 ---
 
-## Risultato Atteso
+## Dettagli Implementazione
 
-Dopo la correzione, per NVIDIA:
+### 1. Modificare `analyzePortfolioRisk` per passare posizioni complete
 
-| Metrica | Prima | Dopo |
-|---------|-------|------|
-| Stock Value | €209,343 | €209,343 |
-| Protezioni trovate | 0 | 9 contratti |
-| Protected Value | €0 | €81,000 (9 × 90 × 100) |
-| **Risk** | €209,343 | **€128,343** |
+```typescript
+export function analyzePortfolioRisk(
+  positions: Position[],
+  categories: DerivativeCategories
+): RiskAnalysis {
+  // ...
+  const stockDetails = calculateStockRisk(stocks, categories.longPuts, positions);
+  // ...
+}
+```
 
-La protezione PUT 90 verrà riconosciuta e il rischio sarà ridotto di €81,000.
+### 2. Modificare firma `calculateStockRisk`
+
+```typescript
+export function calculateStockRisk(
+  stocks: Position[],
+  longPuts: LongPutPosition[],
+  allPositions: Position[]  // NUOVO parametro
+): StockRiskDetail[]
+```
+
+### 3. Implementare logica protezione corretta
+
+```typescript
+for (const stock of stocks) {
+  // ... existing code ...
+  
+  // Trova TUTTE le PUT comprate su questo stock (non solo quelle classificate)
+  const allDerivatives = allPositions.filter(p => p.asset_type === 'derivative');
+  const boughtPuts = allDerivatives.filter(p => 
+    p.option_type === 'put' && 
+    p.quantity > 0 && 
+    matchesUnderlying(p, stock)
+  );
+  
+  // Calcola contratti protezione totali
+  const protectionContracts = boughtPuts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+  const protectedShares = Math.min(protectionContracts * 100, stockQuantity);
+  const unprotectedShares = stockQuantity - protectedShares;
+  
+  // Calcola strike medio ponderato
+  let avgStrike = 0;
+  if (protectionContracts > 0) {
+    avgStrike = boughtPuts.reduce((sum, p) => 
+      sum + (p.strike_price || 0) * (p.quantity || 0), 0
+    ) / protectionContracts;
+  }
+  
+  // Formula corretta
+  const unprotectedRisk = unprotectedShares * stockPrice;
+  const protectedRisk = protectedShares * Math.max(0, stockPrice - avgStrike);
+  const riskOriginal = unprotectedRisk + protectedRisk;
+  
+  result.push({
+    // ...
+    protectionStrike: avgStrike > 0 ? avgStrike : null,
+    protectionContracts,
+    protectedValue: protectedShares * avgStrike, // Per retrocompatibilità UI
+    riskOriginal,
+    // ...
+  });
+}
+```
 
 ---
 
-## Note Aggiuntive
+## Risultato Atteso per AMD
 
-- La correzione si applica a **tutti** gli stock con opzioni, non solo NVIDIA
-- Il matching token-based già funziona in derivativeStrategies per la classificazione, quindi la logica è testata
-- La vista Equity, Currency e Sector Exposure beneficeranno tutte della correzione perché usano tutte `stockDetails` dal risk calculator
+| Metrica | Prima (Errato) | Dopo (Corretto) |
+|---------|----------------|-----------------|
+| Stock Value | $165,711 | $165,711 |
+| Protezioni trovate | 0 | 5 contratti |
+| Azioni protette | 0 | 500 |
+| Azioni non protette | 700 | 200 |
+| **Rischio USD** | $165,711 | **$108,211** |
+| **Rischio EUR** | €139,578 | **€91,183** |
+
+La riduzione del rischio sarà di circa €48,400 per AMD.
+
+---
+
+## Note Tecniche
+
+1. **Lookup diretto**: Cercando le PUT direttamente nelle posizioni evitiamo il problema della classificazione in "Altre Strategie"
+2. **Strike medio ponderato**: Se ci sono PUT a strike diversi, usiamo la media ponderata per i contratti
+3. **Retrocompatibilità**: I campi `protectedValue` e `protectionStrike` rimangono per l'UI esistente
+4. **Nessun cambio in derivativeStrategies**: La classificazione rimane invariata, solo il calcolo rischio viene corretto
