@@ -18,6 +18,36 @@ const SECTOR_KEYWORDS = [
   'Equity', 'Stock', 'Cash', 'Money Market'
 ];
 
+// Names to exclude from top holdings (countries, generic terms, sectors)
+const EXCLUDED_HOLDING_NAMES = [
+  // Generic/placeholder terms
+  'Other', 'Others', 'Cash', 'Liquidità', 'Liquidity', 'N/A', 'Unknown',
+  // Countries that might get scraped from wrong sections
+  'United States', 'USA', 'Japan', 'Canada', 'United Kingdom', 'UK',
+  'Germany', 'France', 'China', 'Switzerland', 'Australia', 'Netherlands',
+  'Sweden', 'Spain', 'Italy', 'Hong Kong', 'Taiwan', 'South Korea', 'India',
+  'Brazil', 'Mexico', 'Singapore', 'Denmark', 'Finland', 'Belgium', 'Ireland',
+  'Norway', 'South Africa', 'Austria', 'New Zealand', 'Israel', 'Poland',
+  // Sector names that might get scraped incorrectly
+  'Technology', 'Financials', 'Healthcare', 'Consumer Discretionary',
+  'Consumer Staples', 'Industrials', 'Energy', 'Materials', 'Utilities',
+  'Real Estate', 'Communication Services', 'Information Technology',
+];
+
+// Helper function to validate if holdings are real companies (not countries/sectors/generic terms)
+function hasValidTopHoldings(holdings: TopHolding[]): boolean {
+  if (holdings.length === 0) return false;
+  
+  // Check if at least 3 holdings are valid company names (not in excluded list)
+  const validHoldings = holdings.filter(h => 
+    !EXCLUDED_HOLDING_NAMES.some(invalid => 
+      h.name.toUpperCase() === invalid.toUpperCase()
+    )
+  );
+  
+  return validHoldings.length >= 3;
+}
+
 // Fallback sector allocations for major index ETFs (when scraping fails)
 const INDEX_SECTOR_FALLBACKS: Record<string, Record<string, number>> = {
   'MSCI WORLD': {
@@ -902,7 +932,11 @@ async function scrapeJustETF(isin: string): Promise<{
         const isSector = SECTOR_KEYWORDS.some(kw => 
           holdingName.toUpperCase().includes(kw.toUpperCase())
         );
-        if (!isSector) {
+        // Filter out excluded names (countries, generic terms)
+        const isExcluded = EXCLUDED_HOLDING_NAMES.some(name =>
+          holdingName.toUpperCase() === name.toUpperCase()
+        );
+        if (!isSector && !isExcluded) {
           console.log(`Found holding (Method 2): ${holdingName} = ${percentage}%`);
           topHoldings.push({ name: holdingName, percentage });
         }
@@ -1028,13 +1062,14 @@ serve(async (req) => {
       }
     }
 
-    // AI Fallback for ETFs without top holdings data
-    if (data.topHoldings.length === 0) {
-      console.log(`No top holdings scraped for ${isin}, trying Lovable AI...`);
+    // AI Fallback for ETFs without VALID top holdings data
+    // Check if scraped holdings are valid companies (not countries/sectors/generic terms)
+    if (!hasValidTopHoldings(data.topHoldings)) {
+      console.log(`No valid top holdings scraped for ${isin} (found ${data.topHoldings.length} invalid entries), trying Lovable AI...`);
       const aiHoldings = await fetchETFTopHoldingsWithAI(isin, data.name);
       
       if (aiHoldings.length > 0) {
-        data.topHoldings = aiHoldings;
+        data.topHoldings = aiHoldings; // Replace invalid data with AI data
         console.log(`AI populated top holdings for ${data.name}:`, aiHoldings);
       }
     }
