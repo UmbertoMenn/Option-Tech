@@ -11,6 +11,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
+import { usePortfolio } from '@/hooks/usePortfolio';
 import { useETFAllocations } from '@/hooks/useETFAllocations';
 import { useSectorMappings } from '@/hooks/useSectorMappings';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
@@ -32,6 +33,7 @@ export function RiskAnalyzer() {
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
+  const { summary } = usePortfolio();
   
   const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
@@ -223,7 +225,7 @@ export function RiskAnalyzer() {
             
             {/* Dynamic Content Based on View Mode */}
             {viewMode === 'equity' ? (
-              <EquityExposureView analysis={analysis} />
+              <EquityExposureView analysis={analysis} portfolioTotalValue={summary?.totalValue} />
             ) : viewMode === 'currency' ? (
               <ErrorBoundary title="Errore nella vista Currency Exposure">
                 <CurrencyExposureView 

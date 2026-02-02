@@ -28,14 +28,16 @@ import { formatEUR, formatNumber } from '@/lib/formatters';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
+  portfolioTotalValue?: number;
 }
 
-export function EquityExposureView({ analysis }: EquityExposureViewProps) {
+export function EquityExposureView({ analysis, portfolioTotalValue }: EquityExposureViewProps) {
   const {
     totalStockRisk,
     totalETFRisk,
     totalPureStockRisk,
     totalCommodityRisk,
+    totalBondRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
@@ -48,6 +50,11 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
   } = analysis;
 
   const getPercentage = (value: number) => grandTotal > 0 ? (value / grandTotal) * 100 : 0;
+  
+  // Percentuale rischio Naked PUT rispetto ai Bond
+  const nakedPutVsBondPct = totalBondRisk > 0 
+    ? (totalNakedPutRisk / totalBondRisk) * 100 
+    : null;
 
   // Separate ETF and pure stock details
   const etfDetails = stockDetails.filter(s => s.isETF);
@@ -145,6 +152,11 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
+            {portfolioTotalValue && portfolioTotalValue > 0 && (
+              <div className="text-xs text-muted-foreground mt-0.5">
+                ({((grandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -227,9 +239,23 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                   </div>
                   <span className="text-xs text-muted-foreground ml-6">{cat.description}</span>
                 </div>
-                <div className="text-right">
+                <div className="text-right flex items-center gap-1">
                   <span className="font-semibold">{formatEUR(cat.value)}</span>
                   <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
+                  {cat.label === 'Rischio Naked PUT' && nakedPutVsBondPct !== null && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-xs text-red-400 ml-1 cursor-help">
+                            [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-sm">
+                          <p>Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                 </div>
               </div>
               <div className="h-5 bg-muted rounded-full overflow-hidden">
