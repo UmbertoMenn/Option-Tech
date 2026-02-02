@@ -1,135 +1,91 @@
 
-# Piano: Correggere Estrazione Top Holdings ETF
+# Piano: Correggere Fetch ETF Allocations per Equity View
 
 ## Problema Identificato
 
-Lo scraping delle top holdings nell'edge function `fetch-etf-allocation` estrae dati **errati**:
-- "Method 2" cattura righe con percentuali da sezioni errate (paesi, "Other")
-- Esempio: `topHoldings: [{ name: "Other", percentage: 37.15 }, { name: "Japan", percentage: 5.41 }]`
-- Poiché l'array non è vuoto, il **fallback AI non viene mai attivato**
+Lo screenshot mostra che NVIDIA ha solo i badge Stock e PUT, ma **nessun badge ETF**, nonostante NVIDIA dovrebbe apparire nelle top holdings di ETF come iShares MSCI World (3.44%).
 
-I log confermano il problema:
+### Diagnosi
+
+Il problema NON è nell'edge function (funziona correttamente - popola le top holdings via AI). Il problema è nel **timing del fetch**:
+
+```typescript
+// src/pages/RiskAnalyzer.tsx, linea 70
+if (etfIsins.length > 0 && (viewMode === 'currency' || viewMode === 'sector') && !hasFetchedETFs) {
+  setHasFetchedETFs(true);
+  fetchMultipleAllocations(etfIsins);
+}
 ```
-Holdings Method 1 failed, trying Method 2...
-Found holding (Method 2): Other = 37.15%
-Found holding (Method 2): Japan = 5.41%
-Found holding (Method 2): Canada = 2.94%
-```
+
+Questo codice fetcha le allocazioni ETF **SOLO** quando l'utente passa alla vista "Currency" o "Sector", ma **MAI** per la vista "Equity" (che è quella di default e contiene "Holdings Consolidate").
+
+Quando l'utente è sulla vista Equity:
+- `allocations` = `{}` (vuoto)
+- `calculateConsolidatedTopHoldings()` non trova nessuna top holding ETF
+- Nessun badge ETF viene mostrato
 
 ## Soluzione
 
-### Modifica 1: Validare le Top Holdings prima del Fallback AI
+### Modifica 1: Fetch ETF allocations anche per equity view
 
-**File**: `supabase/functions/fetch-etf-allocation/index.ts`
+**File**: `src/pages/RiskAnalyzer.tsx`
 
-Invece di controllare solo se `topHoldings.length === 0`, verificare che le holdings siano **valide** (non contengano paesi o parole generiche):
-
-```typescript
-// Helper function to validate if holdings are real companies
-function hasValidTopHoldings(holdings: TopHolding[]): boolean {
-  if (holdings.length === 0) return false;
-  
-  const invalidNames = [
-    'Other', 'Others', 'Cash', 'Liquidità',
-    // Countries that might get scraped incorrectly
-    'United States', 'USA', 'Japan', 'Canada', 'United Kingdom', 'UK',
-    'Germany', 'France', 'China', 'Switzerland', 'Australia',
-    // Generic terms
-    'Technology', 'Financials', 'Healthcare', 'Energy', 'Materials'
-  ];
-  
-  // Check if at least 3 holdings are valid company names (not in invalid list)
-  const validHoldings = holdings.filter(h => 
-    !invalidNames.some(invalid => 
-      h.name.toUpperCase() === invalid.toUpperCase()
-    )
-  );
-  
-  return validHoldings.length >= 3;
-}
-```
-
-Poi modificare la condizione per il fallback AI (linea ~1032):
+Modificare la condizione nel `useEffect` per includere anche `viewMode === 'equity'`:
 
 ```typescript
-// AI Fallback for ETFs without VALID top holdings data
-if (!hasValidTopHoldings(data.topHoldings)) {
-  console.log(`No valid top holdings scraped for ${isin} (found ${data.topHoldings.length} invalid entries), trying Lovable AI...`);
-  const aiHoldings = await fetchETFTopHoldingsWithAI(isin, data.name);
-  
-  if (aiHoldings.length > 0) {
-    data.topHoldings = aiHoldings; // Replace invalid data with AI data
-    console.log(`AI populated top holdings for ${data.name}:`, aiHoldings);
+// Fetch ETF allocations for ALL views that need them
+useEffect(() => {
+  if (etfIsins.length > 0 && !hasFetchedETFs) {
+    setHasFetchedETFs(true);
+    fetchMultipleAllocations(etfIsins);
   }
-}
+}, [etfIsins, hasFetchedETFs, fetchMultipleAllocations]);
 ```
 
-### Modifica 2: Migliorare Method 2 Holdings Scraping
-
-Aggiungere un filtro più rigoroso nel Method 2 per escludere paesi e termini generici:
+Oppure, più specificamente:
 
 ```typescript
-// Additional filter: exclude country names and generic terms
-const EXCLUDED_HOLDING_NAMES = [
-  'Other', 'Others', 'United States', 'USA', 'Japan', 'UK', 
-  'United Kingdom', 'Canada', 'Germany', 'France', 'China',
-  'Switzerland', 'Australia', 'Netherlands', 'Sweden', 'Spain'
-];
-
-// In Method 2 loop:
-const isExcluded = EXCLUDED_HOLDING_NAMES.some(name =>
-  holdingName.toUpperCase() === name.toUpperCase()
-);
-if (!isSector && !isExcluded) {
-  topHoldings.push({ name: holdingName, percentage });
-}
+// Fetch ETF allocations for equity, currency, and sector views
+useEffect(() => {
+  if (etfIsins.length > 0 && 
+      (viewMode === 'equity' || viewMode === 'currency' || viewMode === 'sector') && 
+      !hasFetchedETFs) {
+    setHasFetchedETFs(true);
+    fetchMultipleAllocations(etfIsins);
+  }
+}, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
 ```
+
+Dato che `equity` è la vista di default, la seconda forma è equivalente alla prima in pratica, ma è più esplicita.
 
 ## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `supabase/functions/fetch-etf-allocation/index.ts` | Aggiungere validazione holdings + migliorare filtri Method 2 |
+| `src/pages/RiskAnalyzer.tsx` | Aggiungere `viewMode === 'equity'` alla condizione del fetch ETF |
 
 ## Risultato Atteso
 
-Dopo le modifiche, l'edge function per `IE00B4L5Y983` (iShares Core MSCI World) dovrebbe:
+Dopo la modifica:
 
-1. **Rilevare** che le holdings estratte ("Other", "Japan", "Canada") sono **invalide**
-2. **Attivare** il fallback AI per ottenere le vere top holdings
-3. **Restituire** holdings come:
-   ```json
-   {
-     "topHoldings": [
-       {"name": "Apple Inc.", "percentage": 5.2},
-       {"name": "Microsoft Corp.", "percentage": 4.8},
-       {"name": "NVIDIA Corp.", "percentage": 4.1},
-       {"name": "Amazon.com Inc.", "percentage": 2.8},
-       ...
-     ]
-   }
-   ```
+1. Quando l'utente apre Risk Analyzer (default view = equity), le allocazioni ETF vengono caricate immediatamente
+2. NVIDIA mostrerà:
+   - **Stock**: €140.331
+   - **PUT**: €63.910
+   - **ETF**: ~€XXX (calcolato da iShares MSCI World 3.44% di €YYY)
+3. Il totale includerà correttamente l'esposizione via ETF
+4. Il breakdown dialog mostrerà le fonti ETF (es. "iShares Core MSCI World UCITS ETF - 3.44%")
 
-## Sequenza di Implementazione
+## Verifica
 
-1. Aggiungere helper `hasValidTopHoldings()`
-2. Aggiungere lista `EXCLUDED_HOLDING_NAMES` 
-3. Modificare filtro nel Method 2 per escludere paesi
-4. Modificare condizione fallback AI per usare `hasValidTopHoldings()`
-5. Deploy edge function
-6. Testare con `forceRefresh: true` su `IE00B4L5Y983`
-7. Verificare che le top holdings siano aziende reali (Apple, Microsoft, etc.)
+Dopo l'implementazione:
+1. Aprire Risk Analyzer 
+2. Vista default = Equity Exposure
+3. Verificare che le Holdings Consolidate mostrino badge ETF per titoli presenti negli ETF
+4. Cliccare su NVIDIA per verificare che nel breakdown appaiano le fonti ETF (es. iShares MSCI World)
 
-## Test di Verifica
+## Note Tecniche
 
-Dopo il deploy, chiamare:
-```bash
-curl -X POST ... -d '{"isin": "IE00B4L5Y983", "forceRefresh": true}'
-```
-
-Aspettarsi nei log:
-```
-No valid top holdings scraped for IE00B4L5Y983 (found 4 invalid entries), trying Lovable AI...
-Calling Lovable AI for ETF top holdings: iShares Core MSCI World UCITS ETF USD (Acc)...
-AI resolved 15 top holdings for iShares Core MSCI World UCITS ETF USD (Acc)
-```
+- Il fetch ETF usa batching (3 alla volta) con delay 500ms per evitare rate limiting
+- I dati vengono cachati in memoria (`allocations` state) e nel database (`etf_allocations` table)
+- La prima volta potrebbero volerci alcuni secondi per fetchare tutti gli ETF (il loader è già gestito con `isLoadingETFData`)
