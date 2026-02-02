@@ -595,8 +595,16 @@ export function calculateConsolidatedTopHoldings(
   }
   
   // 3. Add Naked PUT risk
+  console.log('[ConsolidatedHoldings] Naked PUT details:', analysis.nakedPutDetails.map(np => ({
+    underlying: np.underlying,
+    normalizedName: normalizeHoldingName(np.underlying),
+    strike: np.strike,
+    riskEUR: np.riskEUR
+  })));
+  
   for (const np of analysis.nakedPutDetails) {
     const holding = getOrCreateHolding(np.underlying);
+    console.log(`[ConsolidatedHoldings] Adding PUT ${np.strike} for "${np.underlying}" to holding "${holding.name}"`);
     
     holding.nakedPutRisk += np.riskEUR;
     holding.sources.push({

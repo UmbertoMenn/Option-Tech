@@ -76,6 +76,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       setSelectedId(savedId);
       localStorage.setItem(SELECTED_PORTFOLIO_KEY, savedId); // Conferma
     } else {
+      // Pulizia localStorage orfano
+      if (savedId) {
+        console.log('Removing orphan portfolio ID from localStorage:', savedId);
+        localStorage.removeItem(SELECTED_PORTFOLIO_KEY);
+      }
       // Fallback: primo della lista (ordine deterministico)
       const fallbackId = portfolios[0].id;
       setSelectedId(fallbackId);
