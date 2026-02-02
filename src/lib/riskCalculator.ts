@@ -175,54 +175,85 @@ function matchesUnderlying(option: Position, stock: Position): boolean {
 
 /**
  * Calculate stock risk taking into account protective puts.
- * Formula:
- * - Senza protezione: Quantità × Prezzo
- * - Con protezione: Valore Azioni - (Strike PUT × Contratti × 100)
+ * Formula for partial protection:
+ * - Risk = (Unprotected Shares × Price) + (Protected Shares × max(0, Price - Strike))
+ * 
+ * This searches for bought PUTs directly in all positions, bypassing
+ * the derivative classification which may group them into "Altre Strategie".
  */
 export function calculateStockRisk(
   stocks: Position[],
-  longPuts: LongPutPosition[]
+  longPuts: LongPutPosition[],
+  allPositions: Position[]
 ): StockRiskDetail[] {
   const result: StockRiskDetail[] = [];
   
   // Include only stocks and ETFs (commodities are calculated separately)
   const stockAssetTypes = ['stock', 'etf'];
   
+  // Pre-filter all bought PUTs from positions (quantity > 0 = bought)
+  const allBoughtPuts = allPositions.filter(p => 
+    p.asset_type === 'derivative' && 
+    p.option_type === 'put' && 
+    (p.quantity || 0) > 0
+  );
+  
   for (const stock of stocks) {
     if (!stockAssetTypes.includes(stock.asset_type)) continue;
     
-    const stockValue = (stock.quantity || 0) * (stock.current_price || 0);
+    const stockQuantity = stock.quantity || 0;
+    const stockPrice = stock.current_price || 0;
+    const stockValue = stockQuantity * stockPrice;
     const exchangeRate = getEffectiveExchangeRate(stock);
     const currency = stock.currency || 'USD';
     
-    // Find protective puts for this stock using flexible matching
-    const protectivePuts = longPuts.filter(lp => matchesUnderlying(lp.option, stock));
+    // Find ALL bought PUTs for this stock from positions (bypasses classification)
+    const boughtPutsFromPositions = allBoughtPuts.filter(put => matchesUnderlying(put, stock));
     
-    let protectionStrike: number | null = null;
-    let protectionContracts = 0;
-    let protectedValue = 0;
+    // Also check classified longPuts (and avoid duplicates)
+    const classifiedPuts = longPuts.filter(lp => matchesUnderlying(lp.option, stock));
+    const classifiedPutIds = new Set(classifiedPuts.map(lp => lp.option.id));
     
-    if (protectivePuts.length > 0) {
-      // Use the highest strike put as protection (most protective)
-      const sortedPuts = [...protectivePuts].sort((a, b) => 
-        (b.option.strike_price || 0) - (a.option.strike_price || 0)
+    // Merge: use classified + additional from positions not already counted
+    const additionalPuts = boughtPutsFromPositions.filter(p => !classifiedPutIds.has(p.id));
+    
+    // Calculate total protection contracts
+    const contractsFromClassified = classifiedPuts.reduce((sum, lp) => sum + lp.contracts, 0);
+    const contractsFromPositions = additionalPuts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+    const protectionContracts = contractsFromClassified + contractsFromPositions;
+    
+    // Calculate weighted average strike (if multiple PUTs at different strikes)
+    let avgStrike = 0;
+    if (protectionContracts > 0) {
+      const classifiedWeightedSum = classifiedPuts.reduce((sum, lp) => 
+        sum + (lp.option.strike_price || 0) * lp.contracts, 0
       );
-      const mainPut = sortedPuts[0];
-      protectionStrike = mainPut.option.strike_price || null;
-      protectionContracts = protectivePuts.reduce((sum, p) => sum + p.contracts, 0);
-      protectedValue = (protectionStrike || 0) * protectionContracts * 100;
+      const positionsWeightedSum = additionalPuts.reduce((sum, p) => 
+        sum + (p.strike_price || 0) * (p.quantity || 0), 0
+      );
+      avgStrike = (classifiedWeightedSum + positionsWeightedSum) / protectionContracts;
     }
     
-    // Risk = Stock Value - Protected Value (minimum 0)
-    const riskOriginal = Math.max(0, stockValue - protectedValue);
+    // Calculate protected vs unprotected shares
+    const protectedShares = Math.min(protectionContracts * 100, stockQuantity);
+    const unprotectedShares = stockQuantity - protectedShares;
+    
+    // Formula corretta per protezione parziale:
+    // Risk = (Azioni_non_protette × Prezzo) + (Azioni_protette × max(0, Prezzo - Strike))
+    const unprotectedRisk = unprotectedShares * stockPrice;
+    const protectedRisk = protectedShares * Math.max(0, stockPrice - avgStrike);
+    const riskOriginal = unprotectedRisk + protectedRisk;
     const riskEUR = riskOriginal / exchangeRate;
+    
+    // For UI compatibility, protectedValue represents the floor value
+    const protectedValue = protectedShares * avgStrike;
     
     result.push({
       underlying: stock.ticker || stock.description,
       stockValue,
-      stockQuantity: stock.quantity || 0,
-      stockPrice: stock.current_price || 0,
-      protectionStrike,
+      stockQuantity,
+      stockPrice,
+      protectionStrike: avgStrike > 0 ? avgStrike : null,
       protectionContracts,
       protectedValue,
       riskOriginal,
@@ -452,7 +483,8 @@ export function analyzePortfolioRisk(
   const bonds = positions.filter(p => p.asset_type === 'bond');
   
   // Calculate each risk category
-  const stockDetails = calculateStockRisk(stocks, categories.longPuts);
+  // Pass allPositions to calculateStockRisk for direct PUT lookup
+  const stockDetails = calculateStockRisk(stocks, categories.longPuts, positions);
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
   const nakedPutDetails = calculateNakedPutRisk(categories.nakedPuts);
