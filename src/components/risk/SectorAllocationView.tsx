@@ -112,7 +112,7 @@ export function SectorAllocationView({
                       <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="max-w-xs text-xs">
-                      <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale.</p>
+                      <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale, così come i bond.</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -172,7 +172,7 @@ export function SectorAllocationView({
             <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
               <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
               <span className="text-xs text-blue-600 dark:text-blue-400">
-                Commodities e Protezioni (Long Put) escluse dall'analisi settoriale
+                Commodities, Bond e Protezioni (Long Put) escluse dall'analisi settoriale
               </span>
             </div>
           </CardContent>
