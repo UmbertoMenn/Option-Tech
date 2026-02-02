@@ -15,7 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Info, Loader2 } from 'lucide-react';
+import { Info, Loader2, ChevronRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
@@ -30,7 +30,8 @@ import {
 import { RiskAnalysis } from '@/lib/riskCalculator';
 import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ETFAllocation } from '@/hooks/useETFAllocations';
-import { calculateConsolidatedTopHoldings } from '@/lib/sectorExposure';
+import { calculateConsolidatedTopHoldings, ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
+import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
@@ -46,6 +47,8 @@ export function EquityExposureView({
   isLoadingETFData = false,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
+  const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   
   const {
     totalStockRisk,
@@ -754,7 +757,11 @@ export function EquityExposureView({
                 return (
                   <div
                     key={holding.name}
-                    className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+                    className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setSelectedHolding(holding);
+                      setBreakdownOpen(true);
+                    }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -792,10 +799,11 @@ export function EquityExposureView({
                           </div>
                         </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
+                      <div className="text-right flex-shrink-0 flex items-center gap-2">
                         <div className="font-semibold text-primary">
                           {formatEUR(holding.totalExposure)}
                         </div>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                       </div>
                     </div>
                   </div>
@@ -805,6 +813,14 @@ export function EquityExposureView({
           )}
         </CardContent>
       </Card>
+
+      {/* Holding Breakdown Dialog */}
+      <HoldingBreakdownDialog
+        holding={selectedHolding}
+        open={breakdownOpen}
+        onOpenChange={setBreakdownOpen}
+        includeProtections={includeProtections}
+      />
 
       {/* Empty State */}
       {!hasData && (

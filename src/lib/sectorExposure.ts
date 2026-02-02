@@ -464,49 +464,156 @@ export function calculateTopHoldings(
 }
 
 /**
+ * Corporate stopwords that cause false matches between different companies.
+ * These are removed during key generation to prevent "ALIBABA GROUP HOLDING"
+ * from matching "CK HUTCHISON HOLDINGS" just because they share "HOLDING".
+ */
+const CORPORATE_STOPWORDS = new Set([
+  'GROUP', 'HOLDING', 'HOLDINGS', 'COMPANY', 'COMPANIES', 'CO', 'CORP', 'CORPORATION',
+  'LIMITED', 'LTD', 'INC', 'INCORPORATED', 'PLC', 'AG', 'SA', 'SPA', 'NV', 'BV',
+  'SE', 'GMBH', 'LLC', 'LP', 'LLP', 'ADR', 'ADS', 'CLASS', 'CL', 'SHS', 'SHARES',
+  'COMMON', 'ORDINARY', 'PREFERRED', 'PREF', 'ORD', 'THE', 'OF', 'AND', '&'
+]);
+
+/**
  * Normalizes holding names for matching across different sources
  * Handles variations like "NVIDIA Corp" vs "NVDA" vs "NVIDIA CORP"
  */
-function normalizeHoldingName(name: string): string {
+export function normalizeHoldingName(name: string): string {
   // Rimuovi prefisso "AZ." comune nelle descrizioni stock italiane
   let normalized = name.replace(/^AZ\./i, '').trim();
   return normalizeForMatching(normalized);
 }
 
 /**
- * Checks if two holding names represent the same company
+ * Generates a distinctive canonical key for a holding name by:
+ * 1. Normalizing the name
+ * 2. Tokenizing
+ * 3. Removing corporate stopwords
+ * 4. Keeping only significant tokens (length >= 3, not pure numbers)
+ * 5. Sorting for consistency
+ * 
+ * Returns null if no significant tokens remain (requires exact match only)
  */
-function isSameHolding(name1: string, name2: string): boolean {
+export function getHoldingKey(name: string): string | null {
+  // First check canonical aliases (e.g., ALPHABET -> GOOGLE)
+  const canonical = getCanonicalKey(name);
+  if (canonical) {
+    return `CANONICAL:${canonical}`;
+  }
+  
+  const normalized = normalizeHoldingName(name);
+  const tokens = normalized.toUpperCase().split(/\s+/);
+  
+  // Filter out stopwords and insignificant tokens
+  const significantTokens = tokens.filter(token => {
+    // Skip short tokens
+    if (token.length < 3) return false;
+    // Skip pure numbers
+    if (/^\d+$/.test(token)) return false;
+    // Skip stopwords
+    if (CORPORATE_STOPWORDS.has(token)) return false;
+    return true;
+  });
+  
+  // If no significant tokens remain, return null (exact match only)
+  if (significantTokens.length === 0) {
+    return null;
+  }
+  
+  // Sort for consistency and join
+  return significantTokens.sort().join('|');
+}
+
+/**
+ * Checks if two holding names represent the same company using the new key-based approach.
+ * This is more conservative than the old approach to prevent false merges.
+ */
+export function isSameHolding(name1: string, name2: string): boolean {
   const norm1 = normalizeHoldingName(name1);
   const norm2 = normalizeHoldingName(name2);
   
-  // Direct match
+  // Direct exact match after normalization
   if (norm1 === norm2) return true;
   
-  // Check special aliases
-  const canon1 = getCanonicalKey(name1);
-  const canon2 = getCanonicalKey(name2);
-  if (canon1 && canon2 && canon1 === canon2) return true;
+  // Get holding keys
+  const key1 = getHoldingKey(name1);
+  const key2 = getHoldingKey(name2);
   
-  // Token-based matching
-  const tokens1 = norm1.split(' ').filter(t => t.length >= 2);
-  const tokens2 = norm2.split(' ').filter(t => t.length >= 2);
-  
-  // For single-word names, require exact match of the main token
-  if (tokens1.length === 1 || tokens2.length === 1) {
-    const shortToken = tokens1.length === 1 ? tokens1[0] : tokens2[0];
-    const otherTokens = tokens1.length === 1 ? tokens2 : tokens1;
-    return otherTokens.some(t => t === shortToken || t.includes(shortToken) || shortToken.includes(t));
+  // If either has no key (no significant tokens), require exact match
+  if (!key1 || !key2) {
+    return norm1 === norm2;
   }
   
-  // For multi-word names, require significant overlap
-  const shared = tokens1.filter(t => tokens2.includes(t)).length;
-  const minTokens = Math.min(tokens1.length, tokens2.length);
-  return shared >= Math.max(1, minTokens - 1);
+  // Check canonical keys first
+  if (key1.startsWith('CANONICAL:') && key2.startsWith('CANONICAL:')) {
+    return key1 === key2;
+  }
+  
+  // If one is canonical and other isn't, check if tokens match
+  if (key1.startsWith('CANONICAL:') || key2.startsWith('CANONICAL:')) {
+    const canonicalKey = key1.startsWith('CANONICAL:') ? key1 : key2;
+    const otherName = key1.startsWith('CANONICAL:') ? name2 : name1;
+    const canonicalName = canonicalKey.replace('CANONICAL:', '');
+    const otherNorm = normalizeHoldingName(otherName).toUpperCase();
+    return otherNorm.includes(canonicalName.toUpperCase());
+  }
+  
+  // Parse token keys
+  const tokens1 = key1.split('|');
+  const tokens2 = key2.split('|');
+  
+  // Single token case: require exact token match
+  if (tokens1.length === 1 || tokens2.length === 1) {
+    const singleToken = tokens1.length === 1 ? tokens1[0] : tokens2[0];
+    const otherTokens = tokens1.length === 1 ? tokens2 : tokens1;
+    // Single token must exactly match one of the other tokens
+    return otherTokens.includes(singleToken);
+  }
+  
+  // Multi-token case: require high overlap (Jaccard >= 0.6)
+  // OR all tokens from shorter set are in longer set
+  const set1 = new Set(tokens1);
+  const set2 = new Set(tokens2);
+  const intersection = tokens1.filter(t => set2.has(t));
+  const union = new Set([...tokens1, ...tokens2]);
+  const jaccard = intersection.length / union.size;
+  
+  // High overlap
+  if (jaccard >= 0.6) return true;
+  
+  // All tokens from shorter contained in longer
+  const shorter = tokens1.length <= tokens2.length ? tokens1 : tokens2;
+  const longer = tokens1.length <= tokens2.length ? set2 : set1;
+  const allContained = shorter.every(t => longer.has(t));
+  
+  return allContained && shorter.length >= 1;
 }
 
 export interface ConsolidatedTopHoldingsOptions {
   includeProtections: boolean;
+}
+
+// Extended interface to include source details for breakdown
+export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
+  nakedPutDetails: Array<{
+    strike: number;
+    contracts: number;
+    riskEUR: number;
+    expiry: string;
+  }>;
+  etfDetails: Array<{
+    etfName: string;
+    holdingPercentage: number;
+    exposure: number;
+  }>;
+  stockDetails: Array<{
+    quantity: number;
+    price: number;
+    currency: string;
+    value: number;
+    valueWithProtection: number;
+  }>;
 }
 
 /**
@@ -514,39 +621,69 @@ export interface ConsolidatedTopHoldingsOptions {
  * 1. ETF holdings (top 10 from each ETF, weighted by ETF value)
  * 2. Direct stock positions (with or without protection based on toggle)
  * 3. Naked PUT positions
+ * 
+ * Uses key-based Map for deterministic, stable aggregation (no more O(N²) scan).
  */
 export function calculateConsolidatedTopHoldings(
   analysis: RiskAnalysis,
   etfAllocations: Record<string, ETFAllocation>,
   options: ConsolidatedTopHoldingsOptions,
   limit: number = 100 // Show all holdings by default
-): ConsolidatedHolding[] {
-  const holdingsMap = new Map<string, ConsolidatedHolding>();
+): ConsolidatedHoldingWithDetails[] {
+  // Key-based map for stable aggregation
+  const holdingsByKey = new Map<string, ConsolidatedHoldingWithDetails>();
+  // Fallback map for names without distinctive keys (exact match only)
+  const holdingsByExactName = new Map<string, ConsolidatedHoldingWithDetails>();
   
   // Pattern per riconoscere ETF
   const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
   
-  const getOrCreateHolding = (name: string): ConsolidatedHolding => {
-    // Check if we already have this holding under a different name variation
-    for (const [existingName, holding] of holdingsMap.entries()) {
-      if (isSameHolding(name, existingName)) {
-        return holding;
-      }
-    }
-    
-    // Create new holding
+  const createHolding = (name: string): ConsolidatedHoldingWithDetails => ({
+    name: name.trim(),
+    etfExposure: 0,
+    stockRisk: 0,
+    stockRiskWithProtection: 0,
+    nakedPutRisk: 0,
+    totalExposure: 0,
+    sources: [],
+    nakedPutDetails: [],
+    etfDetails: [],
+    stockDetails: [],
+  });
+  
+  const getOrCreateHolding = (name: string): ConsolidatedHoldingWithDetails => {
+    const key = getHoldingKey(name);
     const cleanName = name.trim();
-    const holding: ConsolidatedHolding = {
-      name: cleanName,
-      etfExposure: 0,
-      stockRisk: 0,
-      stockRiskWithProtection: 0,
-      nakedPutRisk: 0,
-      totalExposure: 0,
-      sources: [],
-    };
-    holdingsMap.set(cleanName, holding);
-    return holding;
+    
+    if (key) {
+      // Use key-based lookup
+      if (holdingsByKey.has(key)) {
+        const existing = holdingsByKey.get(key)!;
+        // Prefer shorter/cleaner name or direct stock name (without AZ. prefix)
+        const existingHasAZ = existing.name.startsWith('AZ.');
+        const newHasAZ = cleanName.startsWith('AZ.');
+        if (existingHasAZ && !newHasAZ) {
+          existing.name = cleanName;
+        } else if (cleanName.length < existing.name.length && !newHasAZ) {
+          existing.name = cleanName;
+        }
+        return existing;
+      }
+      
+      const holding = createHolding(cleanName);
+      holdingsByKey.set(key, holding);
+      return holding;
+    } else {
+      // No distinctive key - use exact normalized name
+      const normalizedName = normalizeHoldingName(name);
+      if (holdingsByExactName.has(normalizedName)) {
+        return holdingsByExactName.get(normalizedName)!;
+      }
+      
+      const holding = createHolding(cleanName);
+      holdingsByExactName.set(normalizedName, holding);
+      return holding;
+    }
   };
   
   // 1. Add ETF holdings (top 10 from each ETF)
@@ -570,6 +707,11 @@ export function calculateConsolidatedTopHoldings(
             exposure,
             percentage: etfHolding.percentage,
           });
+          holding.etfDetails.push({
+            etfName: allocation.name || stock.underlying,
+            holdingPercentage: etfHolding.percentage,
+            exposure,
+          });
         }
       }
     }
@@ -583,28 +725,28 @@ export function calculateConsolidatedTopHoldings(
       const holding = getOrCreateHolding(stock.underlying);
       
       // stockValue is full value, riskEUR is value with protections
-      holding.stockRisk += stock.stockValue / stock.exchangeRate;
+      const stockValueEUR = stock.stockValue / stock.exchangeRate;
+      holding.stockRisk += stockValueEUR;
       holding.stockRiskWithProtection += stock.riskEUR;
       
       holding.sources.push({
         type: 'stock',
         name: 'Diretto',
-        exposure: options.includeProtections ? stock.riskEUR : (stock.stockValue / stock.exchangeRate),
+        exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
+      });
+      holding.stockDetails.push({
+        quantity: stock.stockQuantity,
+        price: stock.stockPrice,
+        currency: stock.currency,
+        value: stockValueEUR,
+        valueWithProtection: stock.riskEUR,
       });
     }
   }
   
   // 3. Add Naked PUT risk
-  console.log('[ConsolidatedHoldings] Naked PUT details:', analysis.nakedPutDetails.map(np => ({
-    underlying: np.underlying,
-    normalizedName: normalizeHoldingName(np.underlying),
-    strike: np.strike,
-    riskEUR: np.riskEUR
-  })));
-  
   for (const np of analysis.nakedPutDetails) {
     const holding = getOrCreateHolding(np.underlying);
-    console.log(`[ConsolidatedHoldings] Adding PUT ${np.strike} for "${np.underlying}" to holding "${holding.name}"`);
     
     holding.nakedPutRisk += np.riskEUR;
     holding.sources.push({
@@ -612,10 +754,19 @@ export function calculateConsolidatedTopHoldings(
       name: `PUT ${np.strike}`,
       exposure: np.riskEUR,
     });
+    holding.nakedPutDetails.push({
+      strike: np.strike,
+      contracts: np.contracts,
+      riskEUR: np.riskEUR,
+      expiry: np.expiry,
+    });
   }
   
+  // Combine both maps
+  const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
+  
   // Calculate total exposure based on toggle
-  for (const holding of holdingsMap.values()) {
+  for (const holding of allHoldings) {
     const stockPart = options.includeProtections 
       ? holding.stockRiskWithProtection 
       : holding.stockRisk;
@@ -627,7 +778,7 @@ export function calculateConsolidatedTopHoldings(
   }
   
   // Sort by total exposure and take top N
-  const result = Array.from(holdingsMap.values())
+  const result = allHoldings
     .filter(h => h.totalExposure > 0)
     .sort((a, b) => b.totalExposure - a.totalExposure)
     .slice(0, limit);
