@@ -6,14 +6,15 @@ import {
   LeapCallPosition,
   IronCondorPosition,
   DoubleDiagonalPosition,
-  GroupedOtherStrategy
+  GroupedOtherStrategy,
+  normalizeForMatching,
+  getCanonicalKey
 } from './derivativeStrategies';
 import { 
   calculateUniversalMaxLoss, 
   positionsToLegs,
   OptionLeg 
 } from './universalMaxLoss';
-// ============= INTERFACES =============
 
 export interface StockRiskDetail {
   underlying: string;
@@ -123,17 +124,51 @@ function getEffectiveExchangeRate(position: Position): number {
 }
 
 /**
- * Normalizes text for matching (same logic as derivativeStrategies.ts)
+ * Checks if an option matches a stock using flexible matching logic.
+ * This is consistent with derivativeStrategies.ts findUnderlyingStock logic.
  */
-function normalizeForMatching(text: string): string {
-  return text
-    .toUpperCase()
-    .replace(/^AZ\./i, '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[^A-Z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '')
-    .trim();
+function matchesUnderlying(option: Position, stock: Position): boolean {
+  // Build full text for matching
+  const optionText = normalizeForMatching(
+    `${option.underlying || ''} ${option.description || ''} ${option.ticker || ''}`
+  );
+  const stockText = normalizeForMatching(
+    `${stock.ticker || ''} ${stock.description || ''}`
+  );
+  
+  // 1. Direct match
+  if (optionText === stockText && optionText.length > 0) return true;
+  
+  // 2. Check for ticker containment
+  if (stock.ticker) {
+    const tickerNorm = normalizeForMatching(stock.ticker);
+    if (tickerNorm.length > 0 && optionText.includes(tickerNorm)) return true;
+  }
+  
+  // 3. Check for stock name containment
+  const stockName = normalizeForMatching(stock.description);
+  if (stockName.length > 0 && optionText.includes(stockName)) return true;
+  
+  // 4. Token-based matching
+  const optionTokens = optionText.split(' ').filter(t => t.length > 2);
+  const stockTokens = stockText.split(' ').filter(t => t.length > 2);
+  
+  if (stockTokens.length > 0) {
+    const matchCount = stockTokens.filter(t => optionTokens.includes(t)).length;
+    // For single-word names (e.g., NVIDIA), require 1 match
+    // For compound names, require at least half
+    const threshold = stockTokens.length === 1 ? 1 : Math.ceil(stockTokens.length / 2);
+    if (matchCount >= threshold) return true;
+  }
+  
+  // 5. Special aliases (GOOGLE = ALPHABET, etc.)
+  const optionCanonical = getCanonicalKey(optionText);
+  const stockCanonical = getCanonicalKey(stockText);
+  if (optionCanonical && stockCanonical && optionCanonical === stockCanonical) {
+    return true;
+  }
+  
+  return false;
 }
 
 // ============= RISK CALCULATION FUNCTIONS =============
@@ -150,29 +185,18 @@ export function calculateStockRisk(
 ): StockRiskDetail[] {
   const result: StockRiskDetail[] = [];
   
-  // Group long puts by underlying
-  const putsByUnderlying = new Map<string, LongPutPosition[]>();
-  for (const lp of longPuts) {
-    const underlyingKey = normalizeForMatching(lp.option.underlying || lp.option.description);
-    if (!putsByUnderlying.has(underlyingKey)) {
-      putsByUnderlying.set(underlyingKey, []);
-    }
-    putsByUnderlying.get(underlyingKey)!.push(lp);
-  }
-  
   // Include only stocks and ETFs (commodities are calculated separately)
   const stockAssetTypes = ['stock', 'etf'];
   
   for (const stock of stocks) {
     if (!stockAssetTypes.includes(stock.asset_type)) continue;
     
-    const stockKey = normalizeForMatching(stock.ticker || stock.description);
     const stockValue = (stock.quantity || 0) * (stock.current_price || 0);
     const exchangeRate = getEffectiveExchangeRate(stock);
     const currency = stock.currency || 'USD';
     
-    // Find protective puts for this stock
-    const protectivePuts = putsByUnderlying.get(stockKey) || [];
+    // Find protective puts for this stock using flexible matching
+    const protectivePuts = longPuts.filter(lp => matchesUnderlying(lp.option, stock));
     
     let protectionStrike: number | null = null;
     let protectionContracts = 0;

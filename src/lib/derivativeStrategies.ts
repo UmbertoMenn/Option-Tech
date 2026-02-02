@@ -1005,7 +1005,7 @@ function detectStrategyName(options: OtherStrategyPosition[]): string | null {
  * Special-case aliasing
  * Only keep the explicit GOOGLE ↔ ALPHABET equivalence requested.
  */
-const SPECIAL_ALIASES: Record<string, string[]> = {
+export const SPECIAL_ALIASES: Record<string, string[]> = {
   ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
   PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
   NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],
@@ -1015,7 +1015,7 @@ const SPECIAL_ALIASES: Record<string, string[]> = {
 /**
  * Normalizes text for matching - removes common prefixes and suffixes
  */
-function normalizeForMatching(text: string): string {
+export function normalizeForMatching(text: string): string {
   return text
     .toUpperCase()
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
@@ -1029,7 +1029,7 @@ function normalizeForMatching(text: string): string {
 /**
  * Gets the canonical company key for any variation
  */
-function getCanonicalKey(text: string): string | null {
+export function getCanonicalKey(text: string): string | null {
   const normalized = normalizeForMatching(text);
   
   for (const [canonical, aliases] of Object.entries(SPECIAL_ALIASES)) {
@@ -1056,7 +1056,7 @@ function getCanonicalKey(text: string): string | null {
  *
  * IMPORTANT: Only matches stocks, never ETFs.
  */
-function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined {
+export function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined {
   const stocksOnly = stocks.filter(s => s.asset_type === 'stock');
 
   const optionText = `${option.underlying ?? ''} ${option.description ?? ''} ${option.ticker ?? ''}`;
