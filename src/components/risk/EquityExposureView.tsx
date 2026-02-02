@@ -733,7 +733,7 @@ export function EquityExposureView({
             </div>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Aggregazione esposizione: ETF holdings + Stock diretti + Naked PUT
+            Aggregazione esposizione: Stock diretti + Naked PUT + Leap Call
           </p>
         </CardHeader>
         <CardContent>
@@ -749,9 +749,9 @@ export function EquityExposureView({
           ) : (
             <div className="space-y-2">
               {consolidatedHoldings.map((holding, index) => {
-                const hasETF = holding.etfExposure > 0;
                 const hasStock = (includeProtections ? holding.stockRiskWithProtection : holding.stockRisk) > 0;
                 const hasNakedPut = holding.nakedPutRisk > 0;
+                const hasLeapCall = holding.leapCallRisk > 0;
                 const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
                 
                 return (
@@ -771,11 +771,6 @@ export function EquityExposureView({
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="font-medium truncate">{holding.name}</span>
                           <div className="flex flex-wrap gap-1.5 mt-1">
-                            {hasETF && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-cyan-500/10 text-cyan-500 border-cyan-500/30">
-                                ETF: {formatEUR(holding.etfExposure)}
-                              </Badge>
-                            )}
                             {hasStock && (
                               <Badge 
                                 variant="outline" 
@@ -794,6 +789,11 @@ export function EquityExposureView({
                             {hasNakedPut && (
                               <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-red-500/10 text-red-500 border-red-500/30">
                                 PUT: {formatEUR(holding.nakedPutRisk)}
+                              </Badge>
+                            )}
+                            {hasLeapCall && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-amber-500/10 text-amber-500 border-amber-500/30">
+                                LEAP: {formatEUR(holding.leapCallRisk)}
                               </Badge>
                             )}
                           </div>
