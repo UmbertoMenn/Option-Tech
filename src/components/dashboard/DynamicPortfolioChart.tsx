@@ -76,7 +76,7 @@ const CHART_TITLES: Record<ViewMode, string> = {
   base: 'Composizione Portafoglio (Derivati esclusi)',
   netting_total: 'Valore Portafoglio (Netting Totale Derivati)',
   netting_ex_cc: 'Valore Portafoglio (Netting ex. Covered Call)',
-  netting_ex_cc_np: 'Valore Portafoglio (Netting ex. CC e NP OTM)',
+  netting_ex_cc_np: 'Valore Portafoglio (Netting ex. Covered Call e Naked Put OTM)',
 };
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode }: DynamicPortfolioChartProps) {
@@ -120,7 +120,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
           <NettingChart
             baseValue={summary?.totalValue ?? 0}
             nettedValue={netting.nettingExCCAndNP}
-            label="Netting ex. CC e NP OTM"
+            label="Netting ex. Covered Call e NP OTM"
           />
           <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
             Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM (strike inferiore al prezzo del sottostante). La logica è che, se ho venduto una PUT e il prezzo del sottostante è sopra lo strike, l'opzione scadrà senza valore e non ha senso spendere soldi per riacquistarla. Per le Naked Put ITM invece, si sottrae la differenza tra strike e prezzo del titolo.
@@ -132,10 +132,10 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
     // netting_ex_cc
     return (
       <div className="flex flex-col">
-        <NettingChart
-          baseValue={summary?.totalValue ?? 0}
-          nettedValue={netting.nettingExCoveredCall}
-          label="Netting ex. CC"
+          <NettingChart
+            baseValue={summary?.totalValue ?? 0}
+            nettedValue={netting.nettingExCoveredCall}
+            label="Netting ex. Covered Call"
         />
         <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
           Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. La logica è che, se un'opzione call è OTM, se non ho intenzione di liquidare il titolo, non ha senso che spenda dei soldi per ricomprarmi un'opzione che, nel peggiore dei casi, mi farà vendere i titoli ad un prezzo più alto. Per le Covered Call ITM invece, si sottrae la differenza tra prezzo attuale del titolo e strike delle opzioni call.
