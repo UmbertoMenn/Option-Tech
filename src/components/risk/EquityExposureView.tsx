@@ -64,9 +64,9 @@ export function EquityExposureView({
     strategyDetails
   } = analysis;
   
-  // Calculate consolidated top 10 holdings
+  // Calculate all consolidated holdings (no limit)
   const consolidatedHoldings = useMemo(() => {
-    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { includeProtections }, 10);
+    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { includeProtections });
   }, [analysis, etfAllocations, includeProtections]);
 
   const getPercentage = (value: number) => grandTotal > 0 ? (value / grandTotal) * 100 : 0;
@@ -704,7 +704,7 @@ export function EquityExposureView({
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-base">
               <Layers className="w-5 h-5 text-primary" />
-              Top 10 Holdings Consolidate
+              Holdings Consolidate ({consolidatedHoldings.length})
             </CardTitle>
             <div className="flex items-center gap-2">
               <Switch 

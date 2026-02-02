@@ -468,7 +468,9 @@ export function calculateTopHoldings(
  * Handles variations like "NVIDIA Corp" vs "NVDA" vs "NVIDIA CORP"
  */
 function normalizeHoldingName(name: string): string {
-  return normalizeForMatching(name);
+  // Rimuovi prefisso "AZ." comune nelle descrizioni stock italiane
+  let normalized = name.replace(/^AZ\./i, '').trim();
+  return normalizeForMatching(normalized);
 }
 
 /**
@@ -517,7 +519,7 @@ export function calculateConsolidatedTopHoldings(
   analysis: RiskAnalysis,
   etfAllocations: Record<string, ETFAllocation>,
   options: ConsolidatedTopHoldingsOptions,
-  limit: number = 10
+  limit: number = 100 // Show all holdings by default
 ): ConsolidatedHolding[] {
   const holdingsMap = new Map<string, ConsolidatedHolding>();
   

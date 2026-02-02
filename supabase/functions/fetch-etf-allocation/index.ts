@@ -356,6 +356,88 @@ Respond in this EXACT JSON format only, no explanation:
   }
 }
 
+// Fetch ETF top holdings using Lovable AI when scraping fails
+// Returns top 10-15 holdings with percentage weights
+async function fetchETFTopHoldingsWithAI(
+  isin: string,
+  etfName: string
+): Promise<TopHolding[]> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!lovableApiKey) {
+    console.log('LOVABLE_API_KEY not configured, skipping AI top holdings lookup for ETF');
+    return [];
+  }
+  
+  const prompt = `For the ETF "${etfName}" (ISIN: ${isin}), provide the top 10-15 largest holdings.
+
+IMPORTANT RULES:
+1. Return the TOP 10-15 company holdings with their percentage weights
+2. Use the company NAME, not ticker (e.g., "Apple Inc." not "AAPL")
+3. Be accurate based on your knowledge of the index/ETF composition
+4. For broad market ETFs (MSCI World, S&P 500, etc.) include the major tech companies and largest cap stocks
+5. The percentages should be realistic (typically largest holding is 3-7% for diversified ETFs, higher for concentrated ETFs)
+
+Respond in this EXACT JSON array format only, no explanation:
+[{"name": "Apple Inc.", "percentage": 5.2}, {"name": "Microsoft Corp.", "percentage": 4.8}, {"name": "NVIDIA Corp.", "percentage": 4.1}]`;
+
+  try {
+    console.log(`Calling Lovable AI for ETF top holdings: ${etfName}...`);
+    
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 500,
+      }),
+    });
+    
+    if (!response.ok) {
+      console.error(`AI gateway error for holdings: ${response.status}`);
+      return [];
+    }
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content?.trim() || '';
+    
+    // Parse JSON array response
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error('AI did not return valid JSON array for ETF holdings');
+      return [];
+    }
+    
+    const parsed = JSON.parse(jsonMatch[0]);
+    
+    // Validate: array of objects with name and percentage
+    const result: TopHolding[] = [];
+    
+    for (const item of parsed) {
+      if (typeof item.name === 'string' && typeof item.percentage === 'number' && item.percentage > 0) {
+        result.push({
+          name: item.name.trim(),
+          percentage: item.percentage,
+        });
+      }
+    }
+    
+    if (result.length > 0) {
+      console.log(`AI resolved ${result.length} top holdings for ${etfName}`);
+      return result.slice(0, 15); // Max 15 holdings
+    }
+    
+    console.log(`AI returned no valid holdings for ${etfName}`);
+    return [];
+  } catch (error) {
+    console.error('Error fetching ETF top holdings with AI:', error);
+    return [];
+  }
+}
+
 // Map countries to their primary currencies
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   'United States': 'USD',
@@ -935,7 +1017,7 @@ serve(async (req) => {
     // Scrape fresh data
     const data = await scrapeJustETF(isin);
 
-    // NEW: AI Fallback for ETFs without sector data
+    // AI Fallback for ETFs without sector data
     if (Object.keys(data.sectorAllocations).length === 0) {
       console.log(`No sector data scraped for ${isin}, trying Lovable AI...`);
       const aiSectors = await fetchETFSectorsWithAI(isin, data.name);
@@ -943,6 +1025,17 @@ serve(async (req) => {
       if (Object.keys(aiSectors).length > 0) {
         Object.assign(data.sectorAllocations, aiSectors);
         console.log(`AI populated sectors for ${data.name}:`, aiSectors);
+      }
+    }
+
+    // AI Fallback for ETFs without top holdings data
+    if (data.topHoldings.length === 0) {
+      console.log(`No top holdings scraped for ${isin}, trying Lovable AI...`);
+      const aiHoldings = await fetchETFTopHoldingsWithAI(isin, data.name);
+      
+      if (aiHoldings.length > 0) {
+        data.topHoldings = aiHoldings;
+        console.log(`AI populated top holdings for ${data.name}:`, aiHoldings);
       }
     }
 
