@@ -1,98 +1,168 @@
 
+# Piano: Correggere il Matching delle Protezioni nel Calcolo del Rischio
 
-# Piano: Sospendere Temporaneamente il Cron Job di Aggiornamento Prezzi
+## Problema Identificato
 
-## Situazione Attuale
+Le protezioni PUT acquistate su NVIDIA non vengono applicate nel calcolo del rischio perché la logica di matching tra opzioni e sottostanti è **incoerente** tra i due moduli:
 
-Il cron job e' configurato cosi':
+### Logica in `derivativeStrategies.ts` (FUNZIONA)
 
-| Parametro | Valore |
-|-----------|--------|
-| Job ID | 2 |
-| Schedule | `*/5 8-22 * * 1-5` (ogni 5 min, lun-ven, 08-22 UTC) |
-| Active | `true` |
-| Target | `update-prices-cron` edge function |
+Usa una logica sofisticata con `findUnderlyingStock()`:
+1. Normalizza i testi rimuovendo prefissi (AZ.), suffissi (CORP, INC, etc.)
+2. Usa matching per token (NVIDIA contiene NVIDIA)
+3. Gestisce alias speciali (GOOGLE = ALPHABET)
+4. Cerca per ticker se disponibile
 
-## Opzioni per Sospendere
+**Risultato**: PUT su "NVIDIA CORP" viene correttamente associata a stock "NVDA"
 
-### Opzione 1: Disattivare il Job (Consigliata)
+### Logica in `riskCalculator.ts` (NON FUNZIONA)
 
-Usare `cron.alter_job()` per impostare `active = false`. Il job rimane configurato ma non viene eseguito.
+Usa una semplice comparazione di stringhe normalizzate:
 
-```sql
-SELECT cron.alter_job(2, active := false);
+```typescript
+// Stock: usa ticker O description
+const stockKey = normalizeForMatching(stock.ticker || stock.description);
+// → "NVDA" per NVIDIA
+
+// PUT: usa underlying O description  
+const underlyingKey = normalizeForMatching(lp.option.underlying || lp.option.description);
+// → "NVIDIA" per PUT su NVIDIA
 ```
 
-**Vantaggi:**
-- Semplice e reversibile
-- Mantiene tutta la configurazione (schedule, comando)
-- Per riattivare basta: `SELECT cron.alter_job(2, active := true);`
+**Problema**: `"NVDA" !== "NVIDIA"` → protezioni non trovate!
 
-### Opzione 2: Eliminare e Ricreare (Non consigliata)
+### Dati Reali dal Database
 
-Eliminare il job con `cron.unschedule()` e salvare la configurazione da qualche parte per ricrearlo dopo.
+**Portfolio Principale:**
+| Tipo | Descrizione | Quantità |
+|------|-------------|----------|
+| Stock | AZ.NVIDIA CORP (ticker: NVDA) | 1300 |
+| PUT | NVIDIA CORP PUT 90 DEC/27 | +9 (acquistata) |
+| PUT | NVIDIA CORP PUT 195 FEB/26 | -3 (venduta) |
+| PUT | NVIDIA CORP PUT 180 MAR/26 | -1 (venduta) |
+
+La PUT 90 DEC/27 (+9 contratti) dovrebbe proteggere 900 azioni, ma non viene riconosciuta.
 
 ---
 
-## Piano di Esecuzione
+## Soluzione
 
-### 1. Eseguire il Comando di Sospensione
+Modificare `src/lib/riskCalculator.ts` per usare una logica di matching coerente con `derivativeStrategies.ts`.
 
-```sql
-SELECT cron.alter_job(2, active := false);
+### Approccio
+
+1. **Importare la logica di matching da derivativeStrategies** (evita duplicazione)
+2. **Cambiare il sistema di raggruppamento** delle protezioni per usare matching flessibile invece di stringhe esatte
+
+---
+
+## Dettagli Tecnici
+
+### 1. Esportare le utility di matching da derivativeStrategies.ts
+
+```typescript
+// Rendere pubbliche le funzioni esistenti
+export function normalizeForMatching(text: string): string { ... }
+export function getCanonicalKey(text: string): string | null { ... }
+export function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined { ... }
 ```
 
-### 2. Documentare la Configurazione per il Ripristino
+### 2. Modificare calculateStockRisk in riskCalculator.ts
 
-Salvero' in un commento nel codice o nella documentazione:
+**Prima** (matching esatto per stringa):
+```typescript
+const putsByUnderlying = new Map<string, LongPutPosition[]>();
+for (const lp of longPuts) {
+  const underlyingKey = normalizeForMatching(lp.option.underlying || lp.option.description);
+  putsByUnderlying.set(underlyingKey, [...]);
+}
 
-```sql
--- CRON JOB SOSPESO - Per riattivare:
--- SELECT cron.alter_job(2, active := true);
---
--- Configurazione originale:
--- Schedule: */5 8-22 * * 1-5 (ogni 5 min, lun-ven, 08-22 UTC / 09-23 IT)
--- Target: update-prices-cron edge function
--- Descrizione: Aggiorna prezzi delle azioni (asset_type = 'stock')
+// Lookup con stringa esatta - FALLISCE per NVDA vs NVIDIA
+const protectivePuts = putsByUnderlying.get(stockKey) || [];
 ```
 
-### 3. Verifica
+**Dopo** (matching flessibile):
+```typescript
+// Per ogni stock, trova le protezioni con matching flessibile
+const protectivePuts = longPuts.filter(lp => {
+  // Usa la stessa logica di findUnderlyingStock ma al contrario:
+  // verifica se questa PUT protegge questo stock
+  return matchesUnderlying(lp.option, stock);
+});
+```
 
-Dopo la sospensione, controllero' che il job sia effettivamente disattivato:
+### 3. Nuova funzione matchesUnderlying
 
-```sql
-SELECT jobid, schedule, active FROM cron.job WHERE jobid = 2;
+```typescript
+function matchesUnderlying(option: Position, stock: Position): boolean {
+  // 1. Normalizza i testi
+  const optionText = normalizeForMatching(
+    `${option.underlying || ''} ${option.description || ''}`
+  );
+  const stockText = normalizeForMatching(
+    `${stock.ticker || ''} ${stock.description || ''}`
+  );
+  
+  // 2. Match diretto
+  if (optionText === stockText) return true;
+  
+  // 3. Match per ticker contenuto
+  if (stock.ticker) {
+    const tickerNorm = normalizeForMatching(stock.ticker);
+    if (optionText.includes(tickerNorm)) return true;
+  }
+  
+  // 4. Match per token
+  const optionTokens = optionText.split(' ').filter(t => t.length > 2);
+  const stockTokens = stockText.split(' ').filter(t => t.length > 2);
+  
+  // Se il nome dello stock è contenuto nell'opzione
+  if (stockTokens.length > 0) {
+    const matchCount = stockTokens.filter(t => optionTokens.includes(t)).length;
+    // Per nomi singoli, basta 1 match; per nomi composti, almeno metà
+    const threshold = stockTokens.length === 1 ? 1 : Math.ceil(stockTokens.length / 2);
+    if (matchCount >= threshold) return true;
+  }
+  
+  // 5. Alias speciali (GOOGLE = ALPHABET, etc.)
+  const optionCanonical = getCanonicalKey(optionText);
+  const stockCanonical = getCanonicalKey(stockText);
+  if (optionCanonical && stockCanonical && optionCanonical === stockCanonical) {
+    return true;
+  }
+  
+  return false;
+}
 ```
 
 ---
 
-## Come Ripristinare in Futuro
+## File da Modificare
 
-Quando vorrai riattivare l'aggiornamento automatico dei prezzi:
-
-```sql
-SELECT cron.alter_job(2, active := true);
-```
-
-Oppure, se vuoi modificare lo schedule al momento del ripristino:
-
-```sql
-SELECT cron.alter_job(
-  2, 
-  active := true,
-  schedule := '*/5 8-22 * * 1-5'  -- modifica se necessario
-);
-```
+| File | Modifica |
+|------|----------|
+| `src/lib/derivativeStrategies.ts` | Esportare `normalizeForMatching`, `getCanonicalKey`, `SPECIAL_ALIASES` |
+| `src/lib/riskCalculator.ts` | Importare utility da derivativeStrategies; riscrivere logica matching in `calculateStockRisk` |
 
 ---
 
-## Riepilogo
+## Risultato Atteso
 
-| Azione | Comando |
-|--------|---------|
-| **Sospendere** | `SELECT cron.alter_job(2, active := false);` |
-| **Riattivare** | `SELECT cron.alter_job(2, active := true);` |
-| **Verificare stato** | `SELECT jobid, active FROM cron.job WHERE jobid = 2;` |
+Dopo la correzione, per NVIDIA:
 
-Il codice della edge function `update-prices-cron` rimarra' intatto e pronto all'uso quando riattiverai il job.
+| Metrica | Prima | Dopo |
+|---------|-------|------|
+| Stock Value | €209,343 | €209,343 |
+| Protezioni trovate | 0 | 9 contratti |
+| Protected Value | €0 | €81,000 (9 × 90 × 100) |
+| **Risk** | €209,343 | **€128,343** |
 
+La protezione PUT 90 verrà riconosciuta e il rischio sarà ridotto di €81,000.
+
+---
+
+## Note Aggiuntive
+
+- La correzione si applica a **tutti** gli stock con opzioni, non solo NVIDIA
+- Il matching token-based già funziona in derivativeStrategies per la classificazione, quindi la logica è testata
+- La vista Equity, Currency e Sector Exposure beneficeranno tutte della correzione perché usano tutte `stockDetails` dal risk calculator
