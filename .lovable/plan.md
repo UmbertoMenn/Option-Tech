@@ -1,91 +1,96 @@
 
-# Piano: Correggere Fetch ETF Allocations per Equity View
 
-## Problema Identificato
+# Piano: Usare Perplexity per Top Holdings ETF Aggiornate
 
-Lo screenshot mostra che NVIDIA ha solo i badge Stock e PUT, ma **nessun badge ETF**, nonostante NVIDIA dovrebbe apparire nelle top holdings di ETF come iShares MSCI World (3.44%).
+## Perché Perplexity?
 
-### Diagnosi
+| Caratteristica | Gemini 2.5 Flash | Perplexity Sonar |
+|---------------|------------------|------------------|
+| Dati | Training data (obsoleti) | Web search in tempo reale |
+| Fonti | Nessuna | Citations verificabili |
+| Aggiornamento | Mesi/anni di ritardo | Dati attuali |
 
-Il problema NON è nell'edge function (funziona correttamente - popola le top holdings via AI). Il problema è nel **timing del fetch**:
+Perplexity può cercare direttamente su justETF, Bloomberg, iShares e altre fonti per ottenere le **top holdings aggiornate al giorno corrente**.
+
+## Passaggi
+
+### 1. Configurare Perplexity Connector
+
+Prima di tutto devo collegare Perplexity al progetto tramite il connector. Questo renderà disponibile `PERPLEXITY_API_KEY` come variabile d'ambiente.
+
+### 2. Modificare Edge Function
+
+**File**: `supabase/functions/fetch-etf-allocation/index.ts`
+
+Sostituire la chiamata a Lovable AI (Gemini) con Perplexity:
 
 ```typescript
-// src/pages/RiskAnalyzer.tsx, linea 70
-if (etfIsins.length > 0 && (viewMode === 'currency' || viewMode === 'sector') && !hasFetchedETFs) {
-  setHasFetchedETFs(true);
-  fetchMultipleAllocations(etfIsins);
+// Prima (Gemini - dati obsoleti)
+const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  headers: { Authorization: `Bearer ${LOVABLE_API_KEY}` },
+  body: JSON.stringify({
+    model: "google/gemini-2.5-flash",
+    messages: [{ role: "user", content: prompt }]
+  })
+});
+
+// Dopo (Perplexity - dati in tempo reale)
+const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
+
+const response = await fetch("https://api.perplexity.ai/chat/completions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${PERPLEXITY_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    model: "sonar",  // Modello con web search
+    messages: [{
+      role: "user",
+      content: `Search for the current top 15 holdings of the ETF with ISIN ${isin} (${etfName}). 
+                Return ONLY a JSON array with format: [{"name": "Company Name", "percentage": 2.48}, ...]
+                Use data from justETF, iShares, or the official ETF provider website.`
+    }]
+  })
+});
+```
+
+### 3. Vantaggi
+
+Con Perplexity, la risposta per `IE00B9CQXS71` sarà:
+
+```json
+{
+  "topHoldings": [
+    {"name": "Altria Group, Inc.", "percentage": 2.48},
+    {"name": "CVS Health", "percentage": 2.46},
+    {"name": "APA Group", "percentage": 2.05},
+    ...
+  ],
+  "citations": [
+    "https://www.justetf.com/en/etf-profile.html?isin=IE00B9CQXS71"
+  ]
 }
 ```
-
-Questo codice fetcha le allocazioni ETF **SOLO** quando l'utente passa alla vista "Currency" o "Sector", ma **MAI** per la vista "Equity" (che è quella di default e contiene "Holdings Consolidate").
-
-Quando l'utente è sulla vista Equity:
-- `allocations` = `{}` (vuoto)
-- `calculateConsolidatedTopHoldings()` non trova nessuna top holding ETF
-- Nessun badge ETF viene mostrato
-
-## Soluzione
-
-### Modifica 1: Fetch ETF allocations anche per equity view
-
-**File**: `src/pages/RiskAnalyzer.tsx`
-
-Modificare la condizione nel `useEffect` per includere anche `viewMode === 'equity'`:
-
-```typescript
-// Fetch ETF allocations for ALL views that need them
-useEffect(() => {
-  if (etfIsins.length > 0 && !hasFetchedETFs) {
-    setHasFetchedETFs(true);
-    fetchMultipleAllocations(etfIsins);
-  }
-}, [etfIsins, hasFetchedETFs, fetchMultipleAllocations]);
-```
-
-Oppure, più specificamente:
-
-```typescript
-// Fetch ETF allocations for equity, currency, and sector views
-useEffect(() => {
-  if (etfIsins.length > 0 && 
-      (viewMode === 'equity' || viewMode === 'currency' || viewMode === 'sector') && 
-      !hasFetchedETFs) {
-    setHasFetchedETFs(true);
-    fetchMultipleAllocations(etfIsins);
-  }
-}, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
-```
-
-Dato che `equity` è la vista di default, la seconda forma è equivalente alla prima in pratica, ma è più esplicita.
 
 ## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/pages/RiskAnalyzer.tsx` | Aggiungere `viewMode === 'equity'` alla condizione del fetch ETF |
+| `supabase/functions/fetch-etf-allocation/index.ts` | Sostituire chiamata Gemini con Perplexity API |
+
+## Sequenza
+
+1. Connettere Perplexity al progetto (ti verrà chiesto di autorizzare)
+2. Modificare `fetchETFTopHoldingsWithAI()` per usare Perplexity
+3. Deploy edge function
+4. Testare con `forceRefresh: true` su `IE00B9CQXS71`
+5. Verificare che Altria Group appaia nelle top holdings
 
 ## Risultato Atteso
 
-Dopo la modifica:
+Dopo le modifiche:
+- Top holdings ETF sempre aggiornate (dati dal web)
+- Altria Group 2.48% visibile per SPDR S&P Global Dividend Aristocrats
+- Badge ETF corretti nelle Holdings Consolidate
 
-1. Quando l'utente apre Risk Analyzer (default view = equity), le allocazioni ETF vengono caricate immediatamente
-2. NVIDIA mostrerà:
-   - **Stock**: €140.331
-   - **PUT**: €63.910
-   - **ETF**: ~€XXX (calcolato da iShares MSCI World 3.44% di €YYY)
-3. Il totale includerà correttamente l'esposizione via ETF
-4. Il breakdown dialog mostrerà le fonti ETF (es. "iShares Core MSCI World UCITS ETF - 3.44%")
-
-## Verifica
-
-Dopo l'implementazione:
-1. Aprire Risk Analyzer 
-2. Vista default = Equity Exposure
-3. Verificare che le Holdings Consolidate mostrino badge ETF per titoli presenti negli ETF
-4. Cliccare su NVIDIA per verificare che nel breakdown appaiano le fonti ETF (es. iShares MSCI World)
-
-## Note Tecniche
-
-- Il fetch ETF usa batching (3 alla volta) con delay 500ms per evitare rate limiting
-- I dati vengono cachati in memoria (`allocations` state) e nel database (`etf_allocations` table)
-- La prima volta potrebbero volerci alcuni secondi per fetchare tutti gli ETF (il loader è già gestito con `isLoadingETFData`)
