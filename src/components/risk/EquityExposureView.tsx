@@ -15,7 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Info, Loader2, ChevronRight } from 'lucide-react';
+import { HelpCircle, Loader2, ChevronRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
@@ -160,12 +160,7 @@ export function EquityExposureView({
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button 
-                      className="p-0.5 rounded-full hover:bg-primary/20 text-primary/70 hover:text-primary transition-colors"
-                      aria-label="Info sul calcolo del rischio"
-                    >
-                      <Info className="w-4 h-4" />
-                    </button>
+                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
                     <p>Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il totale dei premi pagati.</p>
@@ -721,9 +716,7 @@ export function EquityExposureView({
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button className="p-0.5 rounded-full hover:bg-primary/20 text-primary/70 hover:text-primary transition-colors">
-                      <Info className="w-4 h-4" />
-                    </button>
+                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
                     <p>Quando attivo, il rischio stock è calcolato al netto delle protezioni PUT. Quando disattivo, mostra il valore pieno.</p>
