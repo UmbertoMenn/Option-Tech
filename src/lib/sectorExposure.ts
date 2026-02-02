@@ -613,6 +613,10 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     currency: string;
     value: number;
     valueWithProtection: number;
+    // Protection info
+    protectionContracts: number;
+    protectionStrike: number | null;
+    hasProtection: boolean;
   }>;
 }
 
@@ -740,6 +744,10 @@ export function calculateConsolidatedTopHoldings(
         currency: stock.currency,
         value: stockValueEUR,
         valueWithProtection: stock.riskEUR,
+        // Protection info from StockRiskDetail
+        protectionContracts: stock.protectionContracts || 0,
+        protectionStrike: stock.protectionStrike ?? null,
+        hasProtection: stock.hasProtection || false,
       });
     }
   }

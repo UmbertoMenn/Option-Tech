@@ -28,6 +28,9 @@ interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     currency: string;
     value: number;
     valueWithProtection: number;
+    protectionContracts: number;
+    protectionStrike: number | null;
+    hasProtection: boolean;
   }>;
 }
 
@@ -89,14 +92,20 @@ export function HoldingBreakdownDialog({
                       <div className="text-sm">
                         {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
                       </div>
+                      {/* Show protection info if present */}
+                      {stock.hasProtection && stock.protectionContracts > 0 && (
+                        <div className="text-xs text-green-600 mt-1">
+                          🛡️ Protetto: {stock.protectionContracts} PUT × Strike {formatNumber(stock.protectionStrike || 0, 0)}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right">
                       <div className="font-medium text-blue-500">
                         {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
                       </div>
-                      {includeProtections && stock.valueWithProtection < stock.value && (
+                      {includeProtections && stock.hasProtection && stock.valueWithProtection < stock.value && (
                         <div className="text-xs text-green-500">
-                          (Protetto, lordo: {formatEUR(stock.value)})
+                          (Lordo: {formatEUR(stock.value)})
                         </div>
                       )}
                     </div>
