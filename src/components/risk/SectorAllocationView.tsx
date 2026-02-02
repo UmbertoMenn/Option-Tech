@@ -264,7 +264,7 @@ export function SectorAllocationView({
                 </AccordionTrigger>
                 <AccordionContent className="pt-1 pb-2 px-2">
                   <div className="space-y-1 pl-4">
-                    {sector.instruments.slice(0, 15).map((instrument, idx) => (
+                    {sector.instruments.map((instrument, idx) => (
                       <div
                         key={idx}
                         className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
@@ -308,11 +308,6 @@ export function SectorAllocationView({
                         </div>
                       </div>
                     ))}
-                    {sector.instruments.length > 15 && (
-                      <div className="text-xs text-muted-foreground text-center py-2">
-                        + altri {sector.instruments.length - 15} strumenti
-                      </div>
-                    )}
                   </div>
                 </AccordionContent>
               </AccordionItem>
