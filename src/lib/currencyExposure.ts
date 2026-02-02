@@ -4,6 +4,7 @@ export interface CurrencyBreakdown {
   stocks: number;
   bonds: number;
   commodities: number;
+  protections: number;  // Long PUT (valore della protezione)
   nakedPuts: number;
   leapCalls: number;
   strategies: number;
@@ -13,7 +14,7 @@ export interface InstrumentDetail {
   name: string;
   riskEUR: number;
   riskOriginal: number;
-  category: 'stocks' | 'bonds' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
+  category: 'stocks' | 'bonds' | 'commodities' | 'protections' | 'nakedPuts' | 'leapCalls' | 'strategies';
   details: string;
   isin?: string;
   isETF?: boolean;
@@ -54,6 +55,7 @@ function createEmptyBreakdown(): CurrencyBreakdown {
     stocks: 0,
     bonds: 0,
     commodities: 0,
+    protections: 0,
     nakedPuts: 0,
     leapCalls: 0,
     strategies: 0
@@ -111,25 +113,48 @@ export function calculateCurrencyExposure(
   const byCurrency = new Map<string, CurrencyExposure>();
   
   // Aggregate stockDetails by currency (always included)
+  // Stocks are valued at GROSS value (no protection deduction)
   for (const stock of analysis.stockDetails) {
     const curr = stock.currency || 'OTHER';
     const exposure = getOrCreateCurrency(byCurrency, curr);
-    exposure.breakdown.stocks += stock.riskEUR;
-    exposure.totalRisk += stock.riskEUR;
-    exposure.totalRiskOriginal += stock.riskOriginal;
+    
+    // Use gross value (stockValue / exchangeRate) instead of net riskEUR
+    const grossValueEUR = stock.stockValue / stock.exchangeRate;
+    
+    exposure.breakdown.stocks += grossValueEUR;
+    exposure.totalRisk += grossValueEUR;
+    exposure.totalRiskOriginal += stock.stockValue;
     
     const isETF = isETFByDescription(stock.underlying);
     exposure.instruments.push({
       name: stock.underlying,
-      riskEUR: stock.riskEUR,
-      riskOriginal: stock.riskOriginal,
+      riskEUR: grossValueEUR,
+      riskOriginal: stock.stockValue,
       category: 'stocks',
-      details: stock.hasProtection 
-        ? `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)} (protetto a ${stock.protectionStrike})`
-        : `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
+      details: `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
       isin: stock.isin,
       isETF
     });
+    
+    // Add protection as separate derivative entry (if includeDerivatives is ON and has protection)
+    if (includeDerivatives && stock.hasProtection && stock.protectionStrike && stock.protectionContracts > 0) {
+      // Protection value = protected shares × strike (the floor value covered by the PUT)
+      const protectedShares = Math.min(stock.protectionContracts * 100, stock.stockQuantity);
+      const protectionValueOriginal = protectedShares * stock.protectionStrike;
+      const protectionValueEUR = protectionValueOriginal / stock.exchangeRate;
+      
+      exposure.breakdown.protections += protectionValueEUR;
+      exposure.totalRisk += protectionValueEUR;
+      exposure.totalRiskOriginal += protectionValueOriginal;
+      
+      exposure.instruments.push({
+        name: `${stock.underlying} - Long PUT`,
+        riskEUR: protectionValueEUR,
+        riskOriginal: protectionValueOriginal,
+        category: 'protections',
+        details: `PUT ${stock.protectionStrike.toFixed(0)} × ${stock.protectionContracts} ctr`
+      });
+    }
   }
   
   // Aggregate bondDetails by currency (if includeBonds is true)

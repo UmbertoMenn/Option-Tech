@@ -155,6 +155,7 @@ export function applyETFDecomposition(
       stocks: 0,
       bonds: 0,
       commodities: 0,
+      protections: 0,
       nakedPuts: 0,
       leapCalls: 0,
       strategies: 0,
