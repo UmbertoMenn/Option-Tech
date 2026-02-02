@@ -1,24 +1,33 @@
 
 
-# Piano: Pulire i Campi Legacy dal Portfolio
+# Piano: Correggere la Logica P/L per Non Usare Dati Legacy
 
-## Obiettivo
+## Problema Identificato
 
-Rimuovere i valori legacy (`initial_value`, `deposits`, `average_balance`, `average_balance_date`) dalla tabella `portfolios` per forzare l'uso esclusivo dei dati storici nella tabella `historical_data`.
+Il P/L mostra ancora un valore (+1.342.598,45 €) nonostante sia selezionato "Nessuna data" perché:
 
-## Stato Attuale
+1. **Database**: Il "Portfolio Principale" (ID: `2babec7d-...`) contiene ancora dati legacy:
+   - `initial_value`: 670,000 €
+   - `average_balance`: 595,000 €
+   - `deposits`: 0
 
-Dal controllo effettuato:
-- **Portfolio Principale** (id: `db026b04-...`): Ha dati legacy salvati
-  - `initial_value`: 670,000
-  - `average_balance`: 595,000
-  - `deposits`: 0
-- **historical_data**: Tabella vuota
-- **deposits**: Tabella vuota
+2. **Codice**: In `StatsCards.tsx`, linee 197-203, quando non ci sono dati storici selezionati, il codice fa un fallback e usa i campi legacy:
 
-## Operazione da Eseguire
+```typescript
+if (!hasHistoricalData) {
+  if (!hasInitialData) return { absolute: 0, percent: 0 };
+  // USA DATI LEGACY:
+  const absolutePL = summary.totalValue - initialPlusDeposits;
+  const percentPL = (absolutePL / portfolioAverageBalance) * 100;
+  return { absolute: absolutePL, percent: percentPL };
+}
+```
 
-Eseguire un UPDATE SQL per azzerare i campi legacy:
+## Soluzione
+
+### Parte 1: Pulire i Dati dal Database
+
+Eseguire UPDATE sul portfolio corretto:
 
 ```sql
 UPDATE portfolios 
@@ -28,34 +37,63 @@ SET
   deposits = NULL,
   average_balance = NULL,
   average_balance_date = NULL
-WHERE id = 'db026b04-1a5b-4ede-a419-1a5e4215efad';
+WHERE id = '2babec7d-a801-4329-94ec-cee3489d86ab';
+```
+
+### Parte 2: Correggere la Logica nel Codice
+
+Modificare `StatsCards.tsx` per NON usare mai i dati legacy. Se non ci sono dati storici selezionati, il P/L deve essere `—`:
+
+**Linee 197-204 - Prima:**
+```typescript
+const calculatePL = () => {
+  if (!hasHistoricalData) {
+    // Fallback to old calculation if no historical data selected
+    if (!hasInitialData) return { absolute: 0, percent: 0 };
+    const absolutePL = summary.totalValue - initialPlusDeposits;
+    const percentPL = hasPortfolioAverageBalance ? (absolutePL / portfolioAverageBalance) * 100 : 0;
+    return { absolute: absolutePL, percent: percentPL };
+  }
+  // ... resto del codice
+```
+
+**Linee 197-204 - Dopo:**
+```typescript
+const calculatePL = () => {
+  // Se non ci sono dati storici selezionati, non calcolare P/L
+  if (!hasHistoricalData) {
+    return { absolute: 0, percent: 0 };
+  }
+  // ... resto del codice per calcolo con dati storici
+```
+
+Rimuovere anche:
+- Le variabili legacy non più necessarie (`initialValue`, `portfolioDeposits`, `portfolioAverageBalance`, `initialPlusDeposits`, `hasInitialData`, `hasPortfolioAverageBalance`)
+- La logica di fallback alla linea 242 (`canCalculatePL`)
+
+### Parte 3: Aggiornare la Variabile `canCalculatePL`
+
+**Linea 242 - Prima:**
+```typescript
+const canCalculatePL = hasInitialData || hasHistoricalData;
+```
+
+**Dopo:**
+```typescript
+const canCalculatePL = hasHistoricalData;
 ```
 
 ## Risultato Atteso
 
-Dopo la pulizia:
-
-1. **Dashboard senza dati storici**: Il P/L mostrera `—` (trattino) invece di valori calcolati
-2. **Flusso corretto**: Per avere il P/L, l'utente dovra:
-   - Salvare uno snapshot storico tramite il pulsante "Salva Snapshot"
-   - I calcoli useranno solo i dati dalla tabella `historical_data`
-
-## Verifica del Comportamento UI
-
-Il codice in `StatsCards.tsx` gia gestisce questo caso:
-
-```typescript
-// Se non ci sono dati storici E non ci sono dati iniziali nel portfolio
-if (!hasHistoricalData && !hasInitialData) {
-  return { absolute: 0, percent: 0 }; // Mostra "—" nella UI
-}
-```
+| Situazione | P/L Mostrato |
+|------------|--------------|
+| Nessuna data storica selezionata | `—` |
+| Data storica selezionata | Valore calcolato correttamente |
 
 ## File da Modificare
 
-Nessun file da modificare - solo operazione di pulizia dati nel database.
-
-## Azione
-
-Eseguiro l'UPDATE SQL per pulire i campi legacy dal Portfolio Principale.
+| File | Azione |
+|------|--------|
+| `src/components/dashboard/StatsCards.tsx` | Rimuovere fallback a dati legacy |
+| Database (via SQL) | Pulire i campi legacy dal portfolio attuale |
 
