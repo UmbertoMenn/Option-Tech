@@ -25,8 +25,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     return localStorage.getItem(SELECTED_PORTFOLIO_KEY);
   });
+  const [hasInitialized, setHasInitialized] = useState(false);
 
-  // Fetch all portfolios for the user
+  // Fetch all portfolios for the user - ordered by last_updated DESC
   const portfoliosQuery = useQuery({
     queryKey: ['portfolios', user?.id],
     queryFn: async () => {
@@ -36,27 +37,55 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         .from('portfolios')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
+        .order('last_updated', { ascending: false, nullsFirst: false });
       
       if (error) throw error;
       return data as unknown as Portfolio[];
     },
     enabled: !!user,
+    staleTime: 5000, // Evita refetch troppo frequenti
   });
 
   const portfolios = portfoliosQuery.data || [];
 
-  // Auto-select first portfolio if none selected or selected doesn't exist
+  // Reset quando user cambia (logout/login)
   useEffect(() => {
-    if (portfolios.length > 0) {
-      const currentExists = portfolios.some(p => p.id === selectedId);
-      if (!selectedId || !currentExists) {
-        const firstId = portfolios[0].id;
-        setSelectedId(firstId);
-        localStorage.setItem(SELECTED_PORTFOLIO_KEY, firstId);
-      }
+    if (!user) {
+      setSelectedId(null);
+      setHasInitialized(false);
     }
-  }, [portfolios, selectedId]);
+  }, [user]);
+
+  // Auto-selezione robusta - esegue solo dopo il primo fetch completato
+  useEffect(() => {
+    // Non eseguire durante loading o fetching
+    if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
+    if (portfolios.length === 0) return;
+    
+    // Se già inizializzato e selezione valida, non fare nulla
+    if (hasInitialized && selectedId && portfolios.some(p => p.id === selectedId)) {
+      return;
+    }
+    
+    // Verifica se ID in localStorage esiste
+    const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+    const savedExists = savedId && portfolios.some(p => p.id === savedId);
+    
+    if (savedExists) {
+      if (selectedId !== savedId) {
+        setSelectedId(savedId);
+      }
+    } else {
+      // Fallback: primo della lista (già ordinata per last_updated DESC)
+      const fallbackId = portfolios[0].id;
+      setSelectedId(fallbackId);
+      localStorage.setItem(SELECTED_PORTFOLIO_KEY, fallbackId);
+    }
+    
+    if (!hasInitialized) {
+      setHasInitialized(true);
+    }
+  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized]);
 
   const selectedPortfolio = portfolios.find(p => p.id === selectedId) || null;
 
