@@ -37,13 +37,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         .from('portfolios')
         .select('*')
         .eq('user_id', user.id)
-        .order('last_updated', { ascending: false, nullsFirst: false });
+        .order('last_updated', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false }); // Ordinamento secondario deterministico
       
       if (error) throw error;
       return data as unknown as Portfolio[];
     },
     enabled: !!user,
-    staleTime: 5000, // Evita refetch troppo frequenti
+    staleTime: 30000, // 30 secondi - riduce refetch che causano race condition
   });
 
   const portfolios = portfoliosQuery.data || [];
@@ -56,35 +57,32 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // Auto-selezione robusta - esegue solo dopo il primo fetch completato
+  // Auto-selezione robusta - PRIORITÀ: selectedId attuale > localStorage > fallback
   useEffect(() => {
-    // Non eseguire durante loading o fetching
     if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
     if (portfolios.length === 0) return;
     
-    // Se già inizializzato e selezione valida, non fare nulla
-    if (hasInitialized && selectedId && portfolios.some(p => p.id === selectedId)) {
+    // PRIMA: verifica se selezione attuale è già valida - se sì, esci subito
+    if (selectedId && portfolios.some(p => p.id === selectedId)) {
+      if (!hasInitialized) setHasInitialized(true);
       return;
     }
     
-    // Verifica se ID in localStorage esiste
+    // SOLO se selectedId non valido, prova localStorage
     const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
     const savedExists = savedId && portfolios.some(p => p.id === savedId);
     
     if (savedExists) {
-      if (selectedId !== savedId) {
-        setSelectedId(savedId);
-      }
+      setSelectedId(savedId);
+      localStorage.setItem(SELECTED_PORTFOLIO_KEY, savedId); // Conferma
     } else {
-      // Fallback: primo della lista (già ordinata per last_updated DESC)
+      // Fallback: primo della lista (ordine deterministico)
       const fallbackId = portfolios[0].id;
       setSelectedId(fallbackId);
       localStorage.setItem(SELECTED_PORTFOLIO_KEY, fallbackId);
     }
     
-    if (!hasInitialized) {
-      setHasInitialized(true);
-    }
+    setHasInitialized(true);
   }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized]);
 
   const selectedPortfolio = portfolios.find(p => p.id === selectedId) || null;
