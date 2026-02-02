@@ -11,7 +11,8 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   SectorExposure, 
   getSectorColor,
@@ -105,6 +106,16 @@ export function SectorAllocationView({
                   <Building2 className="w-4 h-4 text-primary" />
                 </div>
                 <span className="text-sm font-medium text-primary">Esposizione Settoriale Totale</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
               <div className="flex items-center gap-2">
                 <Switch 
@@ -161,7 +172,7 @@ export function SectorAllocationView({
             <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
               <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
               <span className="text-xs text-blue-600 dark:text-blue-400">
-                Commodities e Protezioni (Long Put) escluse dall'analisi settoriale. Le azioni sono valorizzate al lordo delle protezioni.
+                Commodities e Protezioni (Long Put) escluse dall'analisi settoriale
               </span>
             </div>
           </CardContent>
