@@ -123,7 +123,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             label="Netting ex. CC e NP OTM"
           />
           <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
-            Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM (strike inferiore al prezzo del sottostante). La logica è che, se ho venduto una PUT e il prezzo del sottostante è sopra lo strike, l'opzione scadrà senza valore e non ha senso spendere soldi per riacquistarla.
+            Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM (strike inferiore al prezzo del sottostante). La logica è che, se ho venduto una PUT e il prezzo del sottostante è sopra lo strike, l'opzione scadrà senza valore e non ha senso spendere soldi per riacquistarla. Per le Naked Put ITM invece, si sottrae la differenza tra strike e prezzo del titolo.
           </p>
         </div>
       );
