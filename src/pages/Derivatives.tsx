@@ -85,6 +85,18 @@ export function Derivatives() {
     };
   }, [derivatives, positions, overrides]);
 
+  // Calculate total covered call contracts per underlying (for partial coverage badge)
+  const totalCoveredCallContractsByUnderlying = useMemo(() => {
+    const totals: Record<string, number> = {};
+    categories.coveredCalls.forEach(cc => {
+      const underlyingName = cc.underlying.description || cc.option.underlying || '';
+      if (underlyingName) {
+        totals[underlyingName] = (totals[underlyingName] || 0) + cc.contractsCovered;
+      }
+    });
+    return totals;
+  }, [categories.coveredCalls]);
+
   // Extract all unique underlying names for price fetching
   const allUnderlyingNames = useMemo(() => {
     const names = new Set<string>();
@@ -207,7 +219,17 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.coveredCalls.map((cc, index) => (
-                      <CoveredCallRow key={index} coveredCall={cc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
+                      <CoveredCallRow 
+                        key={index} 
+                        coveredCall={cc} 
+                        stockPositions={stockPositions} 
+                        getOverrideForPosition={getOverrideForPosition}
+                        totalContractsForUnderlying={
+                          totalCoveredCallContractsByUnderlying[
+                            cc.underlying.description || cc.option.underlying || ''
+                          ] || cc.contractsCovered
+                        }
+                      />
                     ))}
                   </div>
                 )}
@@ -466,7 +488,12 @@ interface RowPropsWithPrices extends RowProps {
   underlyingPrices: Record<string, UnderlyingPrice>;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }: { coveredCall: CoveredCallPosition } & RowProps) {
+interface CoveredCallRowProps extends RowProps {
+  coveredCall: CoveredCallPosition;
+  totalContractsForUnderlying: number;
+}
+
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, totalContractsForUnderlying }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
   
@@ -491,10 +518,10 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }:
   const avgCost = option.avg_cost || 0;
   const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
   
-  // Calculate partial coverage badge
+  // Calculate partial coverage badge using TOTAL contracts for this underlying (not just this row)
   const sharesOwned = underlying.quantity || 0;
   const potentialContracts = Math.floor(sharesOwned / 100);
-  const uncoveredContracts = potentialContracts - contractsCovered;
+  const uncoveredContracts = potentialContracts - totalContractsForUnderlying;
   const isPartialCoverage = uncoveredContracts >= 1;
   
   return (
