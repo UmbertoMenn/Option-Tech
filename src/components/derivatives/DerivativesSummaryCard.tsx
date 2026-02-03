@@ -63,24 +63,18 @@ function CompactSection({
 
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
-      {/* Header row - div container with button + tooltip separated */}
-      <div className="flex items-center gap-2 w-full hover:bg-muted/30 rounded px-1 -mx-1 transition-colors">
-        {/* Clickable button for expansion (icon, title, count, arrow) */}
-        <button 
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-2 flex-1 text-left"
-        >
-          <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
-          <span className="text-sm font-bold text-foreground">{title}</span>
-          <span className="text-xs text-muted-foreground">
-            ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
-          </span>
-          <span className="text-xs text-muted-foreground ml-auto">
-            {isExpanded ? '▲' : '▼'}
-          </span>
-        </button>
+      {/* Header row - div cliccabile invece di button per permettere tooltip annidati */}
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
+        className="flex items-center gap-2 w-full text-left hover:bg-muted/30 rounded px-1 -mx-1 transition-colors cursor-pointer"
+      >
+        <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
+        <span className="text-sm font-bold text-foreground">{title}</span>
         
-        {/* Badge with tooltip OUTSIDE the button */}
+        {/* Badge con tooltip - ordine originale: dopo il titolo */}
         {statusBadge && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -96,6 +90,13 @@ function CompactSection({
             </TooltipContent>
           </Tooltip>
         )}
+        
+        <span className="text-xs text-muted-foreground">
+          ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
+        </span>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {isExpanded ? '▲' : '▼'}
+        </span>
       </div>
       
       {/* Expandable items */}
