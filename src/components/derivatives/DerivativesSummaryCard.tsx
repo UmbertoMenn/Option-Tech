@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { AlertTriangle, ChevronDown, ChevronUp, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { 
-  DerivativeCategories,
-} from '@/lib/derivativeStrategies';
+import { DerivativeCategories } from '@/lib/derivativeStrategies';
 
 interface DerivativesSummaryCardProps {
   categories: DerivativeCategories;
@@ -30,11 +27,12 @@ function getTicker(position: Position | { description?: string; ticker?: string;
   return position.ticker || position.description?.split(' ')[0] || 'N/A';
 }
 
-// Expandable section component
-function ExpandableSection({ 
+// Compact section component - horizontal flow with inline tags
+function CompactSection({ 
   title, 
   icon: Icon,
   iconColor,
+  titleColor,
   items, 
   renderItem,
   alwaysVisible = false,
@@ -42,52 +40,50 @@ function ExpandableSection({
   title: string;
   icon: React.ElementType;
   iconColor: string;
+  titleColor: string;
   items: any[];
   renderItem: (item: any, idx: number) => React.ReactNode;
   alwaysVisible?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const INITIAL_SHOW = 5;
+  const INITIAL_SHOW = 8;
   const hasMore = items.length > INITIAL_SHOW;
   const displayItems = isExpanded ? items : items.slice(0, INITIAL_SHOW);
 
   if (items.length === 0 && !alwaysVisible) return null;
 
   return (
-    <div className="p-3 rounded-lg border border-border bg-background/50">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="flex flex-wrap items-center gap-2 py-2.5 border-b border-border/50 last:border-b-0">
+      {/* Title with colored icon */}
+      <div className="flex items-center gap-1.5 min-w-[180px] shrink-0">
         <Icon className={`w-4 h-4 ${iconColor}`} />
-        <span className="text-sm font-semibold">{title}</span>
+        <span className={`text-sm font-bold ${titleColor}`}>{title}:</span>
         <span className="text-xs text-muted-foreground">({items.length})</span>
       </div>
+      
+      {/* Items as inline tags */}
       {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground italic">Nessun elemento</p>
+        <span className="text-xs text-muted-foreground italic">Nessun elemento</span>
       ) : (
-        <>
-          <div className="space-y-1">
-            {displayItems.map((item, idx) => renderItem(item, idx))}
-          </div>
-          {hasMore && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full mt-2 h-7 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setIsExpanded(!isExpanded)}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {displayItems.map((item, idx) => renderItem(item, idx))}
+          {hasMore && !isExpanded && (
+            <button 
+              onClick={() => setIsExpanded(true)}
+              className="text-xs text-primary hover:underline ml-1"
             >
-              {isExpanded ? (
-                <>
-                  <ChevronUp className="w-3 h-3 mr-1" />
-                  Mostra meno
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3 h-3 mr-1" />
-                  Mostra altri {items.length - INITIAL_SHOW}
-                </>
-              )}
-            </Button>
+              +{items.length - INITIAL_SHOW} altri
+            </button>
           )}
-        </>
+          {hasMore && isExpanded && (
+            <button 
+              onClick={() => setIsExpanded(false)}
+              className="text-xs text-muted-foreground hover:underline ml-1"
+            >
+              mostra meno
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -103,7 +99,6 @@ export function DerivativesSummaryCard({
   const uncoveredCalls = useMemo(() => {
     const result: { ticker: string; uncoveredContracts: number; strategies: string[] }[] = [];
     
-    // Build balance per underlying: owned shares vs (sold calls - bought calls)
     const underlyingBalance = new Map<string, {
       owned: number;
       soldCalls: number;
@@ -111,7 +106,6 @@ export function DerivativesSummaryCard({
       strategies: Set<string>;
     }>();
     
-    // Initialize with stock positions
     stockPositions.forEach(stock => {
       const key = normalizeForMatching(stock.description || '');
       if (!underlyingBalance.has(key)) {
@@ -120,7 +114,6 @@ export function DerivativesSummaryCard({
       underlyingBalance.get(key)!.owned += stock.quantity;
     });
     
-    // Count Covered Calls (sold)
     categories.coveredCalls.forEach(cc => {
       const key = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
       if (!underlyingBalance.has(key)) {
@@ -130,7 +123,6 @@ export function DerivativesSummaryCard({
       underlyingBalance.get(key)!.strategies.add('Covered Call');
     });
     
-    // Count Iron Condors (sold call + bought call)
     categories.ironCondors.forEach(ic => {
       const key = normalizeForMatching(ic.underlying);
       if (!underlyingBalance.has(key)) {
@@ -141,7 +133,6 @@ export function DerivativesSummaryCard({
       underlyingBalance.get(key)!.strategies.add('Iron Condor');
     });
     
-    // Count Double Diagonals (sold call + bought call)
     categories.doubleDiagonals.forEach(dd => {
       const key = normalizeForMatching(dd.underlying);
       if (!underlyingBalance.has(key)) {
@@ -152,7 +143,6 @@ export function DerivativesSummaryCard({
       underlyingBalance.get(key)!.strategies.add('Double Diagonal');
     });
     
-    // Count grouped other strategies
     categories.groupedOtherStrategies.forEach(group => {
       const key = normalizeForMatching(group.underlying);
       if (!underlyingBalance.has(key)) {
@@ -173,7 +163,6 @@ export function DerivativesSummaryCard({
       }
     });
     
-    // Count Leap Calls (bought)
     categories.leapCalls.forEach(lc => {
       const key = normalizeForMatching(lc.option.underlying || lc.option.description);
       if (!underlyingBalance.has(key)) {
@@ -183,14 +172,12 @@ export function DerivativesSummaryCard({
       underlyingBalance.get(key)!.strategies.add('Leap Call');
     });
     
-    // Check balance: floor(owned/100) - (soldCalls - boughtCalls) < 0 → Naked Call
     for (const [key, data] of underlyingBalance) {
       const coveredContracts = Math.floor(data.owned / 100);
       const netSoldCalls = data.soldCalls - data.boughtCalls;
       
       if (netSoldCalls > coveredContracts) {
         const uncovered = netSoldCalls - coveredContracts;
-        // Get ticker from the key (first part)
         const ticker = key.split(' ')[0] || key;
         result.push({
           ticker,
@@ -211,7 +198,6 @@ export function DerivativesSummaryCard({
       const strikePrice = cc.option.strike_price || 0;
       const underlyingPrice = cc.underlying.current_price || 0;
       
-      // CALL is ITM when strike < underlying price
       if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
         result.push({
           ticker: getTicker(cc.underlying),
@@ -224,11 +210,10 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.coveredCalls]);
   
-  // ============ 3. Double Diagonal OOR (include Alternative DD) ============
+  // ============ 3. Double Diagonal OOR ============
   const doubleDiagonalOOR = useMemo(() => {
     const result: { ticker: string; isAlternative: boolean }[] = [];
     
-    // Regular Double Diagonals
     categories.doubleDiagonals.forEach(dd => {
       const underlyingPrice = underlyingPrices[dd.underlying]?.price || 0;
       if (underlyingPrice > 0) {
@@ -245,7 +230,6 @@ export function DerivativesSummaryCard({
       }
     });
     
-    // Alternative Double Diagonals (from groupedOtherStrategies)
     categories.groupedOtherStrategies
       .filter(g => g.strategyName === 'Alternative Double Diagonal')
       .forEach(group => {
@@ -301,7 +285,6 @@ export function DerivativesSummaryCard({
     categories.nakedPuts.forEach(np => {
       const strikePrice = np.option.strike_price || 0;
       const underlyingPrice = np.underlying?.current_price || 0;
-      // PUT is ITM when strike > underlying price
       const isITM = underlyingPrice > 0 && strikePrice > underlyingPrice;
       
       if (isITM) {
@@ -316,7 +299,7 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.nakedPuts]);
   
-  // ============ 6. Leap Call in Gain (price > avg cost) ============
+  // ============ 6. Leap Call in Gain ============
   const leapCallsInGain = useMemo(() => {
     const result: { ticker: string; strike: number; contracts: number }[] = [];
     
@@ -324,7 +307,6 @@ export function DerivativesSummaryCard({
       const currentPrice = lc.option.current_price || 0;
       const avgCost = lc.option.avg_cost || 0;
       
-      // In Gain when current price > avg cost
       if (avgCost > 0 && currentPrice > avgCost) {
         result.push({
           ticker: getTicker({ ticker: lc.option.ticker, description: lc.option.underlying || lc.option.description }),
@@ -337,7 +319,7 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.leapCalls]);
   
-  // ============ 7. Call da rivendere (azioni disponibili per nuove CC) ============
+  // ============ 7. Call da rivendere ============
   const availableCallsToSell = useMemo(() => {
     const result: { ticker: string; availableShares: number }[] = [];
     
@@ -345,10 +327,8 @@ export function DerivativesSummaryCard({
       const normalizedKey = normalizeForMatching(stock.description || '');
       const potentialContracts = Math.floor(stock.quantity / 100);
       
-      // Count total sold call contracts for this underlying
       let soldCallContracts = 0;
       
-      // From Covered Calls
       categories.coveredCalls.forEach(cc => {
         const ccKey = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
         if (ccKey === normalizedKey) {
@@ -372,7 +352,6 @@ export function DerivativesSummaryCard({
   const otherStrategiesOOROOB = useMemo(() => {
     const result: { ticker: string; strategyName: string; status: 'OOR' | 'OOB' }[] = [];
     
-    // Strategies that use IR/OOR (range-based)
     const rangeBasedStrategies = ['Short Strangle', 'Put Spread', 'Call Spread', 'Diagonal Put Spread', 'Diagonal Call Spread'];
     
     categories.groupedOtherStrategies
@@ -389,7 +368,6 @@ export function DerivativesSummaryCard({
         
         if (isRangeBased) {
           status = 'OOR';
-          // IR/OOR logic
           if (strategyName.includes('Short Strangle')) {
             const soldPut = group.options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
             const soldCall = group.options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
@@ -413,7 +391,6 @@ export function DerivativesSummaryCard({
           }
         } else {
           status = 'OOB';
-          // IB/OOB logic - negative P/L means out of breakeven
           isInBadState = group.totalProfitLoss < 0;
         }
         
@@ -429,11 +406,13 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.groupedOtherStrategies, underlyingPrices]);
   
-  // Check if there's anything to show (Iron Condor OOR always visible)
+  // Iron Condor always visible
+  const showIronCondorAlways = true;
+  
   const hasContent = uncoveredCalls.length > 0 || 
                      coveredCallsITM.length > 0 || 
                      doubleDiagonalOOR.length > 0 ||
-                     categories.ironCondors.length > 0 || // Always show Iron Condor section
+                     showIronCondorAlways ||
                      nakedPutsITM.length > 0 ||
                      leapCallsInGain.length > 0 ||
                      availableCallsToSell.length > 0 ||
@@ -445,165 +424,159 @@ export function DerivativesSummaryCard({
   
   return (
     <Card className="border-border bg-card">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-amber-500" />
           <CardTitle className="text-xl">Azioni Necessarie</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          
-          {/* 1. Call non coperte (ALERT) */}
-          <ExpandableSection
-            title="Call non coperte"
-            icon={ShieldAlert}
-            iconColor="text-red-500"
-            items={uncoveredCalls}
-            renderItem={(uc, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <AlertTriangle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                <span className="font-medium">{uc.ticker}:</span>
-                <span className="text-red-500">{uc.uncoveredContracts} NC</span>
-                <span className="text-xs text-muted-foreground truncate">({uc.strategies.join(', ')})</span>
-              </div>
-            )}
-          />
-          
-          {/* 2. Covered Call ITM */}
-          <ExpandableSection
-            title="Covered Call ITM"
-            icon={ShieldAlert}
-            iconColor="text-amber-500"
-            items={coveredCallsITM}
-            renderItem={(cc, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />
-                <span className="font-medium">{cc.ticker}</span>
-                <span className="text-muted-foreground">${cc.strike}</span>
-                <span className="text-xs">×{cc.contracts}</span>
-              </div>
-            )}
-          />
-          
-          {/* 3. Double Diagonal OOR */}
-          <ExpandableSection
-            title="Double Diagonal OOR"
-            icon={Layers}
-            iconColor="text-purple-500"
-            items={doubleDiagonalOOR}
-            renderItem={(dd, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">
-                  {dd.ticker}
-                  {dd.isAlternative && <span className="text-xs text-muted-foreground ml-0.5">(Alt)</span>}
-                </span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-red-500 border-red-500"
-                >
-                  OOR
-                </Badge>
-              </div>
-            )}
-          />
-          
-          {/* 4. Iron Condor OOR - Always visible */}
-          <ExpandableSection
-            title="Iron Condor OOR"
-            icon={Target}
-            iconColor="text-amber-500"
-            items={ironCondorOOR}
-            alwaysVisible={categories.ironCondors.length > 0}
-            renderItem={(ic, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{ic.ticker}</span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-red-500 border-red-500"
-                >
-                  OOR
-                </Badge>
-              </div>
-            )}
-          />
-          
-          {/* 5. Naked Put ITM */}
-          <ExpandableSection
-            title="Naked Put ITM"
-            icon={CircleDollarSign}
-            iconColor="text-orange-500"
-            items={nakedPutsITM}
-            renderItem={(np, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{np.ticker}</span>
-                <span className="text-muted-foreground">${np.strike}</span>
-                <span className="text-xs">×{np.contracts}</span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-red-500 border-red-500"
-                >
-                  ITM
-                </Badge>
-              </div>
-            )}
-          />
-          
-          {/* 6. Leap Call in Gain */}
-          <ExpandableSection
-            title="Leap Call in Gain"
-            icon={Rocket}
-            iconColor="text-blue-500"
-            items={leapCallsInGain}
-            renderItem={(lc, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{lc.ticker}</span>
-                <span className="text-muted-foreground">${lc.strike}</span>
-                <span className="text-xs">×{lc.contracts}</span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-green-500 border-green-500"
-                >
-                  G
-                </Badge>
-              </div>
-            )}
-          />
-          
-          {/* 7. Call da rivendere */}
-          <ExpandableSection
-            title="Call da rivendere"
-            icon={TrendingUp}
-            iconColor="text-green-500"
-            items={availableCallsToSell}
-            renderItem={(item, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{item.ticker}</span>
-                <span className="text-muted-foreground">{item.availableShares} azioni</span>
-              </div>
-            )}
-          />
-          
-          {/* 8. Altre Strategie OOR/OOB */}
-          <ExpandableSection
-            title="Altre Strategie"
-            icon={Puzzle}
-            iconColor="text-cyan-500"
-            items={otherStrategiesOOROOB}
-            renderItem={(os, idx) => (
-              <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{os.ticker}</span>
-                <span className="text-xs text-muted-foreground truncate">{os.strategyName}</span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-red-500 border-red-500"
-                >
-                  {os.status}
-                </Badge>
-              </div>
-            )}
-          />
-        </div>
+        {/* Vertical list layout with inline tags */}
+        
+        {/* 1. Call non coperte */}
+        <CompactSection
+          title="Call non coperte"
+          icon={ShieldAlert}
+          iconColor="text-red-500"
+          titleColor="text-red-500"
+          items={uncoveredCalls}
+          renderItem={(uc, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-red-500/10 border-red-500/30"
+            >
+              {uc.ticker}: {uc.uncoveredContracts}NC
+            </Badge>
+          )}
+        />
+        
+        {/* 2. Covered Call ITM */}
+        <CompactSection
+          title="Covered Call ITM"
+          icon={ShieldAlert}
+          iconColor="text-amber-500"
+          titleColor="text-amber-500"
+          items={coveredCallsITM}
+          renderItem={(cc, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-amber-500/10 border-amber-500/30"
+            >
+              {cc.ticker} ${cc.strike} ×{cc.contracts}
+            </Badge>
+          )}
+        />
+        
+        {/* 3. Double Diagonal OOR */}
+        <CompactSection
+          title="Double Diagonal OOR"
+          icon={Layers}
+          iconColor="text-purple-500"
+          titleColor="text-purple-500"
+          items={doubleDiagonalOOR}
+          renderItem={(dd, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-purple-500/10 border-purple-500/30"
+            >
+              {dd.ticker}{dd.isAlternative ? ' (Alt)' : ''}
+            </Badge>
+          )}
+        />
+        
+        {/* 4. Iron Condor OOR - Always visible */}
+        <CompactSection
+          title="Iron Condor OOR"
+          icon={Target}
+          iconColor="text-amber-500"
+          titleColor="text-amber-500"
+          items={ironCondorOOR}
+          alwaysVisible={true}
+          renderItem={(ic, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-amber-500/10 border-amber-500/30"
+            >
+              {ic.ticker}
+            </Badge>
+          )}
+        />
+        
+        {/* 5. Naked Put ITM */}
+        <CompactSection
+          title="Naked Put ITM"
+          icon={CircleDollarSign}
+          iconColor="text-orange-500"
+          titleColor="text-orange-500"
+          items={nakedPutsITM}
+          renderItem={(np, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-orange-500/10 border-orange-500/30"
+            >
+              {np.ticker} ${np.strike} ×{np.contracts}
+            </Badge>
+          )}
+        />
+        
+        {/* 6. Leap Call in Gain */}
+        <CompactSection
+          title="Leap Call in Gain"
+          icon={Rocket}
+          iconColor="text-blue-500"
+          titleColor="text-blue-500"
+          items={leapCallsInGain}
+          renderItem={(lc, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-blue-500/10 border-blue-500/30"
+            >
+              {lc.ticker} ${lc.strike} ×{lc.contracts}
+            </Badge>
+          )}
+        />
+        
+        {/* 7. Call da rivendere */}
+        <CompactSection
+          title="Call da rivendere"
+          icon={TrendingUp}
+          iconColor="text-green-500"
+          titleColor="text-green-500"
+          items={availableCallsToSell}
+          renderItem={(item, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-green-500/10 border-green-500/30"
+            >
+              {item.ticker} {item.availableShares}az
+            </Badge>
+          )}
+        />
+        
+        {/* 8. Altre Strategie OOR/OOB */}
+        <CompactSection
+          title="Altre Strategie"
+          icon={Puzzle}
+          iconColor="text-cyan-500"
+          titleColor="text-cyan-500"
+          items={otherStrategiesOOROOB}
+          renderItem={(os, idx) => (
+            <Badge 
+              key={idx}
+              variant="outline" 
+              className="text-xs bg-cyan-500/10 border-cyan-500/30"
+            >
+              {os.ticker} {os.strategyName} {os.status}
+            </Badge>
+          )}
+        />
       </CardContent>
     </Card>
   );
