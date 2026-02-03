@@ -32,12 +32,14 @@ function CompactSection({
   title, 
   icon: Icon,
   iconColor,
+  statusBadge,
   items, 
   renderItem,
 }: { 
   title: string;
   icon: React.ElementType;
   iconColor: string;
+  statusBadge?: { label: string; colorClass: string };
   items: any[];
   renderItem: (item: any, idx: number) => React.ReactNode;
 }) {
@@ -54,6 +56,14 @@ function CompactSection({
       >
         <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
         <span className="text-sm font-bold text-foreground">{title}</span>
+        {statusBadge && (
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] px-1.5 py-0 h-4 ${statusBadge.colorClass}`}
+          >
+            {statusBadge.label}
+          </Badge>
+        )}
         <span className="text-xs text-muted-foreground">
           ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
         </span>
@@ -429,11 +439,12 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 2. Covered Call ITM */}
+          {/* 2. Covered Call */}
           <CompactSection
-            title="Covered Call ITM"
+            title="Covered Call"
             icon={ShieldAlert}
             iconColor="text-amber-500"
+            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
             items={coveredCallsITM}
             renderItem={(cc, idx) => (
               <Badge 
@@ -446,11 +457,12 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 3. Double Diagonal OOR */}
+          {/* 3. Double Diagonal */}
           <CompactSection
-            title="Double Diagonal OOR"
+            title="Double Diagonal"
             icon={Layers}
             iconColor="text-purple-500"
+            statusBadge={{ label: 'OOR', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
             items={doubleDiagonalOOR}
             renderItem={(dd, idx) => (
               <Badge 
@@ -463,11 +475,12 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 4. Iron Condor OOR */}
+          {/* 4. Iron Condor */}
           <CompactSection
-            title="Iron Condor OOR"
+            title="Iron Condor"
             icon={Target}
             iconColor="text-amber-500"
+            statusBadge={{ label: 'OOR', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
             items={ironCondorOOR}
             renderItem={(ic, idx) => (
               <Badge 
@@ -480,11 +493,12 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 5. Naked Put ITM */}
+          {/* 5. Naked Put */}
           <CompactSection
-            title="Naked Put ITM"
+            title="Naked Put"
             icon={CircleDollarSign}
             iconColor="text-orange-500"
+            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
             items={nakedPutsITM}
             renderItem={(np, idx) => (
               <Badge 
@@ -497,11 +511,12 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 6. Leap Call in Gain */}
+          {/* 6. Leap Call */}
           <CompactSection
-            title="Leap Call in Gain"
+            title="Leap Call"
             icon={Rocket}
             iconColor="text-blue-500"
+            statusBadge={{ label: 'G', colorClass: 'bg-green-500/20 border-green-500/50 text-green-400' }}
             items={leapCallsInGain}
             renderItem={(lc, idx) => (
               <Badge 
