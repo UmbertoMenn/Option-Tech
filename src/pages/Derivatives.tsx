@@ -533,25 +533,34 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <Badge variant="outline" className="text-xs shrink-0 text-green-500 border-green-500">V</Badge>
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge 
-              variant="outline"
-              className={`text-xs shrink-0 ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-            >
-              {isITM ? 'ITM' : 'OTM'}
-            </Badge>
+        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: V/A Badge */}
+          <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
+          
+          {/* Col 3: Descrizione */}
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          
+          {/* Col 4: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {isITM ? 'ITM' : 'OTM'}
+          </Badge>
+          
+          {/* Col 5: Badges (P!, Override) */}
+          <div className="flex items-center gap-1">
             {isPartialCoverage && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help shrink-0">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help">
                     P!
                   </span>
                 </TooltipTrigger>
@@ -562,45 +571,53 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
             )}
             {hasOverride && <OverrideBadge />}
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="covered_call" 
-            />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
-                  PS: {formatCurrency(underlyingPrice, 'USD')}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Prezzo Sottostante</p>
-              </TooltipContent>
-            </Tooltip>
-            <span className="text-sm text-muted-foreground">
-              {contractsCovered} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Prezzo Medio di Carico Opzione</p>
-              </TooltipContent>
-            </Tooltip>
-            <div className="flex items-center gap-1">
-              <span className="font-semibold text-sm">
-                {formatCurrency(option.current_price || 0, 'USD')}
+          
+          {/* Col 6: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="covered_call" 
+          />
+          
+          {/* Col 7: PS */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+                PS: {formatCurrency(underlyingPrice, 'USD')}
               </span>
-              {priceChangePct !== null && (
-                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
-                </span>
-              )}
-            </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Prezzo Sottostante</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 8: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contractsCovered} × 100
+          </span>
+          
+          {/* Col 9: PMC */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+                {formatCurrency(option.avg_cost || 0, 'USD')}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Prezzo Medio di Carico Opzione</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 10: Prezzo + % */}
+          <div className="flex items-center gap-1 justify-end">
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+            {priceChangePct !== null && (
+              <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+              </span>
+            )}
           </div>
         </div>
       </CollapsibleTrigger>
@@ -653,25 +670,34 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <Badge variant="outline" className="text-xs shrink-0 text-red-500 border-red-500">A</Badge>
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge 
-              variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-            >
-              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-            </Badge>
+        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: V/A Badge */}
+          <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
+          
+          {/* Col 3: Descrizione */}
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          
+          {/* Col 4: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+          </Badge>
+          
+          {/* Col 5: Badges (P!, Override) */}
+          <div className="flex items-center gap-1">
             {isPartial && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help shrink-0">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help">
                     P!
                   </span>
                 </TooltipTrigger>
@@ -682,16 +708,20 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             )}
             {hasOverride && <OverrideBadge />}
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="protection" 
-            />
-            {hasUnderlyingPrice && (
+          
+          {/* Col 6: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="protection" 
+          />
+          
+          {/* Col 7: PS */}
+          <div className="text-right">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
+                  <span className="text-sm text-muted-foreground cursor-help truncate">
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -699,24 +729,32 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
                   <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
             )}
-            <span className="text-sm text-muted-foreground">
-              {contracts} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Prezzo Medio di Carico Opzione</p>
-              </TooltipContent>
-            </Tooltip>
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
-            </span>
           </div>
+          
+          {/* Col 8: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contracts} × 100
+          </span>
+          
+          {/* Col 9: PMC */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+                {formatCurrency(option.avg_cost || 0, 'USD')}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Prezzo Medio di Carico Opzione</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 10: Prezzo */}
+          <span className="font-semibold text-sm text-right">
+            {formatCurrency(option.current_price || 0, 'USD')}
+          </span>
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -786,23 +824,30 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <span className="font-medium truncate">{underlying}</span>
-            <Badge variant="outline" className="text-xs shrink-0 text-amber-500 border-amber-500/50">
-              IC
-            </Badge>
-            {hasUnderlyingPrice && (
+        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_5rem_6rem_6rem_4.5rem_5.5rem_5.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: Underlying */}
+          <span className="font-medium truncate">{underlying}</span>
+          
+          {/* Col 3: Badge IC */}
+          <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
+            IC
+          </Badge>
+          
+          {/* Col 4: IR/OOR */}
+          <div className="flex justify-center">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs shrink-0 ${isInRange 
+                    className={`text-xs ${isInRange 
                       ? 'text-green-500 border-green-500' 
                       : 'text-red-500 border-red-500'}`}
                   >
@@ -815,70 +860,70 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                     : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
             )}
-            <span className="text-xs text-muted-foreground">
-              {expiryFormatted}
-            </span>
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            {hasUnderlyingPrice && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-xs text-muted-foreground cursor-help">
-                  PUT {putSpread}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-xs text-muted-foreground cursor-help">
-                  CALL {callSpread}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
-              </TooltipContent>
-            </Tooltip>
-            <span className="text-sm text-muted-foreground">
-              {contracts} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className={`flex items-center gap-1 cursor-help ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
-                  <span className="text-xs text-muted-foreground">GP:</span>
-                  <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Gain Potenziale: premi incassati - premi pagati</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-help text-red-500">
-                  <span className="text-xs text-muted-foreground">ML:</span>
-                  <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Max Loss: perdita massima possibile</p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
+          
+          {/* Col 5: Scadenza */}
+          <span className="text-xs text-muted-foreground text-right">
+            {expiryFormatted}
+          </span>
+          
+          {/* Col 6: PUT spread */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+                PUT {putSpread}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 7: CALL spread */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+                CALL {callSpread}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 8: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contracts} × 100
+          </span>
+          
+          {/* Col 9: GP */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 cursor-help justify-end ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+                <span className="text-xs text-muted-foreground">GP:</span>
+                <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Gain Potenziale: premi incassati - premi pagati</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 10: ML */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1 cursor-help justify-end text-red-500">
+                <span className="text-xs text-muted-foreground">ML:</span>
+                <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Max Loss: perdita massima possibile</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -993,20 +1038,25 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <span className="font-medium truncate">{underlying}</span>
-            {hasUnderlyingPrice && (
+        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_6rem_6rem_4.5rem_5.5rem_5.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: Underlying */}
+          <span className="font-medium truncate">{underlying}</span>
+          
+          {/* Col 3: IR/OOR */}
+          <div className="flex justify-center">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs shrink-0 ${isInRange 
+                    className={`text-xs ${isInRange 
                       ? 'text-green-500 border-green-500' 
                       : 'text-red-500 border-red-500'}`}
                   >
@@ -1019,70 +1069,70 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
             )}
-            <span className="text-xs text-muted-foreground">
-              {soldExpiryFormatted} - {boughtExpiryFormatted}
-            </span>
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            {hasUnderlyingPrice && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-xs text-muted-foreground cursor-help">
-                  PUT {putSpread}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-xs text-muted-foreground cursor-help">
-                  CALL {callSpread}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
-              </TooltipContent>
-            </Tooltip>
-            <span className="text-sm text-muted-foreground">
-              {contracts} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-help">
-                  <span className="text-xs text-muted-foreground">GP:</span>
-                  <span className="text-sm text-muted-foreground">{formatCurrency(gainPotenziale, 'USD')}</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Gain Potenziale: premi incassati - premi pagati</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-help">
-                  <span className="text-xs text-muted-foreground">ML:</span>
-                  <span className="text-sm text-muted-foreground">{formatCurrency(maxLoss, 'USD')}</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Max Loss: perdita massima possibile</p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
+          
+          {/* Col 4: Scadenze */}
+          <span className="text-xs text-muted-foreground text-right">
+            {soldExpiryFormatted} - {boughtExpiryFormatted}
+          </span>
+          
+          {/* Col 5: PUT spread */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+                PUT {putSpread}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 6: CALL spread */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+                CALL {callSpread}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 7: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contracts} × 100
+          </span>
+          
+          {/* Col 8: GP */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 cursor-help justify-end ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+                <span className="text-xs text-muted-foreground">GP:</span>
+                <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Gain Potenziale: premi incassati - premi pagati</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 9: ML */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1 cursor-help justify-end text-red-500">
+                <span className="text-xs text-muted-foreground">ML:</span>
+                <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Max Loss: perdita massima possibile</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -1607,33 +1657,46 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <Badge variant="outline" className="text-xs shrink-0 text-green-500 border-green-500">V</Badge>
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge 
-              variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-            >
-              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-            </Badge>
+        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: V Badge */}
+          <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
+          
+          {/* Col 3: Descrizione */}
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          
+          {/* Col 4: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+          </Badge>
+          
+          {/* Col 5: Override Badge */}
+          <div className="flex items-center">
             {hasOverride && <OverrideBadge />}
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="naked_put" 
-            />
-            {hasUnderlyingPrice && (
+          
+          {/* Col 6: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="naked_put" 
+          />
+          
+          {/* Col 7: PS */}
+          <div className="text-right">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
+                  <span className="text-sm text-muted-foreground cursor-help truncate">
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1641,24 +1704,32 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                   <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
             )}
-            <span className="text-sm text-muted-foreground">
-              {contracts} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Prezzo Medio di Carico Opzione</p>
-              </TooltipContent>
-            </Tooltip>
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
-            </span>
           </div>
+          
+          {/* Col 8: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contracts} × 100
+          </span>
+          
+          {/* Col 9: PMC */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+                {formatCurrency(option.avg_cost || 0, 'USD')}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Prezzo Medio di Carico Opzione</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 10: Prezzo */}
+          <span className="font-semibold text-sm text-right">
+            {formatCurrency(option.current_price || 0, 'USD')}
+          </span>
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -1710,33 +1781,46 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <Badge variant="outline" className="text-xs shrink-0 text-red-500 border-red-500">A</Badge>
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge 
-              variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-            >
-              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-            </Badge>
+        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Col 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          
+          {/* Col 2: A Badge */}
+          <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
+          
+          {/* Col 3: Descrizione */}
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          
+          {/* Col 4: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+          </Badge>
+          
+          {/* Col 5: Override Badge */}
+          <div className="flex items-center">
             {hasOverride && <OverrideBadge />}
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="leap_call" 
-            />
-            {hasUnderlyingPrice && (
+          
+          {/* Col 6: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="leap_call" 
+          />
+          
+          {/* Col 7: PS */}
+          <div className="text-right">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
+                  <span className="text-sm text-muted-foreground cursor-help truncate">
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1744,38 +1828,46 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                   <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
             )}
-            <span className="text-sm text-muted-foreground">
-              {contracts} × 100
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
-                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Prezzo Medio di Carico Opzione</p>
-              </TooltipContent>
-            </Tooltip>
-            {(() => {
-              const currentPrice = option.current_price || 0;
-              const avgCost = option.avg_cost || 0;
-              const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
-              return (
-                <div className="flex items-center gap-1">
-                  <span className="font-semibold text-sm">
-                    {formatCurrency(currentPrice, 'USD')}
-                  </span>
-                  {priceChangePct !== null && (
-                    <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
           </div>
+          
+          {/* Col 8: Contratti */}
+          <span className="text-sm text-muted-foreground text-right">
+            {contracts} × 100
+          </span>
+          
+          {/* Col 9: PMC */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+                {formatCurrency(option.avg_cost || 0, 'USD')}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Prezzo Medio di Carico Opzione</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          {/* Col 10: Prezzo + % */}
+          {(() => {
+            const currentPrice = option.current_price || 0;
+            const avgCost = option.avg_cost || 0;
+            const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+            return (
+              <div className="flex items-center gap-1 justify-end">
+                <span className="font-semibold text-sm">
+                  {formatCurrency(currentPrice, 'USD')}
+                </span>
+                {priceChangePct !== null && (
+                  <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
