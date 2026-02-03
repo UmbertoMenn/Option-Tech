@@ -84,9 +84,50 @@ export interface DerivativeCategories {
 }
 
 /**
+ * Raggruppa le opzioni in cluster basati sulla vicinanza temporale delle scadenze.
+ * Due opzioni sono nello stesso cluster se la distanza tra le loro scadenze è ≤ maxDaysGap.
+ */
+function clusterByExpiry(options: Position[], maxDaysGap: number = 100): Position[][] {
+  if (options.length === 0) return [];
+  
+  // Ordina per scadenza
+  const sorted = [...options].sort((a, b) => {
+    const dateA = a.expiry_date ? new Date(a.expiry_date).getTime() : 0;
+    const dateB = b.expiry_date ? new Date(b.expiry_date).getTime() : 0;
+    return dateA - dateB;
+  });
+  
+  const clusters: Position[][] = [];
+  let currentCluster: Position[] = [sorted[0]];
+  
+  for (let i = 1; i < sorted.length; i++) {
+    const prevDate = sorted[i - 1].expiry_date ? new Date(sorted[i - 1].expiry_date).getTime() : 0;
+    const currDate = sorted[i].expiry_date ? new Date(sorted[i].expiry_date).getTime() : 0;
+    const diffDays = (currDate - prevDate) / (1000 * 60 * 60 * 24);
+    
+    if (diffDays <= maxDaysGap) {
+      currentCluster.push(sorted[i]);
+    } else {
+      clusters.push(currentCluster);
+      currentCluster = [sorted[i]];
+    }
+  }
+  
+  clusters.push(currentCluster);
+  return clusters;
+}
+
+/**
+ * Verifica se un cluster contiene opzioni vendute (quantity < 0)
+ */
+function clusterHasSoldOptions(cluster: Position[]): boolean {
+  return cluster.some(o => o.quantity < 0);
+}
+
+/**
  * Categorizes derivatives following this priority order:
  * 1. Covered Call: CALL vendute con sottostante in portafoglio
- * 2. Protezioni: PUT acquistate SOLO se possiedo il sottostante
+ * 2. Protezioni: PUT acquistate SOLO se possiedo il sottostante (usando clustering temporale)
  * 3. Iron Condor: 4 gambe (2 call + 2 put) tutte con stessa scadenza
  * 4. Double Diagonal: 4 gambe con vendite stessa scadenza, acquisti stessa scadenza più lunga
  * 5. Altre Strategie: più gambe raggruppate per sottostante (con riconoscimento nome strategia)
@@ -260,65 +301,75 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 2: Find Protezioni (Long PUT) ============
-  // Protezione totale: esposizione netta <= 0
-  // Protezione parziale: esposizione netta > 0 (PUT comprate single-leg non usate in altre strategie)
+  // Una PUT comprata è una Protezione solo se:
+  // a) È in un cluster senza opzioni vendute, OPPURE
+  // b) È l'UNICA opzione sul sottostante, OPPURE
+  // c) È separata da > 100 giorni dal cluster più vicino con opzioni vendute
   
-  // Raggruppa le PUT per sottostante
-  const putsByUnderlying = new Map<string, { bought: Position[], sold: Position[], stock: Position | null }>();
+  // Raggruppa TUTTE le opzioni (non solo PUT) per sottostante
+  const allOptionsByUnderlying = new Map<string, Position[]>();
   
   for (const d of filteredDerivatives) {
-    if (d.option_type === 'put' && !usedDerivatives.has(d.id)) {
-      const underlyingKey = normalizeForMatching(d.underlying || d.description);
-      const underlyingStock = findUnderlyingStock(d, stockPositions);
-      
-      if (!putsByUnderlying.has(underlyingKey)) {
-        putsByUnderlying.set(underlyingKey, { bought: [], sold: [], stock: underlyingStock || null });
-      }
-      
-      const group = putsByUnderlying.get(underlyingKey)!;
-      if (d.quantity > 0) {
-        group.bought.push(d);
-      } else {
-        group.sold.push(d);
-      }
-      // Aggiorna stock se trovato
-      if (underlyingStock && !group.stock) {
-        group.stock = underlyingStock;
-      }
+    if (usedDerivatives.has(d.id)) continue;
+    const underlyingKey = normalizeForMatching(d.underlying || d.description);
+    
+    if (!allOptionsByUnderlying.has(underlyingKey)) {
+      allOptionsByUnderlying.set(underlyingKey, []);
     }
+    allOptionsByUnderlying.get(underlyingKey)!.push(d);
   }
   
-  // Track PUT comprate per sottostante che hanno il sottostante ma esposizione > 0
-  // Queste verranno aggiunte come protezioni parziali se rimangono single-leg
-  const partialProtectionCandidates = new Map<string, { puts: Position[], stock: Position }>();
+  // Track PUT comprate rinviate per strategia (fallback a protezione in Step 6)
+  const partialProtectionCandidates = new Map<string, { puts: Position[], stock: Position, deferredForStrategy?: boolean }>();
   
-  // Verifica esposizione netta per ogni sottostante
-  for (const [underlyingKey, group] of putsByUnderlying.entries()) {
-    if (!group.stock || group.stock.quantity <= 0) continue;
+  // Per ogni sottostante con opzioni
+  for (const [underlyingKey, allOptions] of allOptionsByUnderlying.entries()) {
+    // Trova lo stock corrispondente
+    const stock = findUnderlyingStock(allOptions[0], stockPositions);
+    if (!stock || stock.quantity <= 0) continue;
     
-    const stockContracts = Math.floor(group.stock.quantity / 100);
-    // Only count bought PUT contracts (Long PUT), ignore sold PUTs
-    const longPutContracts = group.bought.reduce((sum, p) => sum + p.quantity, 0);
+    // Filtra solo le PUT comprate su questo sottostante
+    const boughtPuts = allOptions.filter(o => o.option_type === 'put' && o.quantity > 0);
+    if (boughtPuts.length === 0) continue;
     
-    // Partial protection: shares/100 - Long PUT contracts > 0
-    const isPartialProtection = stockContracts - longPutContracts > 0;
+    // Crea cluster temporali per TUTTE le opzioni su questo sottostante (max 100 giorni)
+    const clusters = clusterByExpiry(allOptions, 100);
     
-    if (!isPartialProtection) {
-      // Protezione totale: tutte le PUT comprate sono protezioni complete
-      for (const put of group.bought) {
-        longPuts.push({
-          option: put,
-          underlying: group.stock,
-          contracts: put.quantity,
-          isPartial: false
-        });
-        usedDerivatives.add(put.id);
+    // Calcolo una volta: contratti stock e totale PUT comprate
+    const stockContracts = Math.floor(stock.quantity / 100);
+    const totalLongPuts = boughtPuts.reduce((sum, p) => sum + p.quantity, 0);
+    const isPartialProtection = stockContracts - totalLongPuts > 0;
+    
+    for (const put of boughtPuts) {
+      // Trova il cluster a cui appartiene questa PUT
+      const putCluster = clusters.find(c => c.some(o => o.id === put.id));
+      
+      if (!putCluster) continue;
+      
+      // Se il cluster ha opzioni vendute → potenziale strategia, RINVIA
+      if (clusterHasSoldOptions(putCluster)) {
+        // NON classificare come protezione, lascia che Step 5 la gestisca
+        if (!partialProtectionCandidates.has(underlyingKey)) {
+          partialProtectionCandidates.set(underlyingKey, { 
+            puts: [], 
+            stock,
+            deferredForStrategy: true 
+          });
+        }
+        partialProtectionCandidates.get(underlyingKey)!.puts.push(put);
+        console.log(`[Protection] PUT ${put.strike_price} deferred - cluster has sold options`);
+        continue;
       }
-    } else {
-      // Protezione parziale: shares/100 - Long PUT contracts > 0
-      // Le PUT comprate potrebbero essere protezioni parziali
-      // Ma solo se rimangono single-leg (non associate ad altre strategie)
-      partialProtectionCandidates.set(underlyingKey, { puts: group.bought, stock: group.stock });
+      
+      // Cluster senza opzioni vendute → questa PUT è una protezione
+      longPuts.push({
+        option: put,
+        underlying: stock,
+        contracts: put.quantity,
+        isPartial: isPartialProtection
+      });
+      usedDerivatives.add(put.id);
+      console.log(`[Protection] PUT ${put.strike_price} classified as protection (isolated cluster)`);
     }
   }
   
@@ -465,18 +516,24 @@ export function categorizeDerivatives(
     const underlyingStock = findUnderlyingStock(option, stockPositions);
     const underlyingKey = normalizeForMatching(option.underlying || option.description);
     
-    // Check if this is a bought PUT that's a partial protection candidate
+    // Check if this is a bought PUT that was deferred from Step 2 (potential strategy)
+    // If it wasn't used in Steps 3-5, it becomes a protection (fallback)
     if (option.option_type === 'put' && option.quantity > 0) {
       const candidate = partialProtectionCandidates.get(underlyingKey);
       if (candidate && candidate.puts.some(p => p.id === option.id)) {
-        // This is a partial protection (single-leg bought PUT with underlying, net exposure > 0)
+        // This PUT was deferred but didn't form a strategy → classify as protection
+        const stockContracts = Math.floor(candidate.stock.quantity / 100);
+        const totalPuts = candidate.puts.reduce((s, p) => s + p.quantity, 0);
+        const isPartial = stockContracts - totalPuts > 0;
+        
         longPuts.push({
           option,
           underlying: candidate.stock,
           contracts: option.quantity,
-          isPartial: true
+          isPartial
         });
         usedDerivatives.add(option.id);
+        console.log(`[Protection] PUT ${option.strike_price} classified as protection (fallback - no strategy formed)`);
         continue;
       }
     }
