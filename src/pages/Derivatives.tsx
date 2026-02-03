@@ -1241,7 +1241,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_1fr_12rem_3.5rem_9rem_5rem_6rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+        <div className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
           {/* Colonna 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
