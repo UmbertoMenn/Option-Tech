@@ -74,9 +74,6 @@ export function PortfolioDonutChart({ summary, portfolio }: PortfolioDonutChartP
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <p className="text-sm text-muted-foreground">Patrimonio Totale</p>
         <p className="text-2xl font-bold font-mono">{formatCurrency(summary.totalValue)}</p>
-        <p className={`text-sm font-mono ${absolutePL >= 0 ? 'text-profit' : 'text-loss'}`}>
-          {formatPercentage(percentPL)}
-        </p>
       </div>
     </div>
   );
