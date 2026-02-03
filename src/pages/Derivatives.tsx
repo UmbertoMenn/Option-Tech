@@ -1760,14 +1760,18 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
   
   const hasOverride = !!getOverrideForPosition(option.id);
   
-  // Calculate ITM/OTM status for CALL options
-  const strikePrice = option.strike_price || 0;
-  // Get underlying price - try from portfolio first, then from Yahoo Finance
+  // Calculate Gain/Loss status based on current price vs avg cost
+  const currentPrice = option.current_price || 0;
+  const avgCost = option.avg_cost || 0;
+  const hasValidPrices = currentPrice > 0 && avgCost > 0;
+  const isInGain = hasValidPrices && currentPrice > avgCost;
+  const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+  
+  // Get underlying price for display
   const portfolioPrice = underlying?.current_price || 0;
   const yahooPrice = option.underlying ? underlyingPrices[option.underlying]?.price || 0 : 0;
   const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
-  const isITM = hasUnderlyingPrice && strikePrice < underlyingPrice;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -1786,12 +1790,12 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: ITM/OTM */}
+          {/* Col 4: Gain/Loss Badge (G green if price > avg cost, L red if price < avg cost) */}
           <Badge 
             variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+            className={`text-xs ${!hasValidPrices ? 'text-muted-foreground border-muted-foreground' : isInGain ? 'text-green-500 border-green-500' : 'text-red-500 border-red-500'}`}
           >
-            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
           </Badge>
           
           {/* Col 5: Override Badge */}
@@ -1833,7 +1837,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="text-sm text-muted-foreground text-right cursor-help truncate">
-                {formatCurrency(option.avg_cost || 0, 'USD')}
+                {formatCurrency(avgCost, 'USD')}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -1842,23 +1846,16 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           </Tooltip>
           
           {/* Col 10: Prezzo + % */}
-          {(() => {
-            const currentPrice = option.current_price || 0;
-            const avgCost = option.avg_cost || 0;
-            const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
-            return (
-              <div className="flex items-center gap-1 justify-end">
-                <span className="font-semibold text-sm">
-                  {formatCurrency(currentPrice, 'USD')}
-                </span>
-                {priceChangePct !== null && (
-                  <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
-                  </span>
-                )}
-              </div>
-            );
-          })()}
+          <div className="flex items-center gap-1 justify-end">
+            <span className="font-semibold text-sm">
+              {formatCurrency(currentPrice, 'USD')}
+            </span>
+            {priceChangePct !== null && (
+              <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+              </span>
+            )}
+          </div>
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -1878,7 +1875,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+              <p className="font-medium">{formatCurrency(currentPrice, 'USD')}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
