@@ -49,15 +49,15 @@ export function PortfolioDonutChart({ summary, portfolio }: PortfolioDonutChartP
   };
 
   return (
-    <div className="relative h-[340px]">
+    <div className="relative h-[375px]">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={data}
             cx="50%"
             cy="50%"
-            innerRadius={95}
-            outerRadius={140}
+            innerRadius={105}
+            outerRadius={154}
             paddingAngle={2}
             dataKey="value"
             strokeWidth={0}
