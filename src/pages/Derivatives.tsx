@@ -1019,12 +1019,6 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   const soldCallStrike = soldCall.strike_price || 0;
   const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
   
-  // Calculate Gain Potenziale = premi incassati - premi pagati
-  const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
-  const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
-  const gainPotenziale = premiumReceived - premiumPaid;
-  const isPositiveGP = gainPotenziale >= 0;
-  
   // Calculate P/L = sum of all 4 legs' P/L
   const totalPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
                   (boughtPut.profit_loss || 0) + (boughtCall.profit_loss || 0);
@@ -1037,8 +1031,8 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | GP | P/L */}
+        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1108,18 +1102,6 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             {contracts} × 100
           </span>
           
-          {/* Col 8: GP */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
-                <span className="text-xs text-muted-foreground">GP:</span>
-                <span className="text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Gain Potenziale: premi incassati - premi pagati</p>
-            </TooltipContent>
-          </Tooltip>
           
           {/* Col 9: P/L */}
           <Tooltip>
@@ -1208,9 +1190,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           
           {/* Summary */}
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
-            <span className="text-muted-foreground">Gain Potenziale:</span>
-            <span className={`font-semibold ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(gainPotenziale, 'USD')}
+            <span className="text-muted-foreground">Profit/Loss:</span>
+            <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(totalPL, 'EUR')}
             </span>
           </div>
         </div>
