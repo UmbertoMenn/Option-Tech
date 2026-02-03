@@ -1241,20 +1241,31 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {isOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            )}
-            <span className="font-medium truncate">{underlying}</span>
-            {strategyName && (
+        <div className="grid grid-cols-[auto_1fr_9rem_3rem_8rem_4.5rem_6rem_6rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Colonna 1: Chevron */}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          )}
+          
+          {/* Colonna 2: Underlying */}
+          <span className="font-medium truncate">{underlying}</span>
+          
+          {/* Colonna 3: Badge Strategia */}
+          <div className="flex justify-start">
+            {strategyName ? (
               <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
                 {strategyName}
               </Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
             )}
-            {showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
+          </div>
+          
+          {/* Colonna 4: Badge IB/OOB o IR/OOR */}
+          <div className="flex justify-center">
+            {showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
@@ -1272,44 +1283,65 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                     : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
                 </TooltipContent>
               </Tooltip>
+            ) : showBreakevenBadge && breakevens.length > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    variant="outline"
+                    className={`text-xs shrink-0 ${isInBreakeven 
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
+                  >
+                    {isInBreakeven ? 'IB' : 'OOB'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInBreakeven 
+                    ? 'In Breakeven: prezzo nel range profittevole' 
+                    : 'Out of Breakeven: prezzo fuori dal range profittevole'}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
             )}
-            {showBreakevenBadge && breakevens.length > 0 && (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge 
-                      variant="outline"
-                      className={`text-xs shrink-0 ${isInBreakeven 
-                        ? 'text-green-500 border-green-500' 
-                        : 'text-red-500 border-red-500'}`}
-                    >
-                      {isInBreakeven ? 'IB' : 'OOB'}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{isInBreakeven 
-                      ? 'In Breakeven: prezzo nel range profittevole' 
-                      : 'Out of Breakeven: prezzo fuori dal range profittevole'}</p>
-                  </TooltipContent>
-                </Tooltip>
-                <span className="text-xs text-muted-foreground">
-                  BE: {breakevens.length >= 2 
-                    ? `${Math.min(...breakevens).toFixed(2)} - ${Math.max(...breakevens).toFixed(2)}` 
-                    : breakevens[0].toFixed(2)}
-                </span>
-              </>
+          </div>
+          
+          {/* Colonna 5: BE Range */}
+          <div className="text-right">
+            {showBreakevenBadge && breakevens.length > 0 ? (
+              <span className="text-xs text-muted-foreground">
+                BE: {breakevens.length >= 2 
+                  ? `${Math.min(...breakevens).toFixed(2)} - ${Math.max(...breakevens).toFixed(2)}` 
+                  : breakevens[0].toFixed(2)}
+              </span>
+            ) : showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
+              <span className="text-xs text-muted-foreground">
+                {soldPutStrike} - {soldCallStrike}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
             )}
+          </div>
+          
+          {/* Colonna 6: Badge Gambe */}
+          <div className="flex justify-center">
             <Badge variant="secondary" className="text-xs shrink-0">
               {options.length} gambe
             </Badge>
+          </div>
+          
+          {/* Colonna 7: Conteggio Call/Put */}
+          <div className="text-right">
             <span className="text-xs text-muted-foreground">
-              {callCount > 0 && `${callCount} CALL`}
+              {callCount > 0 && `${callCount}C`}
               {callCount > 0 && putCount > 0 && ' • '}
-              {putCount > 0 && `${putCount} PUT`}
+              {putCount > 0 && `${putCount}P`}
             </span>
           </div>
-          <div className="flex items-center gap-4 shrink-0">
-            {hasUnderlyingPrice && (
+          
+          {/* Colonna 8: Prezzo Sottostante */}
+          <div className="text-right">
+            {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help">
@@ -1320,7 +1352,13 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                   <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
             )}
+          </div>
+          
+          {/* Colonna 9: P/L */}
+          <div className="text-right">
             <span className={`text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
               {formatCurrency(totalProfitLoss, 'USD')}
             </span>
