@@ -252,25 +252,57 @@ async function fetchYahooPrice(ticker: string): Promise<{ price: number; currenc
   }
 }
 
-// Check underlying_mappings cache
+// Validate ticker by checking if Yahoo Finance returns a valid price
+async function validateTicker(ticker: string): Promise<boolean> {
+  const priceResult = await fetchYahooPrice(ticker);
+  return priceResult !== null && priceResult.price > 0;
+}
+
+// Check underlying_mappings cache with case-insensitive fallback
 async function checkUnderlyingMappingsCache(
   supabase: any,
   underlying: string
 ): Promise<string | null> {
   try {
-    const { data, error } = await supabase
+    // Try exact match first
+    const { data } = await supabase
       .from('underlying_mappings')
       .select('ticker')
       .eq('underlying', underlying)
       .single();
     
     if (data?.ticker) {
-      console.log(`Cache hit in underlying_mappings for "${underlying}": ${data.ticker}`);
+      console.log(`Cache hit (exact) for "${underlying}": ${data.ticker}`);
       return data.ticker;
     }
   } catch {
-    // No cached mapping
+    // No exact match, continue to normalized search
   }
+  
+  try {
+    // Try case-insensitive match using normalized name
+    const normalized = normalizeName(underlying);
+    const firstWord = normalized.split(' ')[0];
+    
+    const { data: iData } = await supabase
+      .from('underlying_mappings')
+      .select('ticker, underlying')
+      .ilike('underlying', `%${firstWord}%`)
+      .limit(10);
+    
+    if (iData && iData.length > 0) {
+      // Find best match using normalized comparison
+      for (const row of iData) {
+        if (normalizeName(row.underlying) === normalized) {
+          console.log(`Cache hit (normalized) for "${underlying}": ${row.ticker}`);
+          return row.ticker;
+        }
+      }
+    }
+  } catch (error) {
+    console.log(`Error in normalized cache lookup: ${error}`);
+  }
+  
   return null;
 }
 
@@ -341,9 +373,20 @@ serve(async (req) => {
         }
       }
       
-      // Step 3: Try AI inference
+      // Step 3: Try AI inference with validation
       if (!ticker) {
-        ticker = await inferTickerWithAI(underlying);
+        const aiTicker = await inferTickerWithAI(underlying);
+        
+        if (aiTicker) {
+          // Validate AI-inferred ticker before accepting it
+          const isValid = await validateTicker(aiTicker);
+          if (isValid) {
+            ticker = aiTicker;
+            console.log(`AI ticker "${aiTicker}" validated successfully for "${underlying}"`);
+          } else {
+            console.log(`AI ticker "${aiTicker}" failed validation for "${underlying}"`);
+          }
+        }
       }
       
       if (!ticker) {
@@ -351,8 +394,9 @@ serve(async (req) => {
         continue;
       }
       
-      // Save to cache if we resolved via static mapping or AI
-      await saveToUnderlyingMappingsCache(supabase, underlying, ticker);
+      // Save to cache using NORMALIZED underlying for consistency
+      const normalizedUnderlying = normalizeName(underlying);
+      await saveToUnderlyingMappingsCache(supabase, normalizedUnderlying, ticker);
       
       // Step 4: Fetch price from Yahoo Finance
       const priceResult = await fetchYahooPrice(ticker);
