@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ChevronDown, ChevronUp, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, Umbrella } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { 
@@ -337,27 +337,36 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.leapCalls]);
   
-  // ============ 7. Protezioni Attive (Long Put ITM) ============
-  const activeProtections = useMemo(() => {
-    const result: { ticker: string; strike: number; contracts: number }[] = [];
+  // ============ 7. Call da rivendere (azioni disponibili per nuove CC) ============
+  const availableCallsToSell = useMemo(() => {
+    const result: { ticker: string; availableShares: number }[] = [];
     
-    categories.longPuts.forEach(lp => {
-      const strikePrice = lp.option.strike_price || 0;
-      const underlyingPrice = lp.underlying?.current_price || 0;
-      // PUT is ITM when strike > underlying price
-      const isITM = underlyingPrice > 0 && strikePrice > underlyingPrice;
+    stockPositions.forEach(stock => {
+      const normalizedKey = normalizeForMatching(stock.description || '');
+      const potentialContracts = Math.floor(stock.quantity / 100);
       
-      if (isITM) {
+      // Count total sold call contracts for this underlying
+      let soldCallContracts = 0;
+      
+      // From Covered Calls
+      categories.coveredCalls.forEach(cc => {
+        const ccKey = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
+        if (ccKey === normalizedKey) {
+          soldCallContracts += cc.contractsCovered;
+        }
+      });
+      
+      const available = potentialContracts - soldCallContracts;
+      if (available >= 1) {
         result.push({
-          ticker: getTicker({ ticker: lp.option.ticker, description: lp.option.underlying || lp.option.description }),
-          strike: strikePrice,
-          contracts: lp.contracts
+          ticker: stock.ticker || stock.description?.split(' ')[0] || 'N/A',
+          availableShares: available * 100
         });
       }
     });
     
-    return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
-  }, [categories.longPuts]);
+    return result.sort((a, b) => b.availableShares - a.availableShares);
+  }, [stockPositions, categories.coveredCalls]);
   
   // ============ 8. Altre Strategie OOR/OOB ============
   const otherStrategiesOOROOB = useMemo(() => {
@@ -427,7 +436,7 @@ export function DerivativesSummaryCard({
                      categories.ironCondors.length > 0 || // Always show Iron Condor section
                      nakedPutsITM.length > 0 ||
                      leapCallsInGain.length > 0 ||
-                     activeProtections.length > 0 ||
+                     availableCallsToSell.length > 0 ||
                      otherStrategiesOOROOB.length > 0;
   
   if (!hasContent) {
@@ -561,23 +570,16 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 7. Protezioni Attive (Long Put ITM) */}
+          {/* 7. Call da rivendere */}
           <ExpandableSection
-            title="Protezioni Attive"
-            icon={Umbrella}
-            iconColor="text-emerald-500"
-            items={activeProtections}
-            renderItem={(lp, idx) => (
+            title="Call da rivendere"
+            icon={TrendingUp}
+            iconColor="text-green-500"
+            items={availableCallsToSell}
+            renderItem={(item, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
-                <span className="font-medium">{lp.ticker}</span>
-                <span className="text-muted-foreground">${lp.strike}</span>
-                <span className="text-xs">×{lp.contracts}</span>
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-green-500 border-green-500"
-                >
-                  ITM
-                </Badge>
+                <span className="font-medium">{item.ticker}</span>
+                <span className="text-muted-foreground">{item.availableShares} azioni</span>
               </div>
             )}
           />
