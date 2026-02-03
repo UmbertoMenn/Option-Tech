@@ -1108,7 +1108,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
-                <span className="text-sm">{formatCurrency(totalPL, 'EUR')}</span>
+                <span className="text-sm">{formatCurrency(totalPL, 'USD')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1192,7 +1192,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
             <span className="text-muted-foreground">Profit/Loss:</span>
             <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(totalPL, 'EUR')}
+              {formatCurrency(totalPL, 'USD')}
             </span>
           </div>
         </div>
