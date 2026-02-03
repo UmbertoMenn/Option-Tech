@@ -1025,11 +1025,10 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   const gainPotenziale = premiumReceived - premiumPaid;
   const isPositiveGP = gainPotenziale >= 0;
   
-  // Calculate Max Loss
-  const putSpreadWidth = soldPutStrike - (boughtPut.strike_price || 0);
-  const callSpreadWidth = (boughtCall.strike_price || 0) - soldCallStrike;
-  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
-  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
+  // Calculate P/L = sum of all 4 legs' P/L
+  const totalPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
+                  (boughtPut.profit_loss || 0) + (boughtCall.profit_loss || 0);
+  const isPositivePL = totalPL >= 0;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
@@ -1039,6 +1038,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
         <div className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | GP | P/L */}
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1121,16 +1121,16 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 9: ML */}
+          {/* Col 9: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
-                <span className="text-xs text-muted-foreground">ML:</span>
-                <span className="text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+                <span className="text-xs text-muted-foreground">P/L:</span>
+                <span className="text-sm">{formatCurrency(totalPL, 'EUR')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Max Loss: perdita massima possibile</p>
+              <p>Profit/Loss: somma dei P/L delle 4 gambe</p>
             </TooltipContent>
           </Tooltip>
         </div>
