@@ -444,7 +444,7 @@ export function DerivativesSummaryCard({
             title="Covered Call"
             icon={ShieldAlert}
             iconColor="text-amber-500"
-            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
+            statusBadge={{ label: 'ITM', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
             items={coveredCallsITM}
             renderItem={(cc, idx) => (
               <Badge 
@@ -498,7 +498,7 @@ export function DerivativesSummaryCard({
             title="Naked Put"
             icon={CircleDollarSign}
             iconColor="text-orange-500"
-            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
+            statusBadge={{ label: 'ITM', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
             items={nakedPutsITM}
             renderItem={(np, idx) => (
               <Badge 
@@ -529,7 +529,25 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 7. Call da rivendere */}
+          {/* 7. Altre Strategie OOR/OOB */}
+          <CompactSection
+            title="Altre Strategie"
+            icon={Puzzle}
+            iconColor="text-cyan-500"
+            statusBadge={{ label: 'OOR/OOB', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
+            items={otherStrategiesOOROOB}
+            renderItem={(os, idx) => (
+              <Badge 
+                key={idx}
+                variant="outline" 
+                className="text-xs bg-cyan-500/10 border-cyan-500/30"
+              >
+                {os.ticker} {os.strategyName} {os.status}
+              </Badge>
+            )}
+          />
+          
+          {/* 8. Call da rivendere - LAST */}
           <CompactSection
             title="Call da rivendere"
             icon={TrendingUp}
@@ -542,23 +560,6 @@ export function DerivativesSummaryCard({
                 className="text-xs bg-green-500/10 border-green-500/30"
               >
                 {item.ticker} {item.availableShares}az
-              </Badge>
-            )}
-          />
-          
-          {/* 8. Altre Strategie OOR/OOB */}
-          <CompactSection
-            title="Altre Strategie"
-            icon={Puzzle}
-            iconColor="text-cyan-500"
-            items={otherStrategiesOOROOB}
-            renderItem={(os, idx) => (
-              <Badge 
-                key={idx}
-                variant="outline" 
-                className="text-xs bg-cyan-500/10 border-cyan-500/30"
-              >
-                {os.ticker} {os.strategyName} {os.status}
               </Badge>
             )}
           />
