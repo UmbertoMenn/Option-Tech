@@ -110,6 +110,42 @@ export function EquityExposureView({
   // Dynamic stock risk value based on toggle
   const displayedStockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
 
+  // Sorted arrays for consistent descending order display
+  const sortedETFDetails = useMemo(() => 
+    [...etfDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [etfDetails]
+  );
+
+  const sortedPureStockDetails = useMemo(() => 
+    [...pureStockDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [pureStockDetails]
+  );
+
+  const sortedCommodityDetails = useMemo(() => 
+    [...commodityDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [commodityDetails]
+  );
+
+  const sortedNakedPutDetails = useMemo(() => 
+    [...nakedPutDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [nakedPutDetails]
+  );
+
+  const sortedLeapCallDetails = useMemo(() => 
+    [...leapCallDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [leapCallDetails]
+  );
+
+  const sortedStrategyDetails = useMemo(() => 
+    [...strategyDetails].sort((a, b) => b.maxLossEUR - a.maxLossEUR),
+    [strategyDetails]
+  );
+
+  const sortedConsolidatedHoldings = useMemo(() => 
+    [...consolidatedHoldings].sort((a, b) => b.totalExposure - a.totalExposure),
+    [consolidatedHoldings]
+  );
+
   const riskCategories = [
     { 
       label: 'Rischio ETF Azionari', 
@@ -239,7 +275,7 @@ export function EquityExposureView({
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={riskCategories.filter(c => c.value > 0)}
+                      data={[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value)}
                       cx="50%"
                       cy="50%"
                       innerRadius={35}
@@ -247,7 +283,7 @@ export function EquityExposureView({
                       paddingAngle={2}
                       dataKey="value"
                     >
-                      {riskCategories.filter(c => c.value > 0).map((entry, index) => (
+                      {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value).map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
                           fill={entry.color.replace('bg-', '').replace('-500', '')}
@@ -267,7 +303,7 @@ export function EquityExposureView({
                 </ResponsiveContainer>
               </div>
               <div className="flex-1 space-y-1.5">
-                {riskCategories.filter(c => c.value > 0).map((cat, index) => (
+                {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value).map((cat, index) => (
                   <div key={index} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <div 
@@ -298,7 +334,7 @@ export function EquityExposureView({
           <CardTitle className="text-lg">Distribuzione del Rischio</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          {riskCategories.map((cat, index) => (
+          {[...riskCategories].sort((a, b) => b.value - a.value).map((cat, index) => (
             <div key={index} className="space-y-1.5">
               <div className="flex justify-between items-start">
                 <div>
@@ -373,7 +409,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-2">
-                {etfDetails.map((stock, index) => {
+                {sortedETFDetails.map((stock, index) => {
                   const protectedPct = stock.stockValue > 0 
                     ? (stock.protectedValue / stock.stockValue) * 100 
                     : 0;
@@ -476,7 +512,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-2">
-                {pureStockDetails.map((stock, index) => {
+                {sortedPureStockDetails.map((stock, index) => {
                   const protectedPct = stock.stockValue > 0 
                     ? (stock.protectedValue / stock.stockValue) * 100 
                     : 0;
@@ -579,7 +615,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-3">
-                {commodityDetails.map((commodity, index) => (
+                {sortedCommodityDetails.map((commodity, index) => (
                   <div key={index} className="p-4 rounded-lg bg-muted/50 flex justify-between items-center">
                     <div>
                       <div className="font-semibold">{commodity.underlying}</div>
@@ -620,7 +656,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-3">
-                {nakedPutDetails.map((np, index) => (
+                {sortedNakedPutDetails.map((np, index) => (
                   <div key={index} className="p-4 rounded-lg bg-muted/50 flex justify-between items-center">
                     <div>
                       <div className="font-semibold">{np.underlying}</div>
@@ -661,7 +697,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-3">
-                {leapCallDetails.map((lc, index) => (
+                {sortedLeapCallDetails.map((lc, index) => (
                   <div key={index} className="p-4 rounded-lg bg-muted/50 flex justify-between items-center">
                     <div>
                       <div className="font-semibold">{lc.underlying}</div>
@@ -702,7 +738,7 @@ export function EquityExposureView({
             </AccordionTrigger>
             <AccordionContent className="px-6 pb-4">
               <div className="space-y-1">
-                {strategyDetails.map((strat, index) => (
+                {sortedStrategyDetails.map((strat, index) => (
                   <div key={index} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <BarChart3 className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
@@ -801,7 +837,7 @@ export function EquityExposureView({
             </div>
           ) : (
             <div className="space-y-2">
-              {consolidatedHoldings.map((holding, index) => {
+              {sortedConsolidatedHoldings.map((holding, index) => {
                 const hasStock = (includeProtections ? holding.stockRiskWithProtection : holding.stockRisk) > 0;
                 const hasNakedPut = holding.nakedPutRisk > 0;
                 const hasLeapCall = holding.leapCallRisk > 0;
