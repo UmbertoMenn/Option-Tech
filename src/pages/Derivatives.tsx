@@ -1248,12 +1248,6 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <span className="font-medium truncate">{underlying}</span>
-            {strategyName && (
-              <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
-                {strategyName}
-              </Badge>
-            )}
             {showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1274,30 +1268,36 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
               </Tooltip>
             )}
             {showBreakevenBadge && breakevens.length > 0 && (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge 
-                      variant="outline"
-                      className={`text-xs shrink-0 ${isInBreakeven 
-                        ? 'text-green-500 border-green-500' 
-                        : 'text-red-500 border-red-500'}`}
-                    >
-                      {isInBreakeven ? 'IB' : 'OOB'}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{isInBreakeven 
-                      ? 'In Breakeven: prezzo nel range profittevole' 
-                      : 'Out of Breakeven: prezzo fuori dal range profittevole'}</p>
-                  </TooltipContent>
-                </Tooltip>
-                <span className="text-xs text-muted-foreground">
-                  BE: {breakevens.length >= 2 
-                    ? `${Math.min(...breakevens).toFixed(2)} - ${Math.max(...breakevens).toFixed(2)}` 
-                    : breakevens[0].toFixed(2)}
-                </span>
-              </>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    variant="outline"
+                    className={`text-xs shrink-0 ${isInBreakeven 
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
+                  >
+                    {isInBreakeven ? 'IB' : 'OOB'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInBreakeven 
+                    ? 'In Breakeven: prezzo nel range profittevole' 
+                    : 'Out of Breakeven: prezzo fuori dal range profittevole'}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <span className="font-medium truncate">{underlying}</span>
+            {strategyName && (
+              <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
+                {strategyName}
+              </Badge>
+            )}
+            {showBreakevenBadge && breakevens.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                BE: {breakevens.length >= 2 
+                  ? `${Math.min(...breakevens).toFixed(2)} - ${Math.max(...breakevens).toFixed(2)}` 
+                  : breakevens[0].toFixed(2)}
+              </span>
             )}
             <Badge variant="secondary" className="text-xs shrink-0">
               {options.length} gambe
