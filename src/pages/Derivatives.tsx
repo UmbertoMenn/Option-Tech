@@ -1056,9 +1056,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             </span>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className={`flex items-center gap-1 cursor-help ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+                <div className="flex items-center gap-1 cursor-help">
                   <span className="text-xs text-muted-foreground">GP:</span>
-                  <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                  <span className="text-sm text-muted-foreground">{formatCurrency(gainPotenziale, 'USD')}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -1067,9 +1067,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-help text-red-500">
+                <div className="flex items-center gap-1 cursor-help">
                   <span className="text-xs text-muted-foreground">ML:</span>
-                  <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                  <span className="text-sm text-muted-foreground">{formatCurrency(maxLoss, 'USD')}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
