@@ -1180,23 +1180,46 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
+  // or single-sided spread strategies (Put Spread, Call Spread, Diagonal Put/Call Spread)
   const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
   const isShortStrangle = strategyName === 'Short Strangle';
-  const showRangeBadge = isAltDoubleDiagonal || isShortStrangle;
+  const isPutSpread = strategyName === 'Put Spread' || strategyName === 'Diagonal Put Spread';
+  const isCallSpread = strategyName === 'Call Spread' || strategyName === 'Diagonal Call Spread';
+  const showRangeBadge = isAltDoubleDiagonal || isShortStrangle || isPutSpread || isCallSpread;
   
   let isInRange = false;
   let soldPutStrike = 0;
   let soldCallStrike = 0;
+  let rangeDisplay = '';
   
   if (showRangeBadge && hasUnderlyingPrice) {
-    // Find sold PUT and CALL strikes
-    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
-    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
-    
-    if (soldPut && soldCall) {
-      soldPutStrike = soldPut.option.strike_price || 0;
-      soldCallStrike = soldCall.option.strike_price || 0;
-      isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+    if (isAltDoubleDiagonal || isShortStrangle) {
+      // Logica esistente: range tra PUT venduta e CALL venduta
+      const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+      const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+      
+      if (soldPut && soldCall) {
+        soldPutStrike = soldPut.option.strike_price || 0;
+        soldCallStrike = soldCall.option.strike_price || 0;
+        isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+        rangeDisplay = `${soldPutStrike} - ${soldCallStrike}`;
+      }
+    } else if (isPutSpread) {
+      // Put Spread: IR se prezzo >= strike PUT venduta
+      const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+      if (soldPut) {
+        soldPutStrike = soldPut.option.strike_price || 0;
+        isInRange = underlyingPrice >= soldPutStrike;
+        rangeDisplay = `≥ ${soldPutStrike}`;
+      }
+    } else if (isCallSpread) {
+      // Call Spread: IR se prezzo <= strike CALL venduta
+      const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+      if (soldCall) {
+        soldCallStrike = soldCall.option.strike_price || 0;
+        isInRange = underlyingPrice <= soldCallStrike;
+        rangeDisplay = `≤ ${soldCallStrike}`;
+      }
     }
   }
   
@@ -1265,7 +1288,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           
           {/* Colonna 4: Badge IB/OOB o IR/OOR */}
           <div className="flex justify-center">
-            {showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
+            {showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
@@ -1279,8 +1302,8 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>{isInRange 
-                    ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
-                    : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+                    ? `In Range: prezzo ${rangeDisplay}` 
+                    : `Out of Range: prezzo non ${rangeDisplay}`}</p>
                 </TooltipContent>
               </Tooltip>
             ) : showBreakevenBadge && breakevens.length > 0 ? (
@@ -1314,9 +1337,9 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                   ? `${Math.min(...breakevens).toFixed(2)} - ${Math.max(...breakevens).toFixed(2)}` 
                   : breakevens[0].toFixed(2)}
               </span>
-            ) : showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
+            ) : showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
               <span className="text-xs text-muted-foreground">
-                {soldPutStrike} - {soldCallStrike}
+                {rangeDisplay}
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">-</span>
