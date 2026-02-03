@@ -193,21 +193,33 @@ export function EquityExposureView({
         {/* Total Card */}
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="pt-6">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 rounded bg-primary/20">
-                <ShieldAlert className="w-4 h-4 text-primary" />
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded bg-primary/20">
+                  <ShieldAlert className="w-4 h-4 text-primary" />
+                </div>
+                <span className="text-sm font-medium text-primary">Esposizione in Equity e Commodities</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-sm">
+                      <p>Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-              <span className="text-sm font-medium text-primary">Esposizione in Equity e Commodities</span>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs text-sm">
-                    <p>Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="protections-toggle"
+                  checked={includeProtections}
+                  onCheckedChange={setIncludeProtections}
+                />
+                <Label htmlFor="protections-toggle" className="text-sm">
+                  Protezioni
+                </Label>
+              </div>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
@@ -216,16 +228,6 @@ export function EquityExposureView({
                 ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
               </div>
             )}
-            <div className="flex items-center gap-2 mt-4">
-              <Switch 
-                id="protections-toggle"
-                checked={includeProtections}
-                onCheckedChange={setIncludeProtections}
-              />
-              <Label htmlFor="protections-toggle" className="text-sm">
-                Protezioni
-              </Label>
-            </div>
           </CardContent>
         </Card>
 
