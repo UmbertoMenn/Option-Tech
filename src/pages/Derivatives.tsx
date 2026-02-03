@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella } from 'lucide-react';
+import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState } from 'react';
@@ -194,6 +195,14 @@ export function Derivatives() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-6">
+        {/* Summary Card */}
+        <DerivativesSummaryCard 
+          categories={categories}
+          stockPositions={stockPositions}
+          underlyingPrices={underlyingPrices}
+          totalCoveredCallContractsByUnderlying={totalCoveredCallContractsByUnderlying}
+        />
+        
         {/* Section 1: Covered Call (Collapsible) */}
         <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
           <Card className="border-border bg-card">
