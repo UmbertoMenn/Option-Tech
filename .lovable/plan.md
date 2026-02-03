@@ -1,100 +1,101 @@
 
 
-# Piano: Rinominare e Stilizzare la Card "Posizioni da monitorare"
+# Piano: Fix Tooltip per Badge nelle Righe delle Strategie Derivati
 
-## Obiettivo
+## Problema Identificato
 
-Modificare la card "Azioni Necessarie" per:
-1. Rinominare il titolo in **"Posizioni da monitorare"**
-2. Creare un effetto visivo di **card sovrapposta** dove il titolo appare su uno sfondo più scuro in secondo piano
+I tooltip sui badge (ITM, OTM, IR, OOR, IB, OOB, G, L) nelle righe delle strategie non funzionano. La causa è **identica** a quella risolta in `DerivativesSummaryCard.tsx`:
 
-## Soluzione Tecnica
+Il componente `CollapsibleTrigger asChild` renderizza un `<button>` nativo, e i tooltip Radix non funzionano quando il `TooltipTrigger` è annidato in un altro elemento interattivo come `<button>`.
 
-### Struttura Proposta
+## Soluzione
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│  CARD ESTERNA (sfondo più scuro, bordo)                 │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │  🔺 Posizioni da monitorare                        │  │
-│  └────────────────────────────────────────────────────┘  │
-│                                                          │
-│     ┌──────────────────────────────────────────────┐     │
-│     │  CARD INTERNA (sfondo più chiaro)            │     │
-│     │                                               │     │
-│     │  • Covered Call ITM                          │     │
-│     │  • Double Diagonal OOR                       │     │
-│     │  • Iron Condor OOR                          │     │
-│     │  • ...                                       │     │
-│     │                                               │     │
-│     └──────────────────────────────────────────────┘     │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
-### Implementazione
-
-1. **Card esterna** con sfondo `bg-background-secondary` (più scuro)
-2. **Header** con il titolo "Posizioni da monitorare" sulla card esterna
-3. **Card interna** con sfondo `bg-card` (più chiaro) contenente l'elenco delle sezioni
-
-### Codice Modificato (righe 442-451)
-
-**Prima:**
-```typescript
-return (
-  <div className="grid grid-cols-2 gap-4">
-    <Card className="border-border bg-card">
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="w-5 h-5 text-amber-500" />
-          <CardTitle className="text-xl">Azioni Necessarie</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        ...
-      </CardContent>
-    </Card>
-```
-
-**Dopo:**
-```typescript
-return (
-  <div className="grid grid-cols-2 gap-4">
-    {/* Card esterna più scura - sfondo principale */}
-    <div className="rounded-lg border border-border bg-background-secondary p-4">
-      {/* Header sulla card esterna */}
-      <div className="flex items-center gap-2 mb-3">
-        <AlertTriangle className="w-5 h-5 text-amber-500" />
-        <h3 className="text-xl font-semibold text-card-foreground">Posizioni da monitorare</h3>
-      </div>
-      
-      {/* Card interna più chiara - contenuto */}
-      <Card className="border-border bg-card">
-        <CardContent className="pt-4">
-          ...
-        </CardContent>
-      </Card>
-    </div>
-```
-
-## Dettagli Stilistici
-
-| Elemento | Classe/Sfondo | Risultato |
-|----------|---------------|-----------|
-| Card esterna | `bg-background-secondary` | Sfondo più scuro (HSL 220 18% 10%) |
-| Card interna | `bg-card` | Sfondo più chiaro (HSL 220 18% 10%) - già presente |
-| Bordo esterno | `border-border` | Bordo visibile sulla card principale |
-| Padding | `p-4` | Spazio tra card esterna e interna |
+Usare lo stesso approccio applicato al `DerivativesSummaryCard.tsx`:
+- Sostituire il pattern `<CollapsibleTrigger asChild><div ...>` con `<div role="button" onClick={...}>`
+- Mantenere invariata la struttura e la posizione di tutti gli elementi interni
+- Gestire l'evento click manualmente per toggle `isOpen`
 
 ## File da Modificare
 
-- `src/components/derivatives/DerivativesSummaryCard.tsx` - Righe 442-520 circa
+**`src/pages/Derivatives.tsx`** - Modificare le seguenti funzioni Row:
 
-## Risultato Visivo
+| Funzione | Righe | Badge con Tooltip |
+|----------|-------|-------------------|
+| `CoveredCallRow` | 542-669 | ITM/OTM, P! |
+| `LongPutRow` | 686-811 | ITM/OTM, P! |
+| `IronCondorRow` | 847-1026 | IR/OOR |
+| `DoubleDiagonalRow` | 1054-1224 | IR/OOR |
+| `GroupedOtherStrategyRow` | 1319-1459 | IR/OOR, IB/OOB |
+| `NakedPutRow` | 1669-1782 | ITM/OTM |
+| `LeapCallRow` | 1804-1924 | G/L |
 
-L'effetto finale mostrerà:
-- Un contenitore più scuro con il titolo "Posizioni da monitorare" e l'icona di warning
-- Una card bianca sovrapposta contenente tutte le sezioni espandibili
-- L'impressione di profondità e gerarchia visiva
+## Implementazione per Ogni Row
+
+### Pattern Attuale (NON FUNZIONA)
+```typescript
+<Collapsible open={isOpen} onOpenChange={setIsOpen}>
+  <CollapsibleTrigger asChild>
+    <div className="grid ... cursor-pointer ...">
+      {/* Badge con Tooltip - NON FUNZIONA */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge className="cursor-help">ITM</Badge>
+        </TooltipTrigger>
+        <TooltipContent>In The Money</TooltipContent>
+      </Tooltip>
+    </div>
+  </CollapsibleTrigger>
+</Collapsible>
+```
+
+### Pattern Corretto (FUNZIONA)
+```typescript
+<Collapsible open={isOpen} onOpenChange={setIsOpen}>
+  {/* Rimosso CollapsibleTrigger asChild */}
+  <div 
+    role="button"
+    tabIndex={0}
+    onClick={() => setIsOpen(!isOpen)}
+    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+    className="grid ... cursor-pointer ..."
+  >
+    {/* Badge con Tooltip - FUNZIONA */}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge 
+          className="cursor-help"
+          onClick={(e) => e.stopPropagation()}
+        >
+          ITM
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>In The Money</TooltipContent>
+    </Tooltip>
+  </div>
+</Collapsible>
+```
+
+## Dettagli Tecnici
+
+1. **Rimuovere `CollapsibleTrigger asChild`** dal wrapper della riga
+2. **Aggiungere al `<div>` della riga**:
+   - `role="button"` - accessibilità
+   - `tabIndex={0}` - navigazione tastiera
+   - `onClick={() => setIsOpen(!isOpen)}` - gestione click
+   - `onKeyDown` - supporto Enter/Spazio
+3. **Aggiungere `onClick={(e) => e.stopPropagation()}`** ai `TooltipTrigger` per evitare che il click sul badge espanda/chiuda la riga
+
+## Perché Funziona
+
+- Radix `Tooltip` richiede che il `TooltipTrigger` non sia annidato in elementi `<button>` nativi
+- Usando `<div role="button">` invece di `CollapsibleTrigger asChild` (che genera un `<button>`), il tooltip può ricevere correttamente gli eventi hover/focus
+- `e.stopPropagation()` sul badge previene che il click attivi l'espansione della riga
+
+## Elementi NON Modificati
+
+- Struttura della griglia CSS
+- Ordine e posizione degli elementi
+- Stili e classi
+- Logica di calcolo ITM/OTM/IR/OOR/IB/OOB/G/L
+- `CollapsibleContent` (rimane invariato)
 
