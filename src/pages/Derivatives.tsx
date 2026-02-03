@@ -1173,13 +1173,16 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
-  // Calculate IR/OOR for Alternative Double Diagonal
+  // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
   const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
+  const isShortStrangle = strategyName === 'Short Strangle';
+  const showRangeBadge = isAltDoubleDiagonal || isShortStrangle;
+  
   let isInRange = false;
   let soldPutStrike = 0;
   let soldCallStrike = 0;
   
-  if (isAltDoubleDiagonal && hasUnderlyingPrice) {
+  if (showRangeBadge && hasUnderlyingPrice) {
     // Find sold PUT and CALL strikes
     const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
     const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
@@ -1211,7 +1214,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 {strategyName}
               </Badge>
             )}
-            {isAltDoubleDiagonal && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
+            {showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
