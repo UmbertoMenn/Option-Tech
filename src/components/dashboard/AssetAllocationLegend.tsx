@@ -1,5 +1,5 @@
 import { PortfolioSummary, ASSET_TYPE_LABELS, ASSET_TYPE_COLORS } from '@/types/portfolio';
-import { formatCurrency, formatProfitLoss } from '@/lib/formatters';
+import { formatCurrency } from '@/lib/formatters';
 
 interface AssetAllocationLegendProps {
   summary: PortfolioSummary;
@@ -8,7 +8,7 @@ interface AssetAllocationLegendProps {
 export function AssetAllocationLegend({ summary }: AssetAllocationLegendProps) {
   return (
     <div className="space-y-2">
-      {summary.byAssetType.map((item) => (
+      {[...summary.byAssetType].sort((a, b) => b.value - a.value).map((item) => (
         <div
           key={item.type}
           className="flex items-center justify-between p-3 rounded-lg bg-background-secondary/50 hover:bg-background-tertiary transition-colors"
@@ -22,14 +22,9 @@ export function AssetAllocationLegend({ summary }: AssetAllocationLegendProps) {
           </div>
           <div className="text-right">
             <p className="text-sm font-mono">{formatCurrency(item.value)}</p>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>{item.percentage.toFixed(1)}%</span>
-              {item.profitLoss !== 0 && (
-                <span className={item.profitLoss >= 0 ? 'text-profit' : 'text-loss'}>
-                  {formatProfitLoss(item.profitLoss)}
-                </span>
-              )}
-            </div>
+            <span className="text-xs text-muted-foreground">
+              {item.percentage.toFixed(1)}%
+            </span>
           </div>
         </div>
       ))}
