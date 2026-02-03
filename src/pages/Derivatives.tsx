@@ -576,7 +576,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           {/* Col 5: ITM/OTM */}
           <Badge 
             variant="outline"
-            className={`text-xs ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+            className={`text-[10px] px-1.5 py-0 h-4 ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
           >
             {isITM ? 'ITM' : 'OTM'}
           </Badge>
@@ -713,7 +713,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           {/* Col 5: ITM/OTM */}
           <Badge 
             variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+            className={`text-[10px] px-1.5 py-0 h-4 ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
           >
             {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
           </Badge>
@@ -856,9 +856,9 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs ${isInRange 
-                      ? 'text-green-500 border-green-500' 
-                      : 'text-red-500 border-red-500'}`}
+                    className={`text-[10px] px-1.5 py-0 h-4 ${isInRange 
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400' 
+                      : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1059,9 +1059,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs ${isInRange 
-                      ? 'text-green-500 border-green-500' 
-                      : 'text-red-500 border-red-500'}`}
+                    className={`text-[10px] px-1.5 py-0 h-4 ${isInRange 
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400' 
+                      : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1334,9 +1334,9 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs shrink-0 ${isInRange 
-                      ? 'text-green-500 border-green-500' 
-                      : 'text-red-500 border-red-500'}`}
+                    className={`text-[10px] px-1.5 py-0 h-4 shrink-0 ${isInRange 
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400' 
+                      : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1352,9 +1352,9 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 <TooltipTrigger asChild>
                   <Badge 
                     variant="outline"
-                    className={`text-xs shrink-0 ${isInBreakeven 
-                      ? 'text-green-500 border-green-500' 
-                      : 'text-red-500 border-red-500'}`}
+                    className={`text-[10px] px-1.5 py-0 h-4 shrink-0 ${isInBreakeven 
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400' 
+                      : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
                   >
                     {isInBreakeven ? 'IB' : 'OOB'}
                   </Badge>
@@ -1484,7 +1484,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
         <Badge 
           variant="outline"
-          className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          className={`text-[10px] px-1.5 py-0 h-4 shrink-0 ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
         >
           {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
         </Badge>
@@ -1665,7 +1665,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           {/* Col 4: ITM/OTM */}
           <Badge 
             variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+            className={`text-[10px] px-1.5 py-0 h-4 ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
           >
             {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
           </Badge>
@@ -1793,7 +1793,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 4: Gain/Loss Badge (G green if price > avg cost, L red if price < avg cost) */}
           <Badge 
             variant="outline"
-            className={`text-xs ${!hasValidPrices ? 'text-muted-foreground border-muted-foreground' : isInGain ? 'text-green-500 border-green-500' : 'text-red-500 border-red-500'}`}
+            className={`text-[10px] px-1.5 py-0 h-4 ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
           >
             {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
           </Badge>

@@ -444,7 +444,7 @@ export function DerivativesSummaryCard({
             title="Covered Call"
             icon={ShieldAlert}
             iconColor="text-amber-500"
-            statusBadge={{ label: 'ITM', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
+            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
             items={coveredCallsITM}
             renderItem={(cc, idx) => (
               <Badge 
@@ -498,7 +498,7 @@ export function DerivativesSummaryCard({
             title="Naked Put"
             icon={CircleDollarSign}
             iconColor="text-orange-500"
-            statusBadge={{ label: 'ITM', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
+            statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
             items={nakedPutsITM}
             renderItem={(np, idx) => (
               <Badge 
