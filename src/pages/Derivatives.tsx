@@ -486,6 +486,17 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }:
     ? (isSold ? -option.profit_loss_pct : option.profit_loss_pct)
     : null;
   
+  // Calculate price change % vs avg cost (for sold options: green if negative, red if positive)
+  const currentPrice = option.current_price || 0;
+  const avgCost = option.avg_cost || 0;
+  const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+  
+  // Calculate partial coverage badge
+  const sharesOwned = underlying.quantity || 0;
+  const potentialContracts = Math.floor(sharesOwned / 100);
+  const uncoveredContracts = potentialContracts - contractsCovered;
+  const isPartialCoverage = uncoveredContracts >= 1;
+  
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
@@ -504,6 +515,18 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }:
             >
               {isITM ? 'ITM' : 'OTM'}
             </Badge>
+            {isPartialCoverage && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help shrink-0">
+                    P!
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Copertura parziale: {uncoveredContracts} contratti scoperti</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             {hasOverride && <OverrideBadge />}
           </div>
           <div className="flex items-center gap-4 shrink-0">
@@ -535,9 +558,16 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }:
                 <p>Prezzo Medio di Carico Opzione</p>
               </TooltipContent>
             </Tooltip>
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
-            </span>
+            <div className="flex items-center gap-1">
+              <span className="font-semibold text-sm">
+                {formatCurrency(option.current_price || 0, 'USD')}
+              </span>
+              {priceChangePct !== null && (
+                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </CollapsibleTrigger>
@@ -1488,9 +1518,23 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                 <p>Prezzo Medio di Carico Opzione</p>
               </TooltipContent>
             </Tooltip>
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
-            </span>
+            {(() => {
+              const currentPrice = option.current_price || 0;
+              const avgCost = option.avg_cost || 0;
+              const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+              return (
+                <div className="flex items-center gap-1">
+                  <span className="font-semibold text-sm">
+                    {formatCurrency(currentPrice, 'USD')}
+                  </span>
+                  {priceChangePct !== null && (
+                    <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </CollapsibleTrigger>
