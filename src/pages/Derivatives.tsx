@@ -824,7 +824,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_5rem_6rem_6rem_4.5rem_5.5rem_5.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -902,7 +902,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 9: GP */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
                 <span className="text-xs text-muted-foreground">GP:</span>
                 <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
               </div>
@@ -915,7 +915,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 10: ML */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 cursor-help justify-end text-red-500">
+              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
                 <span className="text-xs text-muted-foreground">ML:</span>
                 <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
               </div>
@@ -1038,7 +1038,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_6rem_6rem_4.5rem_5.5rem_5.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1111,7 +1111,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 8: GP */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
                 <span className="text-xs text-muted-foreground">GP:</span>
                 <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
               </div>
@@ -1124,7 +1124,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 9: ML */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 cursor-help justify-end text-red-500">
+              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
                 <span className="text-xs text-muted-foreground">ML:</span>
                 <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
               </div>
