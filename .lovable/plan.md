@@ -1,184 +1,151 @@
 
-# Piano: Prezzi Sottostante Yahoo Finance per Strategie Derivati
+# Piano: Correzione Visualizzazione Prezzi Sottostante
 
-## Obiettivo
-Recuperare i prezzi aggiornati dei sottostanti da Yahoo Finance per tutte le strategie derivati e mostrarli nella pagina Strategie Derivati.
+## Problema Identificato
 
-## Analisi Attuale
+I prezzi per JPMorgan, Lululemon, Progressive e Uber vengono correttamente recuperati dall'edge function (confermato dai log), ma non vengono visualizzati nell'interfaccia.
 
-### Situazione Corrente
-- I prezzi dei sottostanti (PS) vengono già visualizzati nella pagina Derivati, ma **solo per le opzioni che hanno un sottostante collegato** (posizione stock nel portafoglio)
-- Per i derivati senza sottostante in portafoglio (es. Naked PUT su titoli non posseduti, Iron Condor, Double Diagonal), il prezzo sottostante non è disponibile
-- L'edge function `update-prices-cron` contiene già la logica per chiamare Yahoo Finance API
+### Causa Root
+Il hook `useUnderlyingPrices` ha un problema nella gestione delle dipendenze dell'useEffect:
 
-### Problema Attuale
-Le seguenti strategie non mostrano il prezzo sottostante (PS) perché non hanno uno stock collegato:
-- **Naked PUT** senza stock in portafoglio
-- **Iron Condor** 
-- **Double Diagonal**
-- **Altre Strategie** raggruppate
+```typescript
+useEffect(() => {
+  if (underlyings.length > 0) {
+    fetchPrices();
+  }
+}, [fetchPrices, underlyings.length]);  // ← PROBLEMA: usa .length invece dell'array
+```
+
+Questo causa:
+1. Se l'array cambia contenuto ma mantiene la stessa lunghezza, l'effect non si ri-triggera
+2. Potenziale mismatch tra i nomi richiesti e quelli nell'array attuale
 
 ---
 
-## Soluzione Proposta
+## Soluzione
 
-### 1. Nuova Edge Function: `fetch-underlying-prices`
+### File: `src/hooks/useUnderlyingPrices.ts`
 
-Creare un'edge function dedicata che:
-- Riceve una lista di nomi sottostanti (underlying names) 
-- Per ogni sottostante, risolve il ticker tramite AI o mappatura statica
-- Chiama Yahoo Finance API per ottenere il prezzo
-- Restituisce un dizionario `{ underlyingName: { price, currency } }`
+1. **Creare una chiave stabile** basata sul contenuto dell'array, non sulla lunghezza
+2. **Usare la chiave come dipendenza** dell'useEffect invece di `underlyings.length`
+3. **Rimuovere la dipendenza circolare** di `fetchPrices` dall'useCallback
 
-```
-POST /fetch-underlying-prices
-Body: { underlyings: ["NVIDIA CORP", "APPLE COMPUTER, INC.", "AMAZON.COM INC"] }
-Response: {
-  "NVIDIA CORP": { price: 145.50, currency: "USD" },
-  "APPLE COMPUTER, INC.": { price: 195.20, currency: "USD" },
-  ...
+### Codice Corretto
+
+```typescript
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+
+export interface UnderlyingPrice {
+  price: number;
+  currency: string;
+  ticker?: string;
 }
-```
 
-### 2. Nuovo Hook: `useUnderlyingPrices`
+export interface UseUnderlyingPricesResult {
+  prices: Record<string, UnderlyingPrice>;
+  isLoading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
 
-Creare un hook React che:
-- Estrae i nomi univoci dei sottostanti dalle strategie derivati
-- Chiama l'edge function per ottenere i prezzi
-- Gestisce caching e refresh
-- Espone uno stato `{ prices, isLoading, error, refetch }`
-
-### 3. Aggiornamento Pagina Derivati
-
-Modificare `src/pages/Derivatives.tsx` per:
-- Usare il nuovo hook `useUnderlyingPrices`
-- Passare i prezzi ai componenti che non hanno il sottostante in portafoglio
-- Mostrare "PS: $XXX" per tutte le strategie (non solo quelle con stock)
-
----
-
-## Dettagli Tecnici
-
-### Edge Function `fetch-underlying-prices`
-
-```typescript
-// supabase/functions/fetch-underlying-prices/index.ts
-
-// Logica:
-// 1. Riceve array di underlying names
-// 2. Per ogni nome:
-//    a. Cerca in cache locale (isin_mappings con ISIN sintetico)
-//    b. Prova ticker resolution con AI
-//    c. Chiama Yahoo Finance API per prezzo
-// 3. Restituisce mappa prezzi
-```
-
-### Hook `useUnderlyingPrices`
-
-```typescript
-// src/hooks/useUnderlyingPrices.ts
-
-export function useUnderlyingPrices(underlyings: string[]) {
-  const [prices, setPrices] = useState<Record<string, { price: number; currency: string }>>({});
+export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesResult {
+  const [prices, setPrices] = useState<Record<string, UnderlyingPrice>>({});
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Fetch prices when underlyings change
-  // Debounce per evitare chiamate multiple
-  // Cache risultati per sessione
+  const [error, setError] = useState<string | null>(null);
+  const hasFetchedRef = useRef(false);
+  const lastKeyRef = useRef<string>('');
+
+  // Create a stable key from the underlyings array
+  const underlyingsKey = useMemo(() => {
+    const unique = [...new Set(underlyings.filter(u => u && typeof u === 'string'))];
+    return unique.sort().join('|');
+  }, [underlyings]);
+
+  useEffect(() => {
+    const fetchPrices = async () => {
+      const uniqueUnderlyings = [...new Set(underlyings.filter(u => u && typeof u === 'string'))];
+      
+      if (uniqueUnderlyings.length === 0) {
+        return;
+      }
+
+      // Don't refetch if we already have the same underlyings
+      if (hasFetchedRef.current && lastKeyRef.current === underlyingsKey) {
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        console.log(`Fetching prices for ${uniqueUnderlyings.length} underlyings:`, uniqueUnderlyings);
+        
+        const { data, error: fetchError } = await supabase.functions.invoke('fetch-underlying-prices', {
+          body: { underlyings: uniqueUnderlyings }
+        });
+
+        if (fetchError) {
+          throw new Error(fetchError.message || 'Failed to fetch underlying prices');
+        }
+
+        if (data?.prices) {
+          setPrices(data.prices);
+          console.log(`Received ${Object.keys(data.prices).length} underlying prices:`, Object.keys(data.prices));
+        }
+
+        hasFetchedRef.current = true;
+        lastKeyRef.current = underlyingsKey;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error fetching prices';
+        console.error('Error fetching underlying prices:', errorMessage);
+        setError(errorMessage);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (underlyings.length > 0) {
+      fetchPrices();
+    }
+  }, [underlyings, underlyingsKey]);
+
+  const refetch = useCallback(() => {
+    hasFetchedRef.current = false;
+    lastKeyRef.current = '';
+    // Force re-run of effect by triggering a state change
+    setPrices({});
+  }, []);
+
+  return { prices, isLoading, error, refetch };
 }
 ```
 
-### Componenti Derivati Aggiornati
+---
 
-Ogni componente Row riceverà un prop `underlyingPrices`:
+## Modifiche Chiave
 
-```tsx
-// Per Iron Condor, Double Diagonal, ecc.
-function IronCondorRow({ 
-  ironCondor, 
-  underlyingPrices  // NUOVO
-}: { 
-  ironCondor: IronCondorPosition;
-  underlyingPrices: Record<string, { price: number; currency: string }>;
-}) {
-  const underlyingPrice = underlyingPrices[ironCondor.underlying]?.price || 0;
-  // Usa underlyingPrice per ITM/OTM e display PS
-}
-```
+| Aspetto | Prima | Dopo |
+|---------|-------|------|
+| Dipendenza useEffect | `underlyings.length` | `underlyingsKey` (hash del contenuto) |
+| fetchPrices | useCallback con dipendenza circolare | Funzione inline nell'useEffect |
+| Debug logging | Minimo | Aggiunto log degli underlyings richiesti |
+| Refetch | Resettava solo `hasFetchedRef` | Resetta anche `lastKeyRef` e `prices` |
 
 ---
 
-## Informazioni sui Dati Yahoo Finance
+## File Modificati
 
-**Risposta alla tua domanda: I dati Yahoo Finance sono in tempo reale o ritardati?**
-
-Secondo la documentazione ufficiale di Yahoo Finance:
-
-| Mercato | Ritardo |
-|---------|---------|
-| **NASDAQ (USA)** | **Real-time** |
-| **NYSE/S&P (USA)** | **Real-time** |
-| Italia (Borsa Italiana) | 20 min ritardo |
-| Germania (XETRA) | 15 min ritardo |
-| UK (LSE) | 20 min ritardo |
-| Hong Kong (HKEX) | 15 min ritardo |
-| Svizzera (SIX) | 30 min ritardo |
-| Cambi valuta (EURUSD=X) | **Real-time** |
-
-**Conclusione**: Per le azioni USA (NASDAQ, NYSE), i dati sono **real-time**. Per gli altri mercati europei e asiatici, c'è un ritardo di 15-30 minuti.
+| File | Modifica |
+|------|----------|
+| `src/hooks/useUnderlyingPrices.ts` | Refactoring dipendenze e logica fetch |
 
 ---
 
-## File da Creare/Modificare
+## Verifica
 
-| File | Tipo | Descrizione |
-|------|------|-------------|
-| `supabase/functions/fetch-underlying-prices/index.ts` | NUOVO | Edge function per recuperare prezzi da Yahoo |
-| `src/hooks/useUnderlyingPrices.ts` | NUOVO | Hook per gestire fetch e cache prezzi |
-| `src/pages/Derivatives.tsx` | MODIFICA | Integrazione hook e passaggio prezzi ai componenti |
-
----
-
-## Flusso Dati
-
-```text
-┌─────────────────────────────────────┐
-│        Derivatives.tsx              │
-│  1. Estrae lista underlying names   │
-│  2. Chiama useUnderlyingPrices()    │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│    useUnderlyingPrices Hook         │
-│  1. Deduplica nomi                  │
-│  2. Chiama edge function            │
-│  3. Cache risultati                 │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│  fetch-underlying-prices (Edge)     │
-│  1. Risolve ticker (AI/mapping)     │
-│  2. Chiama Yahoo Finance API        │
-│  3. Ritorna prezzi                  │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│        Yahoo Finance API            │
-│  (Real-time per USA)                │
-└─────────────────────────────────────┘
-```
-
----
-
-## Note Implementative
-
-1. **Riutilizzo logica esistente**: L'edge function riutilizzerà le funzioni `fetchYahooPrice`, `inferTickerWithAI` e le mappature già presenti in `update-prices-cron`
-
-2. **Ottimizzazione**: La chiamata viene fatta solo una volta al caricamento della pagina, con possibilità di refresh manuale
-
-3. **Fallback**: Se un prezzo non è recuperabile, il campo PS mostra "-" come già avviene per gli stock senza prezzo
-
-4. **Caching DB opzionale**: I prezzi potrebbero essere salvati in una tabella `underlying_prices_cache` per evitare chiamate ripetute
+Dopo la modifica:
+1. Aprire la pagina Strategie Derivati (`/derivatives`)
+2. Verificare nella console i log: "Fetching prices for X underlyings: [...]"
+3. Verificare che JPMorgan, Lululemon, Progressive, Uber mostrino "PS: $XXX"
+4. Aprire una Naked PUT e verificare il badge ITM/OTM corretto
