@@ -1,180 +1,254 @@
 
-# Piano: Aggiornamento Etichette Netting e Salvataggio Netting ex CC e NP OTM
+# Piano: Fix Duplicazione ETF nella Sector Allocation e Esclusione Opzioni EUROFOREX
 
-## Obiettivo
-1. Rinominare le etichette "Netting ex CC" in "Netting ex. Covered Call"
-2. Rinominare le etichette "Netting ex CC e NP OTM" in "Netting ex. Covered Call e Naked Put OTM"
-3. Aggiungere il campo `netting_ex_cc_np` ai dati storici con supporto completo per snapshot, form e calcolo P/L
+## Problema 1: Duplicazione ETF
 
----
+### Analisi del Bug
+Nel file `src/lib/sectorExposure.ts` (linee 272-343), la logica di elaborazione degli ETF presenta un grave bug di controllo flusso:
 
-## Parte 1: Aggiornamento Etichette
-
-### File da modificare:
-
-**1. `src/components/dashboard/ViewModeSelector.tsx`**
-- Linea 13: `'Netting ex CC'` → `'Netting ex. Covered Call'`
-- Linea 14: `'Netting ex CC e NP OTM'` → `'Netting ex. Covered Call e Naked Put OTM'`
-
-**2. `src/components/dashboard/StatsCards.tsx`**
-- Linea 90: Labels per `netting_ex_cc` → `'Netting ex. Covered Call'`
-- Linea 91: Labels per `netting_ex_cc_np` → `'Netting ex. Covered Call e NP'`
-
-**3. `src/components/dashboard/DynamicPortfolioChart.tsx`**
-- Linea 78: Titolo chart `'Netting ex. Covered Call'`
-- Linea 79: Titolo chart `'Netting ex. Covered Call e Naked Put OTM'`
-- Linea 123: Label barra `'Netting ex. Covered Call e NP OTM'`
-- Linea 138: Label barra `'Netting ex. Covered Call'`
-
-**4. `src/components/dashboard/HistoricalDataForm.tsx`**
-- Linea 168, 209, 284: Labels form → `'Netting ex. Covered Call ($)'`
-
----
-
-## Parte 2: Aggiunta Campo `netting_ex_cc_np` ai Dati Storici
-
-### 2.1 Migrazione Database
-Aggiungere nuova colonna alla tabella `historical_data`:
-
-```sql
-ALTER TABLE public.historical_data 
-ADD COLUMN IF NOT EXISTS netting_ex_cc_np numeric DEFAULT 0 NOT NULL;
 ```
-
-### 2.2 Aggiornamento Tipi TypeScript
-
-**File: `src/types/historicalData.ts`**
-```typescript
-export interface HistoricalDataEntry {
-  id: string;
-  portfolio_id: string;
-  snapshot_date: string;
-  total_value: number;
-  netting_total: number;
-  netting_ex_cc: number;
-  netting_ex_cc_np: number;  // NUOVO
-  deposits: number;
-  average_balance: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface HistoricalDataInput {
-  snapshot_date: string;
-  total_value: number;
-  netting_total: number;
-  netting_ex_cc: number;
-  netting_ex_cc_np: number;  // NUOVO
-  deposits: number;
-  average_balance: number;
+if (isETF && stock.isin && etfAllocations[stock.isin]) {
+  if (totalSectorPercentage > 0) {
+    // Decompone ETF per settore ✓
+    for (...) { ... }
+    
+    // BUG: Manca "continue" - il codice continua e aggiunge a "Other"!
+    sectorExposure.totalRisk += grossValueEUR;  // ← PRIMA DUPLICAZIONE
+  }
+  
+  // BUG: Manca "else" - eseguito SEMPRE anche se già decomposto!
+  sectorExposure.totalRisk += grossValueEUR;  // ← SECONDA DUPLICAZIONE
 }
 ```
 
-### 2.3 Aggiornamento Hook `useHistoricalData.ts`
+**Risultato**: Ogni ETF con dati settoriali viene contato **3 volte**:
+1. Una volta correttamente decomposto per settore
+2. Una volta in "Other" (linee 299-308)
+3. Una seconda volta in "Other" (linee 311-320)
 
-Aggiungere `netting_ex_cc_np` nell'upsert:
+### Soluzione
+Ristrutturare con `continue` e `else` appropriati:
+
+| Caso | Azione | Controllo Flusso |
+|------|--------|------------------|
+| ETF con dati settoriali (`totalSectorPercentage > 0`) | Decompone per settore | `continue` dopo il ciclo |
+| ETF senza dati settoriali | Assegna a "Other" | `continue` dopo assegnazione |
+| Stock singolo (non ETF) | Assegna settore da mapping | Normale flusso |
+
+---
+
+## Problema 2: Esclusione Opzioni EUROFOREX EUROPEAN
+
+### Contesto
+Le opzioni su "EUROFOREX EUROPEAN" sono strumenti currency-related che non dovrebbero essere inclusi nell'analisi del rischio azionario/settoriale. 
+
+Il sistema di aggiornamento prezzi (`update-prices-cron`) già marca questo ticker come `'SKIP'`, ma questa esclusione non è propagata al Risk Analyzer.
+
+### Soluzione
+Aggiungere un filtro per escludere i derivati con underlying contenente "EUROFOREX" nei seguenti punti:
+
+1. **`src/lib/riskCalculator.ts`** - Funzione `analyzePortfolioRisk`:
+   - Filtrare i derivati prima di passarli a `categorizeDerivatives()`
+
+2. **`src/lib/sectorExposure.ts`** - Funzione `calculateSectorExposure`:
+   - Filtrare i dati derivati (`nakedPutDetails`, `leapCallDetails`, `strategyDetails`) prima dell'elaborazione
+
+---
+
+## Modifiche Tecniche
+
+### File 1: `src/lib/sectorExposure.ts`
+
+**Linee 265-344** - Correzione logica ETF:
+
 ```typescript
-const { data, error } = await supabase
-  .from('historical_data')
-  .upsert({
-    portfolio_id: portfolioId,
-    snapshot_date: entry.snapshot_date,
-    total_value: entry.total_value,
-    netting_total: entry.netting_total,
-    netting_ex_cc: entry.netting_ex_cc,
-    netting_ex_cc_np: entry.netting_ex_cc_np,  // NUOVO
-    deposits: entry.deposits,
-    average_balance: entry.average_balance,
-  }, { ... })
+// Process stocks (including ETFs)
+for (const stock of analysis.stockDetails) {
+  // NUOVO: Skip EUROFOREX instruments
+  if (stock.underlying.toUpperCase().includes('EUROFOREX')) {
+    continue;
+  }
+  
+  const isETF = isETFByName(stock.underlying);
+  const grossValueEUR = stock.stockValue / stock.exchangeRate;
+  
+  if (isETF && stock.isin && etfAllocations[stock.isin]) {
+    const allocation = etfAllocations[stock.isin];
+    const sectorData = allocation.sectorAllocations || {};
+    const totalSectorPercentage = Object.values(sectorData).reduce((a, b) => a + b, 0);
+    
+    if (totalSectorPercentage > 0) {
+      // ETF con dati settoriali - decompone per settore
+      for (const [sector, percentage] of Object.entries(sectorData)) {
+        if (percentage > 0) {
+          const sectorExposure = getOrCreateSector(sector);
+          const riskAmount = grossValueEUR * (percentage / 100);
+          
+          sectorExposure.totalRisk += riskAmount;
+          sectorExposure.breakdown.stocks += riskAmount;
+          sectorExposure.instruments.push({
+            name: stock.underlying,
+            riskEUR: riskAmount,
+            isETF: true,
+            isFromETFDecomposition: true,
+            sourceETF: allocation.name || stock.underlying,
+            percentage,
+            category: 'stocks',
+          });
+        }
+      }
+      continue; // ← FIX: Esce dopo decomposizione
+    } else {
+      // ETF senza dati settoriali - assegna a "Other"
+      const sectorExposure = getOrCreateSector('Other');
+      sectorExposure.totalRisk += grossValueEUR;
+      sectorExposure.breakdown.stocks += grossValueEUR;
+      sectorExposure.instruments.push({
+        name: stock.underlying,
+        riskEUR: grossValueEUR,
+        isETF: true,
+        isFromETFDecomposition: false,
+        category: 'stocks',
+      });
+      continue; // ← FIX: Esce dopo assegnazione a Other
+    }
+  } else if (isETF) {
+    // ETF senza allocations entry - assegna a "Other"
+    const sectorExposure = getOrCreateSector('Other');
+    sectorExposure.totalRisk += grossValueEUR;
+    sectorExposure.breakdown.stocks += grossValueEUR;
+    sectorExposure.instruments.push({
+      name: stock.underlying,
+      riskEUR: grossValueEUR,
+      isETF: true,
+      isFromETFDecomposition: false,
+      category: 'stocks',
+    });
+  } else {
+    // Stock singolo - assegna settore
+    let sector: string;
+    if (stock.isin && sectorMappings[stock.isin]?.sector) {
+      sector = normalizeSectorName(sectorMappings[stock.isin].sector);
+    } else {
+      sector = getStockSector(stock.underlying);
+    }
+    
+    const sectorExposure = getOrCreateSector(sector);
+    sectorExposure.totalRisk += grossValueEUR;
+    sectorExposure.breakdown.stocks += grossValueEUR;
+    sectorExposure.instruments.push({
+      name: stock.underlying,
+      riskEUR: grossValueEUR,
+      isETF: false,
+      isFromETFDecomposition: false,
+      category: 'stocks',
+    });
+  }
+}
+
+// Process derivatives - NUOVO: filtro EUROFOREX
+if (includeDerivatives) {
+  // Filtra derivati EUROFOREX
+  const isEuroforex = (name: string) => name.toUpperCase().includes('EUROFOREX');
+  
+  // Naked PUTs
+  for (const np of analysis.nakedPutDetails) {
+    if (isEuroforex(np.underlying)) continue; // ← NUOVO
+    // ... resto del codice esistente ...
+  }
+  
+  // Leap CALLs
+  for (const lc of analysis.leapCallDetails) {
+    if (isEuroforex(lc.underlying)) continue; // ← NUOVO
+    // ... resto del codice esistente ...
+  }
+  
+  // Strategies
+  for (const strat of analysis.strategyDetails) {
+    if (isEuroforex(strat.underlying)) continue; // ← NUOVO
+    // ... resto del codice esistente ...
+  }
+}
 ```
 
-### 2.4 Aggiornamento Dashboard (Salva Snapshot)
+### File 2: `src/lib/riskCalculator.ts`
 
-**File: `src/components/dashboard/Dashboard.tsx`**
-Aggiungere `netting_ex_cc_np` al salvataggio snapshot:
+**Funzione `analyzePortfolioRisk`** - Aggiungere filtro EUROFOREX ai derivati:
+
 ```typescript
-upsertHistoricalData({
-  snapshot_date: portfolio.snapshot_date,
-  total_value: summary?.totalValue ?? 0,
-  netting_total: netting.nettingTotal,
-  netting_ex_cc: netting.nettingExCoveredCall,
-  netting_ex_cc_np: netting.nettingExCCAndNP,  // NUOVO
-  deposits: 0,
-  average_balance: 0,
-});
+export function analyzePortfolioRisk(
+  positions: Position[],
+  categories: DerivativeCategories
+): RiskAnalysis {
+  // NUOVO: Helper per escludere EUROFOREX
+  const isEuroforex = (name: string) => 
+    name?.toUpperCase().includes('EUROFOREX') || false;
+  
+  // ... codice esistente ...
+  
+  // Naked put risk - FILTRO
+  const filteredNakedPuts = categories.nakedPuts.filter(
+    np => !isEuroforex(np.option.underlying || np.option.description)
+  );
+  const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
+  
+  // Leap call risk - FILTRO
+  const filteredLeapCalls = categories.leapCalls.filter(
+    lc => !isEuroforex(lc.option.underlying || lc.option.description)
+  );
+  const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
+  
+  // Strategy risk - FILTRO implicito (le strategies usano underlying dai derivati)
+  // ...
+}
 ```
 
-Passare `currentNettingExCCAndNP` al form:
+### File 3: `src/lib/derivativeStrategies.ts`
+
+**Funzione `categorizeDerivatives`** - Escludere EUROFOREX dall'inizio:
+
 ```typescript
-<HistoricalDataForm
-  ...
-  currentNettingExCC={netting.nettingExCoveredCall}
-  currentNettingExCCAndNP={netting.nettingExCCAndNP}  // NUOVO
-/>
-```
-
-### 2.5 Aggiornamento HistoricalDataForm
-
-**File: `src/components/dashboard/HistoricalDataForm.tsx`**
-
-1. Aggiungere prop `currentNettingExCCAndNP`
-2. Aggiungere stato form `formNettingExCCNP`
-3. Aggiungere campo input nel form (sia edit che create)
-4. Includere nel `handleSave`
-5. Visualizzare nei dati salvati
-6. Aggiornare `useCurrent()` per usare il nuovo valore
-
-Layout form aggiornato (griglia 2 colonne, 2 righe per i netting):
-```
-| Netting Totale         | Netting ex. Covered Call    |
-| Netting ex. CC e NP    |                              |
-```
-
-### 2.6 Aggiornamento Calcolo P/L in StatsCards
-
-**File: `src/components/dashboard/StatsCards.tsx`**
-
-Nel `calculatePL`, usare il valore storico corretto per `netting_ex_cc_np`:
-```typescript
-case 'netting_ex_cc_np':
-  currentValue = nettingExCCAndNP;
-  historicalValue = historical.netting_ex_cc_np ?? historical.netting_ex_cc;
-  break;
-```
-
-Nel calcolo `timeWeightedData`, includere il nuovo viewMode:
-```typescript
-case 'netting_ex_cc_np':
-  historicalValue = selectedHistoricalEntry.netting_ex_cc_np ?? selectedHistoricalEntry.netting_ex_cc;
-  break;
-```
-
-Aggiornare anche la card "Patrimonio Iniziale" per mostrare il valore corretto:
-```typescript
-viewMode === 'netting_ex_cc_np'
-  ? selectedHistoricalEntry!.netting_ex_cc_np ?? selectedHistoricalEntry!.netting_ex_cc
-  : ...
+export function categorizeDerivatives(
+  derivatives: Position[],
+  allPositions: Position[],
+  overrides: DerivativeOverride[] = []
+): DerivativeCategories {
+  // NUOVO: Filtra derivati EUROFOREX prima di tutto
+  const filteredDerivatives = derivatives.filter(d => {
+    const name = (d.underlying || d.description || '').toUpperCase();
+    return !name.includes('EUROFOREX');
+  });
+  
+  // Usa filteredDerivatives invece di derivatives nel resto della funzione
+  // ...
+}
 ```
 
 ---
 
-## Riepilogo File Modificati
+## Riepilogo Modifiche
 
-| File | Modifiche |
-|------|-----------|
-| **Migrazione SQL** | Nuova colonna `netting_ex_cc_np` |
-| `src/types/historicalData.ts` | Aggiunta campo ai tipi |
-| `src/hooks/useHistoricalData.ts` | Supporto upsert nuovo campo |
-| `src/components/dashboard/ViewModeSelector.tsx` | Etichette estese |
-| `src/components/dashboard/StatsCards.tsx` | Etichette + P/L con nuovo campo |
-| `src/components/dashboard/DynamicPortfolioChart.tsx` | Etichette chart |
-| `src/components/dashboard/HistoricalDataForm.tsx` | Etichette + nuovo campo form |
-| `src/components/dashboard/Dashboard.tsx` | Snapshot + prop nuovo campo |
+| File | Tipo | Descrizione |
+|------|------|-------------|
+| `src/lib/sectorExposure.ts` | Bug fix + Feature | Fix duplicazione ETF con `continue`/`else`; filtro EUROFOREX |
+| `src/lib/riskCalculator.ts` | Feature | Filtro EUROFOREX per nakedPuts e leapCalls |
+| `src/lib/derivativeStrategies.ts` | Feature | Filtro EUROFOREX all'inizio di `categorizeDerivatives` |
 
 ---
 
-## Dettagli Tecnici
+## Impatto
 
-- **Compatibilità retroattiva**: Il fallback a `netting_ex_cc` quando `netting_ex_cc_np` è null garantisce che i dati storici esistenti continuino a funzionare
-- **Migrazione non distruttiva**: La colonna viene aggiunta con default 0, i record esistenti rimangono validi
-- **Nessuna nuova dipendenza richiesta**
+| Prima | Dopo |
+|-------|------|
+| ETF con dati settoriali contati 3 volte | Contati 1 volta (solo decomposti per settore) |
+| ETF senza dati settoriali contati 2 volte | Contati 1 volta in "Other" |
+| Opzioni EUROFOREX incluse nel rischio | Completamente escluse dal Risk Analyzer |
+| Totale settoriale gonfiato | Valori corretti e coerenti |
+
+---
+
+## Note Tecniche
+
+- La correzione ETF è una ristrutturazione del controllo di flusso senza cambiare la logica di business
+- L'esclusione EUROFOREX è coerente con il sistema esistente (`update-prices-cron` già marca questi strumenti come `'SKIP'`)
+- Nessuna nuova dipendenza richiesta
