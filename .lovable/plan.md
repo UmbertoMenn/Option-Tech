@@ -1,166 +1,162 @@
 
-# Piano: Badge IR/OOR per Strategie a Range
 
-## Obiettivo
-Aggiungere un badge visivo che indica se il prezzo del sottostante si trova all'interno del "range profittevole" (tra i due strike venduti) per le strategie:
-- Iron Condor
-- Double Diagonal  
-- Alternative Double Diagonal
+# Piano: Correzione Recupero Prezzi Sottostanti (Case-Insensitive)
+
+## Problema Identificato
+
+Il sistema non recupera il prezzo di AppLovin perché:
+
+1. **Query case-sensitive**: Il database ha la mappatura "APPLOVIN CORP" → "APP" (corretta, inserita manualmente), ma la ricerca usa `eq('underlying', 'AppLovin Corp')` che non trova match perché il case è diverso
+
+2. **Ticker AI errato**: Quando il cache miss avviene, l'AI inferisce "APPW" (ticker errato) invece di "APP"
+
+3. **Mappature duplicate**: Nel database esistono ora:
+   - "APPLOVIN CORP" → "APP" ✅ (manuale)
+   - "APPLOVIN" → "APP" ✅ (manuale)
+   - "AppLovin Corp" → "APPW" ❌ (AI errato)
 
 ---
 
-## Logica del Badge
+## Soluzione Dinamica
 
-| Badge | Colore | Condizione |
-|-------|--------|------------|
-| **IR** | Verde | Prezzo sottostante >= Strike PUT venduto AND <= Strike CALL venduto |
-| **OOR** | Rosso | Prezzo sottostante < Strike PUT venduto OR > Strike CALL venduto |
-
-### Formula
-```typescript
-const isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
-// IR = In Range (verde), OOR = Out Of Range (rosso)
-```
+### Strategia
+1. Modificare la ricerca nel database per essere **case-insensitive** usando `ilike`
+2. Normalizzare sempre l'underlying prima di salvarlo nel cache
+3. Aggiungere validazione del ticker via Yahoo Finance prima di salvarlo
 
 ---
 
 ## Modifiche File
 
-### File: `src/pages/Derivatives.tsx`
+### File: `supabase/functions/fetch-underlying-prices/index.ts`
 
----
-
-### 1. Iron Condor - `IronCondorRow` (righe 747-928)
-
-Aggiungere dopo `hasUnderlyingPrice`:
+#### 1. Modificare `checkUnderlyingMappingsCache` per ricerca case-insensitive
 
 ```typescript
-// Calculate if underlying price is In Range (between sold strikes)
-const soldPutStrike = soldPut.strike_price || 0;
-const soldCallStrike = soldCall.strike_price || 0;
-const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+async function checkUnderlyingMappingsCache(
+  supabase: any,
+  underlying: string
+): Promise<string | null> {
+  try {
+    // Try exact match first
+    let { data, error } = await supabase
+      .from('underlying_mappings')
+      .select('ticker')
+      .eq('underlying', underlying)
+      .single();
+    
+    if (data?.ticker) {
+      console.log(`Cache hit (exact) for "${underlying}": ${data.ticker}`);
+      return data.ticker;
+    }
+    
+    // Try case-insensitive match
+    const normalized = normalizeName(underlying);
+    const { data: iData } = await supabase
+      .from('underlying_mappings')
+      .select('ticker, underlying')
+      .ilike('underlying', `%${normalized.split(' ')[0]}%`)
+      .limit(5);
+    
+    if (iData && iData.length > 0) {
+      // Find best match using normalized comparison
+      for (const row of iData) {
+        if (normalizeName(row.underlying) === normalized) {
+          console.log(`Cache hit (normalized) for "${underlying}": ${row.ticker}`);
+          return row.ticker;
+        }
+      }
+    }
+  } catch {
+    // No cached mapping
+  }
+  return null;
+}
 ```
 
-Nel JSX, dopo il badge "IC", aggiungere:
+#### 2. Aggiungere validazione ticker Yahoo Finance
+
+Prima di salvare un ticker inferito dall'AI, verificare che sia valido:
 
 ```typescript
-{hasUnderlyingPrice && (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Badge 
-        className={`text-xs shrink-0 ${isInRange 
-          ? 'bg-green-500 text-white hover:bg-green-600' 
-          : 'bg-red-500 text-white hover:bg-red-600'}`}
-      >
-        {isInRange ? 'IR' : 'OOR'}
-      </Badge>
-    </TooltipTrigger>
-    <TooltipContent>
-      <p>{isInRange 
-        ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
-        : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
-    </TooltipContent>
-  </Tooltip>
-)}
+// Validate ticker before saving (check it returns a valid price)
+async function validateTicker(ticker: string): Promise<boolean> {
+  const priceResult = await fetchYahooPrice(ticker);
+  return priceResult !== null && priceResult.price > 0;
+}
 ```
 
----
-
-### 2. Double Diagonal - `DoubleDiagonalRow` (righe 931-1118)
-
-Stessa logica dell'Iron Condor. Aggiungere dopo `hasUnderlyingPrice`:
+#### 3. Modificare il flusso principale per validare prima di salvare
 
 ```typescript
-// Calculate if underlying price is In Range (between sold strikes)
-const soldPutStrike = soldPut.strike_price || 0;
-const soldCallStrike = soldCall.strike_price || 0;
-const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
-```
-
-Nel JSX, dopo il badge "DD", aggiungere lo stesso badge IR/OOR.
-
----
-
-### 3. Alternative Double Diagonal - `GroupedOtherStrategyRow` (righe 1121-1193)
-
-Per questa strategia, devo estrarre gli strike venduti dalle opzioni:
-
-```typescript
-// Calculate IR/OOR for Alternative Double Diagonal
-const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
-let isInRange = false;
-let soldPutStrike = 0;
-let soldCallStrike = 0;
-
-if (isAltDoubleDiagonal && hasUnderlyingPrice) {
-  // Find sold PUT and CALL strikes
-  const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
-  const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+// Step 3: Try AI inference
+if (!ticker) {
+  const aiTicker = await inferTickerWithAI(underlying);
   
-  if (soldPut && soldCall) {
-    soldPutStrike = soldPut.option.strike_price || 0;
-    soldCallStrike = soldCall.option.strike_price || 0;
-    isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+  // Validate AI-inferred ticker before accepting it
+  if (aiTicker) {
+    const isValid = await validateTicker(aiTicker);
+    if (isValid) {
+      ticker = aiTicker;
+      console.log(`AI ticker "${aiTicker}" validated successfully for "${underlying}"`);
+    } else {
+      console.log(`AI ticker "${aiTicker}" failed validation for "${underlying}"`);
+    }
   }
 }
 ```
 
-Nel JSX, dopo il badge del nome strategia, aggiungere:
+#### 4. Salvare con underlying normalizzato
 
 ```typescript
-{isAltDoubleDiagonal && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Badge 
-        className={`text-xs shrink-0 ${isInRange 
-          ? 'bg-green-500 text-white hover:bg-green-600' 
-          : 'bg-red-500 text-white hover:bg-red-600'}`}
-      >
-        {isInRange ? 'IR' : 'OOR'}
-      </Badge>
-    </TooltipTrigger>
-    <TooltipContent>
-      <p>{isInRange 
-        ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
-        : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
-    </TooltipContent>
-  </Tooltip>
-)}
+// Save to cache using NORMALIZED underlying for consistency
+if (ticker) {
+  const normalizedUnderlying = normalizeName(underlying);
+  await saveToUnderlyingMappingsCache(supabase, normalizedUnderlying, ticker);
+}
 ```
+
+---
+
+## Pulizia Database
+
+Dopo il deploy, pulire il mapping errato:
+
+```sql
+DELETE FROM underlying_mappings 
+WHERE underlying = 'AppLovin Corp' AND ticker = 'APPW';
+```
+
+---
+
+## Flusso Corretto Post-Fix
+
+1. Frontend invia "AppLovin Corp"
+2. Query esatta: no match
+3. Query normalizzata: trova "APPLOVIN CORP" → "APP" ✅
+4. Fetch Yahoo Finance con ticker "APP"
+5. Ritorna prezzo corretto
+
+---
+
+## Benefici della Soluzione
+
+| Aspetto | Prima | Dopo |
+|---------|-------|------|
+| Case sensitivity | ❌ "AppLovin Corp" ≠ "APPLOVIN CORP" | ✅ Match normalizzato |
+| Ticker errati | ❌ Salvati senza validazione | ✅ Validati via Yahoo prima del salvataggio |
+| Duplicati | ❌ Mappature multiple per stesso underlying | ✅ Underlying normalizzato |
+| Robustezza | ❌ Dipende dal case esatto | ✅ Dinamico e case-insensitive |
 
 ---
 
 ## Riepilogo Modifiche
 
-| Componente | Posizione Badge | Dati Utilizzati |
-|------------|-----------------|-----------------|
-| IronCondorRow | Dopo badge "IC" | `soldPut.strike_price`, `soldCall.strike_price`, `underlyingPrice` |
-| DoubleDiagonalRow | Dopo badge "DD" | `soldPut.strike_price`, `soldCall.strike_price`, `underlyingPrice` |
-| GroupedOtherStrategyRow | Dopo badge nome strategia | Estratti da `options` array (sold PUT/CALL) |
+| Componente | Modifica |
+|------------|----------|
+| `checkUnderlyingMappingsCache` | Aggiunta ricerca case-insensitive con `ilike` e confronto normalizzato |
+| Nuovo `validateTicker` | Funzione per validare ticker via Yahoo Finance |
+| Flusso principale | Validazione ticker AI prima del salvataggio |
+| Salvataggio cache | Usa underlying normalizzato per coerenza |
+| Database | Pulizia mapping errato "AppLovin Corp" → "APPW" |
 
----
-
-## Esempi Visivi
-
-### Iron Condor con prezzo in range:
-```
-NVIDIA  [IC] [IR]  GEN/26  PUT 100/110  CALL 130/140  ...
-         ↑    ↑
-       tipo  verde (prezzo tra 110 e 130)
-```
-
-### Double Diagonal con prezzo out of range:
-```
-APPLE  [DD] [OOR]  DIC/25 - MAR/26  PUT 170/180  CALL 200/210  ...
-        ↑    ↑
-      tipo  rosso (prezzo sotto 180 o sopra 200)
-```
-
----
-
-## Note
-
-- Il badge viene mostrato solo se il prezzo del sottostante e disponibile (`hasUnderlyingPrice`)
-- Per Alternative Double Diagonal, verifica anche che gli strike venduti siano stati trovati
-- Il tooltip spiega il range numerico per chiarezza
-- Lo stile del badge e coerente con gli altri badge ITM/OTM esistenti
