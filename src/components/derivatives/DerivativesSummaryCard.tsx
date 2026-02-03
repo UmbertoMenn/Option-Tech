@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories } from '@/lib/derivativeStrategies';
@@ -593,10 +593,20 @@ export function DerivativesSummaryCard({
         </CardContent>
       </Card>
       
-      {/* Placeholder for future content */}
-      <div className="border border-dashed border-border/50 rounded-lg flex items-center justify-center min-h-[200px]">
-        <span className="text-muted-foreground text-sm">Spazio riservato</span>
-      </div>
+      {/* Card Avvisi recenti (24 h) */}
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Newspaper className="w-5 h-5 text-primary" />
+            <CardTitle className="text-xl font-bold tracking-tight">Avvisi recenti (24 h)</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="flex items-center justify-center min-h-[200px]">
+            <span className="text-muted-foreground text-sm">Nessun avviso nelle ultime 24 ore</span>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
