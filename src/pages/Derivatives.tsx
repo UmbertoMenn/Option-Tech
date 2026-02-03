@@ -904,7 +904,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
                 <span className="text-xs text-muted-foreground">GP:</span>
-                <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -917,7 +917,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
                 <span className="text-xs text-muted-foreground">ML:</span>
-                <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(maxLoss, 'USD')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1113,7 +1113,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
                 <span className="text-xs text-muted-foreground">GP:</span>
-                <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1126,7 +1126,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
                 <span className="text-xs text-muted-foreground">ML:</span>
-                <span className="font-semibold text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(maxLoss, 'USD')}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
