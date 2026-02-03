@@ -1,254 +1,162 @@
 
-# Piano: Fix Duplicazione ETF nella Sector Allocation e Esclusione Opzioni EUROFOREX
 
-## Problema 1: Duplicazione ETF
+# Piano: Toggle Protezioni nella vista Equity Exposure
 
-### Analisi del Bug
-Nel file `src/lib/sectorExposure.ts` (linee 272-343), la logica di elaborazione degli ETF presenta un grave bug di controllo flusso:
-
-```
-if (isETF && stock.isin && etfAllocations[stock.isin]) {
-  if (totalSectorPercentage > 0) {
-    // Decompone ETF per settore ✓
-    for (...) { ... }
-    
-    // BUG: Manca "continue" - il codice continua e aggiunge a "Other"!
-    sectorExposure.totalRisk += grossValueEUR;  // ← PRIMA DUPLICAZIONE
-  }
-  
-  // BUG: Manca "else" - eseguito SEMPRE anche se già decomposto!
-  sectorExposure.totalRisk += grossValueEUR;  // ← SECONDA DUPLICAZIONE
-}
-```
-
-**Risultato**: Ogni ETF con dati settoriali viene contato **3 volte**:
-1. Una volta correttamente decomposto per settore
-2. Una volta in "Other" (linee 299-308)
-3. Una seconda volta in "Other" (linee 311-320)
-
-### Soluzione
-Ristrutturare con `continue` e `else` appropriati:
-
-| Caso | Azione | Controllo Flusso |
-|------|--------|------------------|
-| ETF con dati settoriali (`totalSectorPercentage > 0`) | Decompone per settore | `continue` dopo il ciclo |
-| ETF senza dati settoriali | Assegna a "Other" | `continue` dopo assegnazione |
-| Stock singolo (non ETF) | Assegna settore da mapping | Normale flusso |
-
----
-
-## Problema 2: Esclusione Opzioni EUROFOREX EUROPEAN
-
-### Contesto
-Le opzioni su "EUROFOREX EUROPEAN" sono strumenti currency-related che non dovrebbero essere inclusi nell'analisi del rischio azionario/settoriale. 
-
-Il sistema di aggiornamento prezzi (`update-prices-cron`) già marca questo ticker come `'SKIP'`, ma questa esclusione non è propagata al Risk Analyzer.
-
-### Soluzione
-Aggiungere un filtro per escludere i derivati con underlying contenente "EUROFOREX" nei seguenti punti:
-
-1. **`src/lib/riskCalculator.ts`** - Funzione `analyzePortfolioRisk`:
-   - Filtrare i derivati prima di passarli a `categorizeDerivatives()`
-
-2. **`src/lib/sectorExposure.ts`** - Funzione `calculateSectorExposure`:
-   - Filtrare i dati derivati (`nakedPutDetails`, `leapCallDetails`, `strategyDetails`) prima dell'elaborazione
+## Obiettivo
+1. Rimuovere "Totale" dal titolo della card principale
+2. Aggiungere toggle "Protezioni" per mostrare rischio stocks al netto/lordo delle protezioni
+3. Aggiornare dinamicamente la descrizione del rischio stocks nel grafico a barre
+4. Mostrare il valore ridotto dalle protezioni (quando toggle attivo)
+5. Impostare il tooltip con testo fisso (non dinamico)
 
 ---
 
 ## Modifiche Tecniche
 
-### File 1: `src/lib/sectorExposure.ts`
+### File: `src/components/risk/EquityExposureView.tsx`
 
-**Linee 265-344** - Correzione logica ETF:
+#### 1. Titolo Card
+
+```
+// Da:
+"Esposizione Totale in Equity e Commodities"
+
+// A:
+"Esposizione in Equity e Commodities"
+```
+
+#### 2. Aggiungere Toggle "Protezioni" nella Card principale
+
+Nella sezione della card con l'esposizione totale, aggiungere un toggle:
 
 ```typescript
-// Process stocks (including ETFs)
-for (const stock of analysis.stockDetails) {
-  // NUOVO: Skip EUROFOREX instruments
-  if (stock.underlying.toUpperCase().includes('EUROFOREX')) {
-    continue;
-  }
-  
-  const isETF = isETFByName(stock.underlying);
-  const grossValueEUR = stock.stockValue / stock.exchangeRate;
-  
-  if (isETF && stock.isin && etfAllocations[stock.isin]) {
-    const allocation = etfAllocations[stock.isin];
-    const sectorData = allocation.sectorAllocations || {};
-    const totalSectorPercentage = Object.values(sectorData).reduce((a, b) => a + b, 0);
-    
-    if (totalSectorPercentage > 0) {
-      // ETF con dati settoriali - decompone per settore
-      for (const [sector, percentage] of Object.entries(sectorData)) {
-        if (percentage > 0) {
-          const sectorExposure = getOrCreateSector(sector);
-          const riskAmount = grossValueEUR * (percentage / 100);
-          
-          sectorExposure.totalRisk += riskAmount;
-          sectorExposure.breakdown.stocks += riskAmount;
-          sectorExposure.instruments.push({
-            name: stock.underlying,
-            riskEUR: riskAmount,
-            isETF: true,
-            isFromETFDecomposition: true,
-            sourceETF: allocation.name || stock.underlying,
-            percentage,
-            category: 'stocks',
-          });
-        }
-      }
-      continue; // ← FIX: Esce dopo decomposizione
-    } else {
-      // ETF senza dati settoriali - assegna a "Other"
-      const sectorExposure = getOrCreateSector('Other');
-      sectorExposure.totalRisk += grossValueEUR;
-      sectorExposure.breakdown.stocks += grossValueEUR;
-      sectorExposure.instruments.push({
-        name: stock.underlying,
-        riskEUR: grossValueEUR,
-        isETF: true,
-        isFromETFDecomposition: false,
-        category: 'stocks',
-      });
-      continue; // ← FIX: Esce dopo assegnazione a Other
-    }
-  } else if (isETF) {
-    // ETF senza allocations entry - assegna a "Other"
-    const sectorExposure = getOrCreateSector('Other');
-    sectorExposure.totalRisk += grossValueEUR;
-    sectorExposure.breakdown.stocks += grossValueEUR;
-    sectorExposure.instruments.push({
-      name: stock.underlying,
-      riskEUR: grossValueEUR,
-      isETF: true,
-      isFromETFDecomposition: false,
-      category: 'stocks',
-    });
-  } else {
-    // Stock singolo - assegna settore
-    let sector: string;
-    if (stock.isin && sectorMappings[stock.isin]?.sector) {
-      sector = normalizeSectorName(sectorMappings[stock.isin].sector);
-    } else {
-      sector = getStockSector(stock.underlying);
-    }
-    
-    const sectorExposure = getOrCreateSector(sector);
-    sectorExposure.totalRisk += grossValueEUR;
-    sectorExposure.breakdown.stocks += grossValueEUR;
-    sectorExposure.instruments.push({
-      name: stock.underlying,
-      riskEUR: grossValueEUR,
-      isETF: false,
-      isFromETFDecomposition: false,
-      category: 'stocks',
-    });
-  }
-}
+<div className="flex items-center gap-2 mt-4">
+  <Switch 
+    id="protections-toggle"
+    checked={includeProtections}
+    onCheckedChange={setIncludeProtections}
+  />
+  <Label htmlFor="protections-toggle" className="text-sm">
+    Protezioni
+  </Label>
+</div>
+```
 
-// Process derivatives - NUOVO: filtro EUROFOREX
-if (includeDerivatives) {
-  // Filtra derivati EUROFOREX
-  const isEuroforex = (name: string) => name.toUpperCase().includes('EUROFOREX');
+Nota: lo stato `includeProtections` esiste già nel componente.
+
+#### 3. Calcolare valori lordo/netto per gli Stocks
+
+Aggiungere un `useMemo` per calcolare:
+- **Gross Stock Risk**: Somma di (stockValue / exchangeRate) per tutti gli stocks puri (non ETF)
+- **Protection Savings**: Gross - Net (valore ridotto dalle protezioni)
+
+```typescript
+const { grossPureStockRisk, protectionSavings } = useMemo(() => {
+  const pureStocks = stockDetails.filter(s => !s.isETF);
   
-  // Naked PUTs
-  for (const np of analysis.nakedPutDetails) {
-    if (isEuroforex(np.underlying)) continue; // ← NUOVO
-    // ... resto del codice esistente ...
-  }
+  // Gross = valore lordo senza considerare protezioni
+  const gross = pureStocks.reduce((sum, s) => 
+    sum + (s.stockValue / s.exchangeRate), 0
+  );
   
-  // Leap CALLs
-  for (const lc of analysis.leapCallDetails) {
-    if (isEuroforex(lc.underlying)) continue; // ← NUOVO
-    // ... resto del codice esistente ...
-  }
+  // Net = rischio attuale (già al netto delle protezioni)
+  const net = pureStocks.reduce((sum, s) => sum + s.riskEUR, 0);
   
-  // Strategies
-  for (const strat of analysis.strategyDetails) {
-    if (isEuroforex(strat.underlying)) continue; // ← NUOVO
-    // ... resto del codice esistente ...
-  }
+  return {
+    grossPureStockRisk: gross,
+    protectionSavings: gross - net
+  };
+}, [stockDetails]);
+```
+
+#### 4. Dinamica del rischio Stocks nel grafico a barre
+
+L'array `riskCategories` deve usare valori dinamici in base al toggle:
+
+```typescript
+{ 
+  label: 'Rischio Stocks', 
+  // Se protezioni attive: usa valore netto, altrimenti lordo
+  value: includeProtections ? totalPureStockRisk : grossPureStockRisk, 
+  percentage: getPercentage(includeProtections ? totalPureStockRisk : grossPureStockRisk),
+  color: 'bg-blue-500',
+  icon: TrendingUp,
+  // Descrizione dinamica
+  description: includeProtections 
+    ? 'Azioni individuali (al netto di protezioni PUT)' 
+    : 'Azioni individuali (al lordo di protezioni PUT)',
+  // Dati extra per mostrare il risparmio protezioni
+  protectionSavings: includeProtections ? protectionSavings : 0,
+  showProtectionSavings: includeProtections && protectionSavings > 0
 }
 ```
 
-### File 2: `src/lib/riskCalculator.ts`
+#### 5. Mostrare il valore ridotto dalle protezioni
 
-**Funzione `analyzePortfolioRisk`** - Aggiungere filtro EUROFOREX ai derivati:
+Nel rendering del grafico a barre, dopo il valore principale, mostrare il risparmio protezioni:
 
 ```typescript
-export function analyzePortfolioRisk(
-  positions: Position[],
-  categories: DerivativeCategories
-): RiskAnalysis {
-  // NUOVO: Helper per escludere EUROFOREX
-  const isEuroforex = (name: string) => 
-    name?.toUpperCase().includes('EUROFOREX') || false;
-  
-  // ... codice esistente ...
-  
-  // Naked put risk - FILTRO
-  const filteredNakedPuts = categories.nakedPuts.filter(
-    np => !isEuroforex(np.option.underlying || np.option.description)
-  );
-  const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
-  
-  // Leap call risk - FILTRO
-  const filteredLeapCalls = categories.leapCalls.filter(
-    lc => !isEuroforex(lc.option.underlying || lc.option.description)
-  );
-  const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
-  
-  // Strategy risk - FILTRO implicito (le strategies usano underlying dai derivati)
-  // ...
-}
+<div className="text-right">
+  <span className="font-semibold">{formatEUR(cat.value)}</span>
+  <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
+  {/* Nuova riga per mostrare risparmio protezioni */}
+  {cat.showProtectionSavings && (
+    <div className="text-xs text-green-500">
+      Protezioni: -{formatEUR(cat.protectionSavings)}
+    </div>
+  )}
+</div>
 ```
 
-### File 3: `src/lib/derivativeStrategies.ts`
+#### 6. Aggiornare il Grand Total dinamicamente
 
-**Funzione `categorizeDerivatives`** - Escludere EUROFOREX dall'inizio:
+Il grandTotal deve riflettere il toggle:
 
 ```typescript
-export function categorizeDerivatives(
-  derivatives: Position[],
-  allPositions: Position[],
-  overrides: DerivativeOverride[] = []
-): DerivativeCategories {
-  // NUOVO: Filtra derivati EUROFOREX prima di tutto
-  const filteredDerivatives = derivatives.filter(d => {
-    const name = (d.underlying || d.description || '').toUpperCase();
-    return !name.includes('EUROFOREX');
-  });
-  
-  // Usa filteredDerivatives invece di derivatives nel resto della funzione
-  // ...
-}
+const dynamicGrandTotal = useMemo(() => {
+  const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
+  return totalETFRisk + stockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
+}, [includeProtections, ...]);
+```
+
+#### 7. Tooltip FISSO (non dinamico)
+
+Il tooltip avrà sempre lo stesso testo:
+
+```typescript
+<TooltipContent className="max-w-xs text-sm">
+  <p>
+    Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).
+  </p>
+</TooltipContent>
 ```
 
 ---
 
 ## Riepilogo Modifiche
 
-| File | Tipo | Descrizione |
-|------|------|-------------|
-| `src/lib/sectorExposure.ts` | Bug fix + Feature | Fix duplicazione ETF con `continue`/`else`; filtro EUROFOREX |
-| `src/lib/riskCalculator.ts` | Feature | Filtro EUROFOREX per nakedPuts e leapCalls |
-| `src/lib/derivativeStrategies.ts` | Feature | Filtro EUROFOREX all'inizio di `categorizeDerivatives` |
+| Elemento | Prima | Dopo |
+|----------|-------|------|
+| Titolo card | "Esposizione Totale in Equity e Commodities" | "Esposizione in Equity e Commodities" |
+| Toggle Protezioni | Non presente nella card | Toggle con label "Protezioni" |
+| Descrizione Rischio Stocks (ON) | - | "Azioni individuali (al netto di protezioni PUT)" |
+| Descrizione Rischio Stocks (OFF) | - | "Azioni individuali (al lordo di protezioni PUT)" |
+| Valore protezioni (ON) | Non mostrato | Riga "Protezioni: -XXX €" in verde sotto il valore |
+| Grand Total | Fisso (netto) | Dinamico in base al toggle |
+| Tooltip | Dinamico | **FISSO** con testo specificato |
 
 ---
 
-## Impatto
+## Dettagli UI
 
-| Prima | Dopo |
-|-------|------|
-| ETF con dati settoriali contati 3 volte | Contati 1 volta (solo decomposti per settore) |
-| ETF senza dati settoriali contati 2 volte | Contati 1 volta in "Other" |
-| Opzioni EUROFOREX incluse nel rischio | Completamente escluse dal Risk Analyzer |
-| Totale settoriale gonfiato | Valori corretti e coerenti |
+- **Posizione Toggle**: All'interno della card principale, sotto le informazioni percentuali
+- **Stile Toggle**: Usa componenti esistenti `Switch` e `Label`
+- **Valore Protezioni**: Testo verde (`text-green-500`), font normale (non bold), prefisso "Protezioni: -"
+- **Descrizione**: Testo piccolo sotto il nome della categoria nel grafico a barre
 
 ---
 
-## Note Tecniche
+## File Modificato
 
-- La correzione ETF è una ristrutturazione del controllo di flusso senza cambiare la logica di business
-- L'esclusione EUROFOREX è coerente con il sistema esistente (`update-prices-cron` già marca questi strumenti come `'SKIP'`)
-- Nessuna nuova dipendenza richiesta
+- `src/components/risk/EquityExposureView.tsx`
+
