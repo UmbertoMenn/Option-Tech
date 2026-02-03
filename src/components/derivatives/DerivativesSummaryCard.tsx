@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
@@ -27,8 +28,21 @@ function getTicker(position: Position | { description?: string; ticker?: string;
   return position.ticker || position.description?.split(' ')[0] || 'N/A';
 }
 
+// Badge tooltip descriptions
+const BADGE_TOOLTIPS: Record<string, string> = {
+  'ITM': 'In The Money',
+  'OTM': 'Out of The Money',
+  'OOR': 'Out of Range: il sottostante è fuori dagli strike venduti',
+  'IR': 'In Range: il sottostante è all\'interno degli strike venduti',
+  'IB': 'In Breakeven: il sottostante è all\'interno della zona profittevole',
+  'OOB': 'Out of Breakeven: il sottostante è fuori dalla zona profittevole',
+  'G': 'In Gain: la Leap sta guadagnando',
+  'L': 'Loss: la Leap sta perdendo',
+  'OOR/OOB': 'Out of Range o Out of Breakeven',
+};
+
 // Compact section component - collapsible with count
-function CompactSection({ 
+function CompactSection({
   title, 
   icon: Icon,
   iconColor,
@@ -57,12 +71,19 @@ function CompactSection({
         <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
         <span className="text-sm font-bold text-foreground">{title}</span>
         {statusBadge && (
-          <Badge 
-            variant="outline" 
-            className={`text-[10px] px-1.5 py-0 h-4 ${statusBadge.colorClass}`}
-          >
-            {statusBadge.label}
-          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="outline" 
+                className={`text-[10px] px-1.5 py-0 h-4 cursor-help ${statusBadge.colorClass}`}
+              >
+                {statusBadge.label}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{BADGE_TOOLTIPS[statusBadge.label] || statusBadge.label}</p>
+            </TooltipContent>
+          </Tooltip>
         )}
         <span className="text-xs text-muted-foreground">
           ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})

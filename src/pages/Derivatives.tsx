@@ -574,12 +574,19 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           </div>
           
           {/* Col 5: ITM/OTM */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-          >
-            {isITM ? 'ITM' : 'OTM'}
-          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="outline"
+                className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+              >
+                {isITM ? 'ITM' : 'OTM'}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{isITM ? 'In The Money: il sottostante è sopra lo strike' : 'Out of The Money: il sottostante è sotto lo strike'}</p>
+            </TooltipContent>
+          </Tooltip>
           
           {/* Col 6: Menu */}
           <MoveOptionMenu 
@@ -711,12 +718,19 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           </div>
           
           {/* Col 5: ITM/OTM */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-          >
-            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="outline"
+                className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+              >
+                {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? 'In The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike'}</p>
+            </TooltipContent>
+          </Tooltip>
           
           {/* Col 6: Menu */}
           <MoveOptionMenu 
@@ -1482,12 +1496,19 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         <span className="text-sm">{optionTypeLabel}</span>
         <span className="font-medium text-sm">${option.strike_price}</span>
         <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
-        <Badge 
-          variant="outline"
-          className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-        >
-          {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-        </Badge>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge 
+              variant="outline"
+              className={`text-xs shrink-0 cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+            >
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? (isCall ? 'In The Money: il sottostante è sopra lo strike' : 'In The Money: il sottostante è sotto lo strike') : (isCall ? 'Out of The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike')}</p>
+          </TooltipContent>
+        </Tooltip>
         {hasOverride && <OverrideBadge />}
       </div>
       <div className="flex items-center gap-4 shrink-0">
@@ -1663,12 +1684,19 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
           {/* Col 4: ITM/OTM */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-          >
-            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="outline"
+                className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+              >
+                {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? 'In The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike'}</p>
+            </TooltipContent>
+          </Tooltip>
           
           {/* Col 5: Override Badge */}
           <div className="flex items-center">
@@ -1791,12 +1819,19 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
           {/* Col 4: Gain/Loss Badge (G green if price > avg cost, L red if price < avg cost) */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
-          >
-            {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
-          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge 
+                variant="outline"
+                className={`text-xs cursor-help ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+              >
+                {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{!hasValidPrices ? 'Prezzi non disponibili' : isInGain ? 'In Gain: la Leap sta guadagnando' : 'Loss: la Leap sta perdendo'}</p>
+            </TooltipContent>
+          </Tooltip>
           
           {/* Col 5: Override Badge */}
           <div className="flex items-center">
