@@ -441,17 +441,14 @@ export function DerivativesSummaryCard({
   
   return (
     <div className="grid grid-cols-2 gap-4">
-      {/* Card esterna più scura - sfondo principale */}
-      <div className="rounded-lg border border-border bg-background-secondary p-4">
-        {/* Header sulla card esterna */}
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle className="w-5 h-5 text-amber-500" />
-          <h3 className="text-xl font-semibold text-card-foreground">Posizioni da monitorare</h3>
-        </div>
-        
-        {/* Card interna più chiara - contenuto */}
-        <Card className="border-border bg-card">
-          <CardContent className="pt-4">
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            <CardTitle className="text-xl">Azioni Necessarie</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
           {/* 1. Call non coperte */}
           <CompactSection
             title="Call non coperte"
@@ -593,9 +590,8 @@ export function DerivativesSummaryCard({
               </Badge>
             )}
           />
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
       
       {/* Placeholder for future content */}
       <div className="border border-dashed border-border/50 rounded-lg flex items-center justify-center min-h-[200px]">
