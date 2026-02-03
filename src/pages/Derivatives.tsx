@@ -1255,7 +1255,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 </TooltipContent>
               </Tooltip>
             )}
-            <span className={`font-semibold text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            <span className={`text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
               {formatCurrency(totalProfitLoss, 'USD')}
             </span>
           </div>
