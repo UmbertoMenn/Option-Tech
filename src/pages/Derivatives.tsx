@@ -754,6 +754,11 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
+  // Calculate if underlying price is In Range (between sold strikes)
+  const soldPutStrike = soldPut.strike_price || 0;
+  const soldCallStrike = soldCall.strike_price || 0;
+  const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+  
   // Calculate Gain Potenziale = premi incassati - premi pagati
   // Sold options (negative qty) = premium received (avg_cost is positive, so we take it as income)
   // Bought options (positive qty) = premium paid (avg_cost is the cost)
@@ -763,14 +768,14 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   const isPositiveGP = gainPotenziale >= 0;
   
   // Calculate Max Loss = spread width * 100 * contracts - net premium received
-  const putSpreadWidth = (soldPut.strike_price || 0) - (boughtPut.strike_price || 0);
-  const callSpreadWidth = (boughtCall.strike_price || 0) - (soldCall.strike_price || 0);
+  const putSpreadWidth = soldPutStrike - (boughtPut.strike_price || 0);
+  const callSpreadWidth = (boughtCall.strike_price || 0) - soldCallStrike;
   const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
   const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
   
   // Strikes summary
-  const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
-  const callSpread = `${soldCall.strike_price}/${boughtCall.strike_price}`;
+  const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
+  const callSpread = `${soldCallStrike}/${boughtCall.strike_price}`;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -786,6 +791,24 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <Badge variant="outline" className="text-xs shrink-0 text-amber-500 border-amber-500/50">
               IC
             </Badge>
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    className={`text-xs shrink-0 ${isInRange 
+                      ? 'bg-green-500 text-white hover:bg-green-600' 
+                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                  >
+                    {isInRange ? 'IR' : 'OOR'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInRange 
+                    ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
+                    : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <span className="text-xs text-muted-foreground">
               {expiryFormatted}
             </span>
@@ -939,6 +962,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
+  // Calculate if underlying price is In Range (between sold strikes)
+  const soldPutStrike = soldPut.strike_price || 0;
+  const soldCallStrike = soldCall.strike_price || 0;
+  const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+  
   // Calculate Gain Potenziale = premi incassati - premi pagati
   const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
   const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
@@ -946,14 +974,14 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   const isPositiveGP = gainPotenziale >= 0;
   
   // Calculate Max Loss
-  const putSpreadWidth = (soldPut.strike_price || 0) - (boughtPut.strike_price || 0);
-  const callSpreadWidth = (boughtCall.strike_price || 0) - (soldCall.strike_price || 0);
+  const putSpreadWidth = soldPutStrike - (boughtPut.strike_price || 0);
+  const callSpreadWidth = (boughtCall.strike_price || 0) - soldCallStrike;
   const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
   const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
   
   // Strikes summary
-  const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
-  const callSpread = `${soldCall.strike_price}/${boughtCall.strike_price}`;
+  const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
+  const callSpread = `${soldCallStrike}/${boughtCall.strike_price}`;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -969,6 +997,24 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <Badge variant="outline" className="text-xs shrink-0 text-purple-500 border-purple-500/50">
               DD
             </Badge>
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    className={`text-xs shrink-0 ${isInRange 
+                      ? 'bg-green-500 text-white hover:bg-green-600' 
+                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                  >
+                    {isInRange ? 'IR' : 'OOR'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInRange 
+                    ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
+                    : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <span className="text-xs text-muted-foreground">
               {soldExpiryFormatted} - {boughtExpiryFormatted}
             </span>
@@ -1128,6 +1174,24 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
+  // Calculate IR/OOR for Alternative Double Diagonal
+  const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
+  let isInRange = false;
+  let soldPutStrike = 0;
+  let soldCallStrike = 0;
+  
+  if (isAltDoubleDiagonal && hasUnderlyingPrice) {
+    // Find sold PUT and CALL strikes
+    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+    
+    if (soldPut && soldCall) {
+      soldPutStrike = soldPut.option.strike_price || 0;
+      soldCallStrike = soldCall.option.strike_price || 0;
+      isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+    }
+  }
+  
   // Count calls and puts
   const callCount = options.filter(o => o.option.option_type === 'call').length;
   const putCount = options.filter(o => o.option.option_type === 'put').length;
@@ -1147,6 +1211,24 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
               <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
                 {strategyName}
               </Badge>
+            )}
+            {isAltDoubleDiagonal && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    className={`text-xs shrink-0 ${isInRange 
+                      ? 'bg-green-500 text-white hover:bg-green-600' 
+                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                  >
+                    {isInRange ? 'IR' : 'OOR'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInRange 
+                    ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
+                    : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+                </TooltipContent>
+              </Tooltip>
             )}
             <Badge variant="secondary" className="text-xs shrink-0">
               {options.length} gambe
