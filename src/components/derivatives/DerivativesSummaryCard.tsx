@@ -445,7 +445,7 @@ export function DerivativesSummaryCard({
       <CardHeader className="pb-3 border-b border-border">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-amber-500" />
-          <CardTitle className="text-xl font-bold tracking-tight">Posizioni da monitorare</CardTitle>
+          <CardTitle className="text-xl font-bold">Posizioni da monitorare</CardTitle>
         </div>
       </CardHeader>
         <CardContent className="pt-0">
