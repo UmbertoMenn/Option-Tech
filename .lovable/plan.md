@@ -2,99 +2,79 @@
 
 ## Obiettivo
 
-Aggiungere il badge **IB** (In Breakeven - verde) e **OOB** (Out Of Breakeven - rosso) per le strategie diverse da "Short Strangle" e "Alternative Double Diagonal" nella sezione "Altre Strategie".
+Riorganizzare la visualizzazione delle "Altre Strategie" con un layout a colonne allineate per una migliore leggibilità.
 
-## Logica
+## Problema Attuale
 
-- Utilizzare le funzioni esistenti in `optionCalculator.ts` per calcolare i breakeven:
-  - `getPriceRangeForPositions()` - determina il range di prezzo da analizzare
-  - `calculateOptionPayoff()` - calcola il payoff per ogni punto di prezzo
-  - `findBreakevenPoints()` - trova i punti dove il payoff attraversa lo zero
-- Se il prezzo del sottostante è **tra** i breakeven (min e max), mostrare **IB** (verde)
-- Se il prezzo del sottostante è **fuori** dai breakeven, mostrare **OOB** (rosso)
-- Per strategie con un solo breakeven o nessun breakeven, non mostrare il badge
+Attualmente tutti gli elementi sono disposti in un unico flex container con gap variabile:
+- Chevron + Underlying + Badge Strategia (blu) + Badge IB/OOB + BE values + Badge gambe + conteggio Call/Put
 
-## Modifiche
+Questo crea un layout "fluido" dove ogni riga ha posizioni diverse a seconda della lunghezza dei dati.
+
+## Soluzione Proposta
+
+Creare un layout a griglia/colonne fisse partendo dal badge blu della strategia:
+
+```text
+| Chevron | Underlying | Badge Strategia | Badge IB/OOB | BE Range    | Gambe | Call/Put | PS        | P/L     |
+|---------|------------|-----------------|--------------|-------------|-------|----------|-----------|---------|
+| >       | AAPL       | Naked Put       | IB           | BE: 150.00  | 2     | 1C • 1P  | PS: 175€  | +120€   |
+| >       | MSFT       | Bull Spread     | OOB          | BE: 300-350 | 3     | 2C       | PS: 280€  | -50€    |
+```
+
+## Modifiche Tecniche
 
 ### File: `src/pages/Derivatives.tsx`
 
-**1. Import delle funzioni di calcolo:**
-```typescript
-import { 
-  calculateOptionPayoff, 
-  findBreakevenPoints, 
-  getPriceRangeForPositions 
-} from '@/lib/optionCalculator';
+Nel componente `GroupedOtherStrategyRow` (linee 1244-1328), ristrutturare il layout con CSS Grid o flex con larghezze fisse:
+
+**1. Container principale con grid:**
+```tsx
+<div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 items-center p-3 ...">
 ```
 
-**2. Nel componente `GroupedOtherStrategyRow`:**
+**2. Struttura colonne:**
+- Colonna 1 (auto): Chevron
+- Colonna 2 (1fr): Underlying (nome ticker, espandibile)  
+- Colonna 3 (auto): Badge Strategia (blu) - larghezza fissa ~140px
+- Colonna 4 (auto): Badge IB/OOB o IR/OOR - larghezza fissa ~50px
+- Colonna 5 (auto): Breakeven range - larghezza fissa ~120px
+- Colonna 6 (auto): Badge gambe - larghezza fissa ~60px
+- Colonna 7 (auto): Conteggio Call/Put - larghezza fissa ~100px
+- Colonna 8 (auto): Prezzo Sottostante (PS) - larghezza fissa ~100px
+- Colonna 9 (auto): P/L - larghezza fissa ~80px
 
-Dopo la logica esistente per IR/OOR (Short Strangle e Alternative Double Diagonal), aggiungere il calcolo dei breakeven per le altre strategie:
+**3. Applicare larghezze minime per allineamento:**
+```tsx
+// Badge strategia con larghezza minima
+<div className="w-36">
+  {strategyName && (
+    <Badge variant="outline" className="...">
+      {strategyName}
+    </Badge>
+  )}
+</div>
 
-```typescript
-// Logica per badge IB/OOB (strategie diverse da IR/OOR)
-const showBreakevenBadge = !showRangeBadge && hasUnderlyingPrice;
-let isInBreakeven = false;
-let breakevens: number[] = [];
+// Badge IB/OOB con larghezza fissa
+<div className="w-12 flex justify-center">
+  {showBreakevenBadge && breakevens.length > 0 && (
+    <Badge ...>...</Badge>
+  )}
+</div>
 
-if (showBreakevenBadge) {
-  // Converte le opzioni in DerivativePosition per usare le funzioni esistenti
-  const derivativePositions = options.map(o => ({
-    ...o.option,
-    strike_price: o.option.strike_price || 0,
-    option_type: o.option.option_type as OptionType,
-  })) as DerivativePosition[];
-  
-  // Calcola il payoff e trova i breakeven
-  const priceRange = getPriceRangeForPositions(derivativePositions);
-  const payoffPoints = calculateOptionPayoff(derivativePositions, underlyingPrice, priceRange);
-  breakevens = findBreakevenPoints(payoffPoints);
-  
-  // Se ci sono almeno 2 breakeven, verifica se il prezzo è nel range
-  if (breakevens.length >= 2) {
-    const minBE = Math.min(...breakevens);
-    const maxBE = Math.max(...breakevens);
-    isInBreakeven = underlyingPrice >= minBE && underlyingPrice <= maxBE;
-  } else if (breakevens.length === 1) {
-    // Con un solo breakeven, mostra IB se siamo in profitto a quel prezzo
-    // (il payoff al prezzo corrente è positivo)
-    const currentPayoff = payoffPoints.find(p => Math.abs(p.price - underlyingPrice) < (priceRange.max - priceRange.min) / 100);
-    isInBreakeven = currentPayoff ? currentPayoff.payoff >= 0 : false;
-  }
-}
+// BE range con larghezza fissa
+<div className="w-28">
+  {showBreakevenBadge && breakevens.length > 0 && (
+    <span className="text-xs text-muted-foreground">BE: ...</span>
+  )}
+</div>
 ```
 
-**3. Badge UI:**
+## Layout Finale
 
-Aggiungere dopo il badge IR/OOR esistente:
-
-```typescript
-{showBreakevenBadge && breakevens.length > 0 && (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Badge 
-        variant="outline"
-        className={`text-xs shrink-0 ${isInBreakeven 
-          ? 'text-green-500 border-green-500' 
-          : 'text-red-500 border-red-500'}`}
-      >
-        {isInBreakeven ? 'IB' : 'OOB'}
-      </Badge>
-    </TooltipTrigger>
-    <TooltipContent>
-      <p>{isInBreakeven 
-        ? `In Breakeven: prezzo tra ${breakevens.map(b => b.toFixed(2)).join(' e ')}` 
-        : `Out of Breakeven: prezzo fuori dal range ${breakevens.map(b => b.toFixed(2)).join('-')}`}</p>
-    </TooltipContent>
-  </Tooltip>
-)}
-```
-
-## Riepilogo Badge per Strategie
-
-| Strategia | Badge | Colore Verde | Colore Rosso |
-|-----------|-------|--------------|--------------|
-| Short Strangle | IR / OOR | In Range | Out Of Range |
-| Alternative Double Diagonal | IR / OOR | In Range | Out Of Range |
-| Altre Strategie | IB / OOB | In Breakeven | Out Of Breakeven |
+La nuova struttura garantirà che:
+- Ogni colonna abbia una larghezza fissa o minima consistente
+- Gli elementi siano sempre allineati verticalmente tra le righe
+- Il badge blu della strategia sia sempre nella stessa posizione
+- I dati numerici (BE, PS, P/L) siano allineati a destra per facile confronto
 
