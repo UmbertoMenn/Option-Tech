@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
+import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,6 +27,7 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
+import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -82,6 +84,41 @@ export function Derivatives() {
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
   }, [derivatives, positions, overrides]);
+
+  // Extract all unique underlying names for price fetching
+  const allUnderlyingNames = useMemo(() => {
+    const names = new Set<string>();
+    
+    // Iron Condors
+    categories.ironCondors.forEach(ic => names.add(ic.underlying));
+    
+    // Double Diagonals
+    categories.doubleDiagonals.forEach(dd => names.add(dd.underlying));
+    
+    // Naked Puts (those without underlying in portfolio)
+    categories.nakedPuts.forEach(np => {
+      if (!np.underlying?.current_price && np.option.underlying) {
+        names.add(np.option.underlying);
+      }
+    });
+    
+    // Leap Calls (those without underlying in portfolio)
+    categories.leapCalls.forEach(lc => {
+      if (!lc.underlying?.current_price && lc.option.underlying) {
+        names.add(lc.option.underlying);
+      }
+    });
+    
+    // Grouped Other Strategies
+    categories.groupedOtherStrategies.forEach(group => {
+      names.add(group.underlying);
+    });
+    
+    return Array.from(names);
+  }, [categories]);
+
+  // Fetch underlying prices from Yahoo Finance
+  const { prices: underlyingPrices, isLoading: isPricesLoading } = useUnderlyingPrices(allUnderlyingNames);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
@@ -247,7 +284,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.ironCondors.map((ic, index) => (
-                      <IronCondorRow key={index} ironCondor={ic} />
+                      <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -287,7 +324,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.doubleDiagonals.map((dd, index) => (
-                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} />
+                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -327,7 +364,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.nakedPuts.map((np, index) => (
-                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
+                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -367,7 +404,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.leapCalls.map((lc, index) => (
-                      <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
+                      <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -407,7 +444,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.groupedOtherStrategies.map((group, index) => (
-                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
+                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -423,6 +460,10 @@ export function Derivatives() {
 interface RowProps {
   stockPositions: Position[];
   getOverrideForPosition: (positionId: string) => import('@/types/derivativeOverrides').DerivativeOverride | undefined;
+}
+
+interface RowPropsWithPrices extends RowProps {
+  underlyingPrices: Record<string, UnderlyingPrice>;
 }
 
 function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition }: { coveredCall: CoveredCallPosition } & RowProps) {
@@ -646,11 +687,15 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
   );
 }
 
-function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
+function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondorPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = ironCondor;
   
   const expiryFormatted = formatExpiryMMY(expiryDate);
+  
+  // Get underlying price from Yahoo Finance
+  const underlyingPrice = underlyingPrices[underlying]?.price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
   
   // Calculate Gain Potenziale = premi incassati - premi pagati
   // Sold options (negative qty) = premium received (avg_cost is positive, so we take it as income)
@@ -689,6 +734,18 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-xs text-muted-foreground cursor-help">
@@ -814,12 +871,16 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
   );
 }
 
-function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalPosition }) {
+function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagonal: DoubleDiagonalPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, soldExpiryDate, boughtExpiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = doubleDiagonal;
   
   const soldExpiryFormatted = formatExpiryMMY(soldExpiryDate);
   const boughtExpiryFormatted = formatExpiryMMY(boughtExpiryDate);
+  
+  // Get underlying price from Yahoo Finance
+  const underlyingPrice = underlyingPrices[underlying]?.price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
   
   // Calculate Gain Potenziale = premi incassati - premi pagati
   const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
@@ -856,6 +917,18 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-xs text-muted-foreground cursor-help">
@@ -988,12 +1061,14 @@ function DoubleDiagonalRow({ doubleDiagonal }: { doubleDiagonal: DoubleDiagonalP
   );
 }
 
-function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition }: { group: GroupedOtherStrategy } & RowProps) {
+function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition, underlyingPrices }: { group: GroupedOtherStrategy } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, options, totalProfitLoss, strategyName } = group;
   
-  // Get underlying price from first option that has it
-  const underlyingPrice = options[0]?.underlying?.current_price || 0;
+  // Get underlying price - try from portfolio first, then from Yahoo Finance
+  const portfolioPrice = options[0]?.underlying?.current_price || 0;
+  const yahooPrice = underlyingPrices[underlying]?.price || 0;
+  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   // Count calls and puts
@@ -1242,7 +1317,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
   );
 }
 
-function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition }: { nakedPut: NakedPutPosition } & RowProps) {
+function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underlyingPrices }: { nakedPut: NakedPutPosition } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts } = nakedPut;
   
@@ -1252,7 +1327,10 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition }: { nak
   // PUT is ITM when underlying price < strike price (you can sell at higher than market)
   // PUT is OTM when underlying price > strike price
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying?.current_price || 0;
+  // Get underlying price - try from portfolio first, then from Yahoo Finance
+  const portfolioPrice = underlying?.current_price || 0;
+  const yahooPrice = option.underlying ? underlyingPrices[option.underlying]?.price || 0 : 0;
+  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && underlyingPrice < strikePrice;
   
@@ -1344,7 +1422,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition }: { nak
   );
 }
 
-function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition }: { leapCall: LeapCallPosition } & RowProps) {
+function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underlyingPrices }: { leapCall: LeapCallPosition } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts } = leapCall;
   
@@ -1352,7 +1430,10 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition }: { lea
   
   // Calculate ITM/OTM status for CALL options
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying?.current_price || 0;
+  // Get underlying price - try from portfolio first, then from Yahoo Finance
+  const portfolioPrice = underlying?.current_price || 0;
+  const yahooPrice = option.underlying ? underlyingPrices[option.underlying]?.price || 0 : 0;
+  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && strikePrice < underlyingPrice;
   
