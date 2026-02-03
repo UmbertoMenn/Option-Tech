@@ -541,8 +541,13 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -561,7 +566,10 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
             {isPartialCoverage && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help">
+                  <span 
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     P!
                   </span>
                 </TooltipTrigger>
@@ -579,6 +587,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
               <Badge 
                 variant="outline"
                 className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                onClick={(e) => e.stopPropagation()}
               >
                 {isITM ? 'ITM' : 'OTM'}
               </Badge>
@@ -598,7 +607,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           {/* Col 7: PS */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                 PS: {formatCurrency(underlyingPrice, 'USD')}
               </span>
             </TooltipTrigger>
@@ -615,7 +624,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(option.avg_cost || 0, 'USD')}
               </span>
             </TooltipTrigger>
@@ -635,8 +644,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
               </span>
             )}
           </div>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -685,8 +693,13 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -705,7 +718,10 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             {isPartial && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help">
+                  <span 
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     P!
                   </span>
                 </TooltipTrigger>
@@ -723,6 +739,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
               <Badge 
                 variant="outline"
                 className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                onClick={(e) => e.stopPropagation()}
               >
                 {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
               </Badge>
@@ -744,7 +761,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate">
+                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -765,7 +782,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(option.avg_cost || 0, 'USD')}
               </span>
             </TooltipTrigger>
@@ -778,8 +795,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           <span className="font-semibold text-sm text-right">
             {formatCurrency(option.current_price || 0, 'USD')}
           </span>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -846,8 +862,13 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -873,6 +894,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                     className={`text-xs ${isInRange 
                       ? 'bg-green-500/20 border-green-500/50 text-green-400' 
                       : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -896,7 +918,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 6: PUT spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
                 PUT {putSpread}
               </span>
             </TooltipTrigger>
@@ -908,7 +930,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 7: CALL spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
                 CALL {callSpread}
               </span>
             </TooltipTrigger>
@@ -925,7 +947,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 9: GP */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">GP:</span>
                 <span className="text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
               </div>
@@ -938,7 +960,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 10: ML */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap">
+              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">ML:</span>
                 <span className="text-sm">{formatCurrency(maxLoss, 'USD')}</span>
               </div>
@@ -947,8 +969,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               <p>Max Loss: perdita massima possibile</p>
             </TooltipContent>
           </Tooltip>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
           {/* Put Spread */}
@@ -1053,8 +1074,13 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1076,6 +1102,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     className={`text-xs ${isInRange 
                       ? 'bg-green-500/20 border-green-500/50 text-green-400' 
                       : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1099,7 +1126,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 5: PUT spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
                 PUT {putSpread}
               </span>
             </TooltipTrigger>
@@ -1111,7 +1138,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 6: CALL spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate">
+              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
                 CALL {callSpread}
               </span>
             </TooltipTrigger>
@@ -1129,7 +1156,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 9: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
                 <span className="text-sm">{formatCurrency(totalPL, 'USD')}</span>
               </div>
@@ -1138,8 +1165,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               <p>Profit/Loss: somma dei P/L delle 4 gambe</p>
             </TooltipContent>
           </Tooltip>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
           {/* Spreads side by side: PUT on left, CALL on right */}
@@ -1318,8 +1344,13 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -1351,6 +1382,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                     className={`text-xs shrink-0 ${isInRange 
                       ? 'bg-green-500/20 border-green-500/50 text-green-400' 
                       : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1369,6 +1401,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                     className={`text-xs shrink-0 ${isInBreakeven 
                       ? 'bg-green-500/20 border-green-500/50 text-green-400' 
                       : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {isInBreakeven ? 'IB' : 'OOB'}
                   </Badge>
@@ -1422,7 +1455,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
             {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
+                  <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1441,8 +1474,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
               {formatCurrency(totalProfitLoss, 'USD')}
             </span>
           </div>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 space-y-2">
           {options.map((os, idx) => (
@@ -1668,8 +1700,13 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1689,6 +1726,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
               <Badge 
                 variant="outline"
                 className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                onClick={(e) => e.stopPropagation()}
               >
                 {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
               </Badge>
@@ -1715,7 +1753,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate">
+                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1736,7 +1774,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(option.avg_cost || 0, 'USD')}
               </span>
             </TooltipTrigger>
@@ -1749,8 +1787,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           <span className="font-semibold text-sm text-right">
             {formatCurrency(option.current_price || 0, 'USD')}
           </span>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -1803,8 +1840,13 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1824,6 +1866,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
               <Badge 
                 variant="outline"
                 className={`text-xs cursor-help ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                onClick={(e) => e.stopPropagation()}
               >
                 {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
               </Badge>
@@ -1850,7 +1893,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             {hasUnderlyingPrice ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate">
+                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1871,7 +1914,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate">
+              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(avgCost, 'USD')}
               </span>
             </TooltipTrigger>
@@ -1891,8 +1934,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
               </span>
             )}
           </div>
-        </div>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
