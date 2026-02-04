@@ -202,7 +202,8 @@ function parsePortfolioData(rows: any[][]): {
       currentSection = 'cash';
       isDerivativeSection = false;
       continue;
-    } else if (firstCell.includes('TITOLI DI STATO')) {
+    } else if (firstCell.includes('TITOLI DI STATO') || firstCell.includes('OBBLIGAZIONI')) {
+      // Both "TITOLI DI STATO" and "OBBLIGAZIONI" are bond sections
       currentSection = 'bond';
       isDerivativeSection = false;
       continue;
