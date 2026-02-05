@@ -1,72 +1,31 @@
 
-# Piano: Gestione Ticker nel Dialog Avvisi
+
+# Piano: Correzione Visualizzazione Ticker nel Dialog Avvisi
 
 ## Problema Identificato
 
-Nel dialog "Gestione Avvisi", l'utente deve inserire manualmente i ticker per gli override, ma:
-1. Il placeholder dice "Es. APPLOVIN" che NON è un ticker valido (il ticker corretto è "APP")
-2. L'utente non vede quali ticker sono disponibili dalle sue strategie/posizioni
-3. Se il sistema non riconosce un ticker, non c'è modo di correggerlo
+Il sistema **ha già i ticker** - vengono restituiti dalla edge function `fetch-underlying-prices` nel campo `ticker` dell'oggetto `underlyingPrices`. Il problema è che la funzione `extractUniqueTickers` nel dialog non riesce a trovare corrispondenze tra:
+
+1. Gli underlying estratti dalle categorie (es. `cc.option.underlying` = "AMAZON COM INC")
+2. Le chiavi dell'oggetto `underlyingPrices` (es. "AMAZON COM" o diversa normalizzazione)
 
 ## Soluzione
 
-Mostrare nel dialog un **elenco selezionabile** dei ticker già risolti dalle strategie dell'utente, senza duplicati, e permettere l'inserimento manuale con salvataggio dell'override per il futuro.
+Invece di cercare di fare il match tra underlying e `underlyingPrices`, **iteriamo direttamente su `underlyingPrices`** che contiene già tutti i ticker risolti. Poi confrontiamo con gli underlying delle strategie per identificare quelli non risolti.
 
 ---
 
-## Modifiche Previste
+## Modifica al File `AlertSettingsDialog.tsx`
 
-### 1. Passare i dati delle strategie al Dialog
+### Problema nella funzione `extractUniqueTickers`:
 
-**File**: `src/components/derivatives/DerivativesSummaryCard.tsx`
-
-Il dialog `AlertSettingsDialog` attualmente non riceve dati sulle strategie. Devo passargli:
-- `categories` (le strategie categorizzate)
-- `underlyingPrices` (contiene i ticker risolti dalla edge function)
-
-Questo permetterà di estrarre i ticker unici già risolti.
-
----
-
-### 2. Mostrare i Ticker Disponibili nel Tab "Per Ticker"
-
-**File**: `src/components/derivatives/AlertSettingsDialog.tsx`
-
-Modifiche:
-- Ricevere `categories` e `underlyingPrices` come props
-- Estrarre i ticker unici da tutte le strategie (IC, DD, CC, NP, Leap, etc.)
-- Mostrare una **lista cliccabile** dei ticker disponibili sopra il campo di input
-- Se un ticker NON è stato risolto (es. "APPLOVIN INC" senza mapping), mostrarlo con un badge "⚠️ Ticker sconosciuto" e permettere all'utente di inserire manualmente il ticker corretto
-- Salvare l'override nella tabella `underlying_mappings` per uso futuro (per singolo utente? No, la tabella è globale, quindi beneficerà tutti)
-
-**Nuova UI Tab "Per Ticker"**:
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ Ticker disponibili dalle tue strategie:                     │
-│                                                             │
-│  [AAPL] [AMZN] [APP] [GOOGL] [NVDA] [MSFT] [TSLA]          │
-│                                                             │
-│  Clicca su un ticker per aggiungere un override             │
-│                                                             │
-│ ⚠️ Ticker non risolti:                                      │
-│  PINDUODUO INC → [inserisci ticker] [Salva]                 │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│ Override configurati:                                       │
-│                                                             │
-│  [APP]  ──────●────────── 10%  [🗑️]                        │
-│  [NVDA] ─────────●─────── 5%   [🗑️]                        │
-│                                                             │
-│ + Aggiungi manualmente: [__________] [Aggiungi]            │
-└─────────────────────────────────────────────────────────────┘
+```typescript
+// ATTUALE - cerca match esatto che può fallire
+const priceData = underlyingPrices[underlying];
+if (priceData?.ticker) { ... }
 ```
 
----
-
-### 3. Estrarre i Ticker Unici dalle Strategie
-
-Nuova funzione helper per estrarre i ticker da tutte le categorie:
+### Nuova logica:
 
 ```typescript
 function extractUniqueTickers(
@@ -76,97 +35,101 @@ function extractUniqueTickers(
   resolved: Array<{ underlying: string; ticker: string }>;
   unresolved: string[];
 } {
-  const allUnderlyings = new Set<string>();
+  // 1. Raccogli TUTTI gli underlying dalle categorie
+  const allCategoryUnderlyings = new Set<string>();
   
-  // Raccoglie tutti gli underlying da IC, DD, CC, NP, Leap, etc.
-  categories.ironCondors.forEach(ic => allUnderlyings.add(ic.underlying));
-  categories.doubleDiagonals.forEach(dd => allUnderlyings.add(dd.underlying));
-  categories.coveredCalls.forEach(cc => allUnderlyings.add(cc.option.underlying || ''));
-  categories.nakedPuts.forEach(np => allUnderlyings.add(np.option.underlying || ''));
-  categories.leapCalls.forEach(lc => allUnderlyings.add(lc.option.underlying || ''));
-  categories.groupedOtherStrategies.forEach(g => allUnderlyings.add(g.underlying));
+  categories.ironCondors.forEach(ic => allCategoryUnderlyings.add(ic.underlying));
+  categories.doubleDiagonals.forEach(dd => allCategoryUnderlyings.add(dd.underlying));
+  categories.coveredCalls.forEach(cc => {
+    const u = cc.option.underlying || cc.underlying?.description;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.nakedPuts.forEach(np => {
+    const u = np.option.underlying;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.leapCalls.forEach(lc => {
+    const u = lc.option.underlying;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.groupedOtherStrategies.forEach(g => allCategoryUnderlyings.add(g.underlying));
   
+  // 2. Usa DIRETTAMENTE underlyingPrices per i ticker risolti
+  //    (le chiavi sono gli underlying originali, il valore contiene .ticker)
+  const resolvedTickersSet = new Set<string>();
   const resolved: Array<{ underlying: string; ticker: string }> = [];
+  
+  for (const [underlying, priceData] of Object.entries(underlyingPrices)) {
+    if (priceData.ticker && !resolvedTickersSet.has(priceData.ticker)) {
+      resolvedTickersSet.add(priceData.ticker);
+      resolved.push({ underlying, ticker: priceData.ticker });
+    }
+  }
+  
+  // 3. Trova underlying non risolti
+  //    (quelli presenti nelle categorie ma senza entry in underlyingPrices)
+  const resolvedUnderlyings = new Set(Object.keys(underlyingPrices));
   const unresolved: string[] = [];
   
-  for (const underlying of allUnderlyings) {
+  for (const underlying of allCategoryUnderlyings) {
     if (!underlying) continue;
     
-    const priceData = underlyingPrices[underlying];
-    if (priceData?.ticker) {
-      // Già risolto - evita duplicati per ticker
-      if (!resolved.some(r => r.ticker === priceData.ticker)) {
-        resolved.push({ underlying, ticker: priceData.ticker });
+    // Cerca se esiste una chiave corrispondente (match esatto o parziale)
+    let found = false;
+    for (const priceKey of resolvedUnderlyings) {
+      if (priceKey === underlying || 
+          priceKey.includes(underlying) || 
+          underlying.includes(priceKey)) {
+        found = true;
+        break;
       }
-    } else {
+    }
+    
+    if (!found) {
       unresolved.push(underlying);
     }
   }
   
   return { 
     resolved: resolved.sort((a, b) => a.ticker.localeCompare(b.ticker)),
-    unresolved: unresolved.sort()
+    unresolved: [...new Set(unresolved)].sort()
   };
 }
 ```
 
 ---
 
-### 4. Permettere l'Override Manuale per Ticker Non Risolti
+## Logica Chiave
 
-Se un underlying non ha un ticker risolto, l'utente può inserirlo manualmente. Questo viene salvato nella tabella `underlying_mappings` con `source: 'manual-alert-config'`.
+La correzione si basa su un'osservazione fondamentale:
 
-**Nuova funzione nel hook o componente**:
+- **`underlyingPrices`** contiene già SOLO gli underlying per cui è stato trovato un prezzo E un ticker
+- La chiave dell'oggetto è l'underlying originale (es. "AMAZON COM INC")
+- Il valore contiene `{ price, currency, ticker }`
 
-```typescript
-async function saveTickerMapping(underlying: string, ticker: string): Promise<void> {
-  await supabase
-    .from('underlying_mappings')
-    .upsert({
-      underlying,
-      ticker: ticker.toUpperCase(),
-      source: 'manual-alert-config',
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'underlying' });
-}
-```
+Quindi invece di:
+1. Raccogliere underlying dalle categorie
+2. Cercare match in underlyingPrices
+3. Estrarre ticker
+
+Facciamo:
+1. Iterare direttamente su underlyingPrices (che ha già i ticker)
+2. Raccogliere underlying dalle categorie per trovare quelli non risolti
 
 ---
 
-### 5. Aggiornare il Placeholder e Rimuovere Esempio Errato
+## Risultato Atteso
 
-Nel campo di input manuale, cambiare:
-- Da: `placeholder="Es. APPLOVIN"`
-- A: `placeholder="Es. APP, NVDA"`
+Nel tab "Per Ticker" del dialog Gestione Avvisi:
+
+- **Ticker disponibili**: AAPL, AMZN, APP, GOOGL, NVDA, MSFT, ... (tutti quelli presenti in `underlyingPrices`)
+- **Ticker non risolti**: Solo quelli per cui la edge function non ha trovato un prezzo
 
 ---
 
-## Riassunto File da Modificare
+## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/components/derivatives/DerivativesSummaryCard.tsx` | Passare `categories` e `underlyingPrices` al Dialog |
-| `src/components/derivatives/AlertSettingsDialog.tsx` | Ricevere props, estrarre ticker, mostrare lista selezionabile, gestire override manuali per ticker non risolti |
+| `src/components/derivatives/AlertSettingsDialog.tsx` | Riscrivere `extractUniqueTickers` per usare direttamente `underlyingPrices` |
 
----
-
-## Flusso Utente
-
-1. L'utente apre il dialog "Gestione Avvisi"
-2. Nel tab "Per Ticker" vede:
-   - Lista di ticker già risolti dalle sue strategie (es. AAPL, AMZN, APP, NVDA...)
-   - Eventuali underlying non risolti con possibilità di inserire il ticker manualmente
-3. Clicca su un ticker per aggiungerlo agli override
-4. Configura la soglia con lo slider
-5. Salva → il ticker viene usato per gli avvisi personalizzati
-6. Se ha inserito un override manuale, questo viene salvato globalmente per uso futuro
-
----
-
-## Considerazioni sulla Tabella `underlying_mappings`
-
-La tabella è globale (non ha `user_id`), quindi:
-- Gli override manuali beneficeranno tutti gli utenti
-- Il campo `source` distingue i mapping: `'manual'`, `'fetch-underlying-prices'`, `'manual-alert-config'`
-
-Questo è coerente con la memoria del sistema che indica che i mapping sono condivisi globalmente.
