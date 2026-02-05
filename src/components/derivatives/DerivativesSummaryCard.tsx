@@ -1,12 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories } from '@/lib/derivativeStrategies';
-
+import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead } from '@/hooks/useAlerts';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { AlertSettingsDialog } from './AlertSettingsDialog';
+import { Alert, ALERT_TYPE_LABELS, AlertSeverity } from '@/types/alerts';
+import { formatDistanceToNow } from 'date-fns';
+import { it } from 'date-fns/locale';
 interface DerivativesSummaryCardProps {
   categories: DerivativeCategories;
   stockPositions: Position[];
@@ -594,19 +600,135 @@ export function DerivativesSummaryCard({
       </Card>
       
       {/* Card Avvisi recenti (24 h) */}
+      <RecentAlertsCard />
+    </div>
+  );
+}
+
+// Separate component for recent alerts card
+function RecentAlertsCard() {
+  const { selectedPortfolio } = usePortfolioContext();
+  const portfolioId = selectedPortfolio?.id;
+  
+  const { data: alerts = [], isLoading: alertsLoading } = useAlerts(portfolioId);
+  const { data: unreadCount = 0 } = useUnreadAlertsCount(portfolioId);
+  const markAsReadMutation = useMarkAlertAsRead();
+  const markAllAsReadMutation = useMarkAllAlertsAsRead();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  
+  const getSeverityIcon = (severity: AlertSeverity) => {
+    switch (severity) {
+      case 'critical':
+        return <XCircle className="w-4 h-4 text-destructive" />;
+      case 'warning':
+        return <AlertCircle className="w-4 h-4 text-amber-500" />;
+      default:
+        return <Info className="w-4 h-4 text-primary" />;
+    }
+  };
+  
+  const handleMarkAsRead = (alertId: string) => {
+    markAsReadMutation.mutate(alertId);
+  };
+  
+  const handleMarkAllAsRead = () => {
+    markAllAsReadMutation.mutate(portfolioId);
+  };
+  
+  return (
+    <>
       <Card className="border-border bg-card">
         <CardHeader className="pb-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Newspaper className="w-5 h-5 text-primary" />
-            <CardTitle className="text-xl font-bold tracking-tight">Avvisi recenti (24 h)</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Newspaper className="w-5 h-5 text-primary" />
+              <CardTitle className="text-xl font-bold tracking-tight">
+                Avvisi recenti (24 h)
+              </CardTitle>
+              {unreadCount > 0 && (
+                <Badge variant="destructive" className="text-xs">
+                  {unreadCount}
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSettingsOpen(true)}
+              className="h-8 w-8"
+            >
+              <Settings className="w-4 h-4" />
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-4">
-          <div className="flex items-center justify-center min-h-[200px]">
-            <span className="text-muted-foreground text-sm">Nessun avviso nelle ultime 24 ore</span>
-          </div>
+          {alertsLoading ? (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <span className="text-muted-foreground text-sm">Nessun avviso nelle ultime 24 ore</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {/* Mark all as read button */}
+              {unreadCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleMarkAllAsRead}
+                  disabled={markAllAsReadMutation.isPending}
+                  className="w-full mb-2 text-xs"
+                >
+                  <CheckCheck className="w-3 h-3 mr-1" />
+                  Segna tutti come letti
+                </Button>
+              )}
+              
+              {/* Alerts list */}
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {alerts.map(alert => (
+                  <div
+                    key={alert.id}
+                    onClick={() => !alert.read_at && handleMarkAsRead(alert.id)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                      alert.read_at 
+                        ? 'bg-muted/30 border-border/50 opacity-60' 
+                        : 'bg-card border-border hover:bg-muted/50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {getSeverityIcon(alert.severity)}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="outline" className="text-xs font-mono">
+                            {alert.ticker}
+                          </Badge>
+                          {alert.strategy_type && (
+                            <span className="text-xs text-muted-foreground">
+                              {alert.strategy_type}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm line-clamp-2">{alert.message}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDistanceToNow(new Date(alert.created_at), { 
+                            addSuffix: true,
+                            locale: it 
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
-    </div>
+      
+      <AlertSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
   );
 }

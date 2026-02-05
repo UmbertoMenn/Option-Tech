@@ -14,6 +14,151 @@ export type Database = {
   }
   public: {
     Tables: {
+      alert_configs: {
+        Row: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          cooldown_minutes: number | null
+          created_at: string | null
+          enabled: boolean | null
+          id: string
+          threshold_pct: number | null
+          ticker: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          cooldown_minutes?: number | null
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          threshold_pct?: number | null
+          ticker?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          alert_type?: Database["public"]["Enums"]["alert_type"]
+          cooldown_minutes?: number | null
+          created_at?: string | null
+          enabled?: boolean | null
+          id?: string
+          threshold_pct?: number | null
+          ticker?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      alert_states: {
+        Row: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          current_state:
+            | Database["public"]["Enums"]["alert_state_status"]
+            | null
+          id: string
+          last_alerted_at: string | null
+          portfolio_id: string | null
+          position_key: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          current_state?:
+            | Database["public"]["Enums"]["alert_state_status"]
+            | null
+          id?: string
+          last_alerted_at?: string | null
+          portfolio_id?: string | null
+          position_key: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          alert_type?: Database["public"]["Enums"]["alert_type"]
+          current_state?:
+            | Database["public"]["Enums"]["alert_state_status"]
+            | null
+          id?: string
+          last_alerted_at?: string | null
+          portfolio_id?: string | null
+          position_key?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_states_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      alerts: {
+        Row: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          created_at: string | null
+          current_value: number | null
+          direction: string | null
+          id: string
+          message: string
+          portfolio_id: string | null
+          read_at: string | null
+          severity: Database["public"]["Enums"]["alert_severity"] | null
+          strategy_type: string | null
+          strike_price: number | null
+          threshold_value: number | null
+          ticker: string
+          underlying_price: number | null
+          user_id: string
+        }
+        Insert: {
+          alert_type: Database["public"]["Enums"]["alert_type"]
+          created_at?: string | null
+          current_value?: number | null
+          direction?: string | null
+          id?: string
+          message: string
+          portfolio_id?: string | null
+          read_at?: string | null
+          severity?: Database["public"]["Enums"]["alert_severity"] | null
+          strategy_type?: string | null
+          strike_price?: number | null
+          threshold_value?: number | null
+          ticker: string
+          underlying_price?: number | null
+          user_id: string
+        }
+        Update: {
+          alert_type?: Database["public"]["Enums"]["alert_type"]
+          created_at?: string | null
+          current_value?: number | null
+          direction?: string | null
+          id?: string
+          message?: string
+          portfolio_id?: string | null
+          read_at?: string | null
+          severity?: Database["public"]["Enums"]["alert_severity"] | null
+          strategy_type?: string | null
+          strike_price?: number | null
+          threshold_value?: number | null
+          ticker?: string
+          underlying_price?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deposits: {
         Row: {
           amount: number
@@ -522,6 +667,25 @@ export type Database = {
       }
     }
     Enums: {
+      alert_severity: "info" | "warning" | "critical"
+      alert_state_status: "safe" | "alerted"
+      alert_type:
+        | "distance_iron_condor_call"
+        | "distance_iron_condor_put"
+        | "distance_double_diagonal_call"
+        | "distance_double_diagonal_put"
+        | "distance_alternative_dd_call"
+        | "distance_alternative_dd_put"
+        | "distance_covered_call"
+        | "distance_naked_put"
+        | "action_naked_put_itm"
+        | "action_covered_call_itm"
+        | "action_dd_ic_oor"
+        | "action_strategy_oob"
+        | "action_leap_gain_20"
+        | "action_leap_gain_30"
+        | "action_leap_gain_40"
+        | "action_leap_gain_50"
       app_role: "admin" | "user"
     }
     CompositeTypes: {
@@ -650,6 +814,26 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      alert_severity: ["info", "warning", "critical"],
+      alert_state_status: ["safe", "alerted"],
+      alert_type: [
+        "distance_iron_condor_call",
+        "distance_iron_condor_put",
+        "distance_double_diagonal_call",
+        "distance_double_diagonal_put",
+        "distance_alternative_dd_call",
+        "distance_alternative_dd_put",
+        "distance_covered_call",
+        "distance_naked_put",
+        "action_naked_put_itm",
+        "action_covered_call_itm",
+        "action_dd_ic_oor",
+        "action_strategy_oob",
+        "action_leap_gain_20",
+        "action_leap_gain_30",
+        "action_leap_gain_40",
+        "action_leap_gain_50",
+      ],
       app_role: ["admin", "user"],
     },
   },
