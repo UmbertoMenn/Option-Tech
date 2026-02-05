@@ -7,19 +7,17 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Plus, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Loader2, AlertTriangle, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { 
   useAlertConfigs, 
   useBatchUpsertAlertConfigs,
   useDeleteAlertConfig,
   useInitializeDefaultConfigs,
-  getEffectiveConfig,
 } from '@/hooks/useAlertConfigs';
 import {
   AlertType,
-  AlertConfig,
-  ALERT_TYPES,
   ALERT_TYPE_LABELS,
   DISTANCE_ALERT_TYPES,
   ACTION_ALERT_TYPES,
@@ -28,13 +26,61 @@ import {
   DEFAULT_DISTANCE_THRESHOLD_PCT,
   DEFAULT_COOLDOWN_MINUTES,
 } from '@/types/alerts';
+import { DerivativeCategories } from '@/lib/derivativeStrategies';
+import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 
 interface AlertSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  categories: DerivativeCategories;
+  underlyingPrices: Record<string, UnderlyingPrice>;
 }
 
-export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogProps) {
+// Extract unique tickers from all strategy categories
+function extractUniqueTickers(
+  categories: DerivativeCategories,
+  underlyingPrices: Record<string, UnderlyingPrice>
+): { 
+  resolved: Array<{ underlying: string; ticker: string }>;
+  unresolved: string[];
+} {
+  const allUnderlyings = new Set<string>();
+  
+  // Collect all underlyings from all strategy types
+  categories.ironCondors.forEach(ic => allUnderlyings.add(ic.underlying));
+  categories.doubleDiagonals.forEach(dd => allUnderlyings.add(dd.underlying));
+  categories.coveredCalls.forEach(cc => allUnderlyings.add(cc.option.underlying || ''));
+  categories.nakedPuts.forEach(np => allUnderlyings.add(np.option.underlying || ''));
+  categories.leapCalls.forEach(lc => allUnderlyings.add(lc.option.underlying || ''));
+  categories.groupedOtherStrategies.forEach(g => allUnderlyings.add(g.underlying));
+  
+  const resolved: Array<{ underlying: string; ticker: string }> = [];
+  const unresolved: string[] = [];
+  
+  for (const underlying of allUnderlyings) {
+    if (!underlying) continue;
+    
+    const priceData = underlyingPrices[underlying];
+    if (priceData?.ticker) {
+      // Already resolved - avoid duplicate tickers
+      if (!resolved.some(r => r.ticker === priceData.ticker)) {
+        resolved.push({ underlying, ticker: priceData.ticker });
+      }
+    } else {
+      // Not resolved - add to unresolved list
+      if (!unresolved.includes(underlying)) {
+        unresolved.push(underlying);
+      }
+    }
+  }
+  
+  return { 
+    resolved: resolved.sort((a, b) => a.ticker.localeCompare(b.ticker)),
+    unresolved: unresolved.sort()
+  };
+}
+
+export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
   const { data: configs = [], isLoading } = useAlertConfigs();
   const batchUpsertMutation = useBatchUpsertAlertConfigs();
   const deleteConfigMutation = useDeleteAlertConfig();
@@ -46,6 +92,16 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
   const [cooldownMinutes, setCooldownMinutes] = useState(DEFAULT_COOLDOWN_MINUTES);
   const [tickerOverrides, setTickerOverrides] = useState<Array<{ ticker: string; alertTypes: AlertType[]; threshold: number }>>([]);
   const [newTicker, setNewTicker] = useState('');
+  
+  // State for unresolved ticker mappings
+  const [unresolvedMappings, setUnresolvedMappings] = useState<Record<string, string>>({});
+  const [savingMapping, setSavingMapping] = useState<string | null>(null);
+  
+  // Extract available tickers from strategies
+  const { resolved: availableTickers, unresolved: unresolvedUnderlyings } = useMemo(() => 
+    extractUniqueTickers(categories, underlyingPrices),
+    [categories, underlyingPrices]
+  );
   
   // Initialize local state from configs
   useEffect(() => {
@@ -84,7 +140,6 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
       const existing = tickerMap.get(tc.ticker);
       if (existing) {
         existing.alertTypes.push(tc.alert_type);
-        // Use the threshold from the first found
       } else {
         tickerMap.set(tc.ticker, {
           alertTypes: [tc.alert_type],
@@ -157,7 +212,21 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
     }
   };
   
-  // Add ticker override
+  // Add ticker from available list
+  const handleAddTickerFromList = (ticker: string) => {
+    if (tickerOverrides.some(t => t.ticker === ticker)) {
+      toast.error('Ticker già presente negli override');
+      return;
+    }
+    
+    setTickerOverrides([
+      ...tickerOverrides,
+      { ticker, alertTypes: [...DISTANCE_ALERT_TYPES], threshold: DEFAULT_DISTANCE_THRESHOLD_PCT }
+    ]);
+    toast.success(`${ticker} aggiunto agli override`);
+  };
+  
+  // Add ticker manually
   const handleAddTicker = () => {
     const ticker = newTicker.trim().toUpperCase();
     if (!ticker) return;
@@ -176,14 +245,13 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
   
   // Remove ticker override
   const handleRemoveTicker = async (ticker: string) => {
-    // Remove from local state
     setTickerOverrides(tickerOverrides.filter(t => t.ticker !== ticker));
     
     // Delete from database for all alert types
     for (const alertType of DISTANCE_ALERT_TYPES) {
       try {
         await deleteConfigMutation.mutateAsync({ alert_type: alertType, ticker });
-      } catch (error) {
+      } catch {
         // Ignore errors for non-existent configs
       }
     }
@@ -198,6 +266,48 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
     );
   };
   
+  // Save ticker mapping for unresolved underlying
+  const handleSaveUnresolvedMapping = async (underlying: string) => {
+    const ticker = unresolvedMappings[underlying]?.trim().toUpperCase();
+    if (!ticker) {
+      toast.error('Inserisci un ticker valido');
+      return;
+    }
+    
+    setSavingMapping(underlying);
+    
+    try {
+      // Save to underlying_mappings table
+      const { error } = await supabase
+        .from('underlying_mappings')
+        .upsert({
+          underlying,
+          ticker,
+          source: 'manual-alert-config',
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'underlying' });
+      
+      if (error) throw error;
+      
+      toast.success(`Mapping salvato: ${underlying} → ${ticker}`);
+      
+      // Remove from unresolved mappings state
+      setUnresolvedMappings(prev => {
+        const updated = { ...prev };
+        delete updated[underlying];
+        return updated;
+      });
+      
+      // Note: The underlying will still show as unresolved until the next fetch
+      // because underlyingPrices is passed from the parent component
+    } catch (error) {
+      console.error('Error saving ticker mapping:', error);
+      toast.error('Errore nel salvataggio del mapping');
+    } finally {
+      setSavingMapping(null);
+    }
+  };
+  
   // Format cooldown for display
   const formatCooldown = (minutes: number) => {
     if (minutes < 60) return `${minutes} min`;
@@ -206,6 +316,10 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
   };
   
   const isSaving = batchUpsertMutation.isPending;
+  
+  // Check if a ticker is already in overrides
+  const isTickerInOverrides = (ticker: string) => 
+    tickerOverrides.some(t => t.ticker === ticker);
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -283,67 +397,144 @@ export function AlertSettingsDialog({ open, onOpenChange }: AlertSettingsDialogP
             
             {/* Tab 2: Ticker Overrides */}
             <TabsContent value="ticker" className="space-y-4 mt-4">
-              <p className="text-sm text-muted-foreground mb-4">
-                Soglie personalizzate per ticker specifici. Queste sovrascrivono le soglie globali.
-              </p>
-              
-              {/* Add new ticker */}
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Es. APPLOVIN"
-                  value={newTicker}
-                  onChange={e => setNewTicker(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && handleAddTicker()}
-                  className="flex-1"
-                />
-                <Button onClick={handleAddTicker} size="sm">
-                  <Plus className="w-4 h-4 mr-1" />
-                  Aggiungi
-                </Button>
-              </div>
-              
-              {/* Ticker list */}
-              {tickerOverrides.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Nessun override per ticker. Aggiungi un ticker per personalizzare le soglie.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {tickerOverrides.map(override => (
-                    <div key={override.ticker} className="flex items-center gap-3 p-3 border rounded-lg">
-                      <Badge variant="outline" className="font-mono">
-                        {override.ticker}
-                      </Badge>
-                      
-                      <div className="flex-1 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Soglia distanza</span>
-                          <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                            {override.threshold}%
-                          </span>
-                        </div>
-                        <Slider
-                          value={[override.threshold]}
-                          onValueChange={([val]) => handleTickerThresholdChange(override.ticker, val)}
-                          min={1}
-                          max={20}
-                          step={0.5}
-                          className="w-full"
-                        />
-                      </div>
-                      
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemoveTicker(override.ticker)}
-                        className="text-destructive hover:text-destructive"
+              {/* Available tickers from strategies */}
+              {availableTickers.length > 0 && (
+                <div className="space-y-2 p-4 border rounded-lg bg-muted/30">
+                  <p className="text-sm font-medium">Ticker disponibili dalle tue strategie:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableTickers.map(({ ticker }) => (
+                      <Badge
+                        key={ticker}
+                        variant={isTickerInOverrides(ticker) ? "default" : "outline"}
+                        className={`cursor-pointer transition-colors ${
+                          isTickerInOverrides(ticker) 
+                            ? 'bg-primary/20 text-primary-foreground' 
+                            : 'hover:bg-primary/10'
+                        }`}
+                        onClick={() => !isTickerInOverrides(ticker) && handleAddTickerFromList(ticker)}
                       >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
+                        {ticker}
+                        {isTickerInOverrides(ticker) && <Check className="w-3 h-3 ml-1" />}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Clicca su un ticker per aggiungere un override
+                  </p>
                 </div>
               )}
+              
+              {/* Unresolved underlyings */}
+              {unresolvedUnderlyings.length > 0 && (
+                <div className="space-y-3 p-4 border rounded-lg border-amber-500/30 bg-amber-500/5">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    <p className="text-sm font-medium">Ticker non risolti:</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Questi sottostanti non hanno un ticker associato. Inserisci il ticker corretto per poterli usare negli avvisi.
+                  </p>
+                  
+                  <div className="space-y-2">
+                    {unresolvedUnderlyings.map(underlying => (
+                      <div key={underlying} className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground min-w-[150px] truncate">
+                          {underlying}
+                        </span>
+                        <span className="text-muted-foreground">→</span>
+                        <Input
+                          placeholder="Ticker (es. APP)"
+                          value={unresolvedMappings[underlying] || ''}
+                          onChange={e => setUnresolvedMappings(prev => ({ 
+                            ...prev, 
+                            [underlying]: e.target.value.toUpperCase() 
+                          }))}
+                          className="flex-1 h-8 text-sm"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSaveUnresolvedMapping(underlying)}
+                          disabled={savingMapping === underlying || !unresolvedMappings[underlying]?.trim()}
+                        >
+                          {savingMapping === underlying ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            'Salva'
+                          )}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Configured overrides */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Override configurati:</p>
+                
+                {tickerOverrides.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4 border rounded-lg">
+                    Nessun override per ticker. Seleziona un ticker dall'elenco sopra o aggiungine uno manualmente.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {tickerOverrides.map(override => (
+                      <div key={override.ticker} className="flex items-center gap-3 p-3 border rounded-lg">
+                        <Badge variant="outline" className="font-mono">
+                          {override.ticker}
+                        </Badge>
+                        
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Soglia distanza</span>
+                            <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                              {override.threshold}%
+                            </span>
+                          </div>
+                          <Slider
+                            value={[override.threshold]}
+                            onValueChange={([val]) => handleTickerThresholdChange(override.ticker, val)}
+                            min={1}
+                            max={20}
+                            step={0.5}
+                            className="w-full"
+                          />
+                        </div>
+                        
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveTicker(override.ticker)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {/* Manual ticker input */}
+              <div className="pt-4 border-t">
+                <p className="text-sm text-muted-foreground mb-2">
+                  Aggiungi manualmente un ticker non presente nell'elenco:
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Es. APP, NVDA"
+                    value={newTicker}
+                    onChange={e => setNewTicker(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && handleAddTicker()}
+                    className="flex-1"
+                  />
+                  <Button onClick={handleAddTicker} size="sm">
+                    <Plus className="w-4 h-4 mr-1" />
+                    Aggiungi
+                  </Button>
+                </div>
+              </div>
             </TabsContent>
             
             {/* Tab 3: Action Alerts */}
