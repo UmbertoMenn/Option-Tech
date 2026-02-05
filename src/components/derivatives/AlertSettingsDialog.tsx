@@ -37,6 +37,7 @@ interface AlertSettingsDialogProps {
 }
 
 // Extract unique tickers from all strategy categories
+// Uses underlyingPrices directly since it already contains resolved tickers
 function extractUniqueTickers(
   categories: DerivativeCategories,
   underlyingPrices: Record<string, UnderlyingPrice>
@@ -44,39 +45,64 @@ function extractUniqueTickers(
   resolved: Array<{ underlying: string; ticker: string }>;
   unresolved: string[];
 } {
-  const allUnderlyings = new Set<string>();
+  // 1. Collect ALL underlyings from strategy categories
+  const allCategoryUnderlyings = new Set<string>();
   
-  // Collect all underlyings from all strategy types
-  categories.ironCondors.forEach(ic => allUnderlyings.add(ic.underlying));
-  categories.doubleDiagonals.forEach(dd => allUnderlyings.add(dd.underlying));
-  categories.coveredCalls.forEach(cc => allUnderlyings.add(cc.option.underlying || ''));
-  categories.nakedPuts.forEach(np => allUnderlyings.add(np.option.underlying || ''));
-  categories.leapCalls.forEach(lc => allUnderlyings.add(lc.option.underlying || ''));
-  categories.groupedOtherStrategies.forEach(g => allUnderlyings.add(g.underlying));
+  categories.ironCondors.forEach(ic => allCategoryUnderlyings.add(ic.underlying));
+  categories.doubleDiagonals.forEach(dd => allCategoryUnderlyings.add(dd.underlying));
+  categories.coveredCalls.forEach(cc => {
+    const u = cc.option.underlying || cc.underlying?.description;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.nakedPuts.forEach(np => {
+    const u = np.option.underlying;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.leapCalls.forEach(lc => {
+    const u = lc.option.underlying;
+    if (u) allCategoryUnderlyings.add(u);
+  });
+  categories.groupedOtherStrategies.forEach(g => allCategoryUnderlyings.add(g.underlying));
   
+  // 2. Use underlyingPrices DIRECTLY for resolved tickers
+  //    (keys are original underlyings, values contain .ticker)
+  const resolvedTickersSet = new Set<string>();
   const resolved: Array<{ underlying: string; ticker: string }> = [];
+  
+  for (const [underlying, priceData] of Object.entries(underlyingPrices)) {
+    if (priceData.ticker && !resolvedTickersSet.has(priceData.ticker)) {
+      resolvedTickersSet.add(priceData.ticker);
+      resolved.push({ underlying, ticker: priceData.ticker });
+    }
+  }
+  
+  // 3. Find unresolved underlyings
+  //    (those in categories but without an entry in underlyingPrices)
+  const resolvedUnderlyings = new Set(Object.keys(underlyingPrices));
   const unresolved: string[] = [];
   
-  for (const underlying of allUnderlyings) {
+  for (const underlying of allCategoryUnderlyings) {
     if (!underlying) continue;
     
-    const priceData = underlyingPrices[underlying];
-    if (priceData?.ticker) {
-      // Already resolved - avoid duplicate tickers
-      if (!resolved.some(r => r.ticker === priceData.ticker)) {
-        resolved.push({ underlying, ticker: priceData.ticker });
+    // Check if there's a matching key (exact or partial match)
+    let found = false;
+    for (const priceKey of resolvedUnderlyings) {
+      if (priceKey === underlying || 
+          priceKey.includes(underlying) || 
+          underlying.includes(priceKey)) {
+        found = true;
+        break;
       }
-    } else {
-      // Not resolved - add to unresolved list
-      if (!unresolved.includes(underlying)) {
-        unresolved.push(underlying);
-      }
+    }
+    
+    if (!found) {
+      unresolved.push(underlying);
     }
   }
   
   return { 
     resolved: resolved.sort((a, b) => a.ticker.localeCompare(b.ticker)),
-    unresolved: unresolved.sort()
+    unresolved: [...new Set(unresolved)].sort()
   };
 }
 
