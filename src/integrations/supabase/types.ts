@@ -632,6 +632,33 @@ export type Database = {
         }
         Relationships: []
       }
+      underlying_prices: {
+        Row: {
+          created_at: string
+          currency: string
+          id: string
+          price: number
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          id?: string
+          price: number
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          id?: string
+          price?: number
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
