@@ -408,6 +408,21 @@ serve(async (req) => {
           ticker,
         };
         console.log(`Got price for "${underlying}" (${ticker}): ${priceResult.price} ${priceResult.currency}`);
+        
+        // Save to underlying_prices cache for cron job access
+        try {
+          await supabase
+            .from('underlying_prices')
+            .upsert({
+              ticker,
+              price: priceResult.price,
+              currency: priceResult.currency,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'ticker' });
+          console.log(`Saved price to cache for ${ticker}`);
+        } catch (cacheError) {
+          console.error(`Failed to cache price for ${ticker}:`, cacheError);
+        }
       }
       
       // Small delay to avoid rate limiting
