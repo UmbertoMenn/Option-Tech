@@ -104,7 +104,7 @@ export function Derivatives() {
     return totals;
   }, [categories.coveredCalls]);
 
-  // Extract all unique underlying names for price fetching
+  // Extract all unique underlying names for price fetching (include ALL for ticker resolution)
   const allUnderlyingNames = useMemo(() => {
     const names = new Set<string>();
     
@@ -114,17 +114,31 @@ export function Derivatives() {
     // Double Diagonals
     categories.doubleDiagonals.forEach(dd => names.add(dd.underlying));
     
-    // Naked Puts (those without underlying in portfolio)
+    // Naked Puts - ALL (need ticker resolution even if has portfolio price)
     categories.nakedPuts.forEach(np => {
-      if (!np.underlying?.current_price && np.option.underlying) {
+      if (np.option.underlying) {
         names.add(np.option.underlying);
       }
     });
     
-    // Leap Calls (those without underlying in portfolio)
+    // Leap Calls - ALL (need ticker resolution even if has portfolio price)
     categories.leapCalls.forEach(lc => {
-      if (!lc.underlying?.current_price && lc.option.underlying) {
+      if (lc.option.underlying) {
         names.add(lc.option.underlying);
+      }
+    });
+    
+    // Covered Calls - ALL (need ticker resolution)
+    categories.coveredCalls.forEach(cc => {
+      if (cc.option.underlying) {
+        names.add(cc.option.underlying);
+      }
+    });
+    
+    // Long Puts (protections) - ALL
+    categories.longPuts.forEach(lp => {
+      if (lp.option.underlying) {
+        names.add(lp.option.underlying);
       }
     });
     
