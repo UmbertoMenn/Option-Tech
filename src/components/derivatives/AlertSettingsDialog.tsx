@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -371,58 +372,64 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
             </TabsList>
             
             {/* Tab 1: Global Distance Thresholds */}
-            <TabsContent value="distance" className="space-y-4 mt-4">
-              <p className="text-sm text-muted-foreground mb-4">
-                Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
-              </p>
-              
-              {GROUPED_DISTANCE_ALERTS.map(group => (
-                <div key={group.label} className="space-y-3 p-4 border rounded-lg">
-                  <h4 className="font-medium">{group.label}</h4>
+            <TabsContent value="distance" className="mt-4">
+              <ScrollArea className="h-[350px] pr-4">
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
+                  </p>
                   
-                  {group.callType && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-sm">Lato Call (prezzo sale)</Label>
-                        <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                          {globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
-                        </span>
-                      </div>
-                      <Slider
-                        value={[globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
-                        onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.callType!]: val }))}
-                        min={1}
-                        max={20}
-                        step={0.5}
-                        className="w-full"
-                      />
+                  {GROUPED_DISTANCE_ALERTS.map(group => (
+                    <div key={group.label} className="space-y-3 p-4 border rounded-lg">
+                      <h4 className="font-medium">{group.label}</h4>
+                      
+                      {group.callType && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm">Lato Call (prezzo sale)</Label>
+                            <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                              {globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
+                            </span>
+                          </div>
+                          <Slider
+                            value={[globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
+                            onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.callType!]: val }))}
+                            min={1}
+                            max={20}
+                            step={0.5}
+                            className="w-full"
+                          />
+                        </div>
+                      )}
+                      
+                      {group.putType && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm">Lato Put (prezzo scende)</Label>
+                            <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                              {globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
+                            </span>
+                          </div>
+                          <Slider
+                            value={[globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
+                            onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.putType!]: val }))}
+                            min={1}
+                            max={20}
+                            step={0.5}
+                            className="w-full"
+                          />
+                        </div>
+                      )}
                     </div>
-                  )}
-                  
-                  {group.putType && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-sm">Lato Put (prezzo scende)</Label>
-                        <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                          {globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
-                        </span>
-                      </div>
-                      <Slider
-                        value={[globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
-                        onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.putType!]: val }))}
-                        min={1}
-                        max={20}
-                        step={0.5}
-                        className="w-full"
-                      />
-                    </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              </ScrollArea>
             </TabsContent>
             
             {/* Tab 2: Ticker Overrides */}
-            <TabsContent value="ticker" className="space-y-4 mt-4">
+            <TabsContent value="ticker" className="mt-4">
+              <ScrollArea className="h-[350px] pr-4">
+                <div className="space-y-4">
               {/* Available tickers from strategies */}
               {availableTickers.length > 0 && (
                 <div className="space-y-2 p-4 border rounded-lg bg-muted/30">
@@ -561,6 +568,8 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                   </Button>
                 </div>
               </div>
+                </div>
+              </ScrollArea>
             </TabsContent>
             
             {/* Tab 3: Action Alerts */}
