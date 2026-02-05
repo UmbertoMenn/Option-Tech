@@ -600,13 +600,18 @@ export function DerivativesSummaryCard({
       </Card>
       
       {/* Card Avvisi recenti (24 h) */}
-      <RecentAlertsCard />
+      <RecentAlertsCard categories={categories} underlyingPrices={underlyingPrices} />
     </div>
   );
 }
 
 // Separate component for recent alerts card
-function RecentAlertsCard() {
+interface RecentAlertsCardProps {
+  categories: DerivativeCategories;
+  underlyingPrices: Record<string, UnderlyingPrice>;
+}
+
+function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProps) {
   const { selectedPortfolio } = usePortfolioContext();
   const portfolioId = selectedPortfolio?.id;
   
@@ -728,7 +733,12 @@ function RecentAlertsCard() {
         </CardContent>
       </Card>
       
-      <AlertSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <AlertSettingsDialog 
+        open={settingsOpen} 
+        onOpenChange={setSettingsOpen} 
+        categories={categories}
+        underlyingPrices={underlyingPrices}
+      />
     </>
   );
 }
