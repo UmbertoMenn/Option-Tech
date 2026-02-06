@@ -1,115 +1,166 @@
 
-Obiettivo: ripristinare in modo definitivo (e a prova di regressioni) 1) la scomposizione ETF (currency exposure + sector allocation) e 2) l’uso coerente dei mapping settoriali già presenti in ADMIN → SETTORI (es. Applied Digital = Technology) dentro il Risk Analyzer, con un approccio metodico (test, logs, fallback).
+
+# Piano: Carousel Grafici Performance Storiche
+
+## Obiettivo
+Creare un nuovo carousel da posizionare sotto al grafico principale (torta nella vista Base, barre nelle viste Netting) che mostri tre tipi di visualizzazioni dei dati storici:
+
+1. **Slide 1 - Evoluzione Rendimento**: Grafico lineare con rendimento % e valore assoluto P/L nel tempo
+2. **Slide 2 - Rendimento per Anno**: Istogramma con rendimento % per ogni anno
+3. **Slide 3 - Evoluzione Patrimonio**: Grafico lineare dell'andamento del valore patrimoniale nel tempo
+
+Tutti i grafici devono adattarsi dinamicamente alla viewMode selezionata (Base, Netting ex. Covered Call, Netting ex. CC e NP, Netting Totale).
 
 ---
 
-## 1) Diagnosi (cosa sta succedendo davvero)
+## Architettura Componenti
 
-### 1.1 ETF “0 analizzati” non è un problema di `isETF`
-Dai tuoi screenshot il conteggio “✓ 0 ETF analizzati” appare in verde: questo succede quando:
-- `etfCount > 0` (quindi gli ETF vengono riconosciuti e gli ISIN vengono estratti),
-- ma `loadedETFCount = 0` (quindi **non arriva nessuna allocation caricata in frontend**).
-
-Questo spiega perché:
-- gli ETF restano “non scomposti” (currency/sector),
-- finiscono in “Other” lato settore quando non hanno sectorAllocations disponibili in runtime.
-
-### 1.2 Root cause trovata: due backend functions chiave risultano **non disponibili**
-Ho testato direttamente le backend functions:
-- `fetch-etf-allocation` → **404 NOT_FOUND (Requested function was not found)**
-- `update-prices-cron` → **404 NOT_FOUND**
-
-Invece almeno un’altra function (`fetch-underlying-prices`) risponde (400 su payload errato), quindi **il sistema di backend functions è attivo, ma quelle due non sono deployate/registrate**.
-
-Conseguenza diretta:
-- `useETFAllocations()` invoca `fetch-etf-allocation` → fallisce → `allocations` resta vuoto → `loadedETFCount` resta 0.
-- `useSectorMappings()` quando vede anche solo 1 strumento “da risolvere”, invoca `update-prices-cron` → fallisce; e in più (bug logico) rischia di **non settare nemmeno i mapping già esistenti**, lasciando `sectorMappings` vuoto/non completo.
-  - Questo spiega perfettamente il caso “ADMIN dice APLD=Technology ma RiskAnalyzer lo mette in Other”: se il mapping non viene caricato/tenuto, si va in fallback “Other”.
-
-### 1.3 Dati in database ci sono (quindi si può ripartire subito)
-- `isin_mappings` contiene le righe corrette per AAPL/GOOGL/APLD ecc. (es. APLD → Technology).
-- `etf_allocations` contiene già allocazioni per alcuni ETF del portfolio (es. MSCI World, S&P 500, ecc.).
-Quindi il problema principale non è “mancano i dati”: è “il frontend non riesce a caricarli perché le functions non sono disponibili”.
+```text
+Dashboard.tsx
+└── DynamicPortfolioChart (grafico principale esistente)
+└── HistoricalChartsCarousel (NUOVO)
+    ├── PerformanceEvolutionChart (Slide 1)
+    ├── YearlyReturnChart (Slide 2)
+    └── PortfolioEvolutionChart (Slide 3)
+```
 
 ---
 
-## 2) Strategia di risoluzione (precisa, robusta, con test)
+## Dettagli Tecnici
 
-### Step A — Ripristino backend functions (fix strutturale)
-1) Verificare/aggiungere configurazione in `supabase/config.toml`:
-   - aggiungere una sezione per `fetch-etf-allocation` (attualmente manca).
-   - ricontrollare che `update-prices-cron` sia correttamente dichiarata (c’è già, ma non risulta deployata).
-2) Eseguire **deploy esplicito** delle due functions:
-   - `fetch-etf-allocation`
-   - `update-prices-cron`
-3) Smoke test automatico (prima di guardare la UI):
-   - chiamare `fetch-etf-allocation` con un ISIN noto del tuo portfolio (es. `IE00B4L5Y983`) e verificare che ritorni JSON con `currencyAllocations` e `sectorAllocations`.
-   - chiamare `update-prices-cron` con un payload “light” (es. una modalità di test/resolve) e verificare che non sia più 404.
+### Nuovo Componente: `HistoricalChartsCarousel.tsx`
 
-Risultato atteso: le chiamate da browser non falliscono più e l’app torna a popolare `allocations` e `sectorMappings` come prima.
+**Props**:
+- `historicalData: HistoricalDataEntry[]` - dati storici dal DB
+- `viewMode: ViewMode` - vista corrente (base, netting_total, netting_ex_cc, netting_ex_cc_np)
+- `currentValue: number` - valore attuale del patrimonio (per aggiungere punto "oggi" ai grafici)
+- `currentDate: string | null` - data snapshot attuale
 
----
-
-### Step B — Hardening frontend: fallback + visibilità errori (anti-regressione)
-Anche con le functions deployate, vogliamo evitare che un futuro problema “silenzioso” rimetta tutto a 0.
-
-4) `useETFAllocations`:
-   - Se `supabase.functions.invoke('fetch-etf-allocation')` fallisce (404 o altro), fare fallback automatico:
-     - leggere direttamente da tabella `etf_allocations` con `.in('isin', etfIsins)`,
-     - popolare comunque `allocations` con i dati cache,
-     - mostrare un toast “Dati ETF caricati da cache (backend function non disponibile)” oppure un warning dedicato.
-   - Aggiungere esposta in UI (Currency/Sector cards) una riga “Errori ETF: N” cliccabile (o tooltip) che mostra quali ISIN falliscono.
-
-5) `useSectorMappings`:
-   - Correggere la logica: **anche se la risoluzione AI fallisce**, bisogna comunque chiamare `setMappings(newMappings)` con i mapping già presenti in DB.
-   - Se `update-prices-cron` fallisce: mostrare toast “Risoluzione AI non disponibile, uso mapping esistenti”.
-
-Risultato atteso: anche se domani una function va giù, il Risk Analyzer non collassa in “Other” e gli ETF continuano a decomporsi almeno da cache.
+**Struttura**:
+- Utilizza i componenti Carousel esistenti (`Carousel`, `CarouselContent`, `CarouselItem`, `CarouselPrevious`, `CarouselNext`)
+- Ogni slide e una Card con titolo e grafico Recharts
+- Indicatori pallini per navigazione (come il ViewModeSelector esistente)
 
 ---
 
-### Step C — Fix specifici “Other” residui (precisione)
-6) Migliorare fallback statico (solo come rete di sicurezza):
-   - aggiungere mapping `APPLIED DIGITAL` → `APLD` nel dizionario `COMPANY_NAME_TO_TICKER` (e altri nomi ricorrenti che vedi spesso in “Other”).
-   - Questo non sostituisce i mapping ADMIN/DB: serve solo se per qualunque motivo i mapping dinamici non arrivano.
+### Slide 1: Evoluzione Rendimento (LineChart)
+
+**Dati da mostrare**:
+- Asse X: date degli snapshot
+- Asse Y primario: Rendimento % cumulativo
+- Asse Y secondario (opzionale): Valore assoluto P/L
+
+**Calcolo rendimento**:
+Per ogni snapshot (partendo dal piu vecchio come base):
+```
+P/L = valore_snapshot - valore_iniziale - depositi_periodo
+Rendimento % = (P/L / giacenza_media_periodo) * 100
+```
+
+**Selezione valore in base a viewMode**:
+- `base`: usa `total_value`
+- `netting_total`: usa `netting_total`
+- `netting_ex_cc`: usa `netting_ex_cc`
+- `netting_ex_cc_np`: usa `netting_ex_cc_np` (fallback a `netting_ex_cc`)
 
 ---
 
-## 3) Piano di test (metodico, ripetibile)
+### Slide 2: Rendimento per Anno (BarChart)
 
-### Test 1 — Backend function availability
-- Verifica che `fetch-etf-allocation` risponda 200 e ritorni sector/currency allocations.
-- Verifica che `update-prices-cron` risponda 200 (non 404).
+**Dati da mostrare**:
+- Asse X: anni (2023, 2024, 2025, ecc.)
+- Asse Y: Rendimento % annuale
 
-### Test 2 — Risk Analyzer: Currency Exposure
-- Apri Currency Exposure:
-  - deve mostrare “✓ X ETF analizzati” con X > 0 (idealmente = numero ETF in portfolio),
-  - e le valute devono riflettere la decomposizione ETF (non tutto sull’EUR/OTHER).
-
-### Test 3 — Risk Analyzer: Sector Allocation
-- Apri Sector Allocation:
-  - “✓ X ETF analizzati” deve essere > 0,
-  - `AZ.APPLIED DIGITAL CORP` non deve stare in Other se in ADMIN è Technology (via ISIN mapping),
-  - gli ETF devono contribuire ai settori secondo `sector_allocations` (non finire “Other” salvo assenza dati).
-
-### Test 4 — Caso regressione: simulazione fallimento function
-- Forzare (in dev) un errore di invoke e confermare che:
-  - ETF vengono caricati da cache DB,
-  - mapping settori esistenti vengono comunque usati,
-  - la UI mostra un warning chiaro.
+**Calcolo**:
+Per ogni anno con dati:
+1. Trova il primo e ultimo snapshot dell'anno
+2. Calcola rendimento % dall'inizio alla fine dell'anno
+3. Colori: verde per rendimento positivo, rosso per negativo
 
 ---
 
-## 4) Impatto e criticità (trasparenza)
-- Il problema attuale è “grave” perché rompe la catena di dipendenze: senza quelle due functions, l’app perde la decomposizione ETF e la risoluzione/refresh dei mapping.
-- La correzione non è solo “aggiustare una regex”: va ripristinata la disponibilità delle functions e reso il frontend robusto agli errori (fallback + error surfacing), così non si ripresenta più “a sorpresa”.
+### Slide 3: Evoluzione Patrimonio (LineChart)
+
+**Dati da mostrare**:
+- Asse X: date degli snapshot
+- Asse Y: valore patrimoniale
+
+**Caratteristiche**:
+- Linea continua con area fill sfumata
+- Punto evidenziato per il valore corrente (se disponibile)
+- Tooltip con data e valore formattato
 
 ---
 
-## 5) Deliverable (cosa verrà cambiato)
-- Config backend functions (aggiunta entry mancante + deploy)
-- `useETFAllocations`: fallback DB + error reporting + (opzionale) batch fetch efficiente
-- `useSectorMappings`: non perdere i mapping esistenti se la risoluzione fallisce + toast warning
-- `sectorExposure`: aggiornamento dizionario fallback per nomi ricorrenti (APLD ecc.)
-- Logging diagnostico controllato (attivabile) per tracciare: `etfIsins`, errori invoke, conteggi allocations, conteggi mappings
+## Modifiche ai File Esistenti
+
+### `Dashboard.tsx`
+
+Aggiungere il nuovo carousel sotto `DynamicPortfolioChart`:
+
+```tsx
+// Dopo DynamicPortfolioChart
+<HistoricalChartsCarousel
+  historicalData={historicalData}
+  viewMode={viewMode}
+  currentValue={
+    viewMode === 'base' ? summary?.totalValue ?? 0
+    : viewMode === 'netting_total' ? netting.nettingTotal
+    : viewMode === 'netting_ex_cc' ? netting.nettingExCoveredCall
+    : netting.nettingExCCAndNP
+  }
+  currentDate={portfolio?.snapshot_date}
+  deposits={deposits}
+/>
+```
+
+---
+
+## Nuovi File da Creare
+
+| File | Descrizione |
+|------|-------------|
+| `src/components/dashboard/HistoricalChartsCarousel.tsx` | Container carousel con navigazione |
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Grafico evoluzione rendimento % e P/L |
+| `src/components/dashboard/charts/YearlyReturnChart.tsx` | Istogramma rendimento annuale |
+| `src/components/dashboard/charts/PortfolioEvolutionChart.tsx` | Grafico evoluzione patrimonio |
+
+---
+
+## Design UI
+
+- I grafici usano la palette colori esistente (`hsl(var(--primary))`, `hsl(var(--profit))`, `hsl(var(--loss))`)
+- Altezza carousel: circa 300px
+- Responsive: su mobile i grafici si adattano alla larghezza
+- Navigazione carousel: frecce laterali + pallini indicatori (come ViewModeSelector)
+- Card con bordo sottile e sfondo `bg-card`
+
+---
+
+## Gestione Casi Limite
+
+| Caso | Comportamento |
+|------|---------------|
+| Nessun dato storico | Mostra messaggio "Nessun dato storico disponibile. Salva degli snapshot per visualizzare i grafici." |
+| Solo 1 snapshot | Mostra solo Slide 3 (patrimonio) con un punto singolo |
+| Dati incompleti (es. `netting_ex_cc_np` null) | Fallback al campo `netting_ex_cc` |
+
+---
+
+## Librerie Utilizzate
+
+- **Recharts**: gia presente nel progetto per i grafici esistenti (`LineChart`, `BarChart`, `Area`, `Tooltip`, `ResponsiveContainer`)
+- **Embla Carousel**: gia presente tramite il componente `Carousel` di shadcn/ui
+- **date-fns**: gia presente per la formattazione date
+
+---
+
+## Risultato Atteso
+
+1. Sotto il grafico principale appare un carousel navigabile
+2. Slide 1 mostra l'evoluzione del rendimento % con linea e opzionalmente il P/L assoluto
+3. Slide 2 mostra un istogramma con il rendimento di ogni anno (colorato verde/rosso)
+4. Slide 3 mostra l'andamento del patrimonio nel tempo
+5. Tutti i grafici si aggiornano automaticamente quando si cambia viewMode
+6. I dati storici sono ordinati cronologicamente (dal piu vecchio al piu recente)
 
