@@ -9,6 +9,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Trash2, Plus, Loader2, AlertTriangle, Check } from 'lucide-react';
+import { NotificationSettings } from '@/components/settings/NotificationSettings';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { 
@@ -379,11 +380,12 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
           </div>
         ) : (
           <Tabs defaultValue="distance" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="distance">Distanza</TabsTrigger>
               <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
               <TabsTrigger value="action">Azione</TabsTrigger>
               <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
+              <TabsTrigger value="notifications">Notifiche</TabsTrigger>
             </TabsList>
             
             {/* Tab 1: Global Distance Thresholds */}
@@ -691,6 +693,11 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 finché il prezzo non torna in zona sicura e poi ri-entra in zona di pericolo, 
                 e solo se è passato il tempo di cooldown.
               </p>
+            </TabsContent>
+            
+            {/* Tab 5: Notification Settings */}
+            <TabsContent value="notifications" className="mt-4">
+              <NotificationSettings />
             </TabsContent>
           </Tabs>
         )}

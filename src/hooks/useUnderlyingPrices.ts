@@ -68,29 +68,48 @@ export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesR
         const results: Record<string, UnderlyingPrice> = {};
         
         // Step 1: Get underlying -> ticker mappings from cache
-        // Normalize names to match how edge function saves them
-        const normalizedUnderlyings = uniqueUnderlyings.map(u => normalizeName(u));
-        const uniqueNormalized = [...new Set(normalizedUnderlyings.filter(n => n.length > 0))];
-        
-        const { data: mappings } = await supabase
+        // First try with original names (DB may store non-normalized names like "NVIDIA CORP")
+        const { data: originalMappings } = await supabase
           .from('underlying_mappings')
           .select('underlying, ticker')
-          .in('underlying', uniqueNormalized);
+          .in('underlying', uniqueUnderlyings);
         
-        // Build mapping lookup: map original names to tickers via normalized keys
+        // Build mapping lookup from original matches
         const underlyingToTicker: Record<string, string> = {};
-        if (mappings) {
-          // Create normalized -> ticker lookup
-          const normalizedToTicker: Record<string, string> = {};
-          for (const m of mappings) {
-            normalizedToTicker[m.underlying] = m.ticker;
+        const foundOriginals = new Set<string>();
+        
+        if (originalMappings) {
+          for (const m of originalMappings) {
+            underlyingToTicker[m.underlying] = m.ticker;
+            foundOriginals.add(m.underlying);
           }
+        }
+        
+        // Step 2: For underlyings not found, try normalized names as fallback
+        const notFoundUnderlyings = uniqueUnderlyings.filter(u => !foundOriginals.has(u));
+        
+        if (notFoundUnderlyings.length > 0) {
+          // Fetch ALL mappings and do local matching with normalization
+          const { data: allMappings } = await supabase
+            .from('underlying_mappings')
+            .select('underlying, ticker');
           
-          // Map original names to tickers
-          for (const original of uniqueUnderlyings) {
-            const normalized = normalizeName(original);
-            if (normalizedToTicker[normalized]) {
-              underlyingToTicker[original] = normalizedToTicker[normalized];
+          if (allMappings) {
+            // Create a normalized lookup from all DB entries
+            const dbNormalizedToEntry: Record<string, { underlying: string; ticker: string }> = {};
+            for (const m of allMappings) {
+              const normalized = normalizeName(m.underlying);
+              if (!dbNormalizedToEntry[normalized]) {
+                dbNormalizedToEntry[normalized] = m;
+              }
+            }
+            
+            // Try to match remaining underlyings via normalized keys
+            for (const original of notFoundUnderlyings) {
+              const normalized = normalizeName(original);
+              if (dbNormalizedToEntry[normalized]) {
+                underlyingToTicker[original] = dbNormalizedToEntry[normalized].ticker;
+              }
             }
           }
         }
