@@ -420,6 +420,44 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_logs: {
+        Row: {
+          alert_id: string | null
+          channel: string
+          created_at: string | null
+          error_message: string | null
+          id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          alert_id?: string | null
+          channel: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          status: string
+          user_id: string
+        }
+        Update: {
+          alert_id?: string | null
+          channel?: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_logs_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "alerts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       portfolios: {
         Row: {
           average_balance: number | null
@@ -584,6 +622,9 @@ export type Database = {
           email: string
           full_name: string | null
           id: string
+          notify_email: boolean | null
+          notify_telegram: boolean | null
+          telegram_chat_id: string | null
           updated_at: string
           user_id: string
         }
@@ -592,6 +633,9 @@ export type Database = {
           email: string
           full_name?: string | null
           id?: string
+          notify_email?: boolean | null
+          notify_telegram?: boolean | null
+          telegram_chat_id?: string | null
           updated_at?: string
           user_id: string
         }
@@ -600,7 +644,37 @@ export type Database = {
           email?: string
           full_name?: string | null
           id?: string
+          notify_email?: boolean | null
+          notify_telegram?: boolean | null
+          telegram_chat_id?: string | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      telegram_link_codes: {
+        Row: {
+          code: string
+          created_at: string | null
+          expires_at: string
+          id: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          expires_at?: string
+          id?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          expires_at?: string
+          id?: string
+          used_at?: string | null
           user_id?: string
         }
         Relationships: []
