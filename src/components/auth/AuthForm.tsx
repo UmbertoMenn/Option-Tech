@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TrendingUp, Lock, Mail, User, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,20 +32,28 @@ export function AuthForm() {
     
     setLoading(true);
     
-    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    
-    if (error) {
-      toast.error('Errore', {
-        description: error.message,
+    try {
+      const response = await supabase.functions.invoke('generate-reset-link', {
+        body: {
+          email: forgotEmail.trim(),
+          origin: window.location.origin,
+        },
       });
-    } else {
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Errore durante l\'invio');
+      }
+
       toast.success('Email inviata!', {
         description: 'Controlla la tua casella email per il link di reset.',
       });
       setShowForgotPassword(false);
       setForgotEmail('');
+    } catch (error: any) {
+      console.error('Error sending reset email:', error);
+      toast.error('Errore', {
+        description: error.message || 'Impossibile inviare l\'email di reset',
+      });
     }
     
     setLoading(false);
