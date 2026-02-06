@@ -656,14 +656,22 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
                 </Badge>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSettingsOpen(true)}
-              className="h-8 w-8"
-            >
-              <Settings className="w-4 h-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSettingsOpen(true)}
+                  className="h-8 w-8"
+                  aria-label="Gestione avvisi e notifiche"
+                >
+                  <Settings className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Gestione avvisi e notifiche</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </CardHeader>
         <CardContent className="pt-4">

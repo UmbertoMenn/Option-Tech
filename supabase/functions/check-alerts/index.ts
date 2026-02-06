@@ -24,6 +24,8 @@ const ALERT_TYPES = {
   ACTION_LEAP_GAIN_30: 'action_leap_gain_30',
   ACTION_LEAP_GAIN_40: 'action_leap_gain_40',
   ACTION_LEAP_GAIN_50: 'action_leap_gain_50',
+  PRICE_ALERT_ABOVE: 'price_alert_above',
+  PRICE_ALERT_BELOW: 'price_alert_below',
 };
 
 const DEFAULT_THRESHOLD_PCT = 5;
@@ -509,6 +511,115 @@ serve(async (req) => {
                 }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             } else if (!isAboveThreshold && currentState?.current_state === 'alerted') {
+              await supabase.from('alert_states')
+                .update({ current_state: 'safe' })
+                .eq('id', currentState.id);
+            }
+          }
+        }
+      }
+      
+      // === PRICE ALERTS ===
+      // Check custom price alerts for this user (not portfolio-specific)
+      const { data: priceAlertsData, error: priceAlertsError } = await supabase
+        .from('price_alerts')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('enabled', true);
+      
+      if (priceAlertsError) {
+        console.error(`Error fetching price alerts for user ${userId}:`, priceAlertsError);
+      } else if (priceAlertsData && priceAlertsData.length > 0) {
+        // Get underlying_prices for all tickers in price alerts
+        const priceAlertTickers = [...new Set(priceAlertsData.map(pa => pa.ticker))];
+        
+        const { data: tickerPrices, error: tickerPricesError } = await supabase
+          .from('underlying_prices')
+          .select('ticker, price')
+          .in('ticker', priceAlertTickers);
+        
+        if (tickerPricesError) {
+          console.error('Error fetching underlying prices:', tickerPricesError);
+        } else {
+          const priceMap = new Map<string, number>();
+          (tickerPrices || []).forEach(tp => priceMap.set(tp.ticker, tp.price));
+          
+          for (const priceAlert of priceAlertsData) {
+            const currentPrice = priceMap.get(priceAlert.ticker);
+            if (!currentPrice) continue;
+            
+            const isTriggered = priceAlert.direction === 'above'
+              ? currentPrice >= priceAlert.target_price
+              : currentPrice <= priceAlert.target_price;
+            
+            const alertType = priceAlert.direction === 'above' 
+              ? ALERT_TYPES.PRICE_ALERT_ABOVE 
+              : ALERT_TYPES.PRICE_ALERT_BELOW;
+            
+            // Use price_alert id as position key for state tracking
+            const positionKey = `price_alert_${priceAlert.id}`;
+            const stateKey = `${positionKey}:${alertType}`;
+            
+            // Get state for this specific price alert
+            const { data: stateData } = await supabase
+              .from('alert_states')
+              .select('*')
+              .eq('user_id', userId)
+              .eq('position_key', positionKey)
+              .eq('alert_type', alertType)
+              .maybeSingle();
+            
+            const currentState = stateData as AlertState | null;
+            
+            if (isTriggered && (!currentState || currentState.current_state === 'safe')) {
+              // Check cooldown
+              if (cooldownPassed(currentState?.last_alerted_at || priceAlert.last_triggered_at, priceAlert.cooldown_minutes)) {
+                const direction = priceAlert.direction === 'above' ? 'salito sopra' : 'sceso sotto';
+                const message = `${priceAlert.ticker} è ${direction} $${priceAlert.target_price.toFixed(2)} (prezzo attuale: $${currentPrice.toFixed(2)})`;
+                
+                // Create alert
+                const { error: alertError } = await supabase
+                  .from('alerts')
+                  .insert({
+                    user_id: userId,
+                    portfolio_id: null, // Price alerts are not portfolio-specific
+                    alert_type: alertType,
+                    ticker: priceAlert.ticker,
+                    strategy_type: 'PRICE',
+                    direction: priceAlert.direction === 'above' ? 'up' : 'down',
+                    current_value: currentPrice,
+                    threshold_value: priceAlert.target_price,
+                    strike_price: null,
+                    underlying_price: currentPrice,
+                    message: message,
+                    severity: 'info',
+                  });
+                
+                if (alertError) {
+                  console.error('Error creating price alert:', alertError);
+                } else {
+                  totalAlertsCreated++;
+                  console.log(`Created price alert: ${message}`);
+                }
+                
+                // Update alert state
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: null,
+                  position_key: positionKey,
+                  alert_type: alertType,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                
+                // Update last_triggered_at on price_alert itself
+                await supabase
+                  .from('price_alerts')
+                  .update({ last_triggered_at: new Date().toISOString() })
+                  .eq('id', priceAlert.id);
+              }
+            } else if (!isTriggered && currentState?.current_state === 'alerted') {
+              // Reset state when condition is no longer met
               await supabase.from('alert_states')
                 .update({ current_state: 'safe' })
                 .eq('id', currentState.id);
