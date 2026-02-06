@@ -73,21 +73,78 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Step 1: Get all unique tickers from underlying_mappings
-    const { data: mappings, error: mappingsError } = await supabase
-      .from('underlying_mappings')
-      .select('ticker');
+    // Step 1: Get ISINs from active STOCK positions
+    const { data: stockPositions, error: stockError } = await supabase
+      .from('positions')
+      .select('isin')
+      .eq('asset_type', 'stock')
+      .not('isin', 'is', null);
     
-    if (mappingsError) {
-      throw new Error(`Failed to fetch underlying_mappings: ${mappingsError.message}`);
+    if (stockError) {
+      console.error("Error fetching stock positions:", stockError.message);
     }
 
-    if (!mappings || mappings.length === 0) {
-      console.log("No tickers found in underlying_mappings");
+    const stockIsins = [...new Set(stockPositions?.map(p => p.isin).filter(Boolean) || [])];
+    console.log(`Found ${stockIsins.length} unique ISINs from stock positions`);
+
+    // Resolve tickers from ISINs via isin_mappings
+    let tickersFromStocks: string[] = [];
+    if (stockIsins.length > 0) {
+      const { data: isinMappings, error: isinError } = await supabase
+        .from('isin_mappings')
+        .select('ticker')
+        .in('isin', stockIsins);
+      
+      if (isinError) {
+        console.error("Error fetching isin_mappings:", isinError.message);
+      }
+      
+      tickersFromStocks = isinMappings?.map(m => m.ticker).filter(Boolean) || [];
+      console.log(`Resolved ${tickersFromStocks.length} tickers from stock ISINs`);
+    }
+
+    // Step 2: Get underlyings from active DERIVATIVE positions
+    const { data: derivativePositions, error: derivError } = await supabase
+      .from('positions')
+      .select('underlying')
+      .eq('asset_type', 'derivative')
+      .not('underlying', 'is', null);
+    
+    if (derivError) {
+      console.error("Error fetching derivative positions:", derivError.message);
+    }
+
+    const underlyings = [...new Set(derivativePositions?.map(p => p.underlying).filter(Boolean) || [])];
+    console.log(`Found ${underlyings.length} unique underlyings from derivative positions`);
+
+    // Resolve tickers from underlyings via underlying_mappings
+    let tickersFromDerivatives: string[] = [];
+    if (underlyings.length > 0) {
+      const { data: underlyingMappings, error: umError } = await supabase
+        .from('underlying_mappings')
+        .select('ticker')
+        .in('underlying', underlyings);
+      
+      if (umError) {
+        console.error("Error fetching underlying_mappings:", umError.message);
+      }
+      
+      tickersFromDerivatives = underlyingMappings?.map(m => m.ticker).filter(Boolean) || [];
+      console.log(`Resolved ${tickersFromDerivatives.length} tickers from derivative underlyings`);
+    }
+
+    // Step 3: Consolidate and deduplicate
+    const uniqueTickers = [...new Set([...tickersFromStocks, ...tickersFromDerivatives])];
+    console.log(`Total unique tickers to update: ${uniqueTickers.length}`);
+
+    if (uniqueTickers.length === 0) {
+      console.log("No active positions found - nothing to update");
       return new Response(
         JSON.stringify({ 
           success: true, 
-          message: "No tickers to update",
+          message: "No active positions to update",
+          stocks_found: stockIsins.length,
+          derivatives_found: underlyings.length,
           updated: 0,
           failed: 0,
           duration_ms: Date.now() - startTime
@@ -95,9 +152,6 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // Get unique tickers
-    const uniqueTickers = [...new Set(mappings.map(m => m.ticker).filter(Boolean))];
     console.log(`Found ${uniqueTickers.length} unique tickers to update`);
 
     let updated = 0;
