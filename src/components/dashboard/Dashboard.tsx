@@ -17,6 +17,7 @@ import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
 import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioChart';
+import { HistoricalChartsCarousel } from '@/components/dashboard/HistoricalChartsCarousel';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
@@ -213,6 +214,22 @@ export function Dashboard() {
               <FileUploader />
             </div>
           </div>
+        </div>
+
+        {/* Historical Charts Carousel */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <HistoricalChartsCarousel
+            historicalData={historicalData}
+            viewMode={viewMode}
+            currentValue={
+              viewMode === 'base' ? summary?.totalValue ?? 0
+              : viewMode === 'netting_total' ? netting.nettingTotal
+              : viewMode === 'netting_ex_cc' ? netting.nettingExCoveredCall
+              : netting.nettingExCCAndNP
+            }
+            currentDate={portfolio?.snapshot_date ?? null}
+            deposits={deposits}
+          />
         </div>
 
         {/* Positions Table */}
