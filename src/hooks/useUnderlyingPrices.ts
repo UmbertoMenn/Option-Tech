@@ -5,6 +5,8 @@ export interface UnderlyingPrice {
   price: number;
   currency: string;
   ticker?: string;
+  isStale?: boolean;  // true if updated_at > 10 minutes ago
+  updatedAt?: string;
 }
 
 export interface UseUnderlyingPricesResult {
@@ -84,14 +86,23 @@ export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesR
             }
           }
           
-          // Step 3: Build results from cache
+          // Calculate stale threshold (10 minutes = 2 missed cron cycles)
+          const STALE_THRESHOLD_MS = 10 * 60 * 1000;
+          
+          // Step 3: Build results from cache with stale detection
           for (const underlying of uniqueUnderlyings) {
             const ticker = underlyingToTicker[underlying];
             if (ticker && tickerPrices[ticker]) {
+              const updatedAt = tickerPrices[ticker].updated_at;
+              const updatedTime = new Date(updatedAt).getTime();
+              const isStale = Date.now() - updatedTime > STALE_THRESHOLD_MS;
+              
               results[underlying] = {
                 price: tickerPrices[ticker].price,
                 currency: tickerPrices[ticker].currency,
                 ticker,
+                isStale,
+                updatedAt,
               };
             }
           }

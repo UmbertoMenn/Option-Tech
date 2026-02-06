@@ -6,7 +6,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Fetch price from Yahoo Finance
+// EU ticker suffixes - use Yahoo Finance for these
+const EU_SUFFIXES = ['.MI', '.DE', '.SW', '.PA', '.AS', '.L', '.MC', '.BR', '.VI', '.CO', '.HE', '.ST', '.OL', '.LS'];
+
+function isEuropeanTicker(ticker: string): boolean {
+  const upperTicker = ticker.toUpperCase();
+  return EU_SUFFIXES.some(suffix => upperTicker.endsWith(suffix));
+}
+
+// Chunk array into batches
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// Fetch price from Yahoo Finance (for EU tickers)
 async function fetchYahooPrice(ticker: string): Promise<{ price: number; currency: string } | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
@@ -43,7 +60,40 @@ async function fetchYahooPrice(ticker: string): Promise<{ price: number; currenc
       currency: meta.currency || 'USD',
     };
   } catch (error) {
-    console.error(`Error fetching price for ${ticker}:`, error);
+    console.error(`Error fetching Yahoo price for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Fetch price from Finnhub (for US tickers)
+async function fetchFinnhubPrice(ticker: string, apiKey: string): Promise<{ price: number; currency: string } | null> {
+  try {
+    const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.log(`Finnhub API returned ${response.status} for ${ticker}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    // Finnhub response: { c: currentPrice, h: high, l: low, o: open, pc: previousClose, t: timestamp }
+    const price = data.c; // Current price
+    
+    if (!price || price <= 0) {
+      // Fallback to previous close if current price is 0 (market closed)
+      if (data.pc && data.pc > 0) {
+        console.log(`Using previous close for ${ticker}: ${data.pc}`);
+        return { price: data.pc, currency: 'USD' };
+      }
+      console.log(`Invalid Finnhub price for ${ticker}: ${price}`);
+      return null;
+    }
+    
+    return { price, currency: 'USD' };
+  } catch (error) {
+    console.error(`Error fetching Finnhub price for ${ticker}:`, error);
     return null;
   }
 }
@@ -66,9 +116,14 @@ serve(async (req) => {
     // Initialize Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const finnhubApiKey = Deno.env.get("FINNHUB_API_KEY");
     
     if (!supabaseUrl || !supabaseKey) {
       throw new Error("Missing Supabase configuration");
+    }
+    
+    if (!finnhubApiKey) {
+      console.warn("FINNHUB_API_KEY not configured - will use Yahoo Finance for all tickers");
     }
     
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -152,49 +207,153 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    console.log(`Found ${uniqueTickers.length} unique tickers to update`);
+
+    // Step 4: Separate EU and US tickers
+    const euTickers = uniqueTickers.filter(t => isEuropeanTicker(t));
+    const usTickers = uniqueTickers.filter(t => !isEuropeanTicker(t));
+    
+    console.log(`EU tickers (Yahoo Finance): ${euTickers.length}`);
+    console.log(`US tickers (Finnhub): ${usTickers.length}`);
 
     let updated = 0;
     let failed = 0;
     const errors: string[] = [];
 
-    // Step 2: Fetch prices for each ticker and upsert to underlying_prices
-    for (const ticker of uniqueTickers) {
-      try {
-        const priceResult = await fetchYahooPrice(ticker);
-        
-        if (priceResult) {
-          const { error: upsertError } = await supabase
-            .from('underlying_prices')
-            .upsert({
-              ticker,
-              price: priceResult.price,
-              currency: priceResult.currency,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'ticker' });
+    // Step 5: Fetch EU prices via Yahoo Finance
+    if (euTickers.length > 0) {
+      console.log(`--- Fetching ${euTickers.length} EU tickers via Yahoo Finance ---`);
+      for (const ticker of euTickers) {
+        try {
+          const priceResult = await fetchYahooPrice(ticker);
           
-          if (upsertError) {
-            console.error(`Failed to upsert price for ${ticker}:`, upsertError.message);
-            failed++;
-            errors.push(`${ticker}: upsert failed - ${upsertError.message}`);
+          if (priceResult) {
+            const { error: upsertError } = await supabase
+              .from('underlying_prices')
+              .upsert({
+                ticker,
+                price: priceResult.price,
+                currency: priceResult.currency,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'ticker' });
+            
+            if (upsertError) {
+              console.error(`Failed to upsert price for ${ticker}:`, upsertError.message);
+              failed++;
+              errors.push(`${ticker}: upsert failed`);
+            } else {
+              console.log(`[Yahoo] Updated ${ticker}: ${priceResult.price} ${priceResult.currency}`);
+              updated++;
+            }
           } else {
-            console.log(`Updated ${ticker}: ${priceResult.price} ${priceResult.currency}`);
-            updated++;
+            console.log(`[Yahoo] No price for ${ticker}`);
+            failed++;
+            errors.push(`${ticker}: no Yahoo data`);
           }
-        } else {
-          console.log(`No price available for ${ticker}`);
+          
+          // Rate limiting for Yahoo
+          await delay(100);
+          
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          console.error(`Error processing ${ticker}:`, errorMsg);
           failed++;
-          errors.push(`${ticker}: no price data`);
+          errors.push(`${ticker}: ${errorMsg}`);
+        }
+      }
+    }
+
+    // Step 6: Fetch US prices via Finnhub with batching (60/min limit)
+    if (usTickers.length > 0 && finnhubApiKey) {
+      const FINNHUB_RATE_LIMIT = 60;
+      const batches = chunkArray(usTickers, FINNHUB_RATE_LIMIT);
+      
+      console.log(`--- Fetching ${usTickers.length} US tickers via Finnhub (${batches.length} batch${batches.length > 1 ? 'es' : ''}) ---`);
+      
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        
+        // Wait 60 seconds between batches (except for first batch)
+        if (batchIndex > 0) {
+          console.log(`Waiting 60 seconds for Finnhub rate limit (batch ${batchIndex + 1}/${batches.length})...`);
+          await delay(60000);
         }
         
-        // Rate limiting: 100ms between requests
-        await delay(100);
+        console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tickers)`);
         
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Error processing ${ticker}:`, errorMsg);
-        failed++;
-        errors.push(`${ticker}: ${errorMsg}`);
+        for (const ticker of batch) {
+          try {
+            const priceResult = await fetchFinnhubPrice(ticker, finnhubApiKey);
+            
+            if (priceResult) {
+              const { error: upsertError } = await supabase
+                .from('underlying_prices')
+                .upsert({
+                  ticker,
+                  price: priceResult.price,
+                  currency: priceResult.currency,
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'ticker' });
+              
+              if (upsertError) {
+                console.error(`Failed to upsert price for ${ticker}:`, upsertError.message);
+                failed++;
+                errors.push(`${ticker}: upsert failed`);
+              } else {
+                console.log(`[Finnhub] Updated ${ticker}: ${priceResult.price} USD`);
+                updated++;
+              }
+            } else {
+              console.log(`[Finnhub] No price for ${ticker}`);
+              failed++;
+              errors.push(`${ticker}: no Finnhub data`);
+            }
+            
+            // Small delay between Finnhub calls to be nice
+            await delay(50);
+            
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`Error processing ${ticker}:`, errorMsg);
+            failed++;
+            errors.push(`${ticker}: ${errorMsg}`);
+          }
+        }
+      }
+    } else if (usTickers.length > 0 && !finnhubApiKey) {
+      // Fallback to Yahoo for US if no Finnhub key
+      console.log(`--- Fallback: Fetching ${usTickers.length} US tickers via Yahoo Finance ---`);
+      for (const ticker of usTickers) {
+        try {
+          const priceResult = await fetchYahooPrice(ticker);
+          
+          if (priceResult) {
+            const { error: upsertError } = await supabase
+              .from('underlying_prices')
+              .upsert({
+                ticker,
+                price: priceResult.price,
+                currency: priceResult.currency,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'ticker' });
+            
+            if (upsertError) {
+              failed++;
+              errors.push(`${ticker}: upsert failed`);
+            } else {
+              console.log(`[Yahoo-Fallback] Updated ${ticker}: ${priceResult.price} ${priceResult.currency}`);
+              updated++;
+            }
+          } else {
+            failed++;
+            errors.push(`${ticker}: no Yahoo data`);
+          }
+          
+          await delay(100);
+          
+        } catch (error) {
+          failed++;
+          errors.push(`${ticker}: error`);
+        }
       }
     }
 
@@ -207,8 +366,10 @@ serve(async (req) => {
         updated,
         failed,
         total: uniqueTickers.length,
+        eu_tickers: euTickers.length,
+        us_tickers: usTickers.length,
         duration_ms: durationMs,
-        errors: errors.length > 0 ? errors.slice(0, 10) : undefined, // Limit errors in response
+        errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

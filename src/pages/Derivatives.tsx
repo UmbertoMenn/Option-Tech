@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket } from 'lucide-react';
+import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
@@ -1465,18 +1466,23 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           </div>
           
           {/* Colonna 8: Prezzo Sottostante */}
-          <div className="text-right">
+          <div className="text-right flex items-center justify-end">
             {hasUnderlyingPrice ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {underlyingPrices[underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
             ) : (
               <span className="text-sm text-muted-foreground">-</span>
             )}
@@ -1763,18 +1769,23 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           />
           
           {/* Col 7: PS */}
-          <div className="text-right">
+          <div className="text-right flex items-center justify-end">
             {hasUnderlyingPrice ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
             ) : (
               <span className="text-sm text-muted-foreground">-</span>
             )}
@@ -1903,18 +1914,23 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           />
           
           {/* Col 7: PS */}
-          <div className="text-right">
+          <div className="text-right flex items-center justify-end">
             {hasUnderlyingPrice ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
             ) : (
               <span className="text-sm text-muted-foreground">-</span>
             )}
