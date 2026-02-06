@@ -1,63 +1,91 @@
 
 
-# Piano: Correzione Loop Infinito in AlertSettingsDialog
+# Piano: Correzione Risoluzione Ticker e Salvataggio Override
 
 ## Problema Identificato
 
-Il `useEffect` alla riga 135-189 causa un loop infinito quando le configurazioni sono vuote:
+Ci sono **due problemi distinti** che causano ticker non risolti e errori di salvataggio:
 
-```typescript
-useEffect(() => {
-  if (configs.length === 0 && !isLoading) {
-    // Questo chiama mutate() che invalida la query
-    initializeDefaultsMutation.mutate();  // ← PROBLEMA
-    return;
-  }
-  // ... resto del codice
-}, [configs, isLoading]);
+### Problema 1: Mismatch Chiavi di Ricerca
+
+L'edge function normalizza i nomi prima di salvarli nel database:
+```
+"ADOBE INC" → normalizza → "ADOBE" → salva come chiave
 ```
 
-**Sequenza del loop:**
-1. `configs` è vuoto e `isLoading` è false
-2. Viene chiamato `initializeDefaultsMutation.mutate()`
-3. La mutation completa e invalida la query `['alert-configs']`
-4. React Query fa refetch, cambiando `configs` (anche se ancora vuoto durante il caricamento)
-5. Il `useEffect` viene ri-eseguito
-6. Se `configs` è ancora vuoto → torna al punto 2
+Ma il frontend cerca con il nome **originale**:
+```
+cerca "ADOBE INC" → non trova perché la chiave è "ADOBE"
+```
+
+**Esempi nel database:**
+- Chiave salvata: `ADOBE`, `NETFLIX`, `TESLA`
+- Nome nel portafoglio: `ADOBE INC`, `NETFLIX INC`, `TESLA INC`
+
+### Problema 2: RLS Blocca Salvataggio
+
+La tabella `underlying_mappings` ha solo policy SELECT:
+```sql
+-- Policy esistente:
+Anyone can read underlying mappings (SELECT)
+
+-- Policy mancante:
+INSERT/UPDATE per utenti autenticati
+```
 
 ---
 
 ## Soluzione
 
-Aggiungere una `useRef` per tracciare se l'inizializzazione è già stata tentata, impedendo chiamate multiple.
+### Parte 1: Normalizzare le Chiavi di Ricerca nel Frontend
 
-### Codice Modificato
+Modificare `useUnderlyingPrices.ts` per normalizzare i nomi prima della query:
 
 ```typescript
-import { useState, useEffect, useMemo, useRef } from 'react';
+// Funzione di normalizzazione (stessa dell'edge function)
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    .replace(/\bLTD\b/g, '')
+    .replace(/\bLLC\b/g, '')
+    .replace(/\bPLC\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .replace(/\bTHE\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-// ...dentro il componente:
+// Nella query:
+const normalizedUnderlyings = uniqueUnderlyings.map(u => normalizeName(u));
+const { data: mappings } = await supabase
+  .from('underlying_mappings')
+  .select('underlying, ticker')
+  .in('underlying', normalizedUnderlyings);
 
-// Ref per tracciare se l'inizializzazione è già stata tentata
-const initAttemptedRef = useRef(false);
-
-useEffect(() => {
-  if (configs.length === 0 && !isLoading) {
-    // Inizializza solo se non è mai stato tentato
-    if (!initAttemptedRef.current) {
-      initAttemptedRef.current = true;
-      initializeDefaultsMutation.mutate();
-    }
-    return;
+// Mappare i risultati ai nomi originali
+const underlyingToTicker: Record<string, string> = {};
+for (const original of uniqueUnderlyings) {
+  const normalized = normalizeName(original);
+  const mapping = mappings?.find(m => m.underlying === normalized);
+  if (mapping) {
+    underlyingToTicker[original] = mapping.ticker; // Usa chiave originale
   }
-  
-  // Reset ref se abbiamo configs (per gestire logout/login)
-  if (configs.length > 0) {
-    initAttemptedRef.current = false;
-  }
-  
-  // ... resto del codice esistente per popolare lo state locale
-}, [configs, isLoading]);
+}
+```
+
+### Parte 2: Aggiungere Policy RLS per Salvataggio
+
+```sql
+CREATE POLICY "Authenticated users can upsert underlying mappings"
+  ON public.underlying_mappings
+  FOR ALL
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
 ```
 
 ---
@@ -66,52 +94,26 @@ useEffect(() => {
 
 | File | Modifica |
 |------|----------|
-| `src/components/derivatives/AlertSettingsDialog.tsx` | Aggiungere `useRef` e modificare la logica del `useEffect` |
+| `src/hooks/useUnderlyingPrices.ts` | Aggiungere normalizzazione nomi prima della query |
+| Database (migrazione) | Aggiungere policy RLS INSERT/UPDATE |
 
 ---
 
-## Dettaglio Modifiche
+## Flusso Corretto Dopo le Modifiche
 
-### Riga 1: Aggiungere `useRef` all'import
-
-```typescript
-import { useState, useEffect, useMemo, useRef } from 'react';
-```
-
-### Dopo riga 126: Aggiungere la ref
-
-```typescript
-// Ref to prevent multiple initialization attempts
-const initAttemptedRef = useRef(false);
-```
-
-### Righe 135-140: Modificare la logica di inizializzazione
-
-```typescript
-useEffect(() => {
-  if (configs.length === 0 && !isLoading) {
-    // Only initialize once to prevent infinite loop
-    if (!initAttemptedRef.current) {
-      initAttemptedRef.current = true;
-      initializeDefaultsMutation.mutate();
-    }
-    return;
-  }
-  
-  // Reset when we have configs (handles logout/login scenarios)
-  if (configs.length > 0) {
-    initAttemptedRef.current = false;
-  }
-  
-  // ... resto del codice invariato
-}, [configs, isLoading]);
+```text
+1. Portafoglio contiene: "ADOBE INC"
+2. Hook normalizza: "ADOBE INC" → "ADOBE"
+3. Query cerca: WHERE underlying IN ('ADOBE')
+4. Trova mapping: ADOBE → ADBE
+5. Restituisce con chiave originale: { "ADOBE INC": { ticker: "ADBE", ... } }
 ```
 
 ---
 
-## Perché Questa Soluzione Funziona
+## Risultato Atteso
 
-1. **Prima esecuzione**: `initAttemptedRef.current` è `false`, quindi la mutation viene eseguita e la ref viene impostata a `true`
-2. **Esecuzioni successive**: La ref è `true`, quindi la mutation non viene più chiamata
-3. **Reset intelligente**: Se l'utente fa logout e login, quando arrivano configs validi la ref viene resettata, permettendo una nuova inizializzazione se necessario
+- I ticker saranno risolti correttamente anche quando i nomi nel portafoglio hanno suffissi (INC, CORP, etc.)
+- Gli utenti potranno salvare mapping manuali dal dialog "Gestione Avvisi"
+- La cache dei mapping sarà consistente tra frontend e backend
 
