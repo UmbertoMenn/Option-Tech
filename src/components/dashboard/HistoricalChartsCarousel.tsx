@@ -94,28 +94,29 @@ export function HistoricalChartsCarousel({
   }
 
   return (
-    <Card className="lg:col-span-2 border-border bg-card">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            {(() => {
-              const IconComponent = slides[current].icon;
-              return IconComponent ? <IconComponent className="w-5 h-5" /> : null;
-            })()}
-            {slides[current].title}
-          </CardTitle>
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-            {VIEW_MODE_LABELS[viewMode]}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">{slides[current].description}</p>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
-          <CarouselContent>
-            <CarouselItem>
-              <div className="h-[250px] flex gap-4">
-                <div className="flex-[2] min-w-0">
+    <>
+      {/* Card Carousel - Evoluzione Rendimento e Patrimonio */}
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              {(() => {
+                const IconComponent = slides[current].icon;
+                return IconComponent ? <IconComponent className="w-5 h-5" /> : null;
+              })()}
+              {slides[current].title}
+            </CardTitle>
+            <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+              {VIEW_MODE_LABELS[viewMode]}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{slides[current].description}</p>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
+            <CarouselContent>
+              <CarouselItem>
+                <div className="h-[250px]">
                   <PerformanceEvolutionChart
                     historicalData={historicalData}
                     viewMode={viewMode}
@@ -124,47 +125,65 @@ export function HistoricalChartsCarousel({
                     deposits={deposits}
                   />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <YearlyReturnChart
+              </CarouselItem>
+              <CarouselItem>
+                <div className="h-[250px]">
+                  <PortfolioEvolutionChart
                     historicalData={historicalData}
                     viewMode={viewMode}
-                    deposits={deposits}
+                    currentValue={currentValue}
+                    currentDate={currentDate}
                   />
                 </div>
+              </CarouselItem>
+            </CarouselContent>
+            <div className="flex items-center justify-center gap-4 mt-4">
+              <CarouselPrevious className="static translate-y-0" />
+              <div className="flex gap-2">
+                {slides.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => scrollTo(index)}
+                    className={cn(
+                      'w-2 h-2 rounded-full transition-all duration-200',
+                      current === index
+                        ? 'bg-primary w-4'
+                        : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
+                    )}
+                    aria-label={`Go to slide ${index + 1}`}
+                  />
+                ))}
               </div>
-            </CarouselItem>
-            <CarouselItem>
-              <div className="h-[250px]">
-                <PortfolioEvolutionChart
-                  historicalData={historicalData}
-                  viewMode={viewMode}
-                  currentValue={currentValue}
-                  currentDate={currentDate}
-                />
-              </div>
-            </CarouselItem>
-          </CarouselContent>
-          <div className="flex items-center justify-center gap-4 mt-4">
-            <CarouselPrevious className="static translate-y-0" />
-            <div className="flex gap-2">
-              {slides.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => scrollTo(index)}
-                  className={cn(
-                    'w-2 h-2 rounded-full transition-all duration-200',
-                    current === index
-                      ? 'bg-primary w-4'
-                      : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
-                  )}
-                  aria-label={`Go to slide ${index + 1}`}
-                />
-              ))}
+              <CarouselNext className="static translate-y-0" />
             </div>
-            <CarouselNext className="static translate-y-0" />
+          </Carousel>
+        </CardContent>
+      </Card>
+
+      {/* Card separata - Rendimento per Anno */}
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BarChart3 className="w-5 h-5" />
+              Rendimento per Anno
+            </CardTitle>
+            <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+              {VIEW_MODE_LABELS[viewMode]}
+            </span>
           </div>
-        </Carousel>
-      </CardContent>
-    </Card>
+          <p className="text-xs text-muted-foreground">Rendimento % annuo</p>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="h-[282px]">
+            <YearlyReturnChart
+              historicalData={historicalData}
+              viewMode={viewMode}
+              deposits={deposits}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </>
   );
 }
