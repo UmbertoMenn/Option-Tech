@@ -1,122 +1,63 @@
 
-# Piano: Fix Reset Password Link in Preview
+# Piano: Rimuovere le Doppie Barre di Scorrimento dal Dialog Avvisi
 
 ## Problema Identificato
 
-Il flusso attuale fallisce perché:
+Il dialog "Gestione Avvisi" mostra due barre di scorrimento sovrapposte:
 
-1. L'email di reset contiene un link tipo: `https://...supabase.co/auth/v1/verify?token=...&type=recovery&redirect_to=https://preview.../reset-password`
-2. Supabase verifica il token e fa redirect a: `https://preview.../reset-password#access_token=...&type=recovery`
-3. Lovable intercetta e chiede login alla piattaforma
-4. Durante questo redirect, il fragment (`#...`) viene perso
-5. La pagina `/reset-password` non trova il token e mostra "Link non valido"
+1. Una barra esterna sul `DialogContent` (causata da `overflow-y-auto` con `max-h-[85vh]`)
+2. Una barra interna negli `ScrollArea` dentro ogni tab (con `h-[350px]`)
 
-## Soluzione: Uso di token_hash + verifyOtp
+## Soluzione
 
-Invece di usare il flow automatico con fragments, useremo query parameters che sopravvivono ai redirect.
+Rimuovere gli `ScrollArea` interni dai TabsContent e lasciare che il `DialogContent` gestisca lo scrolling dell'intero dialog. Questo approccio:
+- Mantiene un'unica barra di scorrimento
+- Semplifica la struttura UI
+- Migliora l'esperienza utente
 
-### Modifiche Necessarie
+## Modifiche Tecniche
 
-#### 1. Edge Function per generare link personalizzato
+### File: `src/components/derivatives/AlertSettingsDialog.tsx`
 
-Creare una edge function che usa `supabase.auth.admin.generateLink()` per generare un link di recovery con `token_hash` estratto manualmente.
+| Linea | Prima | Dopo |
+|-------|-------|------|
+| 392-393 | `<TabsContent value="distance"><ScrollArea className="h-[350px] pr-4">` | `<TabsContent value="distance" className="mt-4">` |
+| 471-473 | `</ScrollArea></TabsContent>` | `</TabsContent>` |
+| 476-477 | `<TabsContent value="ticker"><ScrollArea className="h-[350px] pr-4">` | `<TabsContent value="ticker" className="mt-4">` |
+| 617-619 | `</ScrollArea></TabsContent>` | `</TabsContent>` |
 
-```typescript
-// supabase/functions/generate-reset-link/index.ts
-const { data } = await supabase.auth.admin.generateLink({
-  type: 'recovery',
-  email: email,
-});
+### Dettaglio delle modifiche:
 
-const tokenHash = data.properties.hashed_token;
-const resetUrl = `${origin}/reset-password?token_hash=${tokenHash}&type=recovery`;
-```
+1. **Tab "Distanza"** (linee 392-473):
+   - Rimuovere `<ScrollArea className="h-[350px] pr-4">` wrapper
+   - Mantenere la struttura interna invariata
 
-#### 2. Modifica AuthForm.tsx
+2. **Tab "Per Ticker"** (linee 476-619):
+   - Rimuovere `<ScrollArea className="h-[350px] pr-4">` wrapper
+   - Mantenere la struttura interna invariata
 
-Chiamare la nuova edge function invece di `resetPasswordForEmail`:
+3. Gli altri tab (Azione, Cooldown, Notifiche) **non hanno** ScrollArea e rimangono invariati
 
-```typescript
-// Invece di:
-await supabase.auth.resetPasswordForEmail(email, { redirectTo: ... });
-
-// Useremo:
-const response = await fetch('/functions/v1/generate-reset-link', {
-  method: 'POST',
-  body: JSON.stringify({ email, origin: window.location.origin })
-});
-```
-
-#### 3. Modifica ResetPassword.tsx
-
-Usare `verifyOtp` con i query parameters:
-
-```typescript
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const tokenHash = params.get('token_hash');
-  const type = params.get('type');
-  
-  if (tokenHash && type === 'recovery') {
-    supabase.auth.verifyOtp({ 
-      token_hash: tokenHash, 
-      type: 'recovery' 
-    }).then(({ error }) => {
-      if (error) {
-        setError('Link scaduto o non valido');
-      } else {
-        setLoading(false); // Mostra form password
-      }
-    });
-  }
-}, []);
-```
-
-### File da Modificare/Creare
-
-1. `supabase/functions/generate-reset-link/index.ts` - Nuova edge function
-2. `supabase/config.toml` - Aggiungere config per la nuova function  
-3. `src/components/auth/AuthForm.tsx` - Chiamare edge function
-4. `src/pages/ResetPassword.tsx` - Usare verifyOtp con query params
-
-### Flusso Corretto
+## Risultato Finale
 
 ```text
-PRIMA (non funziona):
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│ Richiedi │────▶│ Email    │────▶│ Supabase │────▶│ Redirect │
-│  Reset   │     │ con link │     │ Verify   │     │ con #    │
-└──────────┘     └──────────┘     └──────────┘     └──────────┘
-                                                        │
-                                        ┌───────────────▼───────────────┐
-                                        │ Lovable login intercetta      │
-                                        │ Fragment # PERSO!             │
-                                        └───────────────────────────────┘
+PRIMA:
+┌─ DialogContent (overflow-y-auto) ─┐
+│ ┌─ ScrollArea (h-350px) ────────┐ │  ← 2 scrollbar
+│ │  Contenuto tab                │ │
+│ └───────────────────────────────┘ │
+└───────────────────────────────────┘
 
-DOPO (funziona):
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│ Richiedi │────▶│ Edge     │────▶│ Email    │────▶│ Redirect │
-│  Reset   │     │ Function │     │ con link │     │ con ?    │
-└──────────┘     └──────────┘     │ diretto  │     │ params   │
-                                  └──────────┘     └──────────┘
-                                                        │
-                                        ┌───────────────▼───────────────┐
-                                        │ Query params sopravvivono     │
-                                        │ verifyOtp() valida token      │
-                                        └───────────────────────────────┘
+DOPO:
+┌─ DialogContent (overflow-y-auto) ─┐
+│                                   │  ← 1 scrollbar
+│  Contenuto tab                    │
+│                                   │
+└───────────────────────────────────┘
 ```
 
-### Ordine di Implementazione
+## Impatto Visivo
 
-1. Creare edge function `generate-reset-link`
-2. Aggiornare `supabase/config.toml`
-3. Modificare `AuthForm.tsx` per usare la nuova edge function
-4. Modificare `ResetPassword.tsx` per usare `verifyOtp` con query params
-5. Testare il flusso completo
-
-### Note Tecniche
-
-- La edge function usa `supabase.auth.admin.generateLink()` che richiede il service role key
-- Il `token_hash` viene passato via query string che sopravvive ai redirect
-- `verifyOtp` crea una sessione valida, permettendo poi `updateUser({ password })`
-- L'email viene inviata usando Resend (gia configurato)
+- Nessun cambiamento al layout o ai contenuti
+- Esperienza di scroll più naturale e uniforme
+- Coerenza con gli altri tab (Azione, Cooldown, Notifiche) che già non hanno ScrollArea
