@@ -92,7 +92,7 @@ function CustomLegend({
 }) {
   const benchmarkDescription = viewMode === 'base' 
     ? 'Media ponderata di MSCI World (URTH), S&P 500 (SPY), MSCI ACWI (ACWI), Stoxx 600 (EXSA.DE). Benchmark scalato al 60% equity per la vista base.'
-    : 'Benchmark dinamico basato sull\'esposizione azionaria:\n• Esposizione ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
+    : 'Benchmark dinamico basato sull\'esposizione equity:\n• Esposizione equity ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione equity 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
 
   const staleInfo = formatStaleSummary(staleSummary);
   const showWarning = hasDataGaps || staleSummary.length > 0;
