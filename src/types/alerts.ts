@@ -18,6 +18,9 @@ export const ALERT_TYPES = {
   ACTION_LEAP_GAIN_30: 'action_leap_gain_30',
   ACTION_LEAP_GAIN_40: 'action_leap_gain_40',
   ACTION_LEAP_GAIN_50: 'action_leap_gain_50',
+  // Price alerts (custom ticker monitoring)
+  PRICE_ALERT_ABOVE: 'price_alert_above',
+  PRICE_ALERT_BELOW: 'price_alert_below',
 } as const;
 
 export type AlertType = typeof ALERT_TYPES[keyof typeof ALERT_TYPES];
@@ -54,6 +57,12 @@ export const LEAP_GAIN_ALERT_TYPES: AlertType[] = [
   ALERT_TYPES.ACTION_LEAP_GAIN_50,
 ];
 
+// Price alert types
+export const PRICE_ALERT_TYPES: AlertType[] = [
+  ALERT_TYPES.PRICE_ALERT_ABOVE,
+  ALERT_TYPES.PRICE_ALERT_BELOW,
+];
+
 // Human-readable labels for alert types (Italian)
 export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   [ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL]: 'Iron Condor - lato Call',
@@ -72,6 +81,8 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   [ALERT_TYPES.ACTION_LEAP_GAIN_30]: 'Leap +30%',
   [ALERT_TYPES.ACTION_LEAP_GAIN_40]: 'Leap +40%',
   [ALERT_TYPES.ACTION_LEAP_GAIN_50]: 'Leap +50%',
+  [ALERT_TYPES.PRICE_ALERT_ABOVE]: 'Prezzo sopra soglia',
+  [ALERT_TYPES.PRICE_ALERT_BELOW]: 'Prezzo sotto soglia',
 };
 
 // Alert configuration (user settings)
@@ -116,6 +127,20 @@ export interface Alert {
   severity: AlertSeverity;
   created_at: string;
   read_at: string | null;
+}
+
+// Price alert interface
+export interface PriceAlert {
+  id: string;
+  user_id: string;
+  ticker: string;
+  direction: 'above' | 'below';
+  target_price: number;
+  enabled: boolean;
+  last_triggered_at: string | null;
+  cooldown_minutes: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // Default thresholds for distance alerts

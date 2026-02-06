@@ -188,8 +188,21 @@ serve(async (req) => {
       console.log(`Resolved ${tickersFromDerivatives.length} tickers from derivative underlyings`);
     }
 
-    // Step 3: Consolidate and deduplicate
-    const uniqueTickers = [...new Set([...tickersFromStocks, ...tickersFromDerivatives])];
+    // Step 3: Get tickers from price_alerts
+    const { data: priceAlerts, error: priceAlertsError } = await supabase
+      .from('price_alerts')
+      .select('ticker')
+      .eq('enabled', true);
+    
+    if (priceAlertsError) {
+      console.error("Error fetching price_alerts:", priceAlertsError.message);
+    }
+
+    const tickersFromPriceAlerts = [...new Set(priceAlerts?.map(p => p.ticker).filter(Boolean) || [])];
+    console.log(`Found ${tickersFromPriceAlerts.length} unique tickers from price_alerts`);
+
+    // Step 4: Consolidate and deduplicate all tickers
+    const uniqueTickers = [...new Set([...tickersFromStocks, ...tickersFromDerivatives, ...tickersFromPriceAlerts])];
     console.log(`Total unique tickers to update: ${uniqueTickers.length}`);
 
     if (uniqueTickers.length === 0) {

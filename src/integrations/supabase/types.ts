@@ -586,6 +586,45 @@ export type Database = {
           },
         ]
       }
+      price_alerts: {
+        Row: {
+          cooldown_minutes: number
+          created_at: string
+          direction: string
+          enabled: boolean
+          id: string
+          last_triggered_at: string | null
+          target_price: number
+          ticker: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cooldown_minutes?: number
+          created_at?: string
+          direction: string
+          enabled?: boolean
+          id?: string
+          last_triggered_at?: string | null
+          target_price: number
+          ticker: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cooldown_minutes?: number
+          created_at?: string
+          direction?: string
+          enabled?: boolean
+          id?: string
+          last_triggered_at?: string | null
+          target_price?: number
+          ticker?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       price_update_logs: {
         Row: {
           completed_at: string | null
@@ -787,6 +826,8 @@ export type Database = {
         | "action_leap_gain_30"
         | "action_leap_gain_40"
         | "action_leap_gain_50"
+        | "price_alert_above"
+        | "price_alert_below"
       app_role: "admin" | "user"
     }
     CompositeTypes: {
@@ -934,6 +975,8 @@ export const Constants = {
         "action_leap_gain_30",
         "action_leap_gain_40",
         "action_leap_gain_50",
+        "price_alert_above",
+        "price_alert_below",
       ],
       app_role: ["admin", "user"],
     },

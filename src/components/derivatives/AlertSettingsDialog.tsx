@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Plus, Loader2, AlertTriangle, Check } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { NotificationSettings } from '@/components/settings/NotificationSettings';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,6 +18,13 @@ import {
   useDeleteAlertConfig,
   useInitializeDefaultConfigs,
 } from '@/hooks/useAlertConfigs';
+import {
+  usePriceAlerts,
+  useCreatePriceAlert,
+  useDeletePriceAlert,
+  useTogglePriceAlert,
+  validateTicker,
+} from '@/hooks/usePriceAlerts';
 import {
   AlertType,
   ALERT_TYPE_LABELS,
@@ -114,6 +121,12 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const deleteConfigMutation = useDeleteAlertConfig();
   const initializeDefaultsMutation = useInitializeDefaultConfigs();
   
+  // Price alerts hooks
+  const { data: priceAlerts = [], isLoading: isLoadingPriceAlerts } = usePriceAlerts();
+  const createPriceAlertMutation = useCreatePriceAlert();
+  const deletePriceAlertMutation = useDeletePriceAlert();
+  const togglePriceAlertMutation = useTogglePriceAlert();
+  
   // Local state for editing
   const [globalThresholds, setGlobalThresholds] = useState<Record<AlertType, number>>({} as Record<AlertType, number>);
   const [distanceEnabled, setDistanceEnabled] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
@@ -125,6 +138,13 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   // State for unresolved ticker mappings
   const [unresolvedMappings, setUnresolvedMappings] = useState<Record<string, string>>({});
   const [savingMapping, setSavingMapping] = useState<string | null>(null);
+  
+  // State for new price alert
+  const [newPriceTicker, setNewPriceTicker] = useState('');
+  const [newPriceDirection, setNewPriceDirection] = useState<'above' | 'below'>('below');
+  const [newPriceTarget, setNewPriceTarget] = useState('');
+  const [validatingTicker, setValidatingTicker] = useState(false);
+  const [tickerValidation, setTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
   
   // Extract available tickers from strategies
   const { resolved: availableTickers, unresolved: unresolvedUnderlyings } = useMemo(() => 
@@ -364,13 +384,85 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const isTickerInOverrides = (ticker: string) => 
     tickerOverrides.some(t => t.ticker === ticker);
   
+  // Handle ticker validation for price alerts
+  const handleValidatePriceTicker = async () => {
+    const ticker = newPriceTicker.trim().toUpperCase();
+    if (!ticker) return;
+    
+    setValidatingTicker(true);
+    setTickerValidation(null);
+    
+    try {
+      const result = await validateTicker(ticker);
+      setTickerValidation(result);
+      if (!result.valid) {
+        toast.error(`Ticker "${ticker}" non trovato`);
+      }
+    } catch {
+      setTickerValidation({ valid: false });
+      toast.error('Errore durante la validazione del ticker');
+    } finally {
+      setValidatingTicker(false);
+    }
+  };
+  
+  // Handle create new price alert
+  const handleCreatePriceAlert = async () => {
+    const ticker = newPriceTicker.trim().toUpperCase();
+    const targetPrice = parseFloat(newPriceTarget);
+    
+    if (!ticker || isNaN(targetPrice) || targetPrice <= 0) {
+      toast.error('Inserisci un ticker valido e un prezzo target maggiore di zero');
+      return;
+    }
+    
+    try {
+      await createPriceAlertMutation.mutateAsync({
+        ticker,
+        direction: newPriceDirection,
+        target_price: targetPrice,
+        cooldown_minutes: cooldownMinutes,
+      });
+      
+      toast.success(`Avviso di prezzo creato per ${ticker}`);
+      setNewPriceTicker('');
+      setNewPriceTarget('');
+      setTickerValidation(null);
+    } catch (error: any) {
+      if (error.code === '23505') {
+        toast.error('Esiste già un avviso identico per questo ticker');
+      } else {
+        toast.error('Errore nella creazione dell\'avviso');
+      }
+    }
+  };
+  
+  // Handle delete price alert
+  const handleDeletePriceAlert = async (id: string) => {
+    try {
+      await deletePriceAlertMutation.mutateAsync(id);
+      toast.success('Avviso eliminato');
+    } catch {
+      toast.error('Errore nell\'eliminazione dell\'avviso');
+    }
+  };
+  
+  // Handle toggle price alert
+  const handleTogglePriceAlert = async (id: string, enabled: boolean) => {
+    try {
+      await togglePriceAlertMutation.mutateAsync({ id, enabled });
+    } catch {
+      toast.error('Errore nell\'aggiornamento dell\'avviso');
+    }
+  };
+  
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Gestione Avvisi</DialogTitle>
+          <DialogTitle>Gestione avvisi e notifiche</DialogTitle>
           <DialogDescription>
-            Configura le soglie e le notifiche per le strategie derivate
+            Configura le soglie e le notifiche per le strategie derivate e i prezzi dei ticker
           </DialogDescription>
         </DialogHeader>
         
@@ -380,9 +472,10 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
           </div>
         ) : (
           <Tabs defaultValue="distance" className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="distance">Distanza</TabsTrigger>
               <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
+              <TabsTrigger value="price">Prezzo</TabsTrigger>
               <TabsTrigger value="action">Azione</TabsTrigger>
               <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
               <TabsTrigger value="notifications">Notifiche</TabsTrigger>
@@ -614,7 +707,164 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 </div>
             </TabsContent>
             
-            {/* Tab 3: Action Alerts */}
+            {/* Tab 3: Price Alerts */}
+            <TabsContent value="price" className="space-y-4 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Crea avvisi di prezzo su qualsiasi ticker, anche se non presente nel tuo portafoglio.
+              </p>
+              
+              {/* New price alert form */}
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <h4 className="font-medium flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" />
+                  Nuovo avviso di prezzo
+                </h4>
+                
+                <div className="grid gap-3">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Ticker (es. LEU, AAPL)"
+                      value={newPriceTicker}
+                      onChange={e => {
+                        setNewPriceTicker(e.target.value.toUpperCase());
+                        setTickerValidation(null);
+                      }}
+                      className="flex-1"
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={handleValidatePriceTicker}
+                      disabled={validatingTicker || !newPriceTicker.trim()}
+                    >
+                      {validatingTicker ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : tickerValidation?.valid ? (
+                        <Check className="w-4 h-4 text-green-500" />
+                      ) : (
+                        'Verifica'
+                      )}
+                    </Button>
+                  </div>
+                  
+                  {tickerValidation?.valid && tickerValidation.price && (
+                    <p className="text-sm text-muted-foreground">
+                      Prezzo attuale: <span className="font-mono font-medium">${tickerValidation.price.toFixed(2)}</span>
+                      {tickerValidation.currency && tickerValidation.currency !== 'USD' && ` (${tickerValidation.currency})`}
+                    </p>
+                  )}
+                  
+                  <div className="space-y-2">
+                    <Label>Tipo di avviso</Label>
+                    <RadioGroup
+                      value={newPriceDirection}
+                      onValueChange={(v) => setNewPriceDirection(v as 'above' | 'below')}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="below" id="below" />
+                        <Label htmlFor="below" className="flex items-center gap-1 cursor-pointer">
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          Sotto soglia
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="above" id="above" />
+                        <Label htmlFor="above" className="flex items-center gap-1 cursor-pointer">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          Sopra soglia
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                      <Label>Prezzo target</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        placeholder="Es. 100.00"
+                        value={newPriceTarget}
+                        onChange={e => setNewPriceTarget(e.target.value)}
+                      />
+                    </div>
+                    <Button 
+                      onClick={handleCreatePriceAlert}
+                      disabled={createPriceAlertMutation.isPending || !newPriceTicker.trim() || !newPriceTarget}
+                    >
+                      {createPriceAlertMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-1" />
+                      )}
+                      Aggiungi
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Existing price alerts */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Avvisi configurati</h4>
+                
+                {isLoadingPriceAlerts ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : priceAlerts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4 border rounded-lg">
+                    Nessun avviso di prezzo configurato. Usa il form sopra per crearne uno.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {priceAlerts.map(alert => {
+                      const currentPrice = underlyingPrices[alert.ticker]?.price;
+                      return (
+                        <div key={alert.id} className="flex items-center gap-3 p-3 border rounded-lg">
+                          <Badge variant="outline" className="font-mono">
+                            {alert.ticker}
+                          </Badge>
+                          
+                          <div className="flex items-center gap-1">
+                            {alert.direction === 'above' ? (
+                              <TrendingUp className="w-4 h-4 text-green-500" />
+                            ) : (
+                              <TrendingDown className="w-4 h-4 text-red-500" />
+                            )}
+                            <span className="text-sm">
+                              {alert.direction === 'above' ? '>' : '<'} ${alert.target_price.toFixed(2)}
+                            </span>
+                          </div>
+                          
+                          <div className="flex-1 text-xs text-muted-foreground">
+                            {currentPrice !== undefined && (
+                              <span>Attuale: ${currentPrice.toFixed(2)}</span>
+                            )}
+                          </div>
+                          
+                          <Switch
+                            checked={alert.enabled}
+                            onCheckedChange={checked => handleTogglePriceAlert(alert.id, checked)}
+                          />
+                          
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeletePriceAlert(alert.id)}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+            
+            {/* Tab 4: Action Alerts */}
             <TabsContent value="action" className="space-y-4 mt-4">
               <p className="text-sm text-muted-foreground mb-4">
                 Attiva o disattiva gli avvisi per condizioni specifiche.
