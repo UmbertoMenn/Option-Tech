@@ -68,14 +68,14 @@ function CustomLegend({
   onBenchmarkHover: (hovering: boolean) => void;
 }) {
   const benchmarkDescription = viewMode === 'base' 
-    ? 'Media ponderata MSCI World, S&P 500, MSCI ACWI, Stoxx 600, scalata per esposizione equity'
-    : 'Benchmark scalato all\'esposizione azionaria dello snapshot (100% equity se > 90%, 50/50 se 40-60%)';
+    ? 'Media ponderata di MSCI World (URTH), S&P 500 (SPY), MSCI ACWI (ACWI), Stoxx 600 (EXSA.DE). Benchmark scalato al 60% equity per la vista base.'
+    : 'Benchmark dinamico basato sull\'esposizione azionaria:\n• Esposizione ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
 
   return (
     <div className="flex items-center justify-center gap-4 text-xs mb-2">
       <div className="flex items-center gap-1.5">
         <div className="w-3 h-0.5 bg-profit rounded" />
-        <span className="text-muted-foreground">Portafoglio</span>
+        <span className="text-foreground">Portafoglio</span>
       </div>
       {hasBenchmarkData && (
         <TooltipProvider>
@@ -90,12 +90,12 @@ function CustomLegend({
                   className="w-3 h-0.5 rounded" 
                   style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
                 />
-                <span className="text-muted-foreground">Benchmark</span>
+                <span className="text-foreground">Benchmark</span>
                 <HelpCircle className="w-3 h-3 text-muted-foreground" />
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs">
-              <p className="text-xs">{benchmarkDescription}</p>
+            <TooltipContent side="top" className="max-w-sm bg-popover text-popover-foreground border-border">
+              <p className="text-xs whitespace-pre-line">{benchmarkDescription}</p>
             </TooltipContent>
           </UITooltip>
         </TooltipProvider>
@@ -114,7 +114,7 @@ export function PerformanceEvolutionChart({
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   
   // Fetch benchmark data
-  const { benchmarkReturns, hasBenchmarkData } = useBenchmarkData(historicalData, viewMode);
+  const { benchmarkReturns, hasBenchmarkData } = useBenchmarkData(historicalData, viewMode, currentDate);
 
   const chartData = useMemo(() => {
     if (historicalData.length === 0) return [];

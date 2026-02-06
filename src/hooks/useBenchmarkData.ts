@@ -79,7 +79,8 @@ function selectBenchmarkWeight(equityExposure: number): { equityWeight: number; 
 
 export function useBenchmarkData(
   historicalData: HistoricalDataEntry[],
-  viewMode: ViewMode
+  viewMode: ViewMode,
+  currentDate?: string | null
 ) {
   // Get date range from historical data
   const dateRange = useMemo(() => {
@@ -87,7 +88,15 @@ export function useBenchmarkData(
     
     const dates = historicalData.map(h => new Date(h.snapshot_date));
     const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    let maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    
+    // Extend to current date if provided and later than last snapshot
+    if (currentDate) {
+      const current = new Date(currentDate);
+      if (current > maxDate) {
+        maxDate = current;
+      }
+    }
     
     // Extend range slightly for buffer
     minDate.setDate(minDate.getDate() - 7);
@@ -96,7 +105,7 @@ export function useBenchmarkData(
       from: minDate.toISOString().split('T')[0],
       to: maxDate.toISOString().split('T')[0],
     };
-  }, [historicalData]);
+  }, [historicalData, currentDate]);
 
   // Fetch benchmark prices
   const { data: benchmarkPrices, isLoading } = useQuery({
@@ -234,8 +243,57 @@ export function useBenchmarkData(
       });
     });
 
+    // Add current date point if provided and not already in returns
+    if (currentDate && !returns.find(r => r.date === currentDate)) {
+      let equityReturnsCurrent: number[] = [];
+      EQUITY_BENCHMARKS.forEach(ticker => {
+        const basePrice = basePrices[ticker];
+        const currentPrice = getClosestPrice(ticker, currentDate);
+        if (basePrice && currentPrice) {
+          equityReturnsCurrent.push(((currentPrice - basePrice) / basePrice) * 100);
+        }
+      });
+      const avgEquityReturnCurrent = equityReturnsCurrent.length > 0 
+        ? equityReturnsCurrent.reduce((a, b) => a + b, 0) / equityReturnsCurrent.length 
+        : 0;
+
+      // Use last historical entry for equity exposure
+      const lastEntry = sortedHistory[sortedHistory.length - 1];
+      const equityExposure = getEquityExposure(lastEntry, viewMode);
+      const { equityWeight, useBalanced } = selectBenchmarkWeight(equityExposure);
+      
+      // Calculate balanced return for current date
+      const spyBase = basePrices[BALANCED_EQUITY_TICKER];
+      const spyCurrent = getClosestPrice(BALANCED_EQUITY_TICKER, currentDate);
+      const aggBase = basePrices[BOND_TICKER];
+      const aggCurrent = getClosestPrice(BOND_TICKER, currentDate);
+      
+      let balancedReturnCurrent = 0;
+      if (spyBase && spyCurrent && aggBase && aggCurrent) {
+        const spyReturn = ((spyCurrent - spyBase) / spyBase) * 100;
+        const aggReturn = ((aggCurrent - aggBase) / aggBase) * 100;
+        balancedReturnCurrent = 0.5 * spyReturn + 0.5 * aggReturn;
+      }
+
+      let scaledReturnCurrent: number;
+      if (useBalanced) {
+        scaledReturnCurrent = balancedReturnCurrent;
+      } else if (equityWeight === 1) {
+        scaledReturnCurrent = avgEquityReturnCurrent;
+      } else {
+        scaledReturnCurrent = equityWeight * avgEquityReturnCurrent + (1 - equityWeight) * balancedReturnCurrent;
+      }
+
+      returns.push({
+        date: currentDate,
+        equityReturn: avgEquityReturnCurrent,
+        balancedReturn: balancedReturnCurrent,
+        scaledReturn: scaledReturnCurrent,
+      });
+    }
+
     return returns;
-  }, [benchmarkPrices, historicalData, viewMode]);
+  }, [benchmarkPrices, historicalData, viewMode, currentDate]);
 
   return {
     benchmarkReturns,
