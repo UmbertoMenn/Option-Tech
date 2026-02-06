@@ -18,59 +18,52 @@ export function ResetPassword() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Listen for the PASSWORD_RECOVERY event from the magic link
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth event:', event, 'Session:', !!session);
-        
-        if (event === 'PASSWORD_RECOVERY') {
-          // User clicked the recovery link and is now in recovery mode
-          setLoading(false);
-          setError(null);
-        } else if (event === 'SIGNED_IN' && session) {
-          // Check if this is a recovery session by looking at the URL hash
-          const hash = window.location.hash;
-          if (hash.includes('type=recovery')) {
-            setLoading(false);
-            setError(null);
-          } else {
-            // Already logged in normally, redirect to home
-            navigate('/');
-          }
-        }
-      }
-    );
+    const verifyToken = async () => {
+      // Get token_hash from query parameters (survives Lovable login redirect!)
+      const params = new URLSearchParams(window.location.search);
+      const tokenHash = params.get('token_hash');
+      const type = params.get('type');
 
-    // Also check current session - might already be in recovery mode
-    const checkInitialState = async () => {
-      const hash = window.location.hash;
-      
-      // If there's a recovery token in the URL, wait for the auth event
-      if (hash.includes('access_token') && hash.includes('type=recovery')) {
-        // The onAuthStateChange will handle this
+      console.log('Reset password params:', { tokenHash: !!tokenHash, type });
+
+      if (tokenHash && type === 'recovery') {
+        try {
+          // Verify the OTP token and create a session
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: 'recovery',
+          });
+
+          if (verifyError) {
+            console.error('OTP verification error:', verifyError);
+            setError('Link di reset non valido o scaduto. Richiedi un nuovo link.');
+          } else {
+            console.log('OTP verified successfully');
+            setError(null);
+          }
+        } catch (err) {
+          console.error('Unexpected error during OTP verification:', err);
+          setError('Errore durante la verifica del link.');
+        }
+        setLoading(false);
         return;
       }
-      
-      // Check if already has a valid session (from recovery)
+
+      // Fallback: Check for existing session (in case user refreshes after verification)
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        // Has valid session, allow password change
+        console.log('Existing session found');
         setLoading(false);
+        setError(null);
       } else {
-        // No session and no recovery token
+        console.log('No token_hash and no session');
         setLoading(false);
         setError('Link di reset non valido o scaduto. Richiedi un nuovo link.');
       }
     };
 
-    // Small delay to allow auth state change to fire first
-    const timer = setTimeout(checkInitialState, 500);
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(timer);
-    };
-  }, [navigate]);
+    verifyToken();
+  }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
