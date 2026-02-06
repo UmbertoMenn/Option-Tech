@@ -88,11 +88,7 @@ function CustomLegend({
               >
                 <div 
                   className="w-3 h-0.5 rounded" 
-                  style={{ 
-                    backgroundColor: isHoveringBenchmark 
-                      ? 'hsl(30, 100%, 50%)' 
-                      : 'hsla(30, 100%, 50%, 0.4)' 
-                  }} 
+                  style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
                 />
                 <span className="text-muted-foreground">Benchmark</span>
                 <HelpCircle className="w-3 h-3 text-muted-foreground" />
@@ -214,10 +210,8 @@ export function PerformanceEvolutionChart({
     );
   }
 
-  // Dynamic benchmark stroke based on hover state
-  const benchmarkStroke = isHoveringBenchmark 
-    ? 'hsl(30, 100%, 50%)' 
-    : 'hsla(30, 100%, 50%, 0.4)';
+  // Dynamic benchmark opacity based on hover state
+  const benchmarkOpacity = isHoveringBenchmark ? 1 : 0.6;
   const benchmarkStrokeWidth = isHoveringBenchmark ? 2.5 : 1.5;
 
   return (
@@ -279,10 +273,10 @@ export function PerformanceEvolutionChart({
               <Line
                 type="monotone"
                 dataKey="benchmarkReturn"
-                stroke={benchmarkStroke}
+                stroke="hsl(30, 100%, 50%)"
                 strokeWidth={benchmarkStrokeWidth}
-                strokeDasharray="4 4"
-                dot={{ r: 2, fill: benchmarkStroke }}
+                strokeOpacity={benchmarkOpacity}
+                dot={{ r: 2, fill: 'hsl(30, 100%, 50%)', fillOpacity: benchmarkOpacity }}
                 activeDot={{ r: 4, fill: 'hsl(30, 100%, 50%)' }}
                 name="benchmarkReturn"
               />
