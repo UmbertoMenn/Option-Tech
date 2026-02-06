@@ -1,166 +1,109 @@
 
 
-# Piano: Carousel Grafici Performance Storiche
+# Piano: Miglioramenti Carousel Grafici Storici
 
-## Obiettivo
-Creare un nuovo carousel da posizionare sotto al grafico principale (torta nella vista Base, barre nelle viste Netting) che mostri tre tipi di visualizzazioni dei dati storici:
+## Modifiche Richieste
 
-1. **Slide 1 - Evoluzione Rendimento**: Grafico lineare con rendimento % e valore assoluto P/L nel tempo
-2. **Slide 2 - Rendimento per Anno**: Istogramma con rendimento % per ogni anno
-3. **Slide 3 - Evoluzione Patrimonio**: Grafico lineare dell'andamento del valore patrimoniale nel tempo
+### 1. Istogramma affiancato al grafico lineare (stessa slide)
 
-Tutti i grafici devono adattarsi dinamicamente alla viewMode selezionata (Base, Netting ex. Covered Call, Netting ex. CC e NP, Netting Totale).
+**File**: `src/components/dashboard/HistoricalChartsCarousel.tsx`
 
----
+Ristrutturare la prima slide per mostrare i due grafici affiancati:
+- **Sinistra (70%)**: Grafico lineare evoluzione rendimento
+- **Destra (30%)**: Istogramma rendimento per anno
 
-## Architettura Componenti
+Le slide diventano 2 invece di 3:
+| Slide | Contenuto |
+|-------|-----------|
+| 1 | Evoluzione Rendimento (linea) + Rendimento per Anno (barre) |
+| 2 | Evoluzione Patrimonio |
 
-```text
-Dashboard.tsx
-└── DynamicPortfolioChart (grafico principale esistente)
-└── HistoricalChartsCarousel (NUOVO)
-    ├── PerformanceEvolutionChart (Slide 1)
-    ├── YearlyReturnChart (Slide 2)
-    └── PortfolioEvolutionChart (Slide 3)
+Layout CSS:
+```
+Slide 1:
++---------------------------+-------------+
+|  LineChart (flex-[2])     | BarChart    |
+|  Rendimento % e P/L       | (flex-1)    |
++---------------------------+-------------+
 ```
 
 ---
 
-## Dettagli Tecnici
+### 2. Fix tooltip istogramma (testo nero illeggibile)
 
-### Nuovo Componente: `HistoricalChartsCarousel.tsx`
+**File**: `src/components/dashboard/charts/YearlyReturnChart.tsx`
 
-**Props**:
-- `historicalData: HistoricalDataEntry[]` - dati storici dal DB
-- `viewMode: ViewMode` - vista corrente (base, netting_total, netting_ex_cc, netting_ex_cc_np)
-- `currentValue: number` - valore attuale del patrimonio (per aggiungere punto "oggi" ai grafici)
-- `currentDate: string | null` - data snapshot attuale
+Il tooltip ha `contentStyle` con sfondo corretto ma manca il colore del testo. Aggiungere:
 
-**Struttura**:
-- Utilizza i componenti Carousel esistenti (`Carousel`, `CarouselContent`, `CarouselItem`, `CarouselPrevious`, `CarouselNext`)
-- Ogni slide e una Card con titolo e grafico Recharts
-- Indicatori pallini per navigazione (come il ViewModeSelector esistente)
-
----
-
-### Slide 1: Evoluzione Rendimento (LineChart)
-
-**Dati da mostrare**:
-- Asse X: date degli snapshot
-- Asse Y primario: Rendimento % cumulativo
-- Asse Y secondario (opzionale): Valore assoluto P/L
-
-**Calcolo rendimento**:
-Per ogni snapshot (partendo dal piu vecchio come base):
-```
-P/L = valore_snapshot - valore_iniziale - depositi_periodo
-Rendimento % = (P/L / giacenza_media_periodo) * 100
-```
-
-**Selezione valore in base a viewMode**:
-- `base`: usa `total_value`
-- `netting_total`: usa `netting_total`
-- `netting_ex_cc`: usa `netting_ex_cc`
-- `netting_ex_cc_np`: usa `netting_ex_cc_np` (fallback a `netting_ex_cc`)
-
----
-
-### Slide 2: Rendimento per Anno (BarChart)
-
-**Dati da mostrare**:
-- Asse X: anni (2023, 2024, 2025, ecc.)
-- Asse Y: Rendimento % annuale
-
-**Calcolo**:
-Per ogni anno con dati:
-1. Trova il primo e ultimo snapshot dell'anno
-2. Calcola rendimento % dall'inizio alla fine dell'anno
-3. Colori: verde per rendimento positivo, rosso per negativo
-
----
-
-### Slide 3: Evoluzione Patrimonio (LineChart)
-
-**Dati da mostrare**:
-- Asse X: date degli snapshot
-- Asse Y: valore patrimoniale
-
-**Caratteristiche**:
-- Linea continua con area fill sfumata
-- Punto evidenziato per il valore corrente (se disponibile)
-- Tooltip con data e valore formattato
-
----
-
-## Modifiche ai File Esistenti
-
-### `Dashboard.tsx`
-
-Aggiungere il nuovo carousel sotto `DynamicPortfolioChart`:
-
-```tsx
-// Dopo DynamicPortfolioChart
-<HistoricalChartsCarousel
-  historicalData={historicalData}
-  viewMode={viewMode}
-  currentValue={
-    viewMode === 'base' ? summary?.totalValue ?? 0
-    : viewMode === 'netting_total' ? netting.nettingTotal
-    : viewMode === 'netting_ex_cc' ? netting.nettingExCoveredCall
-    : netting.nettingExCCAndNP
-  }
-  currentDate={portfolio?.snapshot_date}
-  deposits={deposits}
+```typescript
+<Tooltip
+  contentStyle={{
+    backgroundColor: 'hsl(var(--card))',
+    border: '1px solid hsl(var(--border))',
+    borderRadius: '8px',
+    fontSize: '12px',
+    color: 'hsl(var(--foreground))',  // <-- AGGIUNGERE
+  }}
+  // ...
 />
 ```
 
 ---
 
-## Nuovi File da Creare
+### 3. Carousel loop infinito
 
-| File | Descrizione |
-|------|-------------|
-| `src/components/dashboard/HistoricalChartsCarousel.tsx` | Container carousel con navigazione |
-| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Grafico evoluzione rendimento % e P/L |
-| `src/components/dashboard/charts/YearlyReturnChart.tsx` | Istogramma rendimento annuale |
-| `src/components/dashboard/charts/PortfolioEvolutionChart.tsx` | Grafico evoluzione patrimonio |
+**File**: `src/components/dashboard/HistoricalChartsCarousel.tsx`
 
----
+Embla Carousel supporta l'opzione `loop: true` tramite la prop `opts`:
 
-## Design UI
+```tsx
+<Carousel 
+  setApi={setApi} 
+  opts={{ loop: true }}  // <-- AGGIUNGERE
+  className="w-full"
+>
+```
 
-- I grafici usano la palette colori esistente (`hsl(var(--primary))`, `hsl(var(--profit))`, `hsl(var(--loss))`)
-- Altezza carousel: circa 300px
-- Responsive: su mobile i grafici si adattano alla larghezza
-- Navigazione carousel: frecce laterali + pallini indicatori (come ViewModeSelector)
-- Card con bordo sottile e sfondo `bg-card`
+Con questa opzione, cliccando "next" dall'ultima slide si torna alla prima, e viceversa.
 
 ---
 
-## Gestione Casi Limite
+### 4. Linea rendimento verde
 
-| Caso | Comportamento |
-|------|---------------|
-| Nessun dato storico | Mostra messaggio "Nessun dato storico disponibile. Salva degli snapshot per visualizzare i grafici." |
-| Solo 1 snapshot | Mostra solo Slide 3 (patrimonio) con un punto singolo |
-| Dati incompleti (es. `netting_ex_cc_np` null) | Fallback al campo `netting_ex_cc` |
+**File**: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+
+Cambiare il colore della linea del rendimento da `hsl(var(--primary))` a `hsl(var(--profit))` (verde):
+
+```tsx
+// Linea 186-194
+<Line
+  yAxisId="left"
+  type="monotone"
+  dataKey="returnPct"
+  stroke="hsl(var(--profit))"        // <-- CAMBIARE (era --primary)
+  strokeWidth={2}
+  dot={{ r: 3, fill: 'hsl(var(--profit))' }}  // <-- CAMBIARE
+  activeDot={{ r: 5 }}
+  name="returnPct"
+/>
+```
 
 ---
 
-## Librerie Utilizzate
+## Riepilogo Modifiche per File
 
-- **Recharts**: gia presente nel progetto per i grafici esistenti (`LineChart`, `BarChart`, `Area`, `Tooltip`, `ResponsiveContainer`)
-- **Embla Carousel**: gia presente tramite il componente `Carousel` di shadcn/ui
-- **date-fns**: gia presente per la formattazione date
+| File | Modifiche |
+|------|-----------|
+| `HistoricalChartsCarousel.tsx` | Unire slide 1 e 2 in layout affiancato; aggiungere `opts={{ loop: true }}`; aggiornare array `slides` |
+| `YearlyReturnChart.tsx` | Aggiungere `color: 'hsl(var(--foreground))'` al tooltip |
+| `PerformanceEvolutionChart.tsx` | Cambiare colore linea da `--primary` a `--profit` |
 
 ---
 
 ## Risultato Atteso
 
-1. Sotto il grafico principale appare un carousel navigabile
-2. Slide 1 mostra l'evoluzione del rendimento % con linea e opzionalmente il P/L assoluto
-3. Slide 2 mostra un istogramma con il rendimento di ogni anno (colorato verde/rosso)
-4. Slide 3 mostra l'andamento del patrimonio nel tempo
-5. Tutti i grafici si aggiornano automaticamente quando si cambia viewMode
-6. I dati storici sono ordinati cronologicamente (dal piu vecchio al piu recente)
+1. Prima slide mostra grafico lineare (rendimento % e P/L) sulla sinistra e istogramma annuale sulla destra
+2. Il tooltip dell'istogramma ha testo leggibile (bianco su sfondo scuro)
+3. Il carousel e infinito: dall'ultima slide si puo tornare alla prima e viceversa
+4. La linea del rendimento % e verde invece che blu/primary
 
