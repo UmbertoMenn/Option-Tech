@@ -1,89 +1,269 @@
 
-# Piano: Correzione Validazione Ticker Diretti
+# Piano: Correzione Definitiva Identificazione ETF e Classificazione Settoriale
 
-## Problema Identificato
+## Problemi Identificati
 
-Quando l'utente inserisce un ticker diretto come "AAPL" nel tab Prezzo e clicca "Verifica", il sistema restituisce "Ticker non trovato" perché:
+### Problema 1: ETF Non Rilevati (0 ETF analizzati)
 
-1. L'edge function `fetch-underlying-prices` e progettata per risolvere nomi company (es. "NVIDIA CORP") in ticker
-2. La logica di ricerca cerca nelle chiavi di `SPECIAL_MAPPINGS` (es. "APPLE", "NVIDIA") ma non trova "AAPL"
-3. Il pattern matching sulla linea 150-153 cerca ticker nel testo ma controlla solo se esiste gia in `SPECIAL_MAPPINGS`
-4. L'AI inference viene chiamata ma potrebbe non funzionare correttamente per input che sono gia ticker
+**Causa**: In `src/pages/RiskAnalyzer.tsx` (linee 52-66), l'identificazione degli ETF avviene tramite pattern matching sul nome (`ETF_PATTERN.test(stock.underlying)`) invece di usare il flag booleano `stock.isETF` che viene impostato correttamente in `riskCalculator.ts` basandosi su `asset_type === 'etf'`.
+
+**Perche il pattern fallisce**: Nomi ETF abbreviati o non standard (es. "ISHSIII-CORE MSCI WLD") potrebbero non matchare tutti i pattern.
+
+### Problema 2: Azioni con prefisso "AZ." finiscono in "Other"
+
+**Causa**: La funzione `getStockSector()` in `src/lib/sectorExposure.ts` (linee 187-202):
+1. Cerca di estrarre il ticker con regex `/^([A-Z]{1,5})(?:\s|$)/` - ma "AZ.APPLE INC" inizia con "AZ." che non e un ticker valido
+2. Poi cerca i ticker noti nel nome con `upperName.includes(ticker)` - ma cerca "AAPL" nel nome che contiene "APPLE" (senza la "L")
+
+**Esempio**: `getStockSector("AZ.APPLE INC")` ritorna "Other" perche:
+- La regex estrae "AZ" che non e nel STOCK_SECTORS
+- La ricerca per "AAPL" nel nome "AZ.APPLE INC" fallisce (il nome contiene "APPLE" non "AAPL")
+
+### Problema 3: Derivati finiscono in "Other"
+
+**Causa**: La funzione `getStockSectorWithMapping()` ha un problema simile:
+1. Cerca il ticker `mapping.ticker` nel nome (`upperName.includes(mapping.ticker)`) 
+2. Ma il nome e "IREN LTD" e il ticker salvato potrebbe essere "IREN" - questo dovrebbe matchare
+3. Il problema e che i `sectorMappings` potrebbero essere vuoti se la risoluzione AI fallisce o non viene chiamata
+
+**Evidenza dal flusso dati**:
+- `stocksForSectorMapping` in RiskAnalyzer.tsx raccoglie gli stock da risolvere
+- Ma usa `ETF_PATTERN.test(stock.underlying)` per escludere gli ETF, che fallisce
+- Quindi potrebbe includere erroneamente ETF come "azioni da risolvere"
+
+---
 
 ## Soluzione
 
-Aggiungere un nuovo Step 0 nella logica di risoluzione che verifica se l'input sembra gia un ticker valido (formato breve, 1-5 caratteri maiuscoli) e in tal caso lo valida direttamente su Yahoo Finance.
+### Modifica 1: Usare `stock.isETF` invece del pattern matching (RiskAnalyzer.tsx)
 
-## Modifiche Tecniche
+**File**: `src/pages/RiskAnalyzer.tsx`
 
-### File: `supabase/functions/fetch-underlying-prices/index.ts`
-
-Aggiungere la seguente logica prima dello Step 1 (intorno alla linea 363):
+Linee 52-66 - Sostituire pattern matching con flag booleano:
 
 ```typescript
-// Step 0: Check if input looks like a ticker (1-5 uppercase letters/hyphen)
-// If so, validate directly on Yahoo Finance
-const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?$/;
-if (tickerPattern.test(underlying.toUpperCase())) {
-  const directTicker = underlying.toUpperCase();
-  console.log(`Input "${underlying}" looks like a ticker, validating directly...`);
+// PRIMA
+const etfIsins = useMemo(() => {
+  const isins: string[] = [];
+  const seen = new Set<string>();
   
-  const isValid = await validateTicker(directTicker);
-  if (isValid) {
-    ticker = directTicker;
-    console.log(`Direct ticker "${directTicker}" validated successfully`);
+  for (const stock of analysis.stockDetails) {
+    if (stock.isin && !seen.has(stock.isin)) {
+      seen.add(stock.isin);
+      if (ETF_PATTERN.test(stock.underlying)) {  // PROBLEMA
+        isins.push(stock.isin);
+      }
+    }
   }
+  return isins;
+}, [analysis.stockDetails]);
+
+// DOPO
+const etfIsins = useMemo(() => {
+  const isins: string[] = [];
+  const seen = new Set<string>();
+  
+  for (const stock of analysis.stockDetails) {
+    if (stock.isin && !seen.has(stock.isin) && stock.isETF) {  // USA IL FLAG
+      seen.add(stock.isin);
+      isins.push(stock.isin);
+    }
+  }
+  return isins;
+}, [analysis.stockDetails]);
+```
+
+Linea 87 - Correggere anche il filtro per sector mapping:
+
+```typescript
+// PRIMA
+if (!ETF_PATTERN.test(stock.underlying)) {
+
+// DOPO  
+if (!stock.isETF) {
+```
+
+Rimuovere la definizione di `ETF_PATTERN` (linea 49) se non piu usata.
+
+### Modifica 2: Normalizzare i nomi prima della ricerca settori (sectorExposure.ts)
+
+**File**: `src/lib/sectorExposure.ts`
+
+Modificare `getStockSector()` (linee 187-202) per normalizzare il nome rimuovendo "AZ.":
+
+```typescript
+function getStockSector(name: string): string {
+  // Normalize: remove AZ. prefix common in Italian brokers
+  const normalizedName = name.replace(/^AZ\./i, '').trim();
+  
+  // Try to extract ticker from name (often first word in uppercase)
+  const tickerMatch = normalizedName.match(/^([A-Z]{1,5})(?:\s|$)/);
+  if (tickerMatch && STOCK_SECTORS[tickerMatch[1]]) {
+    return STOCK_SECTORS[tickerMatch[1]];
+  }
+  
+  // Also check full name for known tickers anywhere
+  const upperName = normalizedName.toUpperCase();
+  for (const [ticker, sector] of Object.entries(STOCK_SECTORS)) {
+    if (upperName.includes(ticker) && ticker.length >= 3) {
+      return sector;
+    }
+  }
+  
+  return 'Other';
 }
 ```
 
-### Posizione nel flusso
+### Modifica 3: Aggiungere mapping statici per nomi comuni (sectorExposure.ts)
 
-```text
-for (const underlying of underlyings) {
-  let ticker: string | null = null;
+Per gestire casi come "APPLE INC" -> "AAPL", aggiungere un mapping di nomi aziendali:
+
+```typescript
+// Mapping da nomi comuni a ticker (per gestire "APPLE INC" -> AAPL)
+const COMPANY_NAME_TO_TICKER: Record<string, string> = {
+  'APPLE': 'AAPL',
+  'NVIDIA': 'NVDA',
+  'ALPHABET': 'GOOGL',
+  'GOOGLE': 'GOOGL',
+  'AMAZON': 'AMZN',
+  'MICROSOFT': 'MSFT',
+  'META': 'META',
+  'TESLA': 'TSLA',
+  'INTEL': 'INTC',
+  'AMD': 'AMD',
+  'ADVANCED MICRO': 'AMD',
+  'BROADCOM': 'AVGO',
+  'QUALCOMM': 'QCOM',
+  'CISCO': 'CSCO',
+  'ORACLE': 'ORCL',
+  'SALESFORCE': 'CRM',
+  'ADOBE': 'ADBE',
+  'NETFLIX': 'NFLX',
+  'PAYPAL': 'PYPL',
+  'VISA': 'V',
+  'MASTERCARD': 'MA',
+  'JPMORGAN': 'JPM',
+  'GOLDMAN': 'GS',
+  'BERKSHIRE': 'BRK.B',
+  'UNITEDHEALTH': 'UNH',
+  'JOHNSON': 'JNJ',
+  'PROCTER': 'PG',
+  'EXXON': 'XOM',
+  'CHEVRON': 'CVX',
+  'WALMART': 'WMT',
+  'DISNEY': 'DIS',
+  'COCA COLA': 'KO',
+  'PEPSI': 'PEP',
+  'PEPSICO': 'PEP',
+  'IREN': 'IREN',
+  'MARA': 'MARA',
+  'MARATHON': 'MARA',
+  'RIOT': 'RIOT',
+  'PALANTIR': 'PLTR',
+  'COINBASE': 'COIN',
+  'MICROSTRATEGY': 'MSTR',
+  'COREWEAVE': 'CRWV',
+};
+
+function getStockSector(name: string): string {
+  // Normalize: remove AZ. prefix
+  const normalizedName = name.replace(/^AZ\./i, '').trim();
+  const upperName = normalizedName.toUpperCase();
   
-  // NEW: Step 0 - Direct ticker validation
-  if (input looks like ticker) {
-    validate on Yahoo Finance
-    if valid -> use it
+  // 1. Try direct ticker match
+  const tickerMatch = normalizedName.match(/^([A-Z]{1,5})(?:\s|$)/);
+  if (tickerMatch && STOCK_SECTORS[tickerMatch[1]]) {
+    return STOCK_SECTORS[tickerMatch[1]];
   }
   
-  // Step 1: Check underlying_mappings cache
-  if (!ticker) { ... }
+  // 2. Try company name to ticker mapping
+  for (const [companyName, ticker] of Object.entries(COMPANY_NAME_TO_TICKER)) {
+    if (upperName.includes(companyName)) {
+      if (STOCK_SECTORS[ticker]) {
+        return STOCK_SECTORS[ticker];
+      }
+    }
+  }
   
-  // Step 2: Try static mappings
-  if (!ticker) { ... }
+  // 3. Check full name for known tickers
+  for (const [ticker, sector] of Object.entries(STOCK_SECTORS)) {
+    if (upperName.includes(ticker) && ticker.length >= 3) {
+      return sector;
+    }
+  }
   
-  // Step 3: Try AI inference
-  if (!ticker) { ... }
-  
-  // Rest of the logic...
+  return 'Other';
 }
 ```
 
-### Dettaglio della modifica
+### Modifica 4: Applicare normalizzazione anche in getStockSectorWithMapping
 
-| Azione | Descrizione |
-|--------|-------------|
-| Aggiungere pattern regex | `/^[A-Z]{1,5}(-[A-Z])?$/` per riconoscere ticker standard (es. AAPL, BRK-B) |
-| Validazione diretta | Se l'input matcha il pattern, chiamare `validateTicker()` (gia esistente) |
-| Log diagnostico | Aggiungere log per tracciare il flusso |
-| Fallback | Se la validazione diretta fallisce, proseguire con il flusso normale |
+```typescript
+function getStockSectorWithMapping(
+  name: string, 
+  sectorMappings: Record<string, SectorMapping>,
+  isin?: string
+): string {
+  // 1. Try by ISIN from dynamic mapping
+  if (isin && sectorMappings[isin]?.sector) {
+    return normalizeSectorName(sectorMappings[isin].sector);
+  }
+  
+  // Normalize name: remove AZ. prefix
+  const normalizedName = name.replace(/^AZ\./i, '').trim();
+  const upperName = normalizedName.toUpperCase();
+  
+  // 2. Try by name key (for derivatives)
+  if (sectorMappings[`name:${upperName}`]?.sector) {
+    return normalizeSectorName(sectorMappings[`name:${upperName}`].sector);
+  }
+  
+  // 3. Try to find by ticker in sectorMappings
+  for (const [key, mapping] of Object.entries(sectorMappings)) {
+    if (key.startsWith('ticker:') && mapping.ticker && upperName.includes(mapping.ticker.toUpperCase())) {
+      return normalizeSectorName(mapping.sector);
+    }
+    if (!key.startsWith('ticker:') && !key.startsWith('name:') && mapping.ticker) {
+      if (upperName.includes(mapping.ticker.toUpperCase()) && mapping.ticker.length >= 2) {
+        return normalizeSectorName(mapping.sector);
+      }
+    }
+  }
+  
+  // 4. Fallback to static mapping (which now handles normalization internally)
+  return getStockSector(name);
+}
+```
+
+---
+
+## Riepilogo Modifiche
+
+| File | Linee | Modifica |
+|------|-------|----------|
+| `src/pages/RiskAnalyzer.tsx` | 49 | Rimuovere `ETF_PATTERN` non piu usato |
+| `src/pages/RiskAnalyzer.tsx` | 57-62 | Usare `stock.isETF` per identificare ETF |
+| `src/pages/RiskAnalyzer.tsx` | 87 | Usare `!stock.isETF` per escludere ETF dal sector mapping |
+| `src/lib/sectorExposure.ts` | ~180 | Aggiungere `COMPANY_NAME_TO_TICKER` mapping |
+| `src/lib/sectorExposure.ts` | 187-202 | Modificare `getStockSector()` con normalizzazione e name mapping |
+| `src/lib/sectorExposure.ts` | 206-237 | Modificare `getStockSectorWithMapping()` con normalizzazione |
+
+---
 
 ## Risultato Atteso
 
-Dopo la modifica:
+| Strumento | Prima | Dopo |
+|-----------|-------|------|
+| ETF (ISHARES, VANGUARD, ecc.) | 0 ETF analizzati | X ETF analizzati (basato su asset_type) |
+| AZ.APPLE INC | Other | Technology |
+| AZ.ALPHABET IN-CL A | Other | Technology |
+| AZ.IREND LTD | Other | Technology (tramite IREN ticker) |
+| Naked PUT NVIDIA | Other | Technology |
+| Double Diagonal AMD | Other | Technology |
 
-| Input | Prima | Dopo |
-|-------|-------|------|
-| AAPL | "Ticker non trovato" | Validato, prezzo restituito |
-| LEU | "Ticker non trovato" | Validato, prezzo restituito |
-| NVIDIA CORP | Funziona | Funziona (invariato) |
-| BRK-B | "Ticker non trovato" | Validato, prezzo restituito |
-| xyz123 | Errore | Prosegue con flusso normale |
+## Prevenzione Future Regressioni
 
-## File da Modificare
-
-| File | Modifica |
-|------|----------|
-| `supabase/functions/fetch-underlying-prices/index.ts` | Aggiungere Step 0 con validazione diretta ticker |
+1. Il flag `isETF` e robusto perche deriva da `asset_type` nel database (impostato durante l'import Excel)
+2. La normalizzazione "AZ." e centralizzata e applicata in tutti i punti di lookup
+3. Il mapping `COMPANY_NAME_TO_TICKER` gestisce le variazioni di nomi comuni
+4. I sectorMappings dinamici hanno comunque priorita per override manuali
