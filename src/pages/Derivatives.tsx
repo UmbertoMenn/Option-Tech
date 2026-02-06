@@ -254,6 +254,7 @@ export function Derivatives() {
                         coveredCall={cc} 
                         stockPositions={stockPositions} 
                         getOverrideForPosition={getOverrideForPosition}
+                        underlyingPrices={underlyingPrices}
                         totalContractsForUnderlying={
                           totalCoveredCallContractsByUnderlying[
                             cc.underlying.description || cc.option.underlying || ''
@@ -296,7 +297,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1">
                     {categories.longPuts.map((lp, index) => (
-                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} />
+                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
                   </div>
                 )}
@@ -518,12 +519,12 @@ interface RowPropsWithPrices extends RowProps {
   underlyingPrices: Record<string, UnderlyingPrice>;
 }
 
-interface CoveredCallRowProps extends RowProps {
+interface CoveredCallRowProps extends RowPropsWithPrices {
   coveredCall: CoveredCallPosition;
   totalContractsForUnderlying: number;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, totalContractsForUnderlying }: CoveredCallRowProps) {
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
   
@@ -620,16 +621,21 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           />
           
           {/* Col 7: PS */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                PS: {formatCurrency(underlyingPrice, 'USD')}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Prezzo Sottostante</p>
-            </TooltipContent>
-          </Tooltip>
+          <div className="text-right flex items-center justify-end">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                  PS: {formatCurrency(underlyingPrice, 'USD')}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Sottostante</p>
+              </TooltipContent>
+            </Tooltip>
+            {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+              <StalePriceIndicator />
+            )}
+          </div>
           
           {/* Col 8: Contratti */}
           <span className="text-sm text-muted-foreground text-right">
@@ -692,7 +698,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
   );
 }
 
-function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longPut: LongPutPosition } & RowProps) {
+function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyingPrices }: { longPut: LongPutPosition } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying, contracts, isPartial } = longPut;
   
@@ -772,18 +778,23 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           />
           
           {/* Col 7: PS */}
-          <div className="text-right">
+          <div className="text-right flex items-center justify-end">
             {hasUnderlyingPrice ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
             ) : (
               <span className="text-sm text-muted-foreground">-</span>
             )}
@@ -882,7 +893,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -954,7 +965,30 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 8: Contratti */}
+          {/* Col 8: PS */}
+          <div className="text-right flex items-center justify-end">
+            {hasUnderlyingPrice ? (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {underlyingPrices[underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
+            )}
+          </div>
+          
+          {/* Col 9: Contratti */}
           <span className="text-sm text-muted-foreground text-right">
             {contracts} × 100
           </span>
@@ -1094,7 +1128,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
       >
           {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1166,6 +1200,29 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           <span className="text-sm text-muted-foreground text-right">
             {contracts} × 100
           </span>
+          
+          {/* Col 8: PS */}
+          <div className="text-right flex items-center justify-end">
+            {hasUnderlyingPrice ? (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Prezzo Sottostante</p>
+                  </TooltipContent>
+                </Tooltip>
+                {underlyingPrices[underlying]?.isStale && (
+                  <StalePriceIndicator />
+                )}
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">-</span>
+            )}
+          </div>
           
           
           {/* Col 9: P/L */}
