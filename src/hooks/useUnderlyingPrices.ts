@@ -1,6 +1,23 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+// Normalize name for matching (same logic as edge function)
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    .replace(/\bLTD\b/g, '')
+    .replace(/\bLLC\b/g, '')
+    .replace(/\bPLC\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .replace(/\bTHE\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export interface UnderlyingPrice {
   price: number;
   currency: string;
@@ -51,16 +68,30 @@ export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesR
         const results: Record<string, UnderlyingPrice> = {};
         
         // Step 1: Get underlying -> ticker mappings from cache
+        // Normalize names to match how edge function saves them
+        const normalizedUnderlyings = uniqueUnderlyings.map(u => normalizeName(u));
+        const uniqueNormalized = [...new Set(normalizedUnderlyings.filter(n => n.length > 0))];
+        
         const { data: mappings } = await supabase
           .from('underlying_mappings')
           .select('underlying, ticker')
-          .in('underlying', uniqueUnderlyings);
+          .in('underlying', uniqueNormalized);
         
-        // Build mapping lookup
+        // Build mapping lookup: map original names to tickers via normalized keys
         const underlyingToTicker: Record<string, string> = {};
         if (mappings) {
+          // Create normalized -> ticker lookup
+          const normalizedToTicker: Record<string, string> = {};
           for (const m of mappings) {
-            underlyingToTicker[m.underlying] = m.ticker;
+            normalizedToTicker[m.underlying] = m.ticker;
+          }
+          
+          // Map original names to tickers
+          for (const original of uniqueUnderlyings) {
+            const normalized = normalizeName(original);
+            if (normalizedToTicker[normalized]) {
+              underlyingToTicker[original] = normalizedToTicker[normalized];
+            }
           }
         }
         
