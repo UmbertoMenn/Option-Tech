@@ -14,13 +14,15 @@ import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
-import { HelpCircle, AlertTriangle } from 'lucide-react';
+import { HelpCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
   Tooltip as UITooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useBenchmarkData } from '@/hooks/useBenchmarkData';
+import { useBenchmarkData, BenchmarkStaleSummary } from '@/hooks/useBenchmarkData';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -54,6 +56,20 @@ function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): nu
   }
 }
 
+// Format stale summary for tooltip
+function formatStaleSummary(staleSummary: BenchmarkStaleSummary[]): string {
+  if (staleSummary.length === 0) return '';
+  
+  const lines = staleSummary.map(s => {
+    if (s.daysDiff === -1) {
+      return `• ${s.ticker}: nessun dato disponibile`;
+    }
+    return `• ${s.ticker}: ultimo dato ${s.lastDate} (${s.daysDiff} giorni fa)`;
+  });
+  
+  return '\n\n⚠️ Dati obsoleti:\n' + lines.join('\n');
+}
+
 // Custom legend component with benchmark tooltip
 function CustomLegend({ 
   hasBenchmarkData, 
@@ -61,20 +77,25 @@ function CustomLegend({
   isHoveringBenchmark,
   onBenchmarkHover,
   hasDataGaps,
+  staleSummary,
+  onRefresh,
+  isRefreshing,
 }: { 
   hasBenchmarkData: boolean; 
   viewMode: ViewMode;
   isHoveringBenchmark: boolean;
   onBenchmarkHover: (hovering: boolean) => void;
   hasDataGaps: boolean;
+  staleSummary: BenchmarkStaleSummary[];
+  onRefresh: () => void;
+  isRefreshing: boolean;
 }) {
   const benchmarkDescription = viewMode === 'base' 
     ? 'Media ponderata di MSCI World (URTH), S&P 500 (SPY), MSCI ACWI (ACWI), Stoxx 600 (EXSA.DE). Benchmark scalato al 60% equity per la vista base.'
     : 'Benchmark dinamico basato sull\'esposizione azionaria:\n• Esposizione ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
 
-  const gapWarning = hasDataGaps 
-    ? '\n\n⚠️ Attenzione: alcuni dati benchmark potrebbero essere obsoleti o mancanti per alcune date.'
-    : '';
+  const staleInfo = formatStaleSummary(staleSummary);
+  const showWarning = hasDataGaps || staleSummary.length > 0;
 
   return (
     <div className="flex items-center justify-center gap-4 text-xs mb-2">
@@ -94,16 +115,28 @@ function CustomLegend({
               style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
             />
             <span className="text-foreground">Benchmark</span>
-            {hasDataGaps ? (
+            {showWarning ? (
               <AlertTriangle className="w-3 h-3 text-warning" />
             ) : (
               <HelpCircle className="w-3 h-3 text-muted-foreground" />
             )}
           </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-sm">
-            <p className="text-xs whitespace-pre-line">{benchmarkDescription}{gapWarning}</p>
+          <TooltipContent side="top" className="max-w-md">
+            <p className="text-xs whitespace-pre-line">{benchmarkDescription}{staleInfo}</p>
           </TooltipContent>
         </UITooltip>
+      )}
+      {showWarning && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs text-warning hover:text-warning"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+        >
+          <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Aggiornando...' : 'Aggiorna'}
+        </Button>
       )}
     </div>
   );
@@ -117,14 +150,28 @@ export function PerformanceEvolutionChart({
   deposits,
 }: PerformanceEvolutionChartProps) {
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Fetch benchmark data
-  const { benchmarkReturns, hasBenchmarkData, dataGaps } = useBenchmarkData(historicalData, viewMode, currentDate);
+  const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(historicalData, viewMode, currentDate);
   
   // Log warning if there are data gaps
   if (dataGaps && dataGaps.length > 0) {
     console.warn('[Benchmark] Data gaps detected:', dataGaps);
   }
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshBenchmark();
+      toast.success('Dati benchmark aggiornati');
+    } catch (error) {
+      console.error('[Benchmark] Refresh error:', error);
+      toast.error('Errore nell\'aggiornamento del benchmark');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const chartData = useMemo(() => {
     if (historicalData.length === 0) return [];
@@ -232,6 +279,9 @@ export function PerformanceEvolutionChart({
         isHoveringBenchmark={isHoveringBenchmark}
         onBenchmarkHover={setIsHoveringBenchmark}
         hasDataGaps={dataGaps && dataGaps.length > 0}
+        staleSummary={staleSummary}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
