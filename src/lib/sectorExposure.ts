@@ -223,12 +223,8 @@ export interface ConsolidatedHolding {
   }>;
 }
 
-// Pattern per riconoscere ETF (sincronizzato con excelParser.ts)
-const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
-
-function isETFByName(name: string): boolean {
-  return ETF_PATTERN.test(name);
-}
+// NOTE: ETF detection now uses stock.isETF flag from riskCalculator (based on asset_type)
+// The pattern matching was unreliable and has been removed
 
 function getStockSector(name: string): string {
   // Normalize: remove AZ. prefix common in Italian brokers
@@ -339,7 +335,8 @@ export function calculateSectorExposure(
       continue;
     }
     
-    const isETF = isETFByName(stock.underlying);
+    // Use the isETF flag from StockRiskDetail (set in riskCalculator based on asset_type)
+    const isETF = stock.isETF;
     // Use gross value (stockValue / exchangeRate) instead of riskEUR (which is net of protections)
     const grossValueEUR = stock.stockValue / stock.exchangeRate;
     
@@ -519,7 +516,7 @@ export function calculateTopHoldings(
   
   // Add direct stock holdings
   for (const stock of analysis.stockDetails) {
-    if (!isETFByName(stock.underlying)) {
+    if (!stock.isETF) {
       const holding = getOrCreateHolding(stock.underlying);
       holding.totalExposure += stock.riskEUR;
       holding.sources.push({
@@ -532,7 +529,7 @@ export function calculateTopHoldings(
   
   // Add holdings from ETF decomposition
   for (const stock of analysis.stockDetails) {
-    if (isETFByName(stock.underlying) && stock.isin && etfAllocations[stock.isin]) {
+    if (stock.isETF && stock.isin && etfAllocations[stock.isin]) {
       const allocation = etfAllocations[stock.isin];
       const topHoldings = allocation.topHoldings || [];
       
