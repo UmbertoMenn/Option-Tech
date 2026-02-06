@@ -362,8 +362,25 @@ serve(async (req) => {
       
       let ticker: string | null = null;
       
+      // Step 0: Check if input looks like a ticker (1-5 uppercase letters, optional hyphen suffix)
+      // If so, validate directly on Yahoo Finance before other lookups
+      const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?$/;
+      const upperInput = underlying.toUpperCase().trim();
+      if (tickerPattern.test(upperInput)) {
+        console.log(`Input "${underlying}" looks like a ticker, validating directly...`);
+        const isValid = await validateTicker(upperInput);
+        if (isValid) {
+          ticker = upperInput;
+          console.log(`Direct ticker "${upperInput}" validated successfully`);
+        } else {
+          console.log(`Direct ticker "${upperInput}" validation failed, continuing with other methods`);
+        }
+      }
+      
       // Step 1: Check underlying_mappings cache
-      ticker = await checkUnderlyingMappingsCache(supabase, underlying);
+      if (!ticker) {
+        ticker = await checkUnderlyingMappingsCache(supabase, underlying);
+      }
       
       // Step 2: Try static mappings
       if (!ticker) {
