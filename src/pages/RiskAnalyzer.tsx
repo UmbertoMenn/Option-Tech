@@ -45,21 +45,16 @@ export function RiskAnalyzer() {
     [analysis, includeDerivatives, includeBonds]
   );
   
-  // Pattern per riconoscere ETF (sincronizzato con excelParser.ts e currencyExposure.ts)
-  const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
-  
-  // Extract ETF ISINs from stock details - look for instruments marked as ETF
+  // Extract ETF ISINs from stock details - use the isETF flag from riskCalculator
   const etfIsins = useMemo(() => {
     const isins: string[] = [];
     const seen = new Set<string>();
     
     for (const stock of analysis.stockDetails) {
-      if (stock.isin && !seen.has(stock.isin)) {
+      // Use the isETF flag (derived from asset_type === 'etf') instead of pattern matching
+      if (stock.isin && !seen.has(stock.isin) && stock.isETF) {
         seen.add(stock.isin);
-        // Check underlying name for ETF keywords with expanded patterns
-        if (ETF_PATTERN.test(stock.underlying)) {
-          isins.push(stock.isin);
-        }
+        isins.push(stock.isin);
       }
     }
     return isins;
@@ -79,12 +74,12 @@ export function RiskAnalyzer() {
     const names: string[] = []; // Derivative underlyings without ISIN
     const seen = new Set<string>();
     
-    // 1. Stock diretti (con ISIN)
+    // 1. Stock diretti (con ISIN) - use isETF flag instead of pattern matching
     for (const stock of analysis.stockDetails) {
       if (stock.isin && !seen.has(stock.isin)) {
         seen.add(stock.isin);
-        // Only include non-ETF stocks
-        if (!ETF_PATTERN.test(stock.underlying)) {
+        // Only include non-ETF stocks (use the flag from riskCalculator)
+        if (!stock.isETF) {
           stocks.push({ isin: stock.isin, description: stock.underlying });
         }
       }

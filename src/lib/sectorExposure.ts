@@ -112,6 +112,52 @@ const STOCK_SECTORS: Record<string, string> = {
   'WBD': 'Communication Services', 'PARA': 'Communication Services', 'OMC': 'Communication Services',
 };
 
+// Mapping da nomi aziendali comuni a ticker (per gestire "APPLE INC" -> AAPL)
+const COMPANY_NAME_TO_TICKER: Record<string, string> = {
+  'APPLE': 'AAPL',
+  'NVIDIA': 'NVDA',
+  'ALPHABET': 'GOOGL',
+  'GOOGLE': 'GOOGL',
+  'AMAZON': 'AMZN',
+  'MICROSOFT': 'MSFT',
+  'META': 'META',
+  'TESLA': 'TSLA',
+  'INTEL': 'INTC',
+  'AMD': 'AMD',
+  'ADVANCED MICRO': 'AMD',
+  'BROADCOM': 'AVGO',
+  'QUALCOMM': 'QCOM',
+  'CISCO': 'CSCO',
+  'ORACLE': 'ORCL',
+  'SALESFORCE': 'CRM',
+  'ADOBE': 'ADBE',
+  'NETFLIX': 'NFLX',
+  'PAYPAL': 'PYPL',
+  'VISA': 'V',
+  'MASTERCARD': 'MA',
+  'JPMORGAN': 'JPM',
+  'GOLDMAN': 'GS',
+  'BERKSHIRE': 'BRK.B',
+  'UNITEDHEALTH': 'UNH',
+  'JOHNSON': 'JNJ',
+  'PROCTER': 'PG',
+  'EXXON': 'XOM',
+  'CHEVRON': 'CVX',
+  'WALMART': 'WMT',
+  'DISNEY': 'DIS',
+  'COCA COLA': 'KO',
+  'PEPSI': 'PEP',
+  'PEPSICO': 'PEP',
+  'IREN': 'IREN',
+  'MARA': 'MARA',
+  'MARATHON': 'MARA',
+  'RIOT': 'RIOT',
+  'PALANTIR': 'PLTR',
+  'COINBASE': 'COIN',
+  'MICROSTRATEGY': 'MSTR',
+  'COREWEAVE': 'CRWV',
+};
+
 // Normalize sector names to standard GICS format
 function normalizeSectorName(sector: string): string {
   const normalized = sector.trim();
@@ -185,14 +231,26 @@ function isETFByName(name: string): boolean {
 }
 
 function getStockSector(name: string): string {
-  // Try to extract ticker from name (often first word in uppercase)
-  const tickerMatch = name.match(/^([A-Z]{1,5})(?:\s|$)/);
+  // Normalize: remove AZ. prefix common in Italian brokers
+  const normalizedName = name.replace(/^AZ\./i, '').trim();
+  const upperName = normalizedName.toUpperCase();
+  
+  // 1. Try direct ticker match (first word in uppercase)
+  const tickerMatch = normalizedName.match(/^([A-Z]{1,5})(?:\s|$)/);
   if (tickerMatch && STOCK_SECTORS[tickerMatch[1]]) {
     return STOCK_SECTORS[tickerMatch[1]];
   }
   
-  // Also check full name for known tickers anywhere
-  const upperName = name.toUpperCase();
+  // 2. Try company name to ticker mapping (handles "APPLE INC" -> AAPL)
+  for (const [companyName, ticker] of Object.entries(COMPANY_NAME_TO_TICKER)) {
+    if (upperName.includes(companyName)) {
+      if (STOCK_SECTORS[ticker]) {
+        return STOCK_SECTORS[ticker];
+      }
+    }
+  }
+  
+  // 3. Check full name for known tickers anywhere
   for (const [ticker, sector] of Object.entries(STOCK_SECTORS)) {
     if (upperName.includes(ticker) && ticker.length >= 3) {
       return sector;
@@ -202,7 +260,7 @@ function getStockSector(name: string): string {
   return 'Other';
 }
 
-// NEW: Get sector with dynamic mapping support for derivatives
+// Get sector with dynamic mapping support for derivatives
 function getStockSectorWithMapping(
   name: string, 
   sectorMappings: Record<string, SectorMapping>,
@@ -213,10 +271,17 @@ function getStockSectorWithMapping(
     return normalizeSectorName(sectorMappings[isin].sector);
   }
   
-  // 2. Try by name key (for derivatives)
-  const upperName = name.toUpperCase();
+  // Normalize name: remove AZ. prefix common in Italian brokers
+  const normalizedName = name.replace(/^AZ\./i, '').trim();
+  const upperName = normalizedName.toUpperCase();
+  
+  // 2. Try by name key (for derivatives) - try both original and normalized
   if (sectorMappings[`name:${upperName}`]?.sector) {
     return normalizeSectorName(sectorMappings[`name:${upperName}`].sector);
+  }
+  const originalUpperName = name.toUpperCase();
+  if (originalUpperName !== upperName && sectorMappings[`name:${originalUpperName}`]?.sector) {
+    return normalizeSectorName(sectorMappings[`name:${originalUpperName}`].sector);
   }
   
   // 3. Try to find by ticker in sectorMappings
@@ -232,7 +297,7 @@ function getStockSectorWithMapping(
     }
   }
   
-  // 4. Fallback to static mapping
+  // 4. Fallback to static mapping (which now handles AZ. normalization internally)
   return getStockSector(name);
 }
 
