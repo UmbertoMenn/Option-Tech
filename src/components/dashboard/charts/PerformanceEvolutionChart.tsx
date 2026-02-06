@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -8,14 +8,19 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Legend,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
-import { formatCurrency } from '@/lib/formatters';
+import { HelpCircle } from 'lucide-react';
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useBenchmarkData } from '@/hooks/useBenchmarkData';
 
 interface PerformanceEvolutionChartProps {
@@ -30,7 +35,6 @@ interface ChartDataPoint {
   date: string;
   formattedDate: string;
   value: number;
-  pl: number;
   returnPct: number;
   cumulativeDeposits: number;
   benchmarkReturn?: number;
@@ -51,6 +55,59 @@ function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): nu
   }
 }
 
+// Custom legend component with benchmark tooltip
+function CustomLegend({ 
+  hasBenchmarkData, 
+  viewMode,
+  isHoveringBenchmark,
+  onBenchmarkHover,
+}: { 
+  hasBenchmarkData: boolean; 
+  viewMode: ViewMode;
+  isHoveringBenchmark: boolean;
+  onBenchmarkHover: (hovering: boolean) => void;
+}) {
+  const benchmarkDescription = viewMode === 'base' 
+    ? 'Media ponderata MSCI World, S&P 500, MSCI ACWI, Stoxx 600, scalata per esposizione equity'
+    : 'Benchmark scalato all\'esposizione azionaria dello snapshot (100% equity se > 90%, 50/50 se 40-60%)';
+
+  return (
+    <div className="flex items-center justify-center gap-4 text-xs mb-2">
+      <div className="flex items-center gap-1.5">
+        <div className="w-3 h-0.5 bg-profit rounded" />
+        <span className="text-muted-foreground">Portafoglio</span>
+      </div>
+      {hasBenchmarkData && (
+        <TooltipProvider>
+          <UITooltip>
+            <TooltipTrigger asChild>
+              <div 
+                className="flex items-center gap-1.5 cursor-help"
+                onMouseEnter={() => onBenchmarkHover(true)}
+                onMouseLeave={() => onBenchmarkHover(false)}
+              >
+                <div 
+                  className="w-3 h-0.5 rounded" 
+                  style={{ 
+                    backgroundColor: isHoveringBenchmark 
+                      ? 'hsl(30, 100%, 50%)' 
+                      : 'hsla(30, 100%, 50%, 0.4)' 
+                  }} 
+                />
+                <span className="text-muted-foreground">Benchmark</span>
+                <HelpCircle className="w-3 h-3 text-muted-foreground" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <p className="text-xs">{benchmarkDescription}</p>
+            </TooltipContent>
+          </UITooltip>
+        </TooltipProvider>
+      )}
+    </div>
+  );
+}
+
 export function PerformanceEvolutionChart({
   historicalData,
   viewMode,
@@ -58,6 +115,8 @@ export function PerformanceEvolutionChart({
   currentDate,
   deposits,
 }: PerformanceEvolutionChartProps) {
+  const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
+  
   // Fetch benchmark data
   const { benchmarkReturns, hasBenchmarkData } = useBenchmarkData(historicalData, viewMode);
 
@@ -111,7 +170,6 @@ export function PerformanceEvolutionChart({
         date: entry.snapshot_date,
         formattedDate: format(parseISO(entry.snapshot_date), 'MMM yy', { locale: it }),
         value,
-        pl,
         returnPct,
         cumulativeDeposits,
         benchmarkReturn: benchmarkByDate[entry.snapshot_date],
@@ -138,7 +196,6 @@ export function PerformanceEvolutionChart({
           date: currentDate,
           formattedDate: format(parseISO(currentDate), 'MMM yy', { locale: it }),
           value: currentValue,
-          pl,
           returnPct,
           cumulativeDeposits,
           benchmarkReturn: benchmarkByDate[currentDate],
@@ -157,101 +214,82 @@ export function PerformanceEvolutionChart({
     );
   }
 
+  // Dynamic benchmark stroke based on hover state
+  const benchmarkStroke = isHoveringBenchmark 
+    ? 'hsl(30, 100%, 50%)' 
+    : 'hsla(30, 100%, 50%, 0.4)';
+  const benchmarkStrokeWidth = isHoveringBenchmark ? 2.5 : 1.5;
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
-        <XAxis
-          dataKey="formattedDate"
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-          tickLine={false}
-          axisLine={{ stroke: 'hsl(var(--border))' }}
-        />
-        <YAxis
-          yAxisId="left"
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-          tickLine={false}
-          axisLine={{ stroke: 'hsl(var(--border))' }}
-          tickFormatter={(value) => `${value.toFixed(1)}%`}
-        />
-        <YAxis
-          yAxisId="right"
-          orientation="right"
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-          tickLine={false}
-          axisLine={{ stroke: 'hsl(var(--border))' }}
-          tickFormatter={(value) => formatCurrency(value)}
-        />
-        <ReferenceLine yAxisId="left" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '8px',
-            fontSize: '12px',
-          }}
-          labelStyle={{
-            color: 'hsl(var(--foreground))',
-            fontWeight: 500,
-          }}
-          itemStyle={{
-            color: 'hsl(var(--foreground))',
-          }}
-          formatter={(value: number, name: string) => {
-            if (name === 'returnPct') return [`${value.toFixed(2)}%`, 'Rendimento'];
-            if (name === 'pl') return [formatCurrency(value), 'P/L'];
-            if (name === 'benchmarkReturn') return [`${value.toFixed(2)}%`, 'Benchmark'];
-            return [value, name];
-          }}
-          labelFormatter={(label) => `Data: ${label}`}
-        />
-        {hasBenchmarkData && (
-          <Legend 
-            verticalAlign="top" 
-            height={24}
-            formatter={(value) => {
-              if (value === 'returnPct') return 'Portafoglio';
-              if (value === 'benchmarkReturn') return 'Benchmark';
-              if (value === 'pl') return 'P/L';
-              return value;
-            }}
-          />
-        )}
-        <Line
-          yAxisId="left"
-          type="monotone"
-          dataKey="returnPct"
-          stroke="hsl(var(--profit))"
-          strokeWidth={2}
-          dot={{ r: 3, fill: 'hsl(var(--profit))' }}
-          activeDot={{ r: 5 }}
-          name="returnPct"
-        />
-        {hasBenchmarkData && (
-          <Line
-            yAxisId="left"
-            type="monotone"
-            dataKey="benchmarkReturn"
-            stroke="hsl(var(--chart-4))"
-            strokeWidth={2}
-            strokeDasharray="4 4"
-            dot={{ r: 2, fill: 'hsl(var(--chart-4))' }}
-            activeDot={{ r: 4 }}
-            name="benchmarkReturn"
-          />
-        )}
-        <Line
-          yAxisId="right"
-          type="monotone"
-          dataKey="pl"
-          stroke="hsl(var(--chart-2))"
-          strokeWidth={2}
-          strokeDasharray="5 5"
-          dot={{ r: 3, fill: 'hsl(var(--chart-2))' }}
-          activeDot={{ r: 5 }}
-          name="pl"
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="h-full flex flex-col">
+      <CustomLegend 
+        hasBenchmarkData={hasBenchmarkData} 
+        viewMode={viewMode}
+        isHoveringBenchmark={isHoveringBenchmark}
+        onBenchmarkHover={setIsHoveringBenchmark}
+      />
+      <div className="flex-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+            <XAxis
+              dataKey="formattedDate"
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              tickLine={false}
+              axisLine={{ stroke: 'hsl(var(--border))' }}
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              tickLine={false}
+              axisLine={{ stroke: 'hsl(var(--border))' }}
+              tickFormatter={(value) => `${value.toFixed(1)}%`}
+            />
+            <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '8px',
+                fontSize: '12px',
+              }}
+              labelStyle={{
+                color: 'hsl(var(--foreground))',
+                fontWeight: 500,
+              }}
+              itemStyle={{
+                color: 'hsl(var(--foreground))',
+              }}
+              formatter={(value: number, name: string) => {
+                if (name === 'returnPct') return [`${value.toFixed(2)}%`, 'Rendimento'];
+                if (name === 'benchmarkReturn') return [`${value.toFixed(2)}%`, 'Benchmark'];
+                return [value, name];
+              }}
+              labelFormatter={(label) => `Data: ${label}`}
+            />
+            <Line
+              type="monotone"
+              dataKey="returnPct"
+              stroke="hsl(var(--profit))"
+              strokeWidth={2}
+              dot={{ r: 3, fill: 'hsl(var(--profit))' }}
+              activeDot={{ r: 5 }}
+              name="returnPct"
+            />
+            {hasBenchmarkData && (
+              <Line
+                type="monotone"
+                dataKey="benchmarkReturn"
+                stroke={benchmarkStroke}
+                strokeWidth={benchmarkStrokeWidth}
+                strokeDasharray="4 4"
+                dot={{ r: 2, fill: benchmarkStroke }}
+                activeDot={{ r: 4, fill: 'hsl(30, 100%, 50%)' }}
+                name="benchmarkReturn"
+              />
+            )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
