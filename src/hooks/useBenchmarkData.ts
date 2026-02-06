@@ -128,9 +128,9 @@ export function useBenchmarkData(
   });
 
   // Calculate benchmark returns aligned with historical snapshots
-  const benchmarkReturns = useMemo(() => {
+  const { benchmarkReturns, dataGaps } = useMemo(() => {
     if (!benchmarkPrices || benchmarkPrices.length === 0 || historicalData.length < 2) {
-      return [];
+      return { benchmarkReturns: [], dataGaps: [] };
     }
 
     // Group prices by ticker and date
@@ -145,24 +145,31 @@ export function useBenchmarkData(
       (a, b) => new Date(a.snapshot_date).getTime() - new Date(b.snapshot_date).getTime()
     );
 
-    // Find the closest benchmark price for a given date
-    const getClosestPrice = (ticker: string, targetDate: string): number | null => {
+    // Track data gaps
+    const gaps: Array<{ date: string; missingTickers: string[] }> = [];
+
+    // Find the closest benchmark price for a given date (with gap detection)
+    const getClosestPrice = (ticker: string, targetDate: string): { price: number | null; isStale: boolean } => {
       const prices = pricesByTicker[ticker];
-      if (!prices) return null;
+      if (!prices) return { price: null, isStale: true };
       
       // Try exact match first
-      if (prices[targetDate]) return prices[targetDate];
+      if (prices[targetDate]) return { price: prices[targetDate], isStale: false };
       
       // Find closest date before target
       const sortedDates = Object.keys(prices).sort();
       for (let i = sortedDates.length - 1; i >= 0; i--) {
         if (sortedDates[i] <= targetDate) {
-          return prices[sortedDates[i]];
+          // Check if the gap is more than 7 days (stale data)
+          const priceDate = new Date(sortedDates[i]);
+          const target = new Date(targetDate);
+          const daysDiff = Math.floor((target.getTime() - priceDate.getTime()) / (1000 * 60 * 60 * 24));
+          return { price: prices[sortedDates[i]], isStale: daysDiff > 7 };
         }
       }
       
-      // Fallback to first available
-      return prices[sortedDates[0]] || null;
+      // Fallback to first available (definitely stale)
+      return { price: prices[sortedDates[0]] || null, isStale: true };
     };
 
     // Calculate cumulative returns from the first snapshot
@@ -172,8 +179,8 @@ export function useBenchmarkData(
     // Get base prices for all benchmarks
     const basePrices: Record<string, number> = {};
     [...EQUITY_BENCHMARKS, BOND_TICKER].forEach(ticker => {
-      const price = getClosestPrice(ticker, firstDate);
-      if (price) basePrices[ticker] = price;
+      const result = getClosestPrice(ticker, firstDate);
+      if (result.price) basePrices[ticker] = result.price;
     });
 
     // Calculate returns for each historical snapshot
@@ -197,27 +204,37 @@ export function useBenchmarkData(
 
       // Calculate equity benchmark return (average of available equity benchmarks)
       let equityReturns: number[] = [];
+      let hasStaleData = false;
+      const missingTickers: string[] = [];
+      
       EQUITY_BENCHMARKS.forEach(ticker => {
         const basePrice = basePrices[ticker];
-        const currentPrice = getClosestPrice(ticker, entry.snapshot_date);
-        if (basePrice && currentPrice) {
-          equityReturns.push(((currentPrice - basePrice) / basePrice) * 100);
+        const result = getClosestPrice(ticker, entry.snapshot_date);
+        if (basePrice && result.price) {
+          equityReturns.push(((result.price - basePrice) / basePrice) * 100);
+          if (result.isStale) hasStaleData = true;
+        } else {
+          missingTickers.push(ticker);
         }
       });
+      
+      if (hasStaleData || missingTickers.length > 0) {
+        gaps.push({ date: entry.snapshot_date, missingTickers });
+      }
       const avgEquityReturn = equityReturns.length > 0 
         ? equityReturns.reduce((a, b) => a + b, 0) / equityReturns.length 
         : 0;
 
       // Calculate balanced return (50% SPY + 50% AGG)
       const spyBase = basePrices[BALANCED_EQUITY_TICKER];
-      const spyCurrent = getClosestPrice(BALANCED_EQUITY_TICKER, entry.snapshot_date);
+      const spyResult = getClosestPrice(BALANCED_EQUITY_TICKER, entry.snapshot_date);
       const aggBase = basePrices[BOND_TICKER];
-      const aggCurrent = getClosestPrice(BOND_TICKER, entry.snapshot_date);
+      const aggResult = getClosestPrice(BOND_TICKER, entry.snapshot_date);
       
       let balancedReturn = 0;
-      if (spyBase && spyCurrent && aggBase && aggCurrent) {
-        const spyReturn = ((spyCurrent - spyBase) / spyBase) * 100;
-        const aggReturn = ((aggCurrent - aggBase) / aggBase) * 100;
+      if (spyBase && spyResult.price && aggBase && aggResult.price) {
+        const spyReturn = ((spyResult.price - spyBase) / spyBase) * 100;
+        const aggReturn = ((aggResult.price - aggBase) / aggBase) * 100;
         balancedReturn = 0.5 * spyReturn + 0.5 * aggReturn;
       }
 
@@ -248,9 +265,9 @@ export function useBenchmarkData(
       let equityReturnsCurrent: number[] = [];
       EQUITY_BENCHMARKS.forEach(ticker => {
         const basePrice = basePrices[ticker];
-        const currentPrice = getClosestPrice(ticker, currentDate);
-        if (basePrice && currentPrice) {
-          equityReturnsCurrent.push(((currentPrice - basePrice) / basePrice) * 100);
+        const result = getClosestPrice(ticker, currentDate);
+        if (basePrice && result.price) {
+          equityReturnsCurrent.push(((result.price - basePrice) / basePrice) * 100);
         }
       });
       const avgEquityReturnCurrent = equityReturnsCurrent.length > 0 
@@ -264,14 +281,14 @@ export function useBenchmarkData(
       
       // Calculate balanced return for current date
       const spyBase = basePrices[BALANCED_EQUITY_TICKER];
-      const spyCurrent = getClosestPrice(BALANCED_EQUITY_TICKER, currentDate);
+      const spyResult = getClosestPrice(BALANCED_EQUITY_TICKER, currentDate);
       const aggBase = basePrices[BOND_TICKER];
-      const aggCurrent = getClosestPrice(BOND_TICKER, currentDate);
+      const aggResult = getClosestPrice(BOND_TICKER, currentDate);
       
       let balancedReturnCurrent = 0;
-      if (spyBase && spyCurrent && aggBase && aggCurrent) {
-        const spyReturn = ((spyCurrent - spyBase) / spyBase) * 100;
-        const aggReturn = ((aggCurrent - aggBase) / aggBase) * 100;
+      if (spyBase && spyResult.price && aggBase && aggResult.price) {
+        const spyReturn = ((spyResult.price - spyBase) / spyBase) * 100;
+        const aggReturn = ((aggResult.price - aggBase) / aggBase) * 100;
         balancedReturnCurrent = 0.5 * spyReturn + 0.5 * aggReturn;
       }
 
@@ -292,11 +309,12 @@ export function useBenchmarkData(
       });
     }
 
-    return returns;
+    return { benchmarkReturns: returns, dataGaps: gaps };
   }, [benchmarkPrices, historicalData, viewMode, currentDate]);
 
   return {
     benchmarkReturns,
+    dataGaps,
     isLoading,
     hasBenchmarkData: benchmarkReturns.length > 0,
   };
