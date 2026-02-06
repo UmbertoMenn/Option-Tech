@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { AuthForm } from "@/components/auth/AuthForm";
@@ -10,12 +10,19 @@ import { Dashboard } from "@/components/dashboard/Dashboard";
 import { AdminPanel } from "@/components/admin/AdminPanel";
 import { Derivatives } from "@/pages/Derivatives";
 import { RiskAnalyzer } from "@/pages/RiskAnalyzer";
+import { ResetPassword } from "@/pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 function AppRoutes() {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
+  // Allow reset-password route even when not logged in
+  if (location.pathname === '/reset-password') {
+    return <ResetPassword />;
+  }
 
   if (loading) {
     return (
