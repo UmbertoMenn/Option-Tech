@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -131,12 +131,23 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
     [categories, underlyingPrices]
   );
   
+  // Ref to prevent multiple initialization attempts (fixes infinite loop)
+  const initAttemptedRef = useRef(false);
+  
   // Initialize local state from configs
   useEffect(() => {
     if (configs.length === 0 && !isLoading) {
-      // Initialize default configs if none exist
-      initializeDefaultsMutation.mutate();
+      // Only initialize once to prevent infinite loop
+      if (!initAttemptedRef.current) {
+        initAttemptedRef.current = true;
+        initializeDefaultsMutation.mutate();
+      }
       return;
+    }
+    
+    // Reset when we have configs (handles logout/login scenarios)
+    if (configs.length > 0) {
+      initAttemptedRef.current = false;
     }
     
     // Set global thresholds and enabled states for distance alerts
