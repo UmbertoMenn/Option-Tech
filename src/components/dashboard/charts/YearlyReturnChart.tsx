@@ -151,6 +151,12 @@ export function YearlyReturnChart({
             border: '1px solid hsl(var(--border))',
             borderRadius: '8px',
             fontSize: '12px',
+          }}
+          labelStyle={{
+            color: 'hsl(var(--foreground))',
+            fontWeight: 500,
+          }}
+          itemStyle={{
             color: 'hsl(var(--foreground))',
           }}
           formatter={(value: number) => [`${value.toFixed(2)}%`, 'Rendimento']}

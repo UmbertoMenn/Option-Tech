@@ -96,7 +96,7 @@ export function HistoricalChartsCarousel({
   return (
     <>
       {/* Card Carousel - Evoluzione Rendimento e Patrimonio */}
-      <Card className="border-border bg-card">
+      <Card className="lg:col-span-2 border-border bg-card">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
