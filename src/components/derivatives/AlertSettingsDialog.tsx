@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -390,7 +390,6 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
             
             {/* Tab 1: Global Distance Thresholds */}
             <TabsContent value="distance" className="mt-4">
-              <ScrollArea className="h-[350px] pr-4">
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
                     Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
@@ -469,12 +468,10 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     );
                   })}
                 </div>
-              </ScrollArea>
             </TabsContent>
             
             {/* Tab 2: Ticker Overrides */}
             <TabsContent value="ticker" className="mt-4">
-              <ScrollArea className="h-[350px] pr-4">
                 <div className="space-y-4">
               {/* Available tickers from strategies */}
               {availableTickers.length > 0 && (
@@ -615,7 +612,6 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 </div>
               </div>
                 </div>
-              </ScrollArea>
             </TabsContent>
             
             {/* Tab 3: Action Alerts */}
