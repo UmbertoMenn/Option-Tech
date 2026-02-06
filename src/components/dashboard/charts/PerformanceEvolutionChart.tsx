@@ -14,7 +14,7 @@ import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
-import { HelpCircle } from 'lucide-react';
+import { HelpCircle, AlertTriangle } from 'lucide-react';
 import {
   Tooltip as UITooltip,
   TooltipContent,
@@ -60,15 +60,21 @@ function CustomLegend({
   viewMode,
   isHoveringBenchmark,
   onBenchmarkHover,
+  hasDataGaps,
 }: { 
   hasBenchmarkData: boolean; 
   viewMode: ViewMode;
   isHoveringBenchmark: boolean;
   onBenchmarkHover: (hovering: boolean) => void;
+  hasDataGaps: boolean;
 }) {
   const benchmarkDescription = viewMode === 'base' 
     ? 'Media ponderata di MSCI World (URTH), S&P 500 (SPY), MSCI ACWI (ACWI), Stoxx 600 (EXSA.DE). Benchmark scalato al 60% equity per la vista base.'
     : 'Benchmark dinamico basato sull\'esposizione azionaria:\n• Esposizione ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
+
+  const gapWarning = hasDataGaps 
+    ? '\n\n⚠️ Attenzione: alcuni dati benchmark potrebbero essere obsoleti o mancanti per alcune date.'
+    : '';
 
   return (
     <div className="flex items-center justify-center gap-4 text-xs mb-2">
@@ -88,10 +94,14 @@ function CustomLegend({
               style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
             />
             <span className="text-foreground">Benchmark</span>
-            <HelpCircle className="w-3 h-3 text-muted-foreground" />
+            {hasDataGaps ? (
+              <AlertTriangle className="w-3 h-3 text-warning" />
+            ) : (
+              <HelpCircle className="w-3 h-3 text-muted-foreground" />
+            )}
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-sm">
-            <p className="text-xs whitespace-pre-line">{benchmarkDescription}</p>
+            <p className="text-xs whitespace-pre-line">{benchmarkDescription}{gapWarning}</p>
           </TooltipContent>
         </UITooltip>
       )}
@@ -109,7 +119,12 @@ export function PerformanceEvolutionChart({
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   
   // Fetch benchmark data
-  const { benchmarkReturns, hasBenchmarkData } = useBenchmarkData(historicalData, viewMode, currentDate);
+  const { benchmarkReturns, hasBenchmarkData, dataGaps } = useBenchmarkData(historicalData, viewMode, currentDate);
+  
+  // Log warning if there are data gaps
+  if (dataGaps && dataGaps.length > 0) {
+    console.warn('[Benchmark] Data gaps detected:', dataGaps);
+  }
 
   const chartData = useMemo(() => {
     if (historicalData.length === 0) return [];
@@ -216,6 +231,7 @@ export function PerformanceEvolutionChart({
         viewMode={viewMode}
         isHoveringBenchmark={isHoveringBenchmark}
         onBenchmarkHover={setIsHoveringBenchmark}
+        hasDataGaps={dataGaps && dataGaps.length > 0}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
