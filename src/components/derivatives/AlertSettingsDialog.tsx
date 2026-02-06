@@ -476,7 +476,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
               <TabsTrigger value="distance">Distanza</TabsTrigger>
               <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
               <TabsTrigger value="price">Prezzo</TabsTrigger>
-              <TabsTrigger value="action">Azione</TabsTrigger>
+              <TabsTrigger value="action">Stato</TabsTrigger>
               <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
               <TabsTrigger value="notifications">Notifiche</TabsTrigger>
             </TabsList>
