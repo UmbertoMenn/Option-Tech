@@ -27,6 +27,9 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { formatNumber } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
+
+type TimeRange = '1Y' | '2Y' | '3Y' | 'MAX';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -74,7 +77,7 @@ function formatStaleSummary(staleSummary: BenchmarkStaleSummary[]): string {
   return '\n\n⚠️ Dati obsoleti:\n' + lines.join('\n');
 }
 
-// Custom legend component with benchmark tooltip and currency toggle
+// Custom legend component with benchmark tooltip, time range selector, and currency toggle
 function CustomLegend({ 
   hasBenchmarkData, 
   isHoveringBenchmark,
@@ -91,6 +94,8 @@ function CustomLegend({
   onCurrencyAdjustedChange,
   usdExposurePct,
   hasUsdData,
+  timeRange,
+  onTimeRangeChange,
 }: { 
   hasBenchmarkData: boolean; 
   isHoveringBenchmark: boolean;
@@ -107,6 +112,8 @@ function CustomLegend({
   onCurrencyAdjustedChange: (checked: boolean) => void;
   usdExposurePct: number;
   hasUsdData: boolean;
+  timeRange: TimeRange;
+  onTimeRangeChange: (range: TimeRange) => void;
 }) {
   const equityPctFormatted = (equityExposurePct * 100).toFixed(1);
   const bondPctFormatted = ((1 - equityExposurePct) * 100).toFixed(1);
@@ -174,31 +181,52 @@ function CustomLegend({
         )}
       </div>
       
-      {/* Right side: Currency toggle */}
-      {hasBenchmarkData && hasUsdData && (
-        <UITooltip delayDuration={0}>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
-              <label 
-                htmlFor="currency-adjusted" 
-                className="text-xs text-foreground cursor-pointer flex items-center gap-1"
-              >
-                Currency
-                <HelpCircle className="w-3 h-3 text-muted-foreground" />
-              </label>
-              <Switch
-                id="currency-adjusted"
-                checked={currencyAdjusted}
-                onCheckedChange={onCurrencyAdjustedChange}
-                className="h-4 w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-sm">
-            <p className="text-xs whitespace-pre-line">{currencyTooltip}</p>
-          </TooltipContent>
-        </UITooltip>
-      )}
+      {/* Right side: Time range selector + Currency toggle */}
+      <div className="flex items-center gap-3">
+        {/* Time range selector */}
+        <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+          {(['1Y', '2Y', '3Y', 'MAX'] as const).map((range) => (
+            <button
+              key={range}
+              onClick={() => onTimeRangeChange(range)}
+              className={cn(
+                "px-2 py-0.5 text-xs transition-colors",
+                timeRange === range 
+                  ? "bg-primary text-primary-foreground" 
+                  : "hover:bg-muted text-foreground"
+              )}
+            >
+              {range === 'MAX' ? 'MAX' : range.replace('Y', 'A')}
+            </button>
+          ))}
+        </div>
+        
+        {/* Currency toggle */}
+        {hasBenchmarkData && hasUsdData && (
+          <UITooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-1.5">
+                <label 
+                  htmlFor="currency-adjusted" 
+                  className="text-xs text-foreground cursor-pointer flex items-center gap-1"
+                >
+                  Currency
+                  <HelpCircle className="w-3 h-3 text-muted-foreground" />
+                </label>
+                <Switch
+                  id="currency-adjusted"
+                  checked={currencyAdjusted}
+                  onCheckedChange={onCurrencyAdjustedChange}
+                  className="h-4 w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-sm">
+              <p className="text-xs whitespace-pre-line">{currencyTooltip}</p>
+            </TooltipContent>
+          </UITooltip>
+        )}
+      </div>
     </div>
   );
 }
@@ -212,7 +240,8 @@ export function PerformanceEvolutionChart({
 }: PerformanceEvolutionChartProps) {
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [currencyAdjusted, setCurrencyAdjusted] = useState(false);
+  const [currencyAdjusted, setCurrencyAdjusted] = useState(true);
+  const [timeRange, setTimeRange] = useState<TimeRange>('MAX');
   
   // Get equity exposure from Risk Analyzer logic
   const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct();
@@ -224,9 +253,22 @@ export function PerformanceEvolutionChart({
   });
   const hasUsdData = !isUsdLoading && usdTotalExposure > 0;
   
+  // Filter historical data based on time range
+  const filteredHistoricalData = useMemo(() => {
+    if (timeRange === 'MAX') return historicalData;
+    
+    const now = new Date();
+    const years = timeRange === '1Y' ? 1 : timeRange === '2Y' ? 2 : 3;
+    const cutoffDate = new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+    
+    return historicalData.filter(entry => 
+      new Date(entry.snapshot_date) >= cutoffDate
+    );
+  }, [historicalData, timeRange]);
+  
   // Fetch benchmark data with real equity exposure and currency adjustment
   const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(
-    historicalData, 
+    filteredHistoricalData, 
     viewMode, 
     currentDate,
     hasEquityData ? equityExposurePct : null,
@@ -252,11 +294,22 @@ export function PerformanceEvolutionChart({
     }
   };
 
+  // Filter deposits based on time range
+  const filteredDeposits = useMemo(() => {
+    if (timeRange === 'MAX') return deposits;
+    
+    const now = new Date();
+    const years = timeRange === '1Y' ? 1 : timeRange === '2Y' ? 2 : 3;
+    const cutoffDate = new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+    
+    return deposits.filter(d => new Date(d.deposit_date) >= cutoffDate);
+  }, [deposits, timeRange]);
+
   const chartData = useMemo(() => {
-    if (historicalData.length === 0) return [];
+    if (filteredHistoricalData.length === 0) return [];
 
     // Sort by date ascending
-    const sorted = [...historicalData].sort(
+    const sorted = [...filteredHistoricalData].sort(
       (a, b) => new Date(a.snapshot_date).getTime() - new Date(b.snapshot_date).getTime()
     );
 
@@ -265,7 +318,7 @@ export function PerformanceEvolutionChart({
     const initialDate = new Date(initialEntry.snapshot_date);
 
     // Calculate cumulative deposits for each snapshot
-    const sortedDeposits = [...deposits].sort(
+    const sortedDeposits = [...filteredDeposits].sort(
       (a, b) => new Date(a.deposit_date).getTime() - new Date(b.deposit_date).getTime()
     );
 
@@ -336,7 +389,7 @@ export function PerformanceEvolutionChart({
     }
 
     return data;
-  }, [historicalData, viewMode, currentValue, currentDate, deposits, benchmarkReturns]);
+  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange]);
 
   if (chartData.length === 0) {
     return (
@@ -368,6 +421,8 @@ export function PerformanceEvolutionChart({
         onCurrencyAdjustedChange={setCurrencyAdjusted}
         usdExposurePct={usdExposurePct}
         hasUsdData={hasUsdData}
+        timeRange={timeRange}
+        onTimeRangeChange={setTimeRange}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
