@@ -201,7 +201,7 @@ serve(async (req) => {
         // Get underlying prices from underlying_mappings + fetch current prices
         // For simplicity, we'll use the current_price from stock positions as underlying prices
         const stockPositions = (positions || []).filter(p => p.asset_type === 'stock');
-        const optionPositions = (positions || []).filter(p => p.asset_type === 'option');
+        const optionPositions = (positions || []).filter(p => p.asset_type === 'derivative');
         
         // Build underlying price map from stock positions
         const underlyingPrices: Record<string, number> = {};
