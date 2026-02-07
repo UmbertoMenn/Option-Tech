@@ -102,10 +102,11 @@ function CustomLegend({
   const bondPctFormatted = ((1 - equityExposurePct) * 100).toFixed(1);
   
   const benchmarkDescription = hasEquityData
-    ? `Equity exposure (Risk Analyzer): ${equityPctFormatted}%\n` +
+    ? `Paniere Equity/Bond ponderato per l'equity exposure del portafoglio.\n\n` +
+      `Equity exposure (Risk Analyzer): ${equityPctFormatted}%\n` +
       `Calcolo: ${formatNumber(equityExposureEUR, 0)}€ / ${formatNumber(assetsTotalEUR, 0)}€\n\n` +
       `Benchmark: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
-    : 'Benchmark dinamico basato sull\'esposizione equity del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
+    : 'Paniere Equity/Bond ponderato per l\'equity exposure del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 
   const staleInfo = formatStaleSummary(staleSummary);
   const showWarning = hasDataGaps || staleSummary.length > 0;
