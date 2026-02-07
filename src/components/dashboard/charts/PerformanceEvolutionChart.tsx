@@ -130,44 +130,55 @@ function CustomLegend({
   const showWarning = hasDataGaps || staleSummary.length > 0;
 
   return (
-    <div className="flex items-center justify-center gap-4 text-xs mb-2 flex-wrap">
-      <div className="flex items-center gap-1.5">
-        <div className="w-3 h-0.5 bg-profit rounded" />
-        <span className="text-foreground">Portafoglio</span>
-      </div>
-      {hasBenchmarkData && (
-        <UITooltip delayDuration={0}>
-          <TooltipTrigger 
-            className="flex items-center gap-1.5 cursor-help"
-            onMouseEnter={() => onBenchmarkHover(true)}
-            onMouseLeave={() => onBenchmarkHover(false)}
+    <div className="flex items-center justify-between text-xs mb-2">
+      {/* Left side: Legend items */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-0.5 bg-profit rounded" />
+          <span className="text-foreground">Portafoglio</span>
+        </div>
+        {hasBenchmarkData && (
+          <UITooltip delayDuration={0}>
+            <TooltipTrigger 
+              className="flex items-center gap-1.5 cursor-help"
+              onMouseEnter={() => onBenchmarkHover(true)}
+              onMouseLeave={() => onBenchmarkHover(false)}
+            >
+              <div 
+                className="w-3 h-0.5 rounded" 
+                style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
+              />
+              <span className="text-foreground">Benchmark</span>
+              {showWarning ? (
+                <AlertTriangle className="w-3 h-3 text-warning" />
+              ) : (
+                <HelpCircle className="w-3 h-3 text-muted-foreground" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-md">
+              <p className="text-xs whitespace-pre-line">{benchmarkDescription}{staleInfo}</p>
+            </TooltipContent>
+          </UITooltip>
+        )}
+        {showWarning && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-warning hover:text-warning"
+            onClick={onRefresh}
+            disabled={isRefreshing}
           >
-            <div 
-              className="w-3 h-0.5 rounded" 
-              style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
-            />
-            <span className="text-foreground">Benchmark</span>
-            {showWarning ? (
-              <AlertTriangle className="w-3 h-3 text-warning" />
-            ) : (
-              <HelpCircle className="w-3 h-3 text-muted-foreground" />
-            )}
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-md">
-            <p className="text-xs whitespace-pre-line">{benchmarkDescription}{staleInfo}</p>
-          </TooltipContent>
-        </UITooltip>
-      )}
+            <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Aggiornando...' : 'Aggiorna'}
+          </Button>
+        )}
+      </div>
+      
+      {/* Right side: Currency toggle */}
       {hasBenchmarkData && hasUsdData && (
         <UITooltip delayDuration={0}>
           <TooltipTrigger asChild>
             <div className="flex items-center gap-1.5">
-              <Switch
-                id="currency-adjusted"
-                checked={currencyAdjusted}
-                onCheckedChange={onCurrencyAdjustedChange}
-                className="h-4 w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
-              />
               <label 
                 htmlFor="currency-adjusted" 
                 className="text-xs text-foreground cursor-pointer flex items-center gap-1"
@@ -175,24 +186,18 @@ function CustomLegend({
                 Currency
                 <HelpCircle className="w-3 h-3 text-muted-foreground" />
               </label>
+              <Switch
+                id="currency-adjusted"
+                checked={currencyAdjusted}
+                onCheckedChange={onCurrencyAdjustedChange}
+                className="h-4 w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+              />
             </div>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-sm">
             <p className="text-xs whitespace-pre-line">{currencyTooltip}</p>
           </TooltipContent>
         </UITooltip>
-      )}
-      {showWarning && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-warning hover:text-warning"
-          onClick={onRefresh}
-          disabled={isRefreshing}
-        >
-          <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Aggiornando...' : 'Aggiorna'}
-        </Button>
       )}
     </div>
   );
