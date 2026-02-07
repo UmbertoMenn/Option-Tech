@@ -1,9 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Plus, Trash2, Save, ChevronDown, ChevronUp, Pencil, X, Upload, FileSpreadsheet } from 'lucide-react';
-import { useDropzone } from 'react-dropzone';
-import { toast } from 'sonner';
+import { Plus, Trash2, Save, ChevronDown, ChevronUp, Pencil, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,8 +9,6 @@ import { DateInput } from '@/components/ui/date-input';
 import { formatCurrency } from '@/lib/formatters';
 import { HistoricalDataEntry, HistoricalDataInput } from '@/types/historicalData';
 import { cn } from '@/lib/utils';
-import { parsePortfolioExcel } from '@/lib/excelParser';
-import { calculateNettingFromPositions } from '@/lib/historicalNettingCalculator';
 
 interface HistoricalDataFormProps {
   historicalData: HistoricalDataEntry[];
@@ -38,7 +34,6 @@ export function HistoricalDataForm({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
   
   // Form state for new/edit
   const [formDate, setFormDate] = useState<Date | undefined>(undefined);
@@ -60,65 +55,6 @@ export function HistoricalDataForm({
     setIsAddingNew(false);
     setEditingId(null);
   };
-
-  // Handle Excel file upload
-  const handleExcelUpload = useCallback(async (file: File) => {
-    setIsProcessingFile(true);
-    
-    try {
-      // Parse the Excel file
-      const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file);
-      
-      if (!snapshotDate) {
-        toast.error('Data non trovata nel file', {
-          description: 'Il file Excel deve contenere una data di snapshot (cella C4 o pattern "POSIZIONE AL")',
-        });
-        return;
-      }
-      
-      // Calculate netting values from positions
-      const nettingResult = calculateNettingFromPositions(positions, cashValue);
-      
-      // Save the historical data
-      onSave({
-        snapshot_date: snapshotDate,
-        total_value: nettingResult.totalValue,
-        netting_total: nettingResult.nettingTotal,
-        netting_ex_cc: nettingResult.nettingExCC,
-        netting_ex_cc_np: nettingResult.nettingExCCNP,
-        deposits: 0,
-        average_balance: 0,
-      });
-      
-      toast.success('Dati storici importati!', {
-        description: `Data: ${format(new Date(snapshotDate), 'dd MMMM yyyy', { locale: it })} - Patrimonio: ${formatCurrency(nettingResult.totalValue)}`,
-      });
-      
-    } catch (error) {
-      console.error('Error parsing Excel:', error);
-      toast.error('Errore nel parsing del file', {
-        description: error instanceof Error ? error.message : 'Errore sconosciuto',
-      });
-    } finally {
-      setIsProcessingFile(false);
-    }
-  }, [onSave]);
-
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0) {
-      handleExcelUpload(acceptedFiles[0]);
-    }
-  }, [handleExcelUpload]);
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'application/vnd.ms-excel': ['.xls'],
-    },
-    multiple: false,
-    disabled: isProcessingFile,
-  });
 
   const handleSave = () => {
     if (!formDate) return;
@@ -405,53 +341,17 @@ export function HistoricalDataForm({
               </div>
             </div>
           ) : (
-            <div className="space-y-3 pt-2 border-t border-border">
-              {/* Action buttons row */}
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={startAddNew}
-                  disabled={editingId !== null || isProcessingFile}
-                  className="flex-1"
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Aggiungi manuale
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => document.getElementById('excel-upload-hidden')?.click()}
-                  disabled={editingId !== null || isProcessingFile}
-                  className="flex-1"
-                >
-                  <FileSpreadsheet className="w-4 h-4 mr-1" />
-                  {isProcessingFile ? 'Elaborazione...' : 'Carica Excel'}
-                </Button>
-              </div>
-              
-              {/* Dropzone */}
-              <div
-                {...getRootProps()}
-                className={cn(
-                  "border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors",
-                  isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50",
-                  isProcessingFile && "opacity-50 cursor-not-allowed"
-                )}
+            <div className="pt-2 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={startAddNew}
+                disabled={editingId !== null}
+                className="w-full"
               >
-                <input {...getInputProps()} id="excel-upload-hidden" />
-                <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                {isDragActive ? (
-                  <p className="text-sm text-primary">Rilascia il file qui...</p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Trascina un file Excel qui per importare automaticamente
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground/70 mt-1">
-                  .xlsx, .xls
-                </p>
-              </div>
+                <Plus className="w-4 h-4 mr-1" />
+                Aggiungi dato storico
+              </Button>
             </div>
           )}
         </div>
