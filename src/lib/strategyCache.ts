@@ -258,5 +258,49 @@ export async function saveStrategyCache(
     }
   }
   
+  // Cleanup orphaned covered call premiums
+  // Extract active tickers from Covered Calls
+  const activeCCTickers: string[] = [];
+  categories.coveredCalls.forEach((cc: CoveredCallPosition) => {
+    const underlying = cc.option.underlying || cc.option.description || '';
+    const ticker = resolveTicker(underlying, underlyingPrices);
+    if (ticker) {
+      activeCCTickers.push(ticker.toUpperCase());
+    }
+  });
+  
+  // Delete premiums for tickers that are no longer in active covered calls
+  if (activeCCTickers.length > 0) {
+    // Get all premiums for this portfolio and delete those not in active list
+    const { data: existingPremiums } = await supabase
+      .from('covered_call_premiums')
+      .select('ticker')
+      .eq('portfolio_id', portfolioId);
+    
+    if (existingPremiums && existingPremiums.length > 0) {
+      const tickersToDelete = existingPremiums
+        .map(row => row.ticker)
+        .filter(ticker => !activeCCTickers.includes(ticker.toUpperCase()));
+      
+      if (tickersToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('covered_call_premiums')
+          .delete()
+          .eq('portfolio_id', portfolioId)
+          .in('ticker', tickersToDelete);
+        
+        if (!deleteError) {
+          console.log(`[StrategyCache] Cleaned up ${tickersToDelete.length} orphaned premium records`);
+        }
+      }
+    }
+  } else {
+    // No active covered calls - delete all premiums for this portfolio
+    await supabase
+      .from('covered_call_premiums')
+      .delete()
+      .eq('portfolio_id', portfolioId);
+  }
+  
   console.log(`[StrategyCache] Saved ${records.length} strategies for portfolio ${portfolioId}`);
 }

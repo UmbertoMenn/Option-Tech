@@ -1,6 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
+import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -53,6 +54,7 @@ export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
+  const { premiums: ccPremiums, getPremiumByTicker } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
@@ -288,6 +290,7 @@ export function Derivatives() {
                             cc.underlying.description || cc.option.underlying || ''
                           ] || cc.contractsCovered
                         }
+                        getPremiumByTicker={getPremiumByTicker}
                       />
                     ))}
                   </div>
@@ -550,9 +553,10 @@ interface RowPropsWithPrices extends RowProps {
 interface CoveredCallRowProps extends RowPropsWithPrices {
   coveredCall: CoveredCallPosition;
   totalContractsForUnderlying: number;
+  getPremiumByTicker: (ticker: string) => CoveredCallPremium | undefined;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying }: CoveredCallRowProps) {
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTicker }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
@@ -587,6 +591,10 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   // Get ticker for calculator
   const ticker = option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined;
   
+  // Get saved premium data for this ticker
+  const savedPremium = ticker ? getPremiumByTicker(ticker) : undefined;
+  const netPerShare = savedPremium?.net_per_share;
+  
   return (
     <>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -595,7 +603,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_5rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -673,7 +681,28 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 8: PS */}
+            {/* Col 8: UNIT (net per share from saved premium) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span 
+                  className={`text-sm text-right cursor-help font-medium ${
+                    netPerShare !== undefined 
+                      ? netPerShare >= 0 
+                        ? 'text-green-500' 
+                        : 'text-red-500'
+                      : 'text-muted-foreground'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {netPerShare !== undefined ? `$${netPerShare.toFixed(2)}` : '-'}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Netto unitario premi CALL (dalla calcolatrice)</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 9: PS */}
             <div className="text-right flex items-center justify-end">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -690,12 +719,12 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               )}
             </div>
             
-            {/* Col 9: Contratti */}
+            {/* Col 10: Contratti */}
             <span className="text-sm text-muted-foreground text-right">
               {contractsCovered} × 100
             </span>
             
-            {/* Col 10: PMC */}
+            {/* Col 11: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
@@ -707,7 +736,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 11: Prezzo + % */}
+            {/* Col 12: Prezzo + % */}
             <div className="flex items-center gap-1 justify-end">
               <span className="font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, 'USD')}

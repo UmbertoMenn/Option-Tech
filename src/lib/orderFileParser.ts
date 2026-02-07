@@ -205,6 +205,43 @@ export function findFirstOperationDate(validityDates: (string | undefined)[]): s
 }
 
 /**
+ * Find the most recent date from a list of validity date strings (Italian format)
+ * Used for showing "Data ultima operazione" in the UI
+ */
+export function findLastOperationDate(validityDates: (string | undefined)[]): string | null {
+  const isoDates = validityDates
+    .map(d => toIsoDateFromIT(d))
+    .filter((d): d is string => d !== null);
+  
+  if (isoDates.length === 0) return null;
+  return isoDates.sort().reverse()[0]; // Most recent date
+}
+
+/**
+ * Generate a unique key for an order for deduplication purposes
+ * Used when merging orders from multiple Excel files
+ */
+export function orderKey(o: ParsedOrder): string {
+  return `${o.symbol}|${o.operation}|${o.avgPrice}|${o.quantity}|${o.validityDate || ''}`;
+}
+
+/**
+ * Merge new orders with existing ones, avoiding duplicates
+ */
+export function mergeOrders(existingOrders: ParsedOrder[], newOrders: ParsedOrder[]): ParsedOrder[] {
+  const merged = [...existingOrders];
+  const existingKeys = new Set(existingOrders.map(orderKey));
+  
+  for (const newOrder of newOrders) {
+    if (!existingKeys.has(orderKey(newOrder))) {
+      merged.push(newOrder);
+    }
+  }
+  
+  return merged;
+}
+
+/**
  * Check if the content appears to be HTML (table-based Excel export)
  * Extended detection to catch files starting with <table> or containing HTML tags
  */

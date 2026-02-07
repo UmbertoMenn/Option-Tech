@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -7,18 +7,23 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3 } from 'lucide-react';
+import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   parseOrderFile, 
   filterAndCalculateCallPremiums, 
   calculatePremiumMetrics,
   findFirstOperationDate,
+  findLastOperationDate,
+  mergeOrders,
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult
 } from '@/lib/orderFileParser';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
+import { useCoveredCallPremiums } from '@/hooks/useCoveredCallPremiums';
+import { usePortfolio } from '@/hooks/usePortfolio';
+import { toast } from 'sonner';
 
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
@@ -37,18 +42,37 @@ export function CallPremiumCalculatorDialog({
   contractsInPortfolio,
   underlyingPrice,
 }: CallPremiumCalculatorDialogProps) {
+  const { portfolio } = usePortfolio();
+  const { getPremiumByTicker, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
+  
   const [transactionCost, setTransactionCost] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<PremiumMetrics | null>(null);
   const [filteredOrders, setFilteredOrders] = useState<ParsedOrder[]>([]);
   const [parseResult, setParseResult] = useState<OrderParseResult | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastOperationDate, setLastOperationDate] = useState<string | null>(null);
+
+  // Load saved data when dialog opens
+  useEffect(() => {
+    if (open && ticker && !isLoadingPremiums) {
+      const saved = getPremiumByTicker(ticker);
+      if (saved && saved.orders_json.length > 0) {
+        setTransactionCost(saved.transaction_cost);
+        setFilteredOrders(saved.orders_json);
+        setLastOperationDate(saved.last_operation_date);
+        recalculateMetrics(saved.orders_json, saved.transaction_cost);
+        setHasUnsavedChanges(false);
+      }
+    }
+  }, [open, ticker, isLoadingPremiums]);
 
   // Recalculate metrics from current orders
   const recalculateMetrics = useCallback((orders: ParsedOrder[], txCost: number) => {
     if (orders.length === 0) {
       setMetrics(null);
+      setLastOperationDate(null);
       return;
     }
 
@@ -67,8 +91,10 @@ export function CallPremiumCalculatorDialog({
       }
     });
 
-    // Find earliest date using shared utility
+    // Find dates using shared utilities
     const firstOperationDate = findFirstOperationDate(orders.map(o => o.validityDate));
+    const lastOpDate = findLastOperationDate(orders.map(o => o.validityDate));
+    setLastOperationDate(lastOpDate);
 
     const newParseResult: OrderParseResult = {
       allOrders: orders,
@@ -96,26 +122,31 @@ export function CallPremiumCalculatorDialog({
 
     setIsProcessing(true);
     setError(null);
-    setFileName(file.name);
 
     try {
       const orders = await parseOrderFile(file);
       const result = filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
-      const calculatedMetrics = calculatePremiumMetrics(result, transactionCost, contractsInPortfolio, underlyingPrice);
       
-      setMetrics(calculatedMetrics);
-      setFilteredOrders(result.filteredOrders);
-      setParseResult(result);
+      // Merge with existing orders (cumulative)
+      const mergedOrders = mergeOrders(filteredOrders, result.filteredOrders);
+      const newOrdersCount = mergedOrders.length - filteredOrders.length;
+      
+      setFilteredOrders(mergedOrders);
+      recalculateMetrics(mergedOrders, transactionCost);
+      setHasUnsavedChanges(true);
+      
+      if (newOrdersCount > 0) {
+        toast.success(`Aggiunte ${newOrdersCount} nuove operazioni`);
+      } else {
+        toast.info('Nessuna nuova operazione trovata');
+      }
     } catch (err) {
       console.error('Error processing file:', err);
       setError(err instanceof Error ? err.message : 'Errore durante l\'elaborazione del file');
-      setMetrics(null);
-      setFilteredOrders([]);
-      setParseResult(null);
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, contractsInPortfolio, underlyingPrice]);
+  }, [ticker, transactionCost, filteredOrders, underlyingPrice, recalculateMetrics]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -133,6 +164,7 @@ export function CallPremiumCalculatorDialog({
     
     if (filteredOrders.length > 0) {
       recalculateMetrics(filteredOrders, cost);
+      setHasUnsavedChanges(true);
     }
   };
 
@@ -141,18 +173,52 @@ export function CallPremiumCalculatorDialog({
     const newOrders = filteredOrders.filter((_, i) => i !== index);
     setFilteredOrders(newOrders);
     recalculateMetrics(newOrders, transactionCost);
+    setHasUnsavedChanges(true);
   };
 
-  const handleReset = () => {
-    setMetrics(null);
-    setFilteredOrders([]);
-    setParseResult(null);
-    setFileName(null);
-    setError(null);
+  // Save to database
+  const handleSave = async () => {
+    if (!ticker || !metrics) return;
+    
+    try {
+      await upsertPremium({
+        ticker,
+        underlying,
+        orders_json: filteredOrders,
+        transaction_cost: transactionCost,
+        net_per_share: metrics.netPerShare,
+        first_operation_date: metrics.firstOperationDate,
+        last_operation_date: lastOperationDate,
+        contracts_count: contractsInPortfolio,
+      });
+      setHasUnsavedChanges(false);
+      toast.success('Dati salvati');
+    } catch (err) {
+      console.error('Error saving premium data:', err);
+      toast.error('Errore durante il salvataggio');
+    }
   };
 
-  // Format first operation date for display
-  const formatFirstOperationDate = (isoDate: string | null): string => {
+  // Reset all data
+  const handleReset = async () => {
+    if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker?')) {
+      try {
+        await deletePremium(ticker);
+        setMetrics(null);
+        setFilteredOrders([]);
+        setParseResult(null);
+        setLastOperationDate(null);
+        setHasUnsavedChanges(false);
+        toast.success('Dati cancellati');
+      } catch (err) {
+        console.error('Error deleting premium data:', err);
+        toast.error('Errore durante la cancellazione');
+      }
+    }
+  };
+
+  // Format date for display
+  const formatDateDisplay = (isoDate: string | null): string => {
     if (!isoDate) return '-';
     const d = new Date(isoDate);
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -173,55 +239,31 @@ export function CallPremiumCalculatorDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* File Upload - shown only when no data */}
-          {!metrics && (
-            <div
-              {...getRootProps()}
-              className={`
-                border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
-                transition-colors
-                ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
-                ${isProcessing ? 'opacity-50 pointer-events-none' : ''}
-              `}
-            >
-              <input {...getInputProps()} />
-              <FileSpreadsheet className="w-10 h-10 mx-auto mb-2 text-muted-foreground" />
+          {/* File Upload - Always visible to add operations */}
+          <div
+            {...getRootProps()}
+            className={`
+              border-2 border-dashed rounded-lg p-4 text-center cursor-pointer
+              transition-colors
+              ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
+              ${isProcessing ? 'opacity-50 pointer-events-none' : ''}
+            `}
+          >
+            <input {...getInputProps()} />
+            <div className="flex items-center justify-center gap-2">
+              <Upload className="w-5 h-5 text-muted-foreground" />
               {isDragActive ? (
                 <p className="text-sm text-primary">Rilascia il file qui...</p>
               ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Trascina un file Excel o clicca per selezionarlo
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Formati supportati: .xls, .xlsx
-                  </p>
-                </>
-              )}
-              {isProcessing && (
-                <p className="text-sm text-primary mt-2">Elaborazione in corso...</p>
+                <p className="text-sm text-muted-foreground">
+                  {filteredOrders.length > 0 ? 'Aggiungi operazioni da Excel' : 'Carica file Excel ordini'}
+                </p>
               )}
             </div>
-          )}
-
-          {/* File indicator when loaded */}
-          {fileName && metrics && (
-            <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2 text-sm">
-                <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                <span className="text-muted-foreground">{fileName}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleReset}
-                className="h-7 px-2"
-              >
-                <Upload className="w-4 h-4 mr-1" />
-                Nuovo file
-              </Button>
-            </div>
-          )}
+            {isProcessing && (
+              <p className="text-sm text-primary mt-2">Elaborazione in corso...</p>
+            )}
+          </div>
 
           {/* Error Alert */}
           {error && (
@@ -271,7 +313,7 @@ export function CallPremiumCalculatorDialog({
                 {/* First operation date - always visible under yields */}
                 <div className="text-center text-xs text-muted-foreground pt-1">
                   📅 Prima operazione: {metrics.firstOperationDate 
-                    ? formatFirstOperationDate(metrics.firstOperationDate)
+                    ? formatDateDisplay(metrics.firstOperationDate)
                     : <span className="italic">- (non trovata nel file)</span>
                   }
                 </div>
@@ -354,7 +396,14 @@ export function CallPremiumCalculatorDialog({
                 <Accordion type="single" collapsible>
                   <AccordionItem value="orders" className="border-none">
                     <AccordionTrigger className="text-sm py-2 hover:no-underline">
-                      📋 Operazioni ({filteredOrders.length})
+                      <span className="flex items-center gap-2">
+                        📋 Operazioni ({filteredOrders.length})
+                        {lastOperationDate && (
+                          <span className="text-muted-foreground font-normal">
+                            — Ultima: {formatDateDisplay(lastOperationDate)}
+                          </span>
+                        )}
+                      </span>
                     </AccordionTrigger>
                     <AccordionContent>
                       <div className="max-h-[250px] overflow-y-auto">
@@ -403,8 +452,31 @@ export function CallPremiumCalculatorDialog({
             </Card>
           )}
 
-          {/* Close button */}
-          <div className="flex justify-end">
+          {/* Action buttons */}
+          <div className="flex justify-between">
+            <div className="flex gap-2">
+              {metrics && (
+                <>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={isUpserting || !hasUnsavedChanges}
+                  >
+                    <Save className="w-4 h-4 mr-1" />
+                    {isUpserting ? 'Salvataggio...' : 'Salva'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReset}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Chiudi
             </Button>

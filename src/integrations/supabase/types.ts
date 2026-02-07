@@ -183,6 +183,59 @@ export type Database = {
         }
         Relationships: []
       }
+      covered_call_premiums: {
+        Row: {
+          contracts_count: number
+          created_at: string
+          first_operation_date: string | null
+          id: string
+          last_operation_date: string | null
+          net_per_share: number
+          orders_json: Json
+          portfolio_id: string
+          ticker: string
+          transaction_cost: number
+          underlying: string
+          updated_at: string
+        }
+        Insert: {
+          contracts_count?: number
+          created_at?: string
+          first_operation_date?: string | null
+          id?: string
+          last_operation_date?: string | null
+          net_per_share?: number
+          orders_json?: Json
+          portfolio_id: string
+          ticker: string
+          transaction_cost?: number
+          underlying: string
+          updated_at?: string
+        }
+        Update: {
+          contracts_count?: number
+          created_at?: string
+          first_operation_date?: string | null
+          id?: string
+          last_operation_date?: string | null
+          net_per_share?: number
+          orders_json?: Json
+          portfolio_id?: string
+          ticker?: string
+          transaction_cost?: number
+          underlying?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "covered_call_premiums_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deposits: {
         Row: {
           amount: number
