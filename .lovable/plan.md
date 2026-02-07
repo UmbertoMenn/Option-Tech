@@ -1,85 +1,50 @@
 
-
-# Piano: Visualizzazione "UNIT" e Rendimento % nella Riga Covered Call
+# Piano: Correzione "$" a capo nella colonna UNIT (Covered Call IREN)
 
 ## Problema Identificato
 
-Dallo screenshot, la colonna mostra solo `$11.63` senza la label "UNIT:" e manca il rendimento percentuale (non annualizzato).
-
-**Codice attuale** (linee 687-698 di `Derivatives.tsx`):
-```tsx
-<span ...>
-  {netPerShare !== undefined ? `$${netPerShare.toFixed(2)}` : '-'}
-</span>
+Dallo screenshot, il testo nella colonna UNIT viene troncato e il simbolo "$" va a capo:
+```
+26,60
+$
 ```
 
-**Risultato visivo attuale**: `$11.63`
-**Risultato desiderato**: `UNIT: $11,63 (6.8%)`
-
----
+**Causa**: La colonna 8 nella griglia CSS ha una larghezza di soli `8rem`, che non è sufficiente per contenere il testo completo come `UNIT: 26,60 $ (+44,5%)`.
 
 ## Soluzione
 
-### 1. Modifica alla colonna UNIT in `CoveredCallRow`
+Aumentare la larghezza della colonna 8 (UNIT) nel grid layout della `CoveredCallRow` da `8rem` a `10rem` o `11rem`.
 
-**File**: `src/pages/Derivatives.tsx`
+### Modifica alla griglia CSS
 
-Modificare la colonna 8 (UNIT) per:
-- Aggiungere la label "UNIT:" prima del valore
-- Calcolare il rendimento % al volo: `yieldPct = (netPerShare / underlyingPrice) * 100`
-- Mostrare il rendimento % tra parentesi dopo il valore in dollari
-- Usare `formatNumber` per il formato italiano (virgola come decimale)
+**File**: `src/pages/Derivatives.tsx` (riga 606)
 
 **Prima**:
-```tsx
-{netPerShare !== undefined ? `$${netPerShare.toFixed(2)}` : '-'}
+```css
+grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem]
+                                                            ^^^^
+                                                            colonna 8
 ```
 
 **Dopo**:
-```tsx
-{netPerShare !== undefined 
-  ? <>
-      UNIT: {formatNumber(netPerShare, 2)} $ 
-      {underlyingPrice > 0 && (
-        <span className="text-muted-foreground ml-1">
-          ({formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
-        </span>
-      )}
-    </>
-  : '-'
-}
+```css
+grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_11rem_6rem_4.5rem_5rem_6rem]
+                                                            ^^^^^
+                                                            colonna 8 allargata
 ```
-
-### 2. Adattamento larghezza colonna
-
-Poiché il contenuto sarà più lungo (es. `UNIT: 11,63 $ (6.8%)`), potrebbe essere necessario allargare leggermente la colonna nella griglia CSS.
-
-**Attuale**: `5rem` per la colonna UNIT
-**Nuovo**: `7rem` o `8rem` per accomodare il testo aggiuntivo
-
----
-
-## Esempio Visivo
-
-| Prima | Dopo |
-|-------|------|
-| `$11.63` | `UNIT: 11,63 $ (6,8%)` |
-| `$-2.50` | `UNIT: -2,50 $ (-1,5%)` |
-
----
 
 ## File Coinvolti
 
-| File | Modifiche |
-|------|-----------|
-| `src/pages/Derivatives.tsx` | Modifica colonna UNIT in `CoveredCallRow`: aggiungere label "UNIT:", calcolare e mostrare rendimento %, eventuale allargamento griglia |
+| File | Modifica |
+|------|----------|
+| `src/pages/Derivatives.tsx` | Aumentare larghezza colonna 8 da `8rem` a `11rem` nella griglia `CoveredCallRow` (riga 606) |
 
----
+## Risultato Atteso
 
-## Note Tecniche
+| Prima | Dopo |
+|-------|------|
+| `26,60` <br> `$` | `UNIT: 26,60 $ (+44,5%)` |
 
-- Il rendimento % viene calcolato dinamicamente come `(netPerShare / underlyingPrice) * 100`
-- Non è necessario modificare il database poiché i dati sono già disponibili
-- Il calcolo è identico a quello usato nella calcolatrice (`yieldPct` in `PremiumMetrics`)
-- Il formato usa `formatNumber` per rispettare lo stile italiano (virgola decimale)
-
+Il testo rimarrà su un'unica riga grazie alla combinazione di:
+1. `whitespace-nowrap` già presente sullo span
+2. Larghezza colonna aumentata a `11rem`
