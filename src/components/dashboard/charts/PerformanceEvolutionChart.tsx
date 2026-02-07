@@ -124,7 +124,7 @@ function CustomLegend({
       `Ponderazione dinamica: Il peso Equity/Bond varia nel tempo in base all'esposizione salvata in ogni snapshot.\n` +
       `L'exposure di ciascun punto determina la ponderazione per il periodo successivo.\n\n` +
       `Equity exposure attuale: ${equityPctFormatted}%\n` +
-      `Benchmark attuale: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
+      `Benchmark attuale: ${equityPctFormatted}% × Equity (SPY/QQQ) + ${bondPctFormatted}% × Bond (AGG)`
     : 'Paniere Equity/Bond ponderato per l\'equity exposure storica del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 
   const currencyTooltip = hasUsdData
