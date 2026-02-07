@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, X } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories } from '@/lib/derivativeStrategies';
@@ -625,7 +625,7 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
   const getSeverityIcon = (severity: AlertSeverity) => {
     switch (severity) {
       case 'critical':
-        return <XCircle className="w-4 h-4 text-destructive" />;
+        return <ShieldAlert className="w-4 h-4 text-destructive" />;
       case 'warning':
         return <AlertCircle className="w-4 h-4 text-amber-500" />;
       default:
@@ -741,11 +741,12 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                        className="h-6 w-6 shrink-0 text-destructive/80 hover:text-destructive"
                         onClick={(e) => handleDeleteAlert(e, alert.id)}
                         disabled={deleteAlertMutation.isPending}
+                        aria-label="Elimina avviso"
                       >
-                        <X className="w-3 h-3" />
+                        <XCircle className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
