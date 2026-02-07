@@ -1,108 +1,376 @@
 
-Obiettivo: ripristinare i tooltip dei badge “OTM/ITM/IB/OOB/IR/OOR” nella pagina Derivati in modo stabile (non workaround “a caso”), identificando la causa reale e applicando una fix strutturale.
+# Piano: Aggiornamento Prezzi Opzioni via Alpaca API
+
+## Panoramica
+
+Creare un cron job che aggiorni i prezzi di tutte le opzioni nel portafoglio ogni 5 minuti durante le ore di mercato, utilizzando l'API Alpaca con il feed "indicative" (gratuito, ritardo 15 minuti).
 
 ---
 
-## Diagnosi approfondita (root cause)
+## Architettura della Soluzione
 
-### 1) Dove si rompe
-Nel file `src/pages/Derivatives.tsx` i tooltip “problematici” sono quasi tutti costruiti così:
-
-```tsx
-<Tooltip>
-  <TooltipTrigger asChild>
-    <Badge ...>OTM</Badge>
-  </TooltipTrigger>
-  <TooltipContent>...</TooltipContent>
-</Tooltip>
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    FLUSSO UPDATE PREZZI OPZIONI                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. Cron trigger ogni 5 min (8:00-22:00 CET, Lun-Ven)                  │
+│           │                                                             │
+│           ▼                                                             │
+│  2. Query: tutte le posizioni con asset_type = 'derivative'             │
+│     per TUTTI gli utenti                                                │
+│           │                                                             │
+│           ▼                                                             │
+│  3. Per ogni opzione: costruisci OCC symbol                             │
+│     ┌─────────────────────────────────────────────────────────┐        │
+│     │ GOOGL + 2026-02-21 + put + 295 → GOOGL 260221P00295000   │        │
+│     └─────────────────────────────────────────────────────────┘        │
+│           │                                                             │
+│           ▼                                                             │
+│  4. Batch API calls con rate limiting                                   │
+│     ┌─────────────────────────────────────────────────────────┐        │
+│     │ - Max 100 symbols per chiamata Alpaca                    │        │
+│     │ - Max 200 chiamate API/minuto (free tier)                │        │
+│     │ - Attendi 60s tra batch se si supera il limite           │        │
+│     └─────────────────────────────────────────────────────────┘        │
+│           │                                                             │
+│           ▼                                                             │
+│  5. UPDATE positions SET current_price = nuovo_prezzo                   │
+│           │                                                             │
+│           ▼                                                             │
+│  6. Log risultati: updated, failed, stale                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Esempi reali nel codice:
-- `GroupedOptionLegRow`: badge `ITM/OTM` (riga ~1709+)
-- `GroupedOtherStrategyRow`: badge `IB/OOB` e `IR/OOR` (righe ~1550+)
-- altre righe strategie usano lo stesso pattern
+---
 
-Quindi i trigger dei tooltip sono “Badge” come child.
+## 1. Formato OCC Symbol
 
-### 2) Perché Radix Tooltip non si attiva con quel pattern
-Il componente `Badge` attuale (`src/components/ui/badge.tsx`) è un normale function component che **NON** usa `React.forwardRef`.
+Le opzioni su Alpaca usano il formato OCC standard (21 caratteri):
 
-Radix (TooltipTrigger) quando usi `asChild` deve poter:
-- attaccare **ref** al nodo DOM reale del trigger
-- comporre handler di pointer/focus sul trigger
+| Parte | Lunghezza | Esempio | Note |
+|-------|-----------|---------|------|
+| Ticker | 6 char (padded) | `GOOGL ` | Spazi a destra |
+| Data scadenza | 6 char | `260221` | YYMMDD |
+| Tipo | 1 char | `P` | C=Call, P=Put |
+| Strike | 8 char | `00295000` | Strike × 1000, padded a sinistra |
 
-Con `asChild`, il ref viene passato al child. Se il child è un component React che **non forwarda il ref** verso il `<div>`, Radix non riesce ad “agganciarsi” correttamente al trigger. Risultato tipico: tooltip che non appare (o comportamento intermittente), e spesso in console appare anche un warning del tipo:
-- “Function components cannot be given refs…”
-
-Nel tuo progetto:
-- `Badge` renderizza un `<div {...props} />` ma **non** forwarda `ref` → per Radix è un trigger “non affidabile”.
-- Questo spiega perfettamente perché “OTM/ITM/IB/OOB ecc.” (tutti badge) non funzionano, mentre altri tooltip con trigger DOM nativi (`<span>`, icone lucide `forwardRef`, `<button>`) tendono a funzionare.
-
-### 3) Perché i fix precedenti non hanno risolto
-I fix precedenti (stopPropagation / rimozione `CollapsibleTrigger asChild` su wrapper di riga) risolvono conflitti di click/hover tra contenitori interattivi, ma **non** risolvono il problema strutturale: il trigger del tooltip (Badge) non supporta ref quando usato con `asChild`.
+**Esempio completo:**
+```
+GOOGLE INC. (A) PUT 295 FEB/26 → GOOGL 260221P00295000
+```
 
 ---
 
-## Soluzione proposta (robusta)
+## 2. Mapping Underlying → Ticker
 
-### A) Fix principale: rendere `Badge` compatibile con Radix `asChild`
-Aggiornare `src/components/ui/badge.tsx` trasformando `Badge` in `React.forwardRef<HTMLDivElement, BadgeProps>`.
+Dobbiamo risolvere il ticker dal nome aziendale. Il sistema utilizza già la tabella `underlying_mappings`:
 
-Cosa cambia:
-- il `ref` viene inoltrato al `<div>` reale
-- Radix TooltipTrigger riesce a gestire correttamente trigger/posizionamento/eventi
-- tutte le istanze `TooltipTrigger asChild` + `<Badge>` in tutta l’app smettono di essere fragili
+```sql
+SELECT ticker FROM underlying_mappings WHERE underlying = 'GOOGLE INC. (A)'
+-- Ritorna: GOOGL
+```
 
-Deliverable:
-- `Badge.displayName = "Badge"`
-- export invariato: `export { Badge, badgeVariants }` (nessun refactor nei consumers)
-
-### B) Hardening (opzionale ma consigliato): audit di altri trigger “asChild”
-Fare una mini-verifica su eventuali altri componenti custom usati come child di:
-- `TooltipTrigger asChild`
-- `DropdownMenuTrigger asChild`
-- ecc.
-
-Nel tuo repo, l’uso più critico è `TooltipTrigger asChild` con `Badge`. Altri casi (es. `<Button>`, icone lucide) sono già `forwardRef` o DOM nativi.
-
-### C) Test manuale mirato (riduce spreco crediti)
-Checklist di test in preview:
-1. Vai su `/derivatives`
-2. Hover su badge:
-   - OTM/ITM (nelle righe opzioni)
-   - IB/OOB e IR/OOR (nelle righe strategie raggruppate)
-3. Verifica:
-   - tooltip appare immediatamente (o con delay standard)
-   - non viene “tagliato” (Portal già presente)
-   - cliccare sul badge non rompe il collapsible (lo stopPropagation è già presente dove serve)
-
-### D) Regressioni da controllare
-Perché `Badge` è usato ovunque, verificare velocemente anche:
-- tooltips in altre pagine che usano badge come trigger (se presenti)
-- stili badge invariati (classi tailwind e cva restano uguali)
+Se non esiste un mapping, l'opzione viene saltata (con log).
 
 ---
 
-## File coinvolti
+## 3. Rate Limiting Strategy
 
-1) `src/components/ui/badge.tsx`
-- Modifica: `Badge` → `React.forwardRef`
-- Nessuna modifica API esterna (props/exports)
+**Free Tier Alpaca:**
+- 200 API calls/minuto
+- Max 100 symbols per batch nell'endpoint `optionlatestquotes`
 
-2) (Nessuna modifica necessaria) `src/pages/Derivatives.tsx`
-- Dovrebbe “magicamente” iniziare a funzionare senza toccare ogni tooltip, perché il bug è nel trigger component.
+**Con 111 opzioni attuali:**
+- 2 chiamate API (100 + 11) = ben sotto il limite
+- Nessuna attesa necessaria
+
+**Scenario futuro (300+ opzioni):**
+- Ogni chiamata richiede ~100 symbols
+- 3 chiamate = 3 API calls ≪ 200 limit
+- Il rate limit diventa un problema solo con migliaia di opzioni
+
+**Logica implementata:**
+```
+se (chiamate_nel_minuto >= 190):
+    attendi (60 - secondi_trascorsi)
+    reset contatore
+```
 
 ---
 
-## Perché questa è la fix “giusta”
-- Non è un workaround locale su una singola riga
-- Risolve il problema alla radice (contratto richiesto da Radix quando si usa `asChild`)
-- Evita di dover riscrivere decine di tooltip
-- Riduce probabilità di ricadute future quando aggiungi nuovi tooltip su Badge
+## 4. Edge Function: `update-option-prices-cron`
+
+**Nuovo file:** `supabase/functions/update-option-prices-cron/index.ts`
+
+### Struttura principale
+
+```typescript
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Costruisce OCC symbol da dati opzione
+function buildOccSymbol(
+  ticker: string,
+  expiryDate: string, // YYYY-MM-DD
+  optionType: 'call' | 'put',
+  strikePrice: number
+): string {
+  // Ticker padded a 6 caratteri
+  const paddedTicker = ticker.toUpperCase().padEnd(6, ' ');
+  
+  // Data in formato YYMMDD
+  const [year, month, day] = expiryDate.split('-');
+  const dateStr = year.slice(-2) + month + day;
+  
+  // Tipo opzione
+  const typeChar = optionType === 'call' ? 'C' : 'P';
+  
+  // Strike * 1000, padded a 8 caratteri
+  const strikeInt = Math.round(strikePrice * 1000);
+  const strikeStr = strikeInt.toString().padStart(8, '0');
+  
+  return `${paddedTicker}${dateStr}${typeChar}${strikeStr}`;
+}
+
+// Fetch quotes da Alpaca (batch fino a 100)
+async function fetchAlpacaQuotes(
+  symbols: string[],
+  apiKey: string,
+  apiSecret: string
+): Promise<Record<string, number>> {
+  const url = new URL('https://data.alpaca.markets/v1beta1/options/quotes/latest');
+  url.searchParams.set('symbols', symbols.join(','));
+  url.searchParams.set('feed', 'indicative'); // Free tier
+  
+  const response = await fetch(url.toString(), {
+    headers: {
+      'APCA-API-KEY-ID': apiKey,
+      'APCA-API-SECRET-KEY': apiSecret,
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Alpaca API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  const results: Record<string, number> = {};
+  
+  // Estrai mid-price da ogni quote
+  for (const [symbol, quote] of Object.entries(data.quotes || {})) {
+    const bid = quote.bp || 0; // Bid price
+    const ask = quote.ap || 0; // Ask price
+    if (bid > 0 && ask > 0) {
+      results[symbol] = (bid + ask) / 2; // Mid price
+    } else if (ask > 0) {
+      results[symbol] = ask;
+    } else if (bid > 0) {
+      results[symbol] = bid;
+    }
+  }
+  
+  return results;
+}
+```
+
+### Flow principale
+
+```typescript
+serve(async (req) => {
+  // 1. Fetch tutte le opzioni attive
+  const { data: options } = await supabase
+    .from('positions')
+    .select('id, underlying, strike_price, expiry_date, option_type')
+    .eq('asset_type', 'derivative')
+    .not('expiry_date', 'is', null);
+  
+  // 2. Risolvi ticker per ogni underlying
+  const optionsWithTickers = [];
+  for (const opt of options) {
+    const { data: mapping } = await supabase
+      .from('underlying_mappings')
+      .select('ticker')
+      .eq('underlying', opt.underlying)
+      .single();
+    
+    if (mapping?.ticker) {
+      optionsWithTickers.push({ ...opt, ticker: mapping.ticker });
+    }
+  }
+  
+  // 3. Costruisci OCC symbols
+  const symbolToPositionId: Record<string, string[]> = {};
+  for (const opt of optionsWithTickers) {
+    const symbol = buildOccSymbol(
+      opt.ticker,
+      opt.expiry_date,
+      opt.option_type,
+      opt.strike_price
+    );
+    if (!symbolToPositionId[symbol]) {
+      symbolToPositionId[symbol] = [];
+    }
+    symbolToPositionId[symbol].push(opt.id);
+  }
+  
+  // 4. Batch API calls (100 symbols alla volta)
+  const symbols = Object.keys(symbolToPositionId);
+  const batches = chunkArray(symbols, 100);
+  
+  let updated = 0;
+  let failed = 0;
+  
+  for (const batch of batches) {
+    const quotes = await fetchAlpacaQuotes(batch, apiKey, apiSecret);
+    
+    // 5. Update positions
+    for (const [symbol, price] of Object.entries(quotes)) {
+      const positionIds = symbolToPositionId[symbol];
+      for (const posId of positionIds) {
+        await supabase
+          .from('positions')
+          .update({ current_price: price })
+          .eq('id', posId);
+        updated++;
+      }
+    }
+    
+    failed += batch.length - Object.keys(quotes).length;
+  }
+  
+  return { success: true, updated, failed };
+});
+```
 
 ---
 
-## Criteri di completamento
-- Tooltip su badge OTM/ITM/IB/OOB/IR/OOR visibili e consistenti al hover/focus
-- Nessun warning React “ref” correlato a Badge quando si aprono pagine che li usano come trigger
-- Nessun impatto sul layout/stile dei badge
+## 5. Configurazione Cron Job
+
+**File:** `supabase/config.toml`
+
+```toml
+[functions.update-option-prices-cron]
+verify_jwt = false
+```
+
+**SQL per cron (da eseguire manualmente):**
+
+```sql
+SELECT cron.schedule(
+  'update-option-prices-every-5-min',
+  '*/5 8-22 * * 1-5',
+  $$
+  SELECT net.http_post(
+    url := 'https://uareyloxlpvaxmzygpgo.supabase.co/functions/v1/update-option-prices-cron',
+    headers := '{"Content-Type": "application/json", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}'::jsonb,
+    body := '{}'::jsonb
+  ) AS request_id;
+  $$
+);
+```
+
+---
+
+## 6. Secret da Configurare
+
+Dovrai fornire le credenziali Alpaca:
+
+| Nome Secret | Descrizione |
+|-------------|-------------|
+| `ALPACA_API_KEY` | API Key ID dal dashboard Alpaca |
+| `ALPACA_API_SECRET` | API Secret Key dal dashboard Alpaca |
+
+Queste si trovano su: https://app.alpaca.markets/paper/dashboard/overview → API Keys
+
+---
+
+## 7. Gestione Casi Speciali
+
+### Opzioni Scadute
+```typescript
+// Filtra opzioni già scadute
+const activeOptions = options.filter(o => 
+  new Date(o.expiry_date) >= new Date()
+);
+```
+
+### Underlying Senza Ticker Mapping
+```typescript
+// Log warning ma continua
+if (!mapping?.ticker) {
+  console.warn(`No ticker mapping for: ${opt.underlying}`);
+  continue;
+}
+```
+
+### Symbol Non Trovato su Alpaca
+```typescript
+// Alcune opzioni potrebbero non esistere (OTC, esotiche)
+if (!quotes[symbol]) {
+  console.log(`No quote for symbol: ${symbol}`);
+  failed++;
+}
+```
+
+### Normalizzazione Underlying per Lookup
+
+L'underlying nel DB potrebbe essere formattato diversamente dalla cache. Esempio:
+- DB: `GOOGLE INC. (A)`
+- Cache: `GOOGLE INC (A)` (senza punto)
+
+Utilizziamo la stessa funzione `normalizeName` già presente in `fetch-underlying-prices`:
+
+```typescript
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    // ... altri suffissi
+    .trim();
+}
+```
+
+---
+
+## 8. File Coinvolti
+
+| File | Azione |
+|------|--------|
+| `supabase/functions/update-option-prices-cron/index.ts` | **NUOVO** - Edge function principale |
+| `supabase/config.toml` | Aggiungere `[functions.update-option-prices-cron]` |
+
+---
+
+## 9. Stima Performance
+
+| Metrica | Valore |
+|---------|--------|
+| Opzioni attuali | ~111 |
+| API calls per run | 2 (100 + 11 symbols) |
+| Tempo stimato | ~3-5 secondi |
+| Rate limit usage | ~1% del limite (2/200) |
+
+---
+
+## 10. Considerazioni Ritardo 15 Minuti
+
+Con il feed `indicative` gratuito:
+- I prezzi sono ritardati di 15 minuti
+- Sufficiente per valutazione portafoglio e calcolo margini
+- Per trading attivo sarebbe necessario il feed `opra` (a pagamento)
+
+---
+
+## Prossimi Passi
+
+1. Richiedere le API keys Alpaca tramite tool `add_secret`
+2. Creare la edge function
+3. Aggiungere configurazione a `config.toml`
+4. Schedulare il cron job via SQL
+5. Testare manualmente chiamando la funzione
+6. Verificare che i prezzi si aggiornino correttamente nelle positions
