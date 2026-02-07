@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseOrdersFromTextData, toIsoDateFromIT, findFirstOperationDate } from '@/lib/orderFileParser';
+import { parseOrdersFromTextData, toIsoDateFromIT, findFirstOperationDate, filterAndCalculateCallPremiums, extractStrikeFromSymbol, ParsedOrder } from '@/lib/orderFileParser';
 
 /**
  * Regression test for Italian decimal format in HTML-based Excel files
@@ -179,5 +179,115 @@ describe('orderFileParser - Sanity check for suspicious prices', () => {
     expect(orders[0].avgPrice).toBe(84);
     expect(orders[1].avgPrice).toBe(1495);
     expect(orders[2].avgPrice).toBe(1280);
+  });
+});
+
+describe('orderFileParser - LEAP Call filtering', () => {
+  // Helper to create a minimal ParsedOrder for testing
+  const createOrder = (symbol: string, operation: 'buy' | 'sell', avgPrice: number = 10): ParsedOrder => ({
+    symbol,
+    operation,
+    status: 'Eseguito',
+    avgPrice,
+    quantity: 1,
+    optionType: 'CALL',
+    orderValue: avgPrice * 100,
+    validityDate: '01/01/2025',
+  });
+
+  describe('extractStrikeFromSymbol', () => {
+    it('should extract strike from standard option symbols', () => {
+      expect(extractStrikeFromSymbol('BABAH6C165')).toBe(165);
+      expect(extractStrikeFromSymbol('TSLAG6P350')).toBe(350);
+      expect(extractStrikeFromSymbol('NVDAG6C150')).toBe(150);
+      expect(extractStrikeFromSymbol('GOOGG6C180')).toBe(180);
+    });
+
+    it('should return null for symbols without strike', () => {
+      expect(extractStrikeFromSymbol('BABA')).toBeNull();
+      expect(extractStrikeFromSymbol('')).toBeNull();
+      expect(extractStrikeFromSymbol('ABC')).toBeNull();
+    });
+  });
+
+  describe('filterAndCalculateCallPremiums - LEAP filtering', () => {
+    it('should exclude buy-only CALL with high strike (LEAP)', () => {
+      // BABA at $100, strike 150 = 150% of price (> 130%) → LEAP
+      const orders: ParsedOrder[] = [
+        createOrder('BABAG6C150', 'buy', 14.95),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(0);
+    });
+
+    it('should keep CALL with sell operation (Covered Call)', () => {
+      // Even high strike, if it's sold it's a Covered Call
+      const orders: ParsedOrder[] = [
+        createOrder('BABAH6C165', 'sell', 8.4),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(1);
+    });
+
+    it('should keep buy if same symbol has a sell (rolling)', () => {
+      // Both buy and sell of same symbol = rolling, keep both
+      const orders: ParsedOrder[] = [
+        createOrder('BABAH6C165', 'sell', 8.4),
+        createOrder('BABAH6C165', 'buy', 2.12),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(2);
+    });
+
+    it('should keep buy-only CALL with near-money strike', () => {
+      // BABA at $100, strike 105 = 105% of price (< 130%) → NOT a LEAP
+      const orders: ParsedOrder[] = [
+        createOrder('BABAM6C105', 'buy', 5.0),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(1);
+    });
+
+    it('should filter multiple LEAPs while keeping valid Covered Calls', () => {
+      // Mixed scenario: 2 LEAPs (buy-only high strike) + 1 Covered Call
+      const orders: ParsedOrder[] = [
+        createOrder('BABAH6C165', 'sell', 8.4),   // Covered Call → keep
+        createOrder('BABAG6C150', 'buy', 14.95),  // LEAP (150 > 100*1.3) → exclude
+        createOrder('BABAJ6C180', 'buy', 20.0),   // LEAP (180 > 100*1.3) → exclude
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(1);
+      expect(result.filteredOrders[0].symbol).toBe('BABAH6C165');
+    });
+
+    it('should not filter when underlyingPrice is not provided', () => {
+      // Without underlying price, cannot determine LEAP → keep all
+      const orders: ParsedOrder[] = [
+        createOrder('BABAG6C150', 'buy', 14.95),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA');
+      expect(result.filteredOrders).toHaveLength(1);
+    });
+
+    it('should handle edge case at exactly 130% threshold', () => {
+      // BABA at $100, strike 130 = exactly 130% → NOT excluded (need > 130%)
+      const orders: ParsedOrder[] = [
+        createOrder('BABAM6C130', 'buy', 8.0),
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      expect(result.filteredOrders).toHaveLength(1);
+    });
+
+    it('should correctly calculate metrics after LEAP filtering', () => {
+      const orders: ParsedOrder[] = [
+        createOrder('BABAH6C165', 'sell', 8.4),   // Keep
+        createOrder('BABAG6C150', 'buy', 14.95),  // LEAP → exclude
+      ];
+      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      
+      expect(result.totalSells).toBe(1);
+      expect(result.totalBuys).toBe(0);
+      expect(result.netPremium).toBeCloseTo(840, 0); // Only the sell counts
+    });
   });
 });

@@ -466,19 +466,63 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
 }
 
 /**
+ * Extract strike price from option symbol
+ * BABAH6C165 → 165
+ * TSLAG6P350 → 350
+ */
+export function extractStrikeFromSymbol(symbol: string): number | null {
+  const match = symbol.match(/(\d+)$/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
  * Filter orders for a specific ticker's CALL options and calculate premiums
+ * Optionally filters out LEAP calls (buy-only with high strike)
  */
 export function filterAndCalculateCallPremiums(
   orders: ParsedOrder[],
-  ticker: string
+  ticker: string,
+  underlyingPrice?: number
 ): OrderParseResult {
-  // Filter for executed CALL orders matching the ticker
-  const filteredOrders = orders.filter(order => {
+  // Step 1: Filter for executed CALL orders matching the ticker
+  const baseFiltered = orders.filter(order => {
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const isCall = order.optionType === 'CALL';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    
     return isExecuted && isCall && matchesTicker;
+  });
+  
+  // Step 2: Identify symbols that have at least one sell (Covered Call or rolling)
+  const symbolsWithSells = new Set<string>();
+  for (const order of baseFiltered) {
+    if (order.operation === 'sell') {
+      symbolsWithSells.add(order.symbol);
+    }
+  }
+  
+  // Step 3: Filter out potential LEAP calls
+  // LEAP = buy-only + strike > 130% of underlying price
+  const LEAP_THRESHOLD = 1.3;
+  
+  const filteredOrders = baseFiltered.filter(order => {
+    // If the symbol has at least one sell → keep everything (it's Covered Call or rolling)
+    if (symbolsWithSells.has(order.symbol)) {
+      return true;
+    }
+    
+    // Only buys for this symbol → check if it's a LEAP
+    if (order.operation === 'buy' && underlyingPrice && underlyingPrice > 0) {
+      const strike = extractStrikeFromSymbol(order.symbol);
+      if (strike !== null && strike > underlyingPrice * LEAP_THRESHOLD) {
+        // Strike too high → LEAP → exclude
+        if (import.meta.env.DEV) {
+          console.log(`[LEAP filter] Excluded ${order.symbol} (strike ${strike} > ${(underlyingPrice * LEAP_THRESHOLD).toFixed(0)})`);
+        }
+        return false;
+      }
+    }
+    
+    return true;
   });
   
   let totalBuys = 0;
