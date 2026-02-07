@@ -1,61 +1,51 @@
-# Piano Completato ✅
 
-## Fix: Sincronizzare Logica Avvisi con Strategie Derivati
+# Piano: Correzione del calcolo Equity Exposure per il Benchmark
 
-### Implementazione Completata
+## Problema Identificato
 
-1. ✅ **Creata tabella `strategy_cache`** - Memorizza le strategie calcolate dal frontend
-2. ✅ **Creato `src/lib/strategyCache.ts`** - Funzione `saveStrategyCache()` per salvare le strategie
-3. ✅ **Modificato `Derivatives.tsx`** - Chiama `saveStrategyCache()` quando le categorie cambiano
-4. ✅ **Riscritto `check-alerts` Edge Function** - Legge dalla cache invece di ricalcolare
-5. ✅ **Aggiornato `send-notification` Edge Function** - Nuovo formato messaggio con ticker, strategia, strike
+Il benchmark nel grafico delle performance usa una percentuale di esposizione equity del 35.2%, ma questo valore è calcolato usando solo `totalStockRisk` (Stocks + ETF netti delle protezioni).
 
-### Flusso Implementato
+Nel Risk Analyzer invece viene mostrata la percentuale corretta che include **tutte** le categorie di rischio:
+- ETF Azionari
+- Azioni (Stocks) 
+- Commodities
+- Naked PUT
+- Leap CALL
+- Strategie (Max Loss)
 
-```text
-Frontend (Derivatives.tsx)            Edge Function (check-alerts)
-         │                                      │
-         │  1. categorizeDerivatives()          │
-         │  2. useEffect → saveStrategyCache()  │
-         │     ↓                                │
-         │  [strategy_cache table]         ──>  │
-         │                                      │  3. Legge da strategy_cache
-         │                                      │  4. Genera avvisi coerenti
-         │                                      │  5. Trigger → send-notification
+## Soluzione
+
+Modificare l'hook `useEquityExposurePct` per:
+
+1. **Usare `grandTotal`** invece di `totalStockRisk` - questo allinea il calcolo a quello visualizzato nel Risk Analyzer
+2. **Applicare un cap al 100%** - se l'esposizione supera il 100% del valore assets, il benchmark usa 100% equity
+
+## Modifiche Tecniche
+
+### File: `src/hooks/useEquityExposurePct.ts`
+
+Cambiamenti:
+- Rinominare il campo `equityExposureEUR` in modo semanticamente più corretto (opzionale) oppure mantenerlo per compatibilità
+- Usare `analysis.grandTotal` invece di `analysis.totalStockRisk`
+- La formula diventa: `equityExposurePct = grandTotal / totalValue`
+- Aggiornare i commenti per riflettere la nuova logica
+- Il clamp `Math.max(0, Math.min(1, ...))` già presente gestisce il cap al 100%
+
+```typescript
+// PRIMA:
+const equityExposureEUR = analysis.totalStockRisk;
+
+// DOPO:
+const equityExposureEUR = analysis.grandTotal;
 ```
 
-### Nuovo Formato Notifiche
+## Impatto
 
-**Telegram:**
-```
-🚨 Avviso Portafoglio
-🔴 Critical
+- Il benchmark sarà ponderato correttamente usando la stessa percentuale visualizzata nel Risk Analyzer
+- Se l'esposizione totale supera il 100% del valore assets, il benchmark userà 100% equity e 0% bond
+- Nessun impatto su altre parti del codice poiché i campi restituiti rimangono gli stessi
 
-📈 Ticker: WDC
-📊 Strategia: Double Diagonal
-🏷️ Tipo Alert: Avviso di Distanza
-📝 Messaggio: WDC si avvicina allo strike della call venduta
-🎯 Strike: CALL $50.00
+## Validazione
 
-**Prezzo WDC**: $48.75
-```
-
-### Tipi di Avviso Supportati
-
-| Strategia | Avviso Distanza | Avviso Stato |
-|-----------|-----------------|--------------|
-| Covered Call | ✅ | ITM |
-| Naked Put | ✅ | ITM |
-| Iron Condor | ✅ PUT + CALL | OOR |
-| Double Diagonal | ✅ PUT + CALL | OOR |
-| Alternative DD | ✅ PUT + CALL | OOR |
-| LEAP Call | - | Gain +20/30/40/50% |
-| Altre Strategie | - | OOB (fuori breakeven) |
-| Avvisi Prezzo | - | Target raggiunto |
-
-### Note Importanti
-
-- Gli avvisi funzionano solo dopo che l'utente ha visitato la pagina "Strategie Derivati" almeno una volta
-- La cache viene aggiornata automaticamente ogni volta che l'utente apre la pagina
-- I ticker mostrati negli avvisi sono quelli risolti (es. "WDC" non "WESTERN")
-- Il "Reset Sistema Avvisi" in Gestione Avvisi NON cancella la strategy_cache
+Dopo la modifica:
+- Nel grafico Performance Evolution, la percentuale mostrata nel tooltip del benchmark dovrebbe corrispondere a quella visualizzata nel Risk Analyzer sotto "Esposizione in Equity e Commodities"
