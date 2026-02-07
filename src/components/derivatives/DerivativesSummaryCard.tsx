@@ -3,11 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, X } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories } from '@/lib/derivativeStrategies';
-import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead } from '@/hooks/useAlerts';
+import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
 import { Alert, ALERT_TYPE_LABELS, AlertSeverity } from '@/types/alerts';
@@ -619,6 +619,7 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
   const { data: unreadCount = 0 } = useUnreadAlertsCount(portfolioId);
   const markAsReadMutation = useMarkAlertAsRead();
   const markAllAsReadMutation = useMarkAllAlertsAsRead();
+  const deleteAlertMutation = useDeleteAlert();
   const [settingsOpen, setSettingsOpen] = useState(false);
   
   const getSeverityIcon = (severity: AlertSeverity) => {
@@ -638,6 +639,11 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
   
   const handleMarkAllAsRead = () => {
     markAllAsReadMutation.mutate(portfolioId);
+  };
+  
+  const handleDeleteAlert = (e: React.MouseEvent, alertId: string) => {
+    e.stopPropagation(); // Prevent triggering mark as read
+    deleteAlertMutation.mutate(alertId);
   };
   
   return (
@@ -732,6 +738,15 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
                           })}
                         </p>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={(e) => handleDeleteAlert(e, alert.id)}
+                        disabled={deleteAlertMutation.isPending}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
                     </div>
                   </div>
                 ))}

@@ -141,6 +141,30 @@ export function useMarkAllAlertsAsRead() {
   });
 }
 
+// Delete a single alert
+export function useDeleteAlert() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  
+  return useMutation({
+    mutationFn: async (alertId: string) => {
+      if (!user) throw new Error('User not authenticated');
+      
+      const { error } = await supabase
+        .from('alerts')
+        .delete()
+        .eq('id', alertId)
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['unread-alerts-count'] });
+    },
+  });
+}
+
 // Reset entire alert system (clear alerts + alert_states)
 export function useResetAlertSystem() {
   const queryClient = useQueryClient();
