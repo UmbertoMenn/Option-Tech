@@ -13,6 +13,7 @@ import {
   parseOrderFile, 
   filterAndCalculateCallPremiums, 
   calculatePremiumMetrics,
+  findFirstOperationDate,
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult
@@ -66,20 +67,8 @@ export function CallPremiumCalculatorDialog({
       }
     });
 
-    // Find earliest date
-    const dates = orders.map(o => o.validityDate).filter(Boolean) as string[];
-    const firstOperationDate = dates.length > 0 
-      ? dates.map(d => {
-          const match = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-          if (match) {
-            const day = parseInt(match[1], 10);
-            const month = parseInt(match[2], 10);
-            const year = parseInt(match[3], 10);
-            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          }
-          return null;
-        }).filter(Boolean).sort()[0] || null
-      : null;
+    // Find earliest date using shared utility
+    const firstOperationDate = findFirstOperationDate(orders.map(o => o.validityDate));
 
     const newParseResult: OrderParseResult = {
       allOrders: orders,

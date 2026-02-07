@@ -44,11 +44,19 @@ function findColumnIndex(headers: string[], possibleNames: string[]): number {
  * Parse number from Italian format (comma as decimal separator)
  * Examples: "8,4" -> 8.4, "12,80" -> 12.80, "1.250,50" -> 1250.50
  */
+/**
+ * Parse number from Italian format (comma as decimal separator)
+ * Examples: "8,4" -> 8.4, "12,80" -> 12.80, "1.250,50" -> 1250.50
+ * Also handles apostrophes (common in Excel exports): "'8,4" -> 8.4
+ */
 function parseNumber(value: any): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
-    // Remove whitespace
-    let cleaned = value.replace(/\s/g, '');
+    // Remove whitespace, non-breaking spaces, and leading apostrophes
+    let cleaned = value
+      .replace(/\s/g, '')
+      .replace(/\u00A0/g, '')  // non-breaking space
+      .replace(/^'+/, '');     // leading apostrophes
     
     // Italian format uses . as thousands separator and , as decimal
     // Check if string contains both . and , - Italian format
@@ -61,7 +69,8 @@ function parseNumber(value: any): number {
     }
     // If only dots, assume it's already correct format
     
-    return parseFloat(cleaned) || 0;
+    const result = parseFloat(cleaned) || 0;
+    return result;
   }
   return 0;
 }
@@ -163,11 +172,12 @@ function parseHtmlTable(htmlContent: string): any[][] {
 /**
  * Parse date from Italian format (DD/MM/YYYY or DD-MM-YYYY)
  * Returns ISO date string or null
+ * Exported so UI can reuse the same logic when recalculating after row removal
  */
-function parseDateIT(value: string): string | null {
+export function toIsoDateFromIT(value: string | undefined | null): string | null {
   if (!value) return null;
   
-  // Remove leading apostrophes (common in Italian Excel exports)
+  // Remove leading apostrophes (common in Italian Excel exports) and trim
   const cleaned = value.trim().replace(/^'+/, '');
   
   // Try DD/MM/YYYY or DD-MM-YYYY
@@ -186,13 +196,16 @@ function parseDateIT(value: string): string | null {
 }
 
 /**
- * Find the earliest date from a list of ISO date strings
+ * Find the earliest date from a list of validity date strings (Italian format)
+ * Exported so UI can reuse the same logic when recalculating after row removal
  */
-function findEarliestDate(dates: (string | null)[]): string | null {
-  const validDates = dates.filter((d): d is string => d !== null);
-  if (validDates.length === 0) return null;
+export function findFirstOperationDate(validityDates: (string | undefined)[]): string | null {
+  const isoDates = validityDates
+    .map(d => toIsoDateFromIT(d))
+    .filter((d): d is string => d !== null);
   
-  return validDates.sort()[0]; // ISO dates sort correctly as strings
+  if (isoDates.length === 0) return null;
+  return isoDates.sort()[0]; // ISO dates sort correctly as strings
 }
 
 /**
@@ -227,7 +240,8 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
               const workbook = XLSX.read(textData, { type: 'string' });
               for (const name of workbook.SheetNames) {
                 const ws = workbook.Sheets[name];
-                const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+                // Use raw: false to get formatted strings instead of coerced numbers
+                const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
                 if (sheetData.length > rawData.length) {
                   rawData = sheetData;
                 }
@@ -254,7 +268,8 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
           // Get best sheet with most data
           for (const name of workbook.SheetNames) {
             const ws = workbook.Sheets[name];
-            const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+            // Use raw: false to get formatted strings instead of coerced numbers
+            const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
             if (sheetData.length > rawData.length) {
               rawData = sheetData;
             }
@@ -271,7 +286,7 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
         console.log('First row (headers):', rawData[0]);
         
         // First row is headers - handle potential empty cells
-        const headers = rawData[0].map(h => String(h || '').trim());
+        const headers = rawData[0].map(h => String(h || '').trim().replace(/^'+/, ''));
         
         console.log('Excel headers found:', headers);
         
@@ -381,9 +396,8 @@ export function filterAndCalculateCallPremiums(
     }
   });
   
-  // Find earliest operation date from filtered orders
-  const dates = filteredOrders.map(o => o.validityDate ? parseDateIT(o.validityDate) : null);
-  const firstOperationDate = findEarliestDate(dates);
+  // Find earliest operation date from filtered orders using the unified utility
+  const firstOperationDate = findFirstOperationDate(filteredOrders.map(o => o.validityDate));
   
   return {
     allOrders: orders,
