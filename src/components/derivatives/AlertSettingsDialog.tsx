@@ -774,6 +774,31 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 Crea avvisi di prezzo su qualsiasi ticker, anche se non presente nel tuo portafoglio.
               </p>
               
+              {/* Available tickers from portfolio */}
+              {availableTickers.length > 0 && (
+                <div className="space-y-2 p-4 border rounded-lg bg-muted/30">
+                  <p className="text-sm font-medium">Ticker dal portafoglio:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableTickers.map(({ ticker }) => (
+                      <Badge
+                        key={ticker}
+                        variant="outline"
+                        className="cursor-pointer hover:bg-primary/10 transition-colors"
+                        onClick={() => {
+                          setNewPriceTicker(ticker);
+                          setTickerValidation(null);
+                        }}
+                      >
+                        {ticker}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Clicca su un ticker per compilarlo automaticamente
+                  </p>
+                </div>
+              )}
+              
               {/* New price alert form */}
               <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
                 <h4 className="font-medium flex items-center gap-2">
