@@ -699,7 +699,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                         UNIT: {formatNumber(netPerShare, 2)} ${' '}
                         {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
-                            ({formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
+                            ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
                         )}
                       </>
