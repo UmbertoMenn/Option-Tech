@@ -251,13 +251,15 @@ export function useBenchmarkData(
       return ((eurusdResult.price / eurusdBase) - 1) * 100;
     };
 
-    // Calculate returns for each historical snapshot
+    // Calculate returns for each historical snapshot using HISTORICAL equity exposure
+    // IMPORTANT: The equity exposure at point N determines the benchmark return from N to N+1
     const returns: Array<{
       date: string;
       equityReturn: number;
       bondReturn: number;
       scaledReturn: number;
       eurusdVariation?: number;
+      equityPctUsed?: number; // Track which equity % was used for debugging
     }> = [];
 
     sortedHistory.forEach((entry, index) => {
@@ -268,6 +270,7 @@ export function useBenchmarkData(
           bondReturn: 0,
           scaledReturn: 0,
           eurusdVariation: 0,
+          equityPctUsed: 0,
         });
         return;
       }
@@ -316,9 +319,17 @@ export function useBenchmarkData(
         bondReturn = ((aggResult.price - aggBase) / aggBase) * 100;
       }
 
-      // Calculate scaled return using real equity exposure percentage
-      // Formula: scaledReturn = equityPct * equityReturn + (1 - equityPct) * bondReturn
-      const equityPct = equityExposurePct ?? 0.6; // Fallback to 60% if not provided
+      // CRITICAL: Use the PREVIOUS point's equity exposure for this period's benchmark
+      // The equity exposure at point N determines the benchmark return from N to N+1
+      const prevEntry = sortedHistory[index - 1];
+      const historicalEquityPct = prevEntry.equity_exposure_pct;
+      
+      // Use historical equity exposure if available (> 0), otherwise fallback
+      // Note: 0 is treated as "not set" and falls back to current or 60%
+      const equityPct = historicalEquityPct && historicalEquityPct > 0 
+        ? historicalEquityPct 
+        : (equityExposurePct ?? 0.6);
+      
       let scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
 
       // Apply currency adjustment if enabled
@@ -336,6 +347,7 @@ export function useBenchmarkData(
         bondReturn,
         scaledReturn,
         eurusdVariation,
+        equityPctUsed: equityPct,
       });
     });
 
@@ -384,8 +396,15 @@ export function useBenchmarkData(
         bondReturnCurrent = ((aggResultCurrent.price - aggBase) / aggBase) * 100;
       }
 
-      // Calculate scaled return using real equity exposure percentage
-      const equityPct = equityExposurePct ?? 0.6;
+      // Calculate scaled return using the LAST historical point's equity exposure
+      // This represents the equity exposure from the last snapshot to current date
+      const lastEntry = sortedHistory[sortedHistory.length - 1];
+      const historicalEquityPct = lastEntry?.equity_exposure_pct;
+      
+      const equityPct = historicalEquityPct && historicalEquityPct > 0 
+        ? historicalEquityPct 
+        : (equityExposurePct ?? 0.6);
+        
       let scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
 
       // Apply currency adjustment if enabled
@@ -401,6 +420,7 @@ export function useBenchmarkData(
         bondReturn: bondReturnCurrent,
         scaledReturn: scaledReturnCurrent,
         eurusdVariation: eurusdVariationCurrent,
+        equityPctUsed: equityPct,
       });
     }
 

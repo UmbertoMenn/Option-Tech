@@ -8,6 +8,7 @@ export interface HistoricalDataEntry {
   netting_ex_cc_np: number;
   deposits: number;
   average_balance: number;
+  equity_exposure_pct: number; // 0-1, default 0.6
   created_at: string;
   updated_at: string;
 }
@@ -20,4 +21,5 @@ export interface HistoricalDataInput {
   netting_ex_cc_np: number;
   deposits: number;
   average_balance: number;
+  equity_exposure_pct: number; // 0-1
 }

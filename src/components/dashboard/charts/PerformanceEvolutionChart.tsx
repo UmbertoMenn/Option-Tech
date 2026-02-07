@@ -120,11 +120,12 @@ function CustomLegend({
   const usdPctFormatted = (usdExposurePct * 100).toFixed(1);
   
   const benchmarkDescription = hasEquityData
-    ? `Paniere Equity/Bond ponderato per l'equity exposure del portafoglio.\n\n` +
-      `Equity exposure (Risk Analyzer): ${equityPctFormatted}%\n` +
-      `Calcolo: ${formatNumber(equityExposureEUR, 0)}€ / ${formatNumber(assetsTotalEUR, 0)}€\n\n` +
-      `Benchmark: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
-    : 'Paniere Equity/Bond ponderato per l\'equity exposure del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
+    ? `Paniere Equity/Bond ponderato per l'equity exposure storica del portafoglio.\n\n` +
+      `Ponderazione dinamica: Il peso Equity/Bond varia nel tempo in base all'esposizione salvata in ogni snapshot.\n` +
+      `L'exposure di ciascun punto determina la ponderazione per il periodo successivo.\n\n` +
+      `Equity exposure attuale: ${equityPctFormatted}%\n` +
+      `Benchmark attuale: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
+    : 'Paniere Equity/Bond ponderato per l\'equity exposure storica del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 
   const currencyTooltip = hasUsdData
     ? `Aggiusta il benchmark per l'effetto valutario EUR/USD.\n\n` +

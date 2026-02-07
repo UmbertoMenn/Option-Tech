@@ -419,6 +419,7 @@ export type Database = {
           average_balance: number
           created_at: string
           deposits: number
+          equity_exposure_pct: number | null
           id: string
           netting_ex_cc: number
           netting_ex_cc_np: number
@@ -432,6 +433,7 @@ export type Database = {
           average_balance?: number
           created_at?: string
           deposits?: number
+          equity_exposure_pct?: number | null
           id?: string
           netting_ex_cc?: number
           netting_ex_cc_np?: number
@@ -445,6 +447,7 @@ export type Database = {
           average_balance?: number
           created_at?: string
           deposits?: number
+          equity_exposure_pct?: number | null
           id?: string
           netting_ex_cc?: number
           netting_ex_cc_np?: number

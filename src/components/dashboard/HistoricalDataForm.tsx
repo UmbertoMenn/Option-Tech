@@ -19,6 +19,7 @@ interface HistoricalDataFormProps {
   currentNettingTotal: number;
   currentNettingExCC: number;
   currentNettingExCCNP: number;
+  currentEquityExposurePct: number; // 0-1
 }
 
 export function HistoricalDataForm({
@@ -30,6 +31,7 @@ export function HistoricalDataForm({
   currentNettingTotal,
   currentNettingExCC,
   currentNettingExCCNP,
+  currentEquityExposurePct,
 }: HistoricalDataFormProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -41,6 +43,7 @@ export function HistoricalDataForm({
   const [formNettingTotal, setFormNettingTotal] = useState('');
   const [formNettingExCC, setFormNettingExCC] = useState('');
   const [formNettingExCCNP, setFormNettingExCCNP] = useState('');
+  const [formEquityExposure, setFormEquityExposure] = useState(''); // 0-100 user input
 
   const parseValue = (val: string) => {
     return parseFloat(val.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
@@ -52,12 +55,18 @@ export function HistoricalDataForm({
     setFormNettingTotal('');
     setFormNettingExCC('');
     setFormNettingExCCNP('');
+    setFormEquityExposure('');
     setIsAddingNew(false);
     setEditingId(null);
   };
 
   const handleSave = () => {
     if (!formDate) return;
+    
+    // Parse equity exposure: user inputs 0-100, we save as 0-1
+    let equityPct = parseValue(formEquityExposure);
+    equityPct = Math.max(0, Math.min(100, equityPct)); // Clamp 0-100
+    equityPct = equityPct / 100; // Convert to 0-1
     
     onSave({
       snapshot_date: format(formDate, 'yyyy-MM-dd'),
@@ -67,6 +76,7 @@ export function HistoricalDataForm({
       netting_ex_cc_np: parseValue(formNettingExCCNP),
       deposits: 0,
       average_balance: 0,
+      equity_exposure_pct: equityPct,
     });
     
     resetForm();
@@ -79,6 +89,9 @@ export function HistoricalDataForm({
     setFormNettingTotal(entry.netting_total.toString());
     setFormNettingExCC(entry.netting_ex_cc.toString());
     setFormNettingExCCNP((entry.netting_ex_cc_np ?? 0).toString());
+    // Convert 0-1 to 0-100 for display
+    const equityPct = entry.equity_exposure_pct ?? 0.6;
+    setFormEquityExposure((equityPct * 100).toFixed(1));
     setIsAddingNew(false);
   };
 
@@ -92,9 +105,82 @@ export function HistoricalDataForm({
     setFormNettingTotal(currentNettingTotal.toString());
     setFormNettingExCC(currentNettingExCC.toString());
     setFormNettingExCCNP(currentNettingExCCNP.toString());
+    // Convert 0-1 to 0-100 for display
+    setFormEquityExposure((currentEquityExposurePct * 100).toFixed(1));
   };
 
   const isEditing = editingId !== null || isAddingNew;
+
+  // Render form fields (reused for both new and edit modes)
+  const renderFormFields = () => (
+    <>
+      <div className="space-y-2">
+        <Label className="text-xs">Data</Label>
+        <DateInput
+          value={formDate}
+          onChange={(date) => setFormDate(date)}
+          disabled={(d) => d > new Date()}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs">Patrimonio Totale ($)</Label>
+        <Input
+          type="text"
+          placeholder="es. 100.000"
+          value={formTotalValue}
+          onChange={(e) => setFormTotalValue(e.target.value)}
+          className="font-mono text-sm"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Netting Totale ($)</Label>
+          <Input
+            type="text"
+            placeholder="es. 95.000"
+            value={formNettingTotal}
+            onChange={(e) => setFormNettingTotal(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Netting ex. Covered Call ($)</Label>
+          <Input
+            type="text"
+            placeholder="es. 98.000"
+            value={formNettingExCC}
+            onChange={(e) => setFormNettingExCC(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Netting ex. CC e NP ($)</Label>
+          <Input
+            type="text"
+            placeholder="es. 99.000"
+            value={formNettingExCCNP}
+            onChange={(e) => setFormNettingExCCNP(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Equity Exposure (%)</Label>
+          <Input
+            type="text"
+            placeholder="es. 65"
+            value={formEquityExposure}
+            onChange={(e) => setFormEquityExposure(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <div className="p-4 rounded-lg bg-background-secondary border border-border">
@@ -140,59 +226,7 @@ export function HistoricalDataForm({
                           </Button>
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-xs">Data</Label>
-                          <DateInput
-                            value={formDate}
-                            onChange={(date) => setFormDate(date)}
-                            disabled={(d) => d > new Date()}
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs">Patrimonio Totale ($)</Label>
-                          <Input
-                            type="text"
-                            placeholder="es. 100.000"
-                            value={formTotalValue}
-                            onChange={(e) => setFormTotalValue(e.target.value)}
-                            className="font-mono text-sm"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-xs">Netting Totale ($)</Label>
-                            <Input
-                              type="text"
-                              placeholder="es. 95.000"
-                              value={formNettingTotal}
-                              onChange={(e) => setFormNettingTotal(e.target.value)}
-                              className="font-mono text-sm"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Netting ex. Covered Call ($)</Label>
-                            <Input
-                              type="text"
-                              placeholder="es. 98.000"
-                              value={formNettingExCC}
-                              onChange={(e) => setFormNettingExCC(e.target.value)}
-                              className="font-mono text-sm"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs">Netting ex. Covered Call e NP ($)</Label>
-                          <Input
-                            type="text"
-                            placeholder="es. 99.000"
-                            value={formNettingExCCNP}
-                            onChange={(e) => setFormNettingExCCNP(e.target.value)}
-                            className="font-mono text-sm"
-                          />
-                        </div>
+                        {renderFormFields()}
 
                         <div className="flex gap-2 pt-2">
                           <Button
@@ -226,6 +260,7 @@ export function HistoricalDataForm({
                             <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
                             <span>Netting ex. CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
                             <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
+                            <span>Equity Exp.: <span className="font-mono text-foreground">{((entry.equity_exposure_pct ?? 0.6) * 100).toFixed(0)}%</span></span>
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -266,59 +301,7 @@ export function HistoricalDataForm({
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs">Data</Label>
-                <DateInput
-                  value={formDate}
-                  onChange={(date) => setFormDate(date)}
-                  disabled={(d) => d > new Date()}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Patrimonio Totale ($)</Label>
-                <Input
-                  type="text"
-                  placeholder="es. 100.000"
-                  value={formTotalValue}
-                  onChange={(e) => setFormTotalValue(e.target.value)}
-                  className="font-mono text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Netting Totale ($)</Label>
-                  <Input
-                    type="text"
-                    placeholder="es. 95.000"
-                    value={formNettingTotal}
-                    onChange={(e) => setFormNettingTotal(e.target.value)}
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Netting ex. Covered Call ($)</Label>
-                  <Input
-                    type="text"
-                    placeholder="es. 98.000"
-                    value={formNettingExCC}
-                    onChange={(e) => setFormNettingExCC(e.target.value)}
-                    className="font-mono text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Netting ex. Covered Call e NP ($)</Label>
-                <Input
-                  type="text"
-                  placeholder="es. 99.000"
-                  value={formNettingExCCNP}
-                  onChange={(e) => setFormNettingExCCNP(e.target.value)}
-                  className="font-mono text-sm"
-                />
-              </div>
+              {renderFormFields()}
 
               <div className="flex gap-2 pt-2">
                 <Button

@@ -38,6 +38,7 @@ export function useHistoricalData(portfolioId: string | undefined) {
           netting_ex_cc_np: entry.netting_ex_cc_np,
           deposits: entry.deposits,
           average_balance: entry.average_balance,
+          equity_exposure_pct: entry.equity_exposure_pct,
         }, {
           onConflict: 'portfolio_id,snapshot_date'
         })
