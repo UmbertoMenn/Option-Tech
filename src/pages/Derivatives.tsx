@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator } from 'lucide-react';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
@@ -33,6 +33,7 @@ import {
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
+import { CallPremiumCalculatorDialog } from '@/components/derivatives/CallPremiumCalculatorDialog';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
@@ -553,6 +554,7 @@ interface CoveredCallRowProps extends RowPropsWithPrices {
 
 function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
   
   const hasOverride = !!getOverrideForPosition(option.id);
@@ -582,146 +584,179 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   const uncoveredContracts = potentialContracts - totalContractsForUnderlying;
   const isPartialCoverage = uncoveredContracts >= 1;
   
+  // Get ticker for calculator
+  const ticker = option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined;
+  
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div 
-        role="button"
-        tabIndex={0}
-        onClick={() => setIsOpen(!isOpen)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
-      >
-          {/* Col 1: Chevron */}
-          {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          )}
-          
-          {/* Col 2: V/A Badge */}
-          <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-          
-          {/* Col 3: Descrizione */}
-          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-          
-          {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
-          <div className="flex items-center gap-1 w-12 justify-end">
-            {isPartialCoverage && (
+    <>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <div 
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsOpen(!isOpen)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        >
+            {/* Col 1: Chevron */}
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            )}
+            
+            {/* Col 2: V/A Badge */}
+            <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
+            
+            {/* Col 3: Descrizione */}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            
+            {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
+            <div className="flex items-center gap-1 w-12 justify-end">
+              {isPartialCoverage && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span 
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      P!
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Copertura parziale: {uncoveredContracts} contratti scoperti</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {hasOverride && <OverrideBadge />}
+            </div>
+            
+            {/* Col 5: ITM/OTM */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge 
+                  variant="outline"
+                  className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {isITM ? 'ITM' : 'OTM'}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isITM ? 'In The Money: il sottostante è sopra lo strike' : 'Out of The Money: il sottostante è sotto lo strike'}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 6: Menu */}
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="covered_call" 
+            />
+            
+            {/* Col 7: Calculator button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola premi CALL incassati</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 8: PS */}
+            <div className="text-right flex items-center justify-end">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span 
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    P!
+                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Copertura parziale: {uncoveredContracts} contratti scoperti</p>
+                  <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
-            )}
-            {hasOverride && <OverrideBadge />}
-          </div>
-          
-          {/* Col 5: ITM/OTM */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge 
-                variant="outline"
-                className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {isITM ? 'ITM' : 'OTM'}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{isITM ? 'In The Money: il sottostante è sopra lo strike' : 'Out of The Money: il sottostante è sotto lo strike'}</p>
-            </TooltipContent>
-          </Tooltip>
-          
-          {/* Col 6: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="covered_call" 
-          />
-          
-          {/* Col 7: PS */}
-          <div className="text-right flex items-center justify-end">
+              {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
+              )}
+            </div>
+            
+            {/* Col 9: Contratti */}
+            <span className="text-sm text-muted-foreground text-right">
+              {contractsCovered} × 100
+            </span>
+            
+            {/* Col 10: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                  PS: {formatCurrency(underlyingPrice, 'USD')}
+                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                  {formatCurrency(option.avg_cost || 0, 'USD')}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Prezzo Sottostante</p>
+                <p>Prezzo Medio di Carico Opzione</p>
               </TooltipContent>
             </Tooltip>
-            {option.underlying && underlyingPrices[option.underlying]?.isStale && (
-              <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-            )}
-          </div>
-          
-          {/* Col 8: Contratti */}
-          <span className="text-sm text-muted-foreground text-right">
-            {contractsCovered} × 100
-          </span>
-          
-          {/* Col 9: PMC */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                {formatCurrency(option.avg_cost || 0, 'USD')}
+            
+            {/* Col 11: Prezzo + % */}
+            <div className="flex items-center gap-1 justify-end">
+              <span className="font-semibold text-sm">
+                {formatCurrency(option.current_price || 0, 'USD')}
               </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Prezzo Medio di Carico Opzione</p>
-            </TooltipContent>
-          </Tooltip>
-          
-          {/* Col 10: Prezzo + % */}
-          <div className="flex items-center gap-1 justify-end">
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
-            </span>
-            {priceChangePct !== null && (
-              <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
-              </span>
-            )}
-          </div>
-      </div>
-      <CollapsibleContent>
-        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground text-xs">Sottostante</p>
-              <p className="font-medium">{underlying.description}</p>
-              <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+              {priceChangePct !== null && (
+                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                </span>
+              )}
             </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${option.strike_price}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
-            </div>
-          </div>
-          {adjustedProfitLossPct !== null && (
-            <div className="text-xs text-muted-foreground">
-              P/L: {formatPercentage(adjustedProfitLossPct)}
-            </div>
-          )}
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+        <CollapsibleContent>
+          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground text-xs">Sottostante</p>
+                <p className="font-medium">{underlying.description}</p>
+                <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Strike</p>
+                <p className="font-medium">${option.strike_price}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Scadenza</p>
+                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+                <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+              </div>
+            </div>
+            {adjustedProfitLossPct !== null && (
+              <div className="text-xs text-muted-foreground">
+                P/L: {formatPercentage(adjustedProfitLossPct)}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={option.underlying || underlying.description || ''}
+        ticker={ticker}
+        contractsInPortfolio={contractsCovered}
+      />
+    </>
   );
 }
 
