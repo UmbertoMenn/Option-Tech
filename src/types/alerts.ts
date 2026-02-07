@@ -144,7 +144,7 @@ export interface PriceAlert {
 }
 
 // Default thresholds for distance alerts
-export const DEFAULT_DISTANCE_THRESHOLD_PCT = 5;
+export const DEFAULT_DISTANCE_THRESHOLD_PCT = 2;
 
 // Default cooldown in minutes (4 hours)
 export const DEFAULT_COOLDOWN_MINUTES = 240;

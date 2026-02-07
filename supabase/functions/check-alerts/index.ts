@@ -28,7 +28,7 @@ const ALERT_TYPES = {
   PRICE_ALERT_BELOW: 'price_alert_below',
 };
 
-const DEFAULT_THRESHOLD_PCT = 5;
+const DEFAULT_THRESHOLD_PCT = 2;
 const DEFAULT_COOLDOWN_MINUTES = 240;
 
 interface AlertConfig {

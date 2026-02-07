@@ -19,6 +19,7 @@ interface AlertPayload {
   strategy_type?: string;
   strike_price?: number;
   underlying_price?: number;
+  threshold_value?: number; // For OOB alerts, this contains the breakeven
 }
 
 interface Profile {
@@ -54,19 +55,27 @@ function getSeverityLabel(severity: string): string {
   return 'Info';
 }
 
-// Build strike display
-function getStrikeDisplay(alertType: string, strikePrice?: number): string | null {
+// Build strike/breakeven display
+function getStrikeDisplay(alertType: string, strikePrice?: number, breakeven?: number): { label: string; value: string } | null {
+  // For OOB alerts, show breakeven instead of strike
+  if (alertType === 'action_strategy_oob') {
+    if (breakeven) {
+      return { label: 'Breakeven', value: `$${breakeven.toFixed(2)}` };
+    }
+    return null;
+  }
+  
   if (!strikePrice) return null;
   
   // Distance alerts
   if (alertType.includes('_call') || alertType === 'action_covered_call_itm') {
-    return `CALL $${strikePrice.toFixed(2)}`;
+    return { label: 'Strike', value: `CALL $${strikePrice.toFixed(2)}` };
   }
   if (alertType.includes('_put') || alertType === 'action_naked_put_itm') {
-    return `PUT $${strikePrice.toFixed(2)}`;
+    return { label: 'Strike', value: `PUT $${strikePrice.toFixed(2)}` };
   }
   
-  return `$${strikePrice.toFixed(2)}`;
+  return { label: 'Strike', value: `$${strikePrice.toFixed(2)}` };
 }
 
 async function sendEmail(
@@ -83,7 +92,7 @@ async function sendEmail(
     const adminPrefix = isAdmin ? "[ADMIN] " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
-    const strikeDisplay = getStrikeDisplay(alertData.alert_type, alertData.strike_price);
+    const strikeInfo = getStrikeDisplay(alertData.alert_type, alertData.strike_price, alertData.threshold_value);
     const priceLabel = alertData.underlying_price ? 
       `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     
@@ -111,10 +120,10 @@ async function sendEmail(
                 <td style="padding: 8px 0; color: #6b7280;">Messaggio:</td>
                 <td style="padding: 8px 0;">${alertData.message}</td>
               </tr>
-              ${strikeDisplay ? `
+              ${strikeInfo ? `
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">Strike:</td>
-                <td style="padding: 8px 0;">${strikeDisplay}</td>
+                <td style="padding: 8px 0; color: #6b7280;">${strikeInfo.label}:</td>
+                <td style="padding: 8px 0;">${strikeInfo.value}</td>
               </tr>
               ` : ''}
             </table>
@@ -150,7 +159,7 @@ async function sendTelegram(
     const adminPrefix = isAdmin ? "*[ADMIN]* " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
-    const strikeDisplay = getStrikeDisplay(alertData.alert_type, alertData.strike_price);
+    const strikeInfo = getStrikeDisplay(alertData.alert_type, alertData.strike_price, alertData.threshold_value);
     const priceLabel = alertData.underlying_price ? 
       `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
@@ -161,8 +170,8 @@ ${severityEmoji} *${severityLabel}*
 📊 *Strategia:* ${strategyName}
 📝 *Messaggio:* ${alertData.message}`;
 
-    if (strikeDisplay) {
-      text += `\n🎯 *Strike:* ${strikeDisplay}`;
+    if (strikeInfo) {
+      text += `\n🎯 *${strikeInfo.label}:* ${strikeInfo.value}`;
     }
     
     if (priceLabel) {
@@ -228,10 +237,10 @@ serve(async (req: Request): Promise<Response> => {
     console.log("Received alert:", alertData);
     
     // Fetch additional alert details from database if missing
-    if (!alertData.strategy_type || !alertData.strike_price || !alertData.underlying_price) {
+    if (!alertData.strategy_type || !alertData.strike_price || !alertData.underlying_price || !alertData.threshold_value) {
       const { data: alertDetails } = await supabase
         .from('alerts')
-        .select('strategy_type, strike_price, underlying_price')
+        .select('strategy_type, strike_price, underlying_price, threshold_value')
         .eq('id', alertData.alert_id)
         .single();
       
@@ -239,6 +248,7 @@ serve(async (req: Request): Promise<Response> => {
         alertData.strategy_type = alertData.strategy_type || alertDetails.strategy_type;
         alertData.strike_price = alertData.strike_price || alertDetails.strike_price;
         alertData.underlying_price = alertData.underlying_price || alertDetails.underlying_price;
+        alertData.threshold_value = alertData.threshold_value || alertDetails.threshold_value;
       }
     }
 

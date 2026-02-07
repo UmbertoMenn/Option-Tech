@@ -149,6 +149,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [actionToggles, setActionToggles] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
   const [cooldownMinutes, setCooldownMinutes] = useState(DEFAULT_COOLDOWN_MINUTES);
   const [tickerOverrides, setTickerOverrides] = useState<Array<{ ticker: string; alertTypes: AlertType[]; threshold: number }>>([]);
+  const [bulkThreshold, setBulkThreshold] = useState(DEFAULT_DISTANCE_THRESHOLD_PCT);
   const [newTicker, setNewTicker] = useState('');
   
   // State for unresolved ticker mappings
@@ -515,6 +516,38 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                   <p className="text-sm text-muted-foreground">
                     Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
                   </p>
+                  
+                  {/* Bulk threshold setter */}
+                  <div className="p-3 border rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-3">
+                      <Label className="text-sm font-medium whitespace-nowrap">Imposta tutte le soglie:</Label>
+                      <Slider
+                        value={[bulkThreshold]}
+                        onValueChange={([val]) => setBulkThreshold(val)}
+                        min={0.5}
+                        max={20}
+                        step={0.5}
+                        className="flex-1"
+                      />
+                      <span className="text-sm font-mono bg-background px-2 py-0.5 rounded border min-w-[40px] text-center">
+                        {bulkThreshold}%
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const updated: Record<AlertType, number> = {} as Record<AlertType, number>;
+                          DISTANCE_ALERT_TYPES.forEach(type => {
+                            updated[type] = bulkThreshold;
+                          });
+                          setGlobalThresholds(prev => ({ ...prev, ...updated }));
+                          toast.success(`Tutte le soglie impostate a ${bulkThreshold}%`);
+                        }}
+                      >
+                        Applica
+                      </Button>
+                    </div>
+                  </div>
                   
                   {GROUPED_DISTANCE_ALERTS.map(group => {
                     // Determine if the whole group is enabled
