@@ -14,6 +14,28 @@ import { HistoricalDataEntry } from '@/types/historicalData';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { formatCurrency } from '@/lib/formatters';
 
+/**
+ * Format large numbers for Y-axis labels (e.g., 2.1M, 814k)
+ */
+function formatAxisValue(value: number): string {
+  const absValue = Math.abs(value);
+  
+  if (absValue >= 1_000_000) {
+    const formatted = (value / 1_000_000).toFixed(1);
+    // Remove trailing .0
+    return formatted.endsWith('.0') 
+      ? `${Math.round(value / 1_000_000)}M` 
+      : `${formatted}M`;
+  }
+  
+  if (absValue >= 1_000) {
+    const formatted = (value / 1_000).toFixed(0);
+    return `${formatted}k`;
+  }
+  
+  return value.toFixed(0);
+}
+
 interface PortfolioEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
   viewMode: ViewMode;
@@ -113,7 +135,8 @@ export function PortfolioEvolutionChart({
           tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={{ stroke: 'hsl(var(--border))' }}
-          tickFormatter={(value) => formatCurrency(value)}
+          tickFormatter={formatAxisValue}
+          width={50}
         />
         <Tooltip
           contentStyle={{
