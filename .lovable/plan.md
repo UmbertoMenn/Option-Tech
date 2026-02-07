@@ -1,121 +1,119 @@
 
-
-## Obiettivo
-Correggere definitivamente la lettura dei prezzi con virgola (formato italiano) nel file Excel `.xls` allegato, così da ottenere:
-- **Netto Unitario** corretto (es. ~13,xx e non 1.124,50)
-- **Rendimento %** e **Rendimento % annualizzato** sempre valorizzati quando disponibili
-- **Prima operazione** mostrata anche sotto ai rendimenti (già presente, ma va resa robusta quando si rimuovono righe)
-- Rimozione singole operazioni senza “rompere” data/annualizzato
+## Obiettivo (definitivo)
+Far sì che i file `.xls` come il tuo (che in realtà contengono una tabella HTML con numeri tipo `8,4`, `14,95`) vengano **sempre** letti rispettando la virgola come decimale, così:
+- `8,4` → `8.40` (non `84.00`)
+- `14,95` → `14.95` (non `1495.00`)
+- “Prima operazione” e “Annualizzato” vengano calcolati e mostrati correttamente.
 
 ---
 
-## Diagnosi (basata sul file OrderStatus_35.xls e screenshot)
-1) Nel file i numeri sono nel formato **italiano**: `8,4`, `14,95`, `2,12`, ecc.
-2) Se il parsing passa tramite `XLSX.utils.sheet_to_json(..., { raw: true })` (default), la libreria può convertire alcune celle in **number già “rovinati”** (es. `14,95` → `1495`), e la nostra `parseNumber()` non può più ricostruire la virgola perché vede un `number` e lo ritorna “as-is”.
-3) Quando rimuovi un’operazione, la UI ricalcola la “prima operazione” con una regex interna che **non rimuove l’apostrofo** e **non riusa** la stessa logica del parser. Questo può riportare `firstOperationDate = null` e quindi **annualizzato = 0** dopo una rimozione, anche se prima era corretto.
+## Diagnosi certa (con prova dal tuo file)
+Nel file `OrderStatus_35-2.xls` la prima riga dati è chiarissima:
+
+- `Prz Medio` = `8,4` (testo)
+- `Data Validità` = `'06/02/2026` (testo con apostrofo iniziale)
+
+Il parser attuale **non riconosce** questo file come “HTML-based Excel” perché controlla solo:
+- `<html...` / `<!doctype...` / `xmlns:x="urn:schemas-microsoft-com:office:excel"`
+
+Ma il tuo file inizia con `<table ...>` (non `<html>`), quindi oggi entra nel ramo “Excel binario” (XLSX.read), e lì la libreria sta facendo coercizione “sbagliata”: `8,4` diventa `84` (comma rimossa), quindi in UI vedi `84.00`.
+
+Questa è la causa del bug. Non è “parseNumber” (quella sarebbe ok se ricevesse la stringa `8,4`), è **il ramo di parsing scelto**.
 
 ---
 
-## Strategia di Fix (robusta per questo tipo di .xls)
-### A) Rendere il parsing numerico indipendente dalla coercizione di XLSX
-**Cambiamento chiave**: quando convertiamo i fogli in matrice (`sheet_to_json`), forzare l’output in **testo formattato** invece che “raw number”.
+## Strategia di fix (robusta e con test automatico)
 
-- In `src/lib/orderFileParser.ts`:
-  - Cambiare tutte le chiamate a:
-    - `XLSX.utils.sheet_to_json(ws, { header: 1 })`
-  - in:
-    - `XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })`
+### 1) Fix definitivo: riconoscimento HTML `.xls` (src/lib/orderFileParser.ts)
+Modifica la detection `isHtmlFile` per includere i casi reali come il tuo:
+- se `textData.trim().startsWith('<table')`
+- oppure se contiene tag tipici: `<table`, `<tr`, `<td`, `</table>`
+- includere anche `<frameset` (alcuni export vecchi)
 
-Motivo: con `raw: false`, la libreria tende a restituire il valore **come lo vedi in Excel** (es. `"14,95"`), così `parseNumber()` può gestire la virgola correttamente.
+In pratica: se è “HTML table” lo trattiamo come HTML **sempre**, senza farlo passare da XLSX.read(array) che rompe le virgole.
 
-**Risultato atteso**: `avgPrice` torna a essere `14.95` e non `1495`, quindi `orderValue = qty * avgPrice * 100` non esplode.
-
----
-
-### B) Rafforzare ulteriormente `parseNumber()` per i casi “sporchi”
-In `src/lib/orderFileParser.ts`:
-- Prima di lavorare sulla stringa, normalizzare:
-  - spazi normali + non-breaking space
-  - apostrofi iniziali
-  - eventuali simboli valuta
-
-Esempio di normalizzazione (concetto):
-- `cleaned = cleaned.replace(/\u00A0/g, '').replace(/^'+/, '')`
-- mantenere la logica `.` migliaia e `,` decimali già presente
-
-Obiettivo: gestire bene valori come `"'8,4"` o ` " 14,95 "`.
+**Criterio di accettazione tecnico:**
+- per `OrderStatus_35-2.xls` deve entrare nel ramo `parseHtmlTable(textData)`.
 
 ---
 
-### C) Migliorare il rilevamento “HTML-based .xls” e l’encoding (se necessario)
-Senza cambiare il requisito “devo caricare esattamente questo file”, rendiamo più affidabile il ramo HTML:
-- Ampliare `isHtmlFile` per riconoscere anche file che non iniziano con `<html>` ma contengono `<table`, `<tr`, `xmlns:x=...`, `<frameset`, ecc.
-- Opzionale (se vediamo header corrotti tipo `QtÃ `): tentare decode alternativo con `TextDecoder('windows-1252')` quando l’UTF-8 mostra molte sequenze “Ã”.
+### 2) Guardrail anti-regressione: fallback “sanity check” (src/lib/orderFileParser.ts)
+Anche se per qualche motivo la detection fallisse, aggiungiamo un secondo livello di sicurezza:
+- dopo aver parsato via XLSX, controlliamo se nel set di ordini ci sono prezzi “implausibili” rispetto a un export opzioni (es: tanti `avgPrice >= 500` oppure multipli sospetti tipo 84, 128, 228, 1495)
+- se `textData` contiene `<table` e i prezzi risultano “sospetti”, **rifacciamo parsing come HTML** e prendiamo quel risultato.
 
-Questo non è il fix principale dei numeri, ma evita regressioni su export diversi.
-
----
-
-## Fix “Annualizzato non carica” (dopo rimozione righe)
-### D) Unificare la logica di parsing date tra parser e UI
-Problema: `recalculateMetrics()` in `CallPremiumCalculatorDialog.tsx` ricalcola la `firstOperationDate` con regex ad-hoc, diversa dal parser (e non rimuove apostrofi).
-
-Soluzione:
-1) In `src/lib/orderFileParser.ts` creare ed esportare una utility unica, ad esempio:
-   - `export function toIsoDateFromIT(value: string): string | null`
-   - `export function findFirstOperationDate(validityDates: (string | undefined)[]): string | null`
-2) Usare questa utility:
-   - in `filterAndCalculateCallPremiums` (al posto della logica locale)
-   - in `CallPremiumCalculatorDialog.tsx` dentro `recalculateMetrics()` (al posto del blocco regex)
-
-Risultato: rimuovendo righe, la “Prima operazione” resta corretta, e l’**annualizzato** continua a calcolarsi.
+Questo rende il fix “a prova di export strani”.
 
 ---
 
-## UI: Data prima operazione sotto i rendimenti (richiesta utente)
-### E) Rendere la riga “Prima operazione” sempre coerente e “piccola”
-Hai già la riga sotto i rendimenti (dal diff). La sistemiamo così:
-- Mostrare:
-  - `Prima operazione: DD/MM/YYYY`
-  - opzionale: `Giorni: N` (utile per capire l’annualizzato), in piccolo
-- Se `firstOperationDate` è `null`, mostrare:
-  - `Prima operazione: - (non trovata nel file)` in muted, per trasparenza
+### 3) Test automatico (vitest) per bloccare per sempre il bug
+Aggiungiamo un test unitario nuovo (es. `src/test/orderFileParserHtmlXls.test.ts`) che:
+1. Usa come input una stringa HTML presa dal file (anche solo header + 3-5 righe, includendo `8,4` e `14,95`).
+2. Passa la stringa nel parsing HTML.
+3. Verifica:
+   - `avgPrice` della riga `BABAH6C165` è `8.4` (non `84`)
+   - `avgPrice` della riga `BABAM6C180` è `14.95` (non `1495`)
+4. Verifica anche la data:
+   - `toIsoDateFromIT("'12/11/2025")` → `2025-11-12`
+
+Nota: per testare senza `FileReader`, creeremo/estrarremo una funzione pura “parse da textData” (es. `parseOrdersFromTextData(textData: string)` o simile) che viene usata sia in produzione sia nei test.
+
+**Criterio di accettazione test:**
+- Il test fallisce se torna 84/1495, quindi impedisce future rotture.
 
 ---
 
-## Controlli di coerenza (anti-valori assurdi)
-### F) Sanity checks post-parse (solo per debug e prevenzione)
-Dopo aver parsato gli ordini:
-- verificare:
-  - `avgPrice` tipicamente < 500 (configurabile)
-  - `quantity` tipicamente intera e piccola
-- se troviamo molti `avgPrice` interi “troppo grandi” (es. 1495), loggare un warning e forzare un percorso di parsing alternativo (HTML table oppure raw:false).
-
-Questo serve per intercettare subito casi come lo screenshot.
+### 4) “Controllando e testando” in preview (verifica end-to-end)
+Dopo l’implementazione, facciamo un test reale in preview:
+- aprire la calcolatrice
+- caricare `OrderStatus_35-2.xls`
+- controllare in tabella che:
+  - `Prezzo` mostra `8,40` / `12,80` / `22,80` / `14,95` (non 84/128/228/1495)
+  - `Valore` mostra `+840,00 $` (non `+8.400,00 $`)
 
 ---
 
-## Test plan (da fare in preview)
-1) Caricare `OrderStatus_35.xls`
-2) Verificare nella tabella operazioni:
-   - prezzi come `8.40`, `14.95`, `2.12` (non 84 / 1495)
-3) Verificare:
-   - Netto Unitario non più a 4 cifre
-   - Rendimento % e Annualizzato non sono 0
-4) Rimuovere 2-3 operazioni e verificare che:
-   - “Prima operazione” resta corretta
-   - “Annualizzato” continua a cambiare e non torna 0
-5) Caricare anche `OrderStatus_33.xls` (regressione) per confermare compatibilità
+### 5) UI: rendere evidente il formato italiano anche nella tabella operazioni (CallPremiumCalculatorDialog.tsx)
+Per evitare ambiguità visive e rendere immediata la verifica, cambiamo la colonna “Prezzo” da:
+- `order.avgPrice.toFixed(2)` (stile inglese `8.40`)
+a:
+- `formatNumber(order.avgPrice, 2)` (stile italiano `8,40`)
+
+Così se il parsing sbaglia, lo si vede subito (84,00 vs 8,40).
+
+---
+
+### 6) Annualizzato + “Prima operazione” sempre visibili (piccolo sotto i rendimenti)
+Oggi la data viene mostrata solo se presente (`{metrics.firstOperationDate && ...}`).
+Modifica:
+- mostrare sempre una riga sotto ai rendimenti:
+  - se data presente: `Prima operazione: 12/11/2025`
+  - se assente: `Prima operazione: - (non trovata nel file)`
+- opzionale: se data assente, anche “Annualizzato” può mostrare `-` invece di `0,00%` (per distinguere “non calcolabile” da “zero vero”).
+
+Questo evita il caso “annualizzato non carica” perché la UI renderà chiaramente se manca la data o se è un problema di calcolo.
 
 ---
 
 ## File coinvolti
 1) `src/lib/orderFileParser.ts`
-   - `sheet_to_json` con `{ raw:false, defval:'' }`
-   - normalizzazione più robusta in `parseNumber`
-   - export di utility per date + primo giorno
-   - miglioramento `isHtmlFile` (se necessario)
-2) `src/components/derivatives/CallPremiumCalculatorDialog.tsx`
-   - `recalculateMetrics()` usa le utility esportate per data
-   - UI: mantenere “Prima operazione” sotto rendimenti, con fallback se null
+- allargare `isHtmlFile` (includere `<table`)
+- aggiungere fallback/sanity-check
+- estrarre funzione pura per test (parsing da textData)
+- aggiungere/aggiornare log di debug solo in `import.meta.env.DEV` (breve e non spam)
 
+2) `src/components/derivatives/CallPremiumCalculatorDialog.tsx`
+- colonna prezzo: usare `formatNumber`
+- “Prima operazione” sempre visibile con fallback
+- (opzionale) annualizzato `-` se data mancante
+
+3) `src/test/orderFileParserHtmlXls.test.ts` (nuovo)
+- test regressione su `8,4` e `14,95`
+
+---
+
+## Done = quando consideriamo chiuso (criteri oggettivi)
+- Caricando `OrderStatus_35-2.xls` la tabella mostra `8,40` e valore `+840,00 $` (non 84 / +8.400)
+- “Prima operazione” appare sotto i rendimenti
+- “Annualizzato” non è 0 quando la data è presente
+- Test vitest verde che blocca per sempre la regressione sulle virgole
