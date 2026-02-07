@@ -102,6 +102,45 @@ export function symbolMatchesTicker(symbol: string, ticker: string): boolean {
 }
 
 /**
+ * Try to parse HTML table from text content
+ */
+function parseHtmlTable(htmlContent: string): any[][] {
+  const rows: any[][] = [];
+  
+  // Find all table rows
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+  
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(htmlContent)) !== null) {
+    const rowContent = rowMatch[1];
+    const cells: any[] = [];
+    
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+      // Clean HTML tags and decode entities
+      let cellValue = cellMatch[1]
+        .replace(/<[^>]*>/g, '') // Remove HTML tags
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .trim();
+      
+      cells.push(cellValue);
+    }
+    
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  }
+  
+  return rows;
+}
+
+/**
  * Parse Excel file (XLS/XLSX) and extract order data
  */
 export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
@@ -111,47 +150,70 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        // Try multiple parsing strategies for different Excel formats
-        let workbook;
-        try {
-          // First try as binary array (works for most .xls/.xlsx)
-          workbook = XLSX.read(data, { type: 'array' });
-        } catch {
-          // If that fails, try as string (HTML-based Excel files)
-          try {
-            const textData = new TextDecoder().decode(data as ArrayBuffer);
-            workbook = XLSX.read(textData, { type: 'string' });
-          } catch {
-            // Last resort: raw binary
-            workbook = XLSX.read(data, { type: 'binary' });
+        const textData = new TextDecoder().decode(data as ArrayBuffer);
+        
+        // Check if this is an HTML file (common for old Excel exports)
+        const isHtmlFile = textData.trim().toLowerCase().startsWith('<html') || 
+                          textData.trim().toLowerCase().startsWith('<!doctype') ||
+                          textData.includes('xmlns:x="urn:schemas-microsoft-com:office:excel"');
+        
+        let rawData: any[][] = [];
+        
+        if (isHtmlFile) {
+          console.log('Detected HTML-based Excel file, parsing as HTML...');
+          
+          // Try to extract table data directly from HTML
+          rawData = parseHtmlTable(textData);
+          
+          // If no data from HTML parsing, try xlsx library anyway
+          if (rawData.length < 2) {
+            console.log('HTML parsing yielded no data, trying xlsx library...');
+            try {
+              const workbook = XLSX.read(textData, { type: 'string' });
+              for (const name of workbook.SheetNames) {
+                const ws = workbook.Sheets[name];
+                const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+                if (sheetData.length > rawData.length) {
+                  rawData = sheetData;
+                }
+              }
+            } catch (xlsxErr) {
+              console.warn('XLSX parsing also failed:', xlsxErr);
+            }
           }
-        }
-        
-        // Get first sheet (some HTML Excel files have different naming)
-        let sheetName = workbook.SheetNames[0];
-        let worksheet = workbook.Sheets[sheetName];
-        
-        // Convert to array of arrays
-        let rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
-        // If data is empty or too small, the file might be HTML frameset-based
-        // Try to extract data from all sheets
-        if (rawData.length < 2) {
+        } else {
+          // Standard Excel binary format
+          let workbook;
+          try {
+            workbook = XLSX.read(data, { type: 'array' });
+          } catch {
+            try {
+              workbook = XLSX.read(data, { type: 'binary' });
+            } catch (err) {
+              console.error('Failed to parse as binary Excel:', err);
+              reject(new Error('Formato file non supportato. Usa .xlsx o esporta come "Cartella di lavoro Excel".'));
+              return;
+            }
+          }
+          
+          // Get best sheet with most data
           for (const name of workbook.SheetNames) {
             const ws = workbook.Sheets[name];
-            const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-            if (data.length > rawData.length) {
-              rawData = data;
-              worksheet = ws;
+            const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+            if (sheetData.length > rawData.length) {
+              rawData = sheetData;
             }
           }
         }
         
         if (rawData.length < 2) {
-          console.warn('No data found in Excel file. Sheets:', workbook.SheetNames);
-          resolve([]);
+          console.warn('No data found in file. This may be a frameset HTML file that references external sheets.');
+          reject(new Error('Nessun dato trovato. Se il file è in formato "Pagina Web", salvalo come "Cartella di lavoro Excel (.xlsx)" e riprova.'));
           return;
         }
+        
+        console.log(`Found ${rawData.length} rows in file`);
+        console.log('First row (headers):', rawData[0]);
         
         // First row is headers - handle potential empty cells
         const headers = rawData[0].map(h => String(h || '').trim());
