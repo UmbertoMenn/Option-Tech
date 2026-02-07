@@ -1,142 +1,121 @@
 
 
-# Piano: Correzione Calcoli e UI Calcolatrice Premi CALL
-
-## Problemi Identificati
-
-### 1. Bug Parsing Numeri
-Guardando lo screenshot, il "Netto Unitario" mostra **1.124,50 $** che corrisponde a **1124.50 USD** (formato italiano). Questo valore e troppo alto - dovrebbe essere circa **13,13 $** per un contratto.
-
-**Causa probabile**: I numeri vengono letti correttamente come decimali (es. "8,4" → 8.4), ma il problema e nell'HTML parsing. Alcuni valori potrebbero essere estratti senza la virgola, trasformando "8,4" in "84" invece di "8.4".
-
-### 2. Rendimento Annualizzato = 0%
-La funzione `calculatePremiumMetrics` ha questa condizione:
-```typescript
-if (parseResult.firstOperationDate && yieldPct > 0) {
-  // calcola annualizzato
-}
-```
-Se il rendimento e 0 o negativo (cosa impossibile con yield al 645%), il problema e probabilmente nella **data prima operazione** che non viene estratta correttamente.
-
-**Causa probabile**: Le date nel file hanno formato `'DD/MM/YYYY` con apostrofo iniziale (es. `'12/11/2025`). La funzione `parseDateIT` non gestisce questo apostrofo.
-
-### 3. Data Prima Operazione Nascosta
-Attualmente la data e visibile solo nella sezione collassabile "Altri dati". L'utente vuole vederla subito sotto ai rendimenti.
+## Obiettivo
+Correggere definitivamente la lettura dei prezzi con virgola (formato italiano) nel file Excel `.xls` allegato, così da ottenere:
+- **Netto Unitario** corretto (es. ~13,xx e non 1.124,50)
+- **Rendimento %** e **Rendimento % annualizzato** sempre valorizzati quando disponibili
+- **Prima operazione** mostrata anche sotto ai rendimenti (già presente, ma va resa robusta quando si rimuovono righe)
+- Rimozione singole operazioni senza “rompere” data/annualizzato
 
 ---
 
-## Soluzioni
-
-### 1. Correzione Parser HTML (`src/lib/orderFileParser.ts`)
-
-**A. Gestione apostrofi nelle date:**
-```typescript
-// Rimuovere apostrofi iniziali dai valori
-let cellValue = cellMatch[1]
-  .replace(/<[^>]*>/g, '')
-  .replace(/^'+/, '')  // NUOVO: rimuove apostrofi iniziali
-  .replace(/&nbsp;/g, ' ')
-  // ...
-```
-
-**B. Verifica parsing numeri:**
-Aggiungere log dettagliati per debug e assicurarsi che la funzione `parseNumber` gestisca correttamente i numeri con virgola estratti dall'HTML.
-
-**C. Gestione date con apostrofo:**
-```typescript
-function parseDateIT(value: string): string | null {
-  if (!value) return null;
-  
-  // Rimuovi apostrofi iniziali (comuni nei file Excel italiani)
-  const cleaned = value.trim().replace(/^'+/, '');
-  // ...
-}
-```
-
-### 2. Calcolo Rendimento Annualizzato
-
-**Rimuovere condizione `yieldPct > 0`:**
-Il rendimento annualizzato deve essere calcolato sempre, anche se il yield e negativo.
-
-```typescript
-// PRIMA (bug)
-if (parseResult.firstOperationDate && yieldPct > 0) {
-
-// DOPO (corretto)
-if (parseResult.firstOperationDate) {
-```
-
-### 3. UI - Mostrare Data Prima Operazione
-
-Aggiungere la data sotto ai rendimenti nella sezione sempre visibile:
-
-```text
-+------------------------------------------+
-|        NETTO UNITARIO                    |
-|           13,13 $                        |
-|     su 1 contratti (100 azioni)          |
-+------------------------------------------+
-|   Rendimento      |   Annualizzato       |
-|    📊 +7,54%      |     📊 +31,23%       |
-+------------------------------------------+
-|     📅 Prima operazione: 12/11/2025      |  ← NUOVO
-+------------------------------------------+
-```
+## Diagnosi (basata sul file OrderStatus_35.xls e screenshot)
+1) Nel file i numeri sono nel formato **italiano**: `8,4`, `14,95`, `2,12`, ecc.
+2) Se il parsing passa tramite `XLSX.utils.sheet_to_json(..., { raw: true })` (default), la libreria può convertire alcune celle in **number già “rovinati”** (es. `14,95` → `1495`), e la nostra `parseNumber()` non può più ricostruire la virgola perché vede un `number` e lo ritorna “as-is”.
+3) Quando rimuovi un’operazione, la UI ricalcola la “prima operazione” con una regex interna che **non rimuove l’apostrofo** e **non riusa** la stessa logica del parser. Questo può riportare `firstOperationDate = null` e quindi **annualizzato = 0** dopo una rimozione, anche se prima era corretto.
 
 ---
 
-## Modifiche File
+## Strategia di Fix (robusta per questo tipo di .xls)
+### A) Rendere il parsing numerico indipendente dalla coercizione di XLSX
+**Cambiamento chiave**: quando convertiamo i fogli in matrice (`sheet_to_json`), forzare l’output in **testo formattato** invece che “raw number”.
 
-| File | Modifiche |
-|------|-----------|
-| `src/lib/orderFileParser.ts` | Gestione apostrofi, fix parsing numeri HTML, debug logging |
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Mostrare data prima operazione sotto i rendimenti |
+- In `src/lib/orderFileParser.ts`:
+  - Cambiare tutte le chiamate a:
+    - `XLSX.utils.sheet_to_json(ws, { header: 1 })`
+  - in:
+    - `XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })`
 
----
+Motivo: con `raw: false`, la libreria tende a restituire il valore **come lo vedi in Excel** (es. `"14,95"`), così `parseNumber()` può gestire la virgola correttamente.
 
-## Dettaglio Tecnico: Parsing HTML
-
-Il problema principale e nel metodo `parseHtmlTable`. Quando legge le celle, alcuni valori numerici con virgola potrebbero essere malformati.
-
-**Debug aggiunto:**
-```typescript
-console.log('Raw cell value:', cellMatch[1]);
-console.log('Cleaned cell value:', cellValue);
-```
-
-**Gestione numeri migliorata:**
-```typescript
-function parseNumber(value: any): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    // Rimuovi whitespace e apostrofi
-    let cleaned = value.replace(/\s/g, '').replace(/^'+/, '');
-    
-    // Log per debug
-    console.log('parseNumber input:', value, '-> cleaned:', cleaned);
-    
-    // Italian format: . = thousands, , = decimal
-    if (cleaned.includes('.') && cleaned.includes(',')) {
-      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
-    } else if (cleaned.includes(',')) {
-      cleaned = cleaned.replace(',', '.');
-    }
-    
-    const result = parseFloat(cleaned) || 0;
-    console.log('parseNumber result:', result);
-    return result;
-  }
-  return 0;
-}
-```
+**Risultato atteso**: `avgPrice` torna a essere `14.95` e non `1495`, quindi `orderValue = qty * avgPrice * 100` non esplode.
 
 ---
 
-## Verifica Attesa
+### B) Rafforzare ulteriormente `parseNumber()` per i casi “sporchi”
+In `src/lib/orderFileParser.ts`:
+- Prima di lavorare sulla stringa, normalizzare:
+  - spazi normali + non-breaking space
+  - apostrofi iniziali
+  - eventuali simboli valuta
 
-Dopo le correzioni, con il file BABA:
-- **Netto Unitario**: ~13,13 $ (non 1.124,50 $)
-- **Rendimento**: ~7,5% (non 645%)
-- **Annualizzato**: ~31% (non 0%)
-- **Data visibile**: 12/11/2025 sotto i rendimenti
+Esempio di normalizzazione (concetto):
+- `cleaned = cleaned.replace(/\u00A0/g, '').replace(/^'+/, '')`
+- mantenere la logica `.` migliaia e `,` decimali già presente
+
+Obiettivo: gestire bene valori come `"'8,4"` o ` " 14,95 "`.
+
+---
+
+### C) Migliorare il rilevamento “HTML-based .xls” e l’encoding (se necessario)
+Senza cambiare il requisito “devo caricare esattamente questo file”, rendiamo più affidabile il ramo HTML:
+- Ampliare `isHtmlFile` per riconoscere anche file che non iniziano con `<html>` ma contengono `<table`, `<tr`, `xmlns:x=...`, `<frameset`, ecc.
+- Opzionale (se vediamo header corrotti tipo `QtÃ `): tentare decode alternativo con `TextDecoder('windows-1252')` quando l’UTF-8 mostra molte sequenze “Ã”.
+
+Questo non è il fix principale dei numeri, ma evita regressioni su export diversi.
+
+---
+
+## Fix “Annualizzato non carica” (dopo rimozione righe)
+### D) Unificare la logica di parsing date tra parser e UI
+Problema: `recalculateMetrics()` in `CallPremiumCalculatorDialog.tsx` ricalcola la `firstOperationDate` con regex ad-hoc, diversa dal parser (e non rimuove apostrofi).
+
+Soluzione:
+1) In `src/lib/orderFileParser.ts` creare ed esportare una utility unica, ad esempio:
+   - `export function toIsoDateFromIT(value: string): string | null`
+   - `export function findFirstOperationDate(validityDates: (string | undefined)[]): string | null`
+2) Usare questa utility:
+   - in `filterAndCalculateCallPremiums` (al posto della logica locale)
+   - in `CallPremiumCalculatorDialog.tsx` dentro `recalculateMetrics()` (al posto del blocco regex)
+
+Risultato: rimuovendo righe, la “Prima operazione” resta corretta, e l’**annualizzato** continua a calcolarsi.
+
+---
+
+## UI: Data prima operazione sotto i rendimenti (richiesta utente)
+### E) Rendere la riga “Prima operazione” sempre coerente e “piccola”
+Hai già la riga sotto i rendimenti (dal diff). La sistemiamo così:
+- Mostrare:
+  - `Prima operazione: DD/MM/YYYY`
+  - opzionale: `Giorni: N` (utile per capire l’annualizzato), in piccolo
+- Se `firstOperationDate` è `null`, mostrare:
+  - `Prima operazione: - (non trovata nel file)` in muted, per trasparenza
+
+---
+
+## Controlli di coerenza (anti-valori assurdi)
+### F) Sanity checks post-parse (solo per debug e prevenzione)
+Dopo aver parsato gli ordini:
+- verificare:
+  - `avgPrice` tipicamente < 500 (configurabile)
+  - `quantity` tipicamente intera e piccola
+- se troviamo molti `avgPrice` interi “troppo grandi” (es. 1495), loggare un warning e forzare un percorso di parsing alternativo (HTML table oppure raw:false).
+
+Questo serve per intercettare subito casi come lo screenshot.
+
+---
+
+## Test plan (da fare in preview)
+1) Caricare `OrderStatus_35.xls`
+2) Verificare nella tabella operazioni:
+   - prezzi come `8.40`, `14.95`, `2.12` (non 84 / 1495)
+3) Verificare:
+   - Netto Unitario non più a 4 cifre
+   - Rendimento % e Annualizzato non sono 0
+4) Rimuovere 2-3 operazioni e verificare che:
+   - “Prima operazione” resta corretta
+   - “Annualizzato” continua a cambiare e non torna 0
+5) Caricare anche `OrderStatus_33.xls` (regressione) per confermare compatibilità
+
+---
+
+## File coinvolti
+1) `src/lib/orderFileParser.ts`
+   - `sheet_to_json` con `{ raw:false, defval:'' }`
+   - normalizzazione più robusta in `parseNumber`
+   - export di utility per date + primo giorno
+   - miglioramento `isHtmlFile` (se necessario)
+2) `src/components/derivatives/CallPremiumCalculatorDialog.tsx`
+   - `recalculateMetrics()` usa le utility esportate per data
+   - UI: mantenere “Prima operazione” sotto rendimenti, con fallback se null
 
