@@ -5,9 +5,9 @@ import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk } from '@/lib/riskCalculator';
 
 export interface EquityExposureResult {
-  /** Equity exposure as percentage (0-1) */
+  /** Equity exposure as percentage (0-1), capped at 100% */
   equityExposurePct: number;
-  /** Equity exposure in EUR (totalStockRisk from Risk Analyzer) */
+  /** Total risk exposure in EUR (grandTotal from Risk Analyzer) */
   equityExposureEUR: number;
   /** Total asset value in EUR (from portfolio summary) */
   assetsTotalEUR: number;
@@ -20,10 +20,10 @@ export interface EquityExposureResult {
 /**
  * Hook that calculates equity exposure percentage using the same logic as Risk Analyzer.
  * 
- * Formula: equityExposurePct = totalStockRisk / totalValue
+ * Formula: equityExposurePct = grandTotal / totalValue (capped at 100%)
  * 
  * Where:
- * - totalStockRisk = Stocks + Equity ETFs (net of Long PUT protections)
+ * - grandTotal = ETF + Stocks + Commodities + Naked PUT + Leap CALL + Strategies Max Loss
  * - totalValue = Total asset value (cash, bonds, stocks, ETFs, commodities - excludes derivatives)
  */
 export function useEquityExposurePct(): EquityExposureResult {
@@ -53,9 +53,9 @@ export function useEquityExposurePct(): EquityExposureResult {
     // Calculate risk analysis (same as Risk Analyzer)
     const analysis = analyzePortfolioRisk(positions, categories);
     
-    // Equity exposure = totalStockRisk / totalValue
-    // totalStockRisk includes Stocks + Equity ETFs, net of Long PUT protections
-    const equityExposureEUR = analysis.totalStockRisk;
+    // Equity exposure = grandTotal / totalValue
+    // grandTotal includes ETF + Stocks + Commodities + Naked PUT + Leap CALL + Strategies
+    const equityExposureEUR = analysis.grandTotal;
     const assetsTotalEUR = summary.totalValue;
     
     // Calculate percentage with safety clamp
