@@ -1,5 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,10 +19,11 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw } from 'lucide-react';
 import { NotificationSettings } from '@/components/settings/NotificationSettings';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { useResetAlertSystem } from '@/hooks/useAlerts';
 import { 
   useAlertConfigs, 
   useBatchUpsertAlertConfigs,
@@ -120,12 +132,16 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const batchUpsertMutation = useBatchUpsertAlertConfigs();
   const deleteConfigMutation = useDeleteAlertConfig();
   const initializeDefaultsMutation = useInitializeDefaultConfigs();
+  const resetAlertSystemMutation = useResetAlertSystem();
   
   // Price alerts hooks
   const { data: priceAlerts = [], isLoading: isLoadingPriceAlerts } = usePriceAlerts();
   const createPriceAlertMutation = useCreatePriceAlert();
   const deletePriceAlertMutation = useDeletePriceAlert();
   const togglePriceAlertMutation = useTogglePriceAlert();
+  
+  // State for reset confirmation dialog
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   
   // Local state for editing
   const [globalThresholds, setGlobalThresholds] = useState<Record<AlertType, number>>({} as Record<AlertType, number>);
@@ -453,6 +469,18 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
       await togglePriceAlertMutation.mutateAsync({ id, enabled });
     } catch {
       toast.error('Errore nell\'aggiornamento dell\'avviso');
+    }
+  };
+  
+  // Handle reset alert system
+  const handleResetAlertSystem = async () => {
+    try {
+      await resetAlertSystemMutation.mutateAsync();
+      toast.success('Sistema avvisi resettato con successo');
+      setShowResetConfirm(false);
+    } catch (error) {
+      console.error('Error resetting alert system:', error);
+      toast.error('Errore nel reset del sistema avvisi');
     }
   };
   
@@ -948,14 +976,67 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
           </Tabs>
         )}
         
-        <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Annulla
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving || isLoading}>
-            {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Salva
-          </Button>
+        <DialogFooter className="mt-4 flex-col sm:flex-row gap-2">
+          <div className="flex-1 flex justify-start">
+            <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+              <AlertDialogTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/50"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset Sistema
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-destructive" />
+                    Sei sicuro di voler resettare?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-left space-y-3">
+                    <p>Questa azione eliminerà:</p>
+                    <ul className="list-disc list-inside space-y-1 text-sm">
+                      <li>Lo storico di tutti gli avvisi generati</li>
+                      <li>La memoria degli stati delle posizioni (safe/alerted)</li>
+                    </ul>
+                    <p className="pt-2">
+                      Il sistema ricomincerà a monitorare le posizioni da zero. 
+                      Utile se hai caricato un Excel sbagliato con posizioni errate.
+                    </p>
+                    <p className="text-sm font-medium text-foreground pt-2">
+                      Le tue configurazioni (soglie, notifiche) NON verranno modificate.
+                    </p>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Annulla</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleResetAlertSystem}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={resetAlertSystemMutation.isPending}
+                  >
+                    {resetAlertSystemMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-2" />
+                    )}
+                    Conferma Reset
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+          
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Annulla
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving || isLoading}>
+              {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Salva
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
