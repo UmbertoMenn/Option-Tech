@@ -1,129 +1,134 @@
 
+
 ## Obiettivo
-Fare in modo che la linea “Benchmark” non possa più rimanere “piatta” per mesi quando in realtà i prezzi esistono, e che il sistema:
-1) recuperi sempre i dati più aggiornati possibili,
-2) segnali in modo chiaro eventuali buchi/obsolescenza dei dati (per ticker e per data),
-3) permetta un refresh manuale (senza “sprecare crediti” a tentativi).
+Correggere il benchmark in modo che venga **scalato usando la % di Equity Exposure reale**, esattamente come nel Risk Analyzer:
+
+> **Equity exposure % = Esposizione equity totale (EUR) / Valore degli asset (EUR)**
+
+Così il benchmark non dipende più da:
+- il fallback fisso “60%” in vista base
+- il rapporto `netting / total_value` (che non è equity exposure)
 
 ---
 
-## Diagnosi (cosa sta succedendo davvero)
-### 1) Da dove arrivano i dati benchmark
-I prezzi vengono scaricati dal backend tramite la funzione `update-benchmark-prices` che interroga **Yahoo Finance** endpoint:
-`https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1=...&period2=...&interval=1d&events=history`
+## Stato attuale (perché ora è “sbagliato”)
+Nel file `src/hooks/useBenchmarkData.ts` oggi la funzione `getEquityExposure()`:
+- in `viewMode === 'base'` ritorna **0.6 fisso**
+- nelle viste netting usa **netting/base** (che misura l’effetto derivati sul valore, non l’esposizione equity)
 
-Poi salva tutto nella tabella `benchmark_prices` (una riga per `ticker` + `price_date`).
-
-### 2) Perché puoi vedere il rendimento “fisso” da dicembre 24 ad oggi
-Il frontend, in `useBenchmarkData.ts`, fa una query:
-
-```ts
-supabase.from('benchmark_prices')
-  .select(...)
-  .gte('price_date', from)
-  .lte('price_date', to)
-  .order('price_date', { ascending: true })
-```
-
-Ma le API del database hanno un **limite di righe per risposta (tipicamente 1000)**.  
-Se chiedi 3 anni * 5 tickers, superi facilmente 1000 righe, e ottieni solo una porzione iniziale della serie storica.
-
-Effetto collaterale:
-- per le date successive all’ultima `price_date` effettivamente ricevuta dal frontend, `getClosestPrice()` continua a restituire “l’ultimo prezzo disponibile” (vecchio),
-- quindi i rendimenti diventano “congelati” da quel punto in poi, anche se nel database i dati più recenti esistono.
-
-Questa è la causa più coerente con il comportamento “linea piatta per mesi”.
+Quindi il benchmark viene scalato con un numero che **non è la % di equity exposure**.
 
 ---
 
-## Cosa implementerò (fix definitivo)
+## Soluzione (allineamento 1:1 con Risk Analyzer)
+### 1) Calcolare la % equity exposure usando la stessa logica del Risk Analyzer
+Useremo le stesse funzioni/librerie già presenti:
+- `categorizeDerivatives(...)`
+- `analyzePortfolioRisk(...)`
 
-### A) Fix principale: paginazione per superare il limite 1000 righe
-**File:** `src/hooks/useBenchmarkData.ts`
+e poi calcoleremo:
 
-1) Sostituire la query singola con una funzione di fetch paginata:
-- fetch a blocchi (es. 1000 righe per pagina) usando `.range(from, to)`
-- accumulare fino a quando la pagina ritorna meno di `PAGE_SIZE`.
+- **Esposizione equity totale (EUR)** = `analysis.totalStockRisk`  
+  (include **stocks + ETF azionari**, già netti delle protezioni Long PUT sulle azioni singole, esattamente come Risk Analyzer)
+- **Valore degli asset (EUR)** = `summary.totalValue` (da `usePortfolio()`; include cash, bond, stock, etf, commodity; esclude derivati come già fa la dashboard)
 
-Risultato: avremo davvero tutte le righe nel range richiesto, quindi `getClosestPrice()` potrà trovare prezzi recenti e il benchmark non si “congela”.
+Quindi:
+- `equityExposurePct = totalStockRisk / summary.totalValue`
 
-2) Aggiungere una “sanity check” lato hook:
-- calcolare `lastFetchedDateByTicker`
-- se per un ticker `lastFetchedDate` è molto indietro rispetto a `dateRange.to` (es. > 7 giorni), segnalare “stale/missing”.
+Con clamp di sicurezza:
+- se `summary.totalValue <= 0` → fallback (es. 0.6) + warning
+- clamp tra `[0, 1]` per evitare valori fuori scala
 
----
-
-### B) Gap detection seria (non solo “missing tickers”)
-**File:** `src/hooks/useBenchmarkData.ts`
-
-Oggi `dataGaps` salva solo `{ date, missingTickers }` e “stale” è un boolean interno non riportato in modo informativo.
-
-Modifica:
-- cambiare struttura gap in qualcosa tipo:
-  - `date`
-  - `missingTickers: string[]`
-  - `staleTickers: string[]`
-  - `staleDetails?: Record<ticker, { lastDate: string; daysDiff: number }>`
-- aggiornare `getClosestPrice()` per restituire anche `matchedDate` (non solo `price`), così possiamo dire chiaramente “per SPY sto usando il prezzo del 2025-12-24 per la data 2026-02-06”.
-
-Questo rende l’avviso affidabile e “debbugabile” dall’utente.
+Nota: questa è la % che l’utente ha indicato (“NEL RISK ANALYZER”).
 
 ---
 
-### C) Avviso UI chiaro e non ignorabile quando ci sono lacune
-**File:** `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+### 2) Passare questa % al calcolo benchmark e usarla davvero
+Modifiche previste in `src/hooks/useBenchmarkData.ts`:
 
-1) Se `dataGaps.length > 0`:
-- mostrare l’icona `AlertTriangle` (già presente) ma rendere il tooltip più esplicito, ad esempio:
-  - “Dati benchmark incompleti/obsoleti”
-  - elenco ticker con `ultima data disponibile` (e quanti giorni di ritardo)
-  - spiegazione: “in giorni di borsa chiusa uso la chiusura precedente; oltre X giorni è considerato stale”.
+- aggiungere un parametro opzionale:
+  - `equityExposurePct?: number | null`
+- eliminare l’uso di `getEquityExposure(entry, viewMode)` (o lasciarlo solo come fallback se equityExposurePct non è disponibile)
+- cambiare la formula di `scaledReturn` in modo che usi la % reale:
 
-2) Aggiungere (facoltativo ma consigliato) una riga di testo piccola sotto la legenda quando ci sono gap:
-- “Benchmark: dati non aggiornati per alcuni ticker (vedi tooltip)”
-così non dipende solo dall’hover.
+**Nuova logica di scaling (chiara e numerica):**
+- `equityReturn` = media di URTH/SPY/ACWI/EXSA.DE (come oggi)
+- `bondReturn` = ritorno di AGG (già calcolabile perché oggi calcoli AGG per il “balanced”)
+- `scaledReturn = equityExposurePct * equityReturn + (1 - equityExposurePct) * bondReturn`
 
----
-
-### D) (Opzionale) Pulsante “Aggiorna benchmark” controllato
-**Per evitare altri giri a vuoto quando Yahoo ha avuto errori temporanei.**
-
-**File:** `PerformanceEvolutionChart.tsx` (o componente padre dashboard)
-- aggiungere un bottone visibile solo se:
-  - ci sono gap stale significativi, oppure
-  - l’ultima data disponibile è indietro oltre soglia.
-- al click invoca la backend function `update-benchmark-prices` e poi invalida la query React Query `['benchmark-prices', ...]`.
-
-Nota: questo non sostituisce l’aggiornamento automatico, ma ti dà un “recovery” immediato senza dover intervenire manualmente sul backend.
+Questo rispetta esattamente “usa la % di equity exposure” e rende il benchmark intuitivo:
+- se equity exposure = 80% → benchmark è 80% equity + 20% bond
+- se equity exposure = 30% → 30% equity + 70% bond
 
 ---
 
-## Test (verifiche che farò prima di chiudere)
-1) **Verifica dati reali nel database** (internamente):
-- controllare `max(price_date)` per ticker e assicurarsi che arrivi a date recenti.
+### 3) Calcolare la % equity exposure nel grafico Dashboard (senza prop drilling pesante)
+Modifiche previste in `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`:
 
-2) **Verifica frontend dopo paginazione**:
-- loggare temporaneamente quante righe arrivano (`benchmarkPrices.length`) e la `max price_date` per ticker dopo fetch (solo in console) per confermare che non si ferma più a ~1000.
+- prendere i dati necessari via hook (React Query cache condivisa, quindi costo marginale basso):
+  - `usePortfolio()` per `positions` + `summary.totalValue`
+  - `useDerivativeOverrides()` per `overrides` (per matchare Risk Analyzer)
+- calcolare `equityExposurePct` con `useMemo()` chiamando:
+  - `categorizeDerivatives(derivatives, positions, overrides)`
+  - `analyzePortfolioRisk(positions, categories)`
+- passare `equityExposurePct` a `useBenchmarkData(historicalData, viewMode, currentDate, equityExposurePct)`
 
-3) **Verifica grafico**:
-- se oggi è nel range, il punto `currentDate` deve usare prezzi <= oggi e quindi il rendimento deve muoversi.
+In alternativa (più pulita e riusabile), creerò un hook dedicato:
+- `src/hooks/useEquityExposurePct.ts`
+che incapsula tutto e torna:
+- `equityExposurePct`
+- `equityExposureEUR`
+- `assetsTotalEUR`
+- `isLoading`
 
-4) **Verifica warning**:
-- simulare un ticker mancante (o restringere range) e vedere che l’avviso compaia con dettagli (ticker + ultima data).
-
----
-
-## File che toccherò
-- `src/hooks/useBenchmarkData.ts`
-  - paginazione query
-  - gap/stale detection dettagliata
-- `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
-  - UI warning migliorato
-  - (opzionale) pulsante refresh benchmark
+Poi `PerformanceEvolutionChart` userà solo quel hook e passerà la % a `useBenchmarkData`.
 
 ---
 
-## Risultato atteso
-- Il benchmark non può più rimanere “congelato” per mesi se i dati esistono.
-- Se davvero ci sono buchi (provider down, ticker senza dati, ecc.), lo vedi subito con un warning chiaro e dettagliato.
-- Hai un modo rapido per forzare l’aggiornamento, senza altri tentativi alla cieca.
+### 4) Tooltip benchmark: mostrare i numeri reali usati
+Aggiornamento in `PerformanceEvolutionChart.tsx` (nel `CustomLegend`):
+
+Nel tooltip del Benchmark aggiungeremo una sezione esplicita, per evitare ambiguità:
+
+Esempio testo:
+- **Equity exposure (Risk Analyzer): 62.4%**
+- Calcolo: **Esposizione equity 521.000€ / Asset 835.000€**
+- Benchmark: `62.4% × Equity(URTH/SPY/ACWI/EXSA.DE) + 37.6% × Bond(AGG)`
+
+Così è verificabile “con numeri reali” e non sembra magia.
+
+---
+
+## Edge case importanti
+- Se mancano `positions` o `summary` (prima del load):
+  - il benchmark resta calcolabile ma userà un fallback (temporaneo) e mostrerà un warning nel tooltip (“equity exposure non disponibile”).
+- Se AGG manca o è stale:
+  - useremo solo equityReturn (o 0 per bondReturn) e segnaleremo data gap come già fai ora.
+
+---
+
+## File toccati
+1) `src/hooks/useBenchmarkData.ts`
+   - aggiunta parametro `equityExposurePct`
+   - nuova formula `scaledReturn` basata su equity exposure %
+   - rimozione/depoteziamento di `getEquityExposure()` e `selectBenchmarkWeight()`
+
+2) `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+   - calcolo equity exposure % (Risk Analyzer-like)
+   - passaggio della % a `useBenchmarkData`
+   - tooltip: mostrare “Equity exposure” + numeri (EUR e %)
+
+3) (Opzionale ma consigliato) `src/hooks/useEquityExposurePct.ts`
+   - hook riusabile per mantenere la stessa metrica in futuro anche altrove
+
+---
+
+## Test / Verifica (end-to-end)
+1) Apri **Risk Analyzer** e annota:
+   - Esposizione equity totale (EUR) / Valore asset (EUR) = X%
+2) Torna in Dashboard → tooltip Benchmark:
+   - deve mostrare **lo stesso X%** (tolleranza piccola per rounding)
+3) Controlla che la linea benchmark cambi coerentemente:
+   - se X% è basso, benchmark deve “muoversi” meno
+4) Verifica che il refresh benchmark continui a funzionare.
+
