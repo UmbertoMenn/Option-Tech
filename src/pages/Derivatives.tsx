@@ -755,6 +755,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
         underlying={option.underlying || underlying.description || ''}
         ticker={ticker}
         contractsInPortfolio={contractsCovered}
+        underlyingPrice={underlying.current_price || 0}
       />
     </>
   );

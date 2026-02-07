@@ -7,16 +7,17 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { FileSpreadsheet, Upload, Calculator, AlertCircle } from 'lucide-react';
+import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   parseOrderFile, 
   filterAndCalculateCallPremiums, 
   calculatePremiumMetrics,
   PremiumMetrics,
-  ParsedOrder
+  ParsedOrder,
+  OrderParseResult
 } from '@/lib/orderFileParser';
-import { formatCurrency } from '@/lib/formatters';
+import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
@@ -24,6 +25,7 @@ interface CallPremiumCalculatorDialogProps {
   underlying: string;
   ticker?: string;
   contractsInPortfolio: number;
+  underlyingPrice: number;
 }
 
 export function CallPremiumCalculatorDialog({
@@ -32,13 +34,67 @@ export function CallPremiumCalculatorDialog({
   underlying,
   ticker,
   contractsInPortfolio,
+  underlyingPrice,
 }: CallPremiumCalculatorDialogProps) {
   const [transactionCost, setTransactionCost] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<PremiumMetrics | null>(null);
   const [filteredOrders, setFilteredOrders] = useState<ParsedOrder[]>([]);
+  const [parseResult, setParseResult] = useState<OrderParseResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+
+  // Recalculate metrics from current orders
+  const recalculateMetrics = useCallback((orders: ParsedOrder[], txCost: number) => {
+    if (orders.length === 0) {
+      setMetrics(null);
+      return;
+    }
+
+    // Rebuild parse result from current orders
+    let totalBuys = 0;
+    let totalSells = 0;
+    let netPremium = 0;
+
+    orders.forEach(order => {
+      if (order.operation === 'sell') {
+        totalSells++;
+        netPremium += order.orderValue;
+      } else {
+        totalBuys++;
+        netPremium -= order.orderValue;
+      }
+    });
+
+    // Find earliest date
+    const dates = orders.map(o => o.validityDate).filter(Boolean) as string[];
+    const firstOperationDate = dates.length > 0 
+      ? dates.map(d => {
+          const match = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+          if (match) {
+            const day = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            const year = parseInt(match[3], 10);
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          }
+          return null;
+        }).filter(Boolean).sort()[0] || null
+      : null;
+
+    const newParseResult: OrderParseResult = {
+      allOrders: orders,
+      filteredOrders: orders,
+      totalBuys,
+      totalSells,
+      netPremium,
+      grossPremium: Math.abs(netPremium),
+      firstOperationDate,
+    };
+
+    setParseResult(newParseResult);
+    const newMetrics = calculatePremiumMetrics(newParseResult, txCost, contractsInPortfolio, underlyingPrice);
+    setMetrics(newMetrics);
+  }, [contractsInPortfolio, underlyingPrice]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -56,19 +112,21 @@ export function CallPremiumCalculatorDialog({
     try {
       const orders = await parseOrderFile(file);
       const result = filterAndCalculateCallPremiums(orders, ticker);
-      const calculatedMetrics = calculatePremiumMetrics(result, transactionCost, contractsInPortfolio);
+      const calculatedMetrics = calculatePremiumMetrics(result, transactionCost, contractsInPortfolio, underlyingPrice);
       
       setMetrics(calculatedMetrics);
       setFilteredOrders(result.filteredOrders);
+      setParseResult(result);
     } catch (err) {
       console.error('Error processing file:', err);
       setError(err instanceof Error ? err.message : 'Errore durante l\'elaborazione del file');
       setMetrics(null);
       setFilteredOrders([]);
+      setParseResult(null);
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, contractsInPortfolio]);
+  }, [ticker, transactionCost, contractsInPortfolio, underlyingPrice]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -79,32 +137,36 @@ export function CallPremiumCalculatorDialog({
     maxFiles: 1,
   });
 
-  // Recalculate when transaction cost changes
+  // Handle transaction cost change
   const handleTransactionCostChange = (value: string) => {
     const cost = parseFloat(value) || 0;
     setTransactionCost(cost);
     
-    if (metrics && filteredOrders.length > 0) {
-      // Recalculate with new transaction cost
-      const ordersCount = filteredOrders.length;
-      const newCommissions = ordersCount * cost;
-      const newNetPremium = metrics.grossPremium - newCommissions;
-      const totalShares = contractsInPortfolio * 100;
-      
-      setMetrics({
-        ...metrics,
-        commissions: newCommissions,
-        netPremium: newNetPremium,
-        netPerShare: totalShares > 0 ? newNetPremium / totalShares : 0,
-      });
+    if (filteredOrders.length > 0) {
+      recalculateMetrics(filteredOrders, cost);
     }
+  };
+
+  // Handle order removal
+  const handleRemoveOrder = (index: number) => {
+    const newOrders = filteredOrders.filter((_, i) => i !== index);
+    setFilteredOrders(newOrders);
+    recalculateMetrics(newOrders, transactionCost);
   };
 
   const handleReset = () => {
     setMetrics(null);
     setFilteredOrders([]);
+    setParseResult(null);
     setFileName(null);
     setError(null);
+  };
+
+  // Format first operation date for display
+  const formatFirstOperationDate = (isoDate: string | null): string => {
+    if (!isoDate) return '-';
+    const d = new Date(isoDate);
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
   };
 
   return (
@@ -122,52 +184,55 @@ export function CallPremiumCalculatorDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* File Upload */}
-          <div
-            {...getRootProps()}
-            className={`
-              border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
-              transition-colors
-              ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
-              ${isProcessing ? 'opacity-50 pointer-events-none' : ''}
-            `}
-          >
-            <input {...getInputProps()} />
-            <FileSpreadsheet className="w-10 h-10 mx-auto mb-2 text-muted-foreground" />
-            {isDragActive ? (
-              <p className="text-sm text-primary">Rilascia il file qui...</p>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  {fileName ? (
-                    <>File caricato: <span className="font-medium">{fileName}</span></>
-                  ) : (
-                    <>Trascina un file Excel o clicca per selezionarlo</>
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Formati supportati: .xls, .xlsx
-                </p>
-              </>
-            )}
-            {isProcessing && (
-              <p className="text-sm text-primary mt-2">Elaborazione in corso...</p>
-            )}
-          </div>
+          {/* File Upload - shown only when no data */}
+          {!metrics && (
+            <div
+              {...getRootProps()}
+              className={`
+                border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
+                transition-colors
+                ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
+                ${isProcessing ? 'opacity-50 pointer-events-none' : ''}
+              `}
+            >
+              <input {...getInputProps()} />
+              <FileSpreadsheet className="w-10 h-10 mx-auto mb-2 text-muted-foreground" />
+              {isDragActive ? (
+                <p className="text-sm text-primary">Rilascia il file qui...</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Trascina un file Excel o clicca per selezionarlo
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Formati supportati: .xls, .xlsx
+                  </p>
+                </>
+              )}
+              {isProcessing && (
+                <p className="text-sm text-primary mt-2">Elaborazione in corso...</p>
+              )}
+            </div>
+          )}
 
-          {/* Transaction Cost Input */}
-          <div className="space-y-2">
-            <Label htmlFor="transactionCost">Costo unitario transazione (USD)</Label>
-            <Input
-              id="transactionCost"
-              type="number"
-              min="0"
-              step="0.01"
-              value={transactionCost}
-              onChange={(e) => handleTransactionCostChange(e.target.value)}
-              className="max-w-[150px]"
-            />
-          </div>
+          {/* File indicator when loaded */}
+          {fileName && metrics && (
+            <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+              <div className="flex items-center gap-2 text-sm">
+                <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
+                <span className="text-muted-foreground">{fileName}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleReset}
+                className="h-7 px-2"
+              >
+                <Upload className="w-4 h-4 mr-1" />
+                Nuovo file
+              </Button>
+            </div>
+          )}
 
           {/* Error Alert */}
           {error && (
@@ -177,108 +242,179 @@ export function CallPremiumCalculatorDialog({
             </Alert>
           )}
 
-          {/* Results */}
+          {/* Main Metrics - Always visible when data loaded */}
           {metrics && (
-            <Card>
+            <Card className="border-primary/20 bg-primary/5">
               <CardContent className="pt-4 space-y-4">
-                {/* Summary */}
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-muted-foreground">Ordini trovati:</div>
-                  <div className="font-medium text-right">{metrics.ordersFound}</div>
-                  
-                  <div className="text-muted-foreground">Vendite / Acquisti:</div>
-                  <div className="font-medium text-right">
-                    <span className="text-green-500">{metrics.sells}</span>
-                    {' / '}
-                    <span className="text-red-500">{metrics.buys}</span>
-                  </div>
-                </div>
-
-                <div className="border-t pt-3 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Lordo Premi:</span>
-                    <span className="font-semibold">{formatCurrency(metrics.grossPremium, 'USD')}</span>
-                  </div>
-                  
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Commissioni:</span>
-                    <span className="text-red-500">-{formatCurrency(metrics.commissions, 'USD')}</span>
-                  </div>
-                  
-                  <div className="flex justify-between text-sm border-t pt-2">
-                    <span className="text-muted-foreground">Netto Commissioni:</span>
-                    <span className="font-semibold text-green-500">{formatCurrency(metrics.netPremium, 'USD')}</span>
-                  </div>
-                </div>
-
-                <div className="border-t pt-3 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Lordo Unitario:</span>
-                    <span className="font-medium">{formatCurrency(metrics.grossPerShare, 'USD')}</span>
-                  </div>
-                  
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Netto Unitario:</span>
-                    <span className="font-medium text-green-500">{formatCurrency(metrics.netPerShare, 'USD')}</span>
-                  </div>
-                  
+                {/* Primary: Net per share */}
+                <div className="text-center pb-3 border-b border-border/50">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Netto Unitario</p>
+                  <p className="text-3xl font-bold text-primary">
+                    {formatCurrency(metrics.netPerShare, 'USD')}
+                  </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Calcolato su {contractsInPortfolio} contratti ({contractsInPortfolio * 100} azioni)
+                    su {contractsInPortfolio} contratti ({contractsInPortfolio * 100} azioni)
                   </p>
                 </div>
 
-                {/* Order Details (Collapsible) */}
-                {filteredOrders.length > 0 && (
-                  <Accordion type="single" collapsible className="border-t pt-2">
-                    <AccordionItem value="orders" className="border-none">
-                      <AccordionTrigger className="text-sm py-2 hover:no-underline">
-                        Dettaglio ordini ({filteredOrders.length})
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="max-h-[200px] overflow-y-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="text-xs">Op.</TableHead>
-                                <TableHead className="text-xs">Simbolo</TableHead>
-                                <TableHead className="text-xs text-right">Qtà</TableHead>
-                                <TableHead className="text-xs text-right">Prezzo</TableHead>
-                                <TableHead className="text-xs text-right">Valore</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {filteredOrders.map((order, idx) => (
-                                <TableRow key={idx}>
-                                  <TableCell className={`text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
-                                    {order.operation === 'sell' ? 'V' : 'A'}
-                                  </TableCell>
-                                  <TableCell className="text-xs font-mono">{order.symbol}</TableCell>
-                                  <TableCell className="text-xs text-right">{order.quantity}</TableCell>
-                                  <TableCell className="text-xs text-right">{order.avgPrice.toFixed(2)}</TableCell>
-                                  <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
-                                    {order.operation === 'sell' ? '+' : '-'}{formatCurrency(order.orderValue, 'USD')}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
+                {/* Secondary: Yields */}
+                <div className="grid grid-cols-2 gap-4 text-center">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Rendimento</p>
+                    <div className="flex items-center justify-center gap-1">
+                      <BarChart3 className="w-4 h-4 text-green-500" />
+                      <span className="text-xl font-semibold text-green-500">
+                        {formatPercentage(metrics.yieldPct)}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Annualizzato</p>
+                    <div className="flex items-center justify-center gap-1">
+                      <BarChart3 className="w-4 h-4 text-green-500" />
+                      <span className="text-xl font-semibold text-green-500">
+                        {formatPercentage(metrics.annualizedYieldPct)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Collapsible: Other data */}
+                <Accordion type="single" collapsible className="border-t pt-2">
+                  <AccordionItem value="other-data" className="border-none">
+                    <AccordionTrigger className="text-sm py-2 hover:no-underline">
+                      📊 Altri dati
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-3 pt-2">
+                        {/* Summary counts */}
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="text-muted-foreground">Ordini trovati:</div>
+                          <div className="text-right font-medium">{metrics.ordersFound}</div>
+                          
+                          <div className="text-muted-foreground">Vendite / Acquisti:</div>
+                          <div className="text-right">
+                            <span className="text-green-500 font-medium">{metrics.sells}</span>
+                            {' / '}
+                            <span className="text-red-500 font-medium">{metrics.buys}</span>
+                          </div>
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
-                )}
+
+                        {/* Premium breakdown */}
+                        <div className="border-t pt-2 space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Lordo Premi:</span>
+                            <span>{formatCurrency(metrics.grossPremium, 'USD')}</span>
+                          </div>
+                          
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Commissioni:</span>
+                            <span className="text-red-500">-{formatCurrency(metrics.commissions, 'USD')}</span>
+                          </div>
+                          
+                          <div className="flex justify-between text-sm border-t pt-1">
+                            <span className="text-muted-foreground">Netto Commissioni:</span>
+                            <span className="text-green-500 font-medium">{formatCurrency(metrics.netPremium, 'USD')}</span>
+                          </div>
+                        </div>
+
+                        {/* Per-share values */}
+                        <div className="border-t pt-2 space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Lordo Unitario:</span>
+                            <span>{formatCurrency(metrics.grossPerShare, 'USD')}</span>
+                          </div>
+                        </div>
+
+                        {/* First operation date */}
+                        <div className="border-t pt-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Prima operazione:</span>
+                            <span>{formatFirstOperationDate(metrics.firstOperationDate)}</span>
+                          </div>
+                        </div>
+
+                        {/* Transaction cost input */}
+                        <div className="border-t pt-3 space-y-2">
+                          <Label htmlFor="transactionCost" className="text-sm text-muted-foreground">
+                            Costo unitario transazione (USD)
+                          </Label>
+                          <Input
+                            id="transactionCost"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={transactionCost}
+                            onChange={(e) => handleTransactionCostChange(e.target.value)}
+                            className="max-w-[120px]"
+                          />
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
               </CardContent>
             </Card>
           )}
 
-          {/* Actions */}
-          <div className="flex justify-end gap-2">
-            {metrics && (
-              <Button variant="outline" onClick={handleReset}>
-                <Upload className="w-4 h-4 mr-2" />
-                Carica nuovo file
-              </Button>
-            )}
+          {/* Order Details (Collapsible with removal) */}
+          {metrics && filteredOrders.length > 0 && (
+            <Card>
+              <CardContent className="pt-4">
+                <Accordion type="single" collapsible>
+                  <AccordionItem value="orders" className="border-none">
+                    <AccordionTrigger className="text-sm py-2 hover:no-underline">
+                      📋 Operazioni ({filteredOrders.length})
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="max-h-[250px] overflow-y-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-xs w-8">Op.</TableHead>
+                              <TableHead className="text-xs">Simbolo</TableHead>
+                              <TableHead className="text-xs text-right">Qtà</TableHead>
+                              <TableHead className="text-xs text-right">Prezzo</TableHead>
+                              <TableHead className="text-xs text-right">Valore</TableHead>
+                              <TableHead className="text-xs w-8"></TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredOrders.map((order, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell className={`text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
+                                  {order.operation === 'sell' ? 'V' : 'A'}
+                                </TableCell>
+                                <TableCell className="text-xs font-mono">{order.symbol}</TableCell>
+                                <TableCell className="text-xs text-right">{order.quantity}</TableCell>
+                                <TableCell className="text-xs text-right">{order.avgPrice.toFixed(2)}</TableCell>
+                                <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
+                                  {order.operation === 'sell' ? '+' : '-'}{formatCurrency(order.orderValue, 'USD')}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                    onClick={() => handleRemoveOrder(idx)}
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Close button */}
+          <div className="flex justify-end">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Chiudi
             </Button>

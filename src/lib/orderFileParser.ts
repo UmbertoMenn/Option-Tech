@@ -8,6 +8,7 @@ export interface ParsedOrder {
   quantity: number;
   optionType: 'CALL' | 'PUT' | null;
   orderValue: number; // quantity * avgPrice * 100
+  validityDate?: string; // Data Validità in formato DD/MM/YYYY
 }
 
 export interface OrderParseResult {
@@ -17,6 +18,7 @@ export interface OrderParseResult {
   totalSells: number;
   netPremium: number; // Sum with signs (sells positive, buys negative)
   grossPremium: number; // Absolute value of netPremium
+  firstOperationDate: string | null; // Earliest validity date
 }
 
 // Column name mappings (Italian Excel format)
@@ -27,6 +29,7 @@ const COLUMN_MAPPINGS = {
   avgPrice: ['Prz Medio', 'prz medio', 'PRZ MEDIO', 'Prezzo Medio', 'prezzo medio'],
   quantity: ['Qtà Eseguita', 'qta eseguita', 'QTA ESEGUITA', 'Quantità Eseguita', 'quantità eseguita'],
   callPut: ['Call/Put', 'call/put', 'CALL/PUT', 'CallPut', 'callput'],
+  validityDate: ['Data Validità', 'data validità', 'DATA VALIDITÀ', 'Data Validita', 'data validita', 'DATA VALIDITA'],
 };
 
 function findColumnIndex(headers: string[], possibleNames: string[]): number {
@@ -37,11 +40,27 @@ function findColumnIndex(headers: string[], possibleNames: string[]): number {
   return -1;
 }
 
+/**
+ * Parse number from Italian format (comma as decimal separator)
+ * Examples: "8,4" -> 8.4, "12,80" -> 12.80, "1.250,50" -> 1250.50
+ */
 function parseNumber(value: any): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
-    // Handle Italian number format (comma as decimal separator)
-    const cleaned = value.replace(/\s/g, '').replace(',', '.');
+    // Remove whitespace
+    let cleaned = value.replace(/\s/g, '');
+    
+    // Italian format uses . as thousands separator and , as decimal
+    // Check if string contains both . and , - Italian format
+    if (cleaned.includes('.') && cleaned.includes(',')) {
+      // Remove thousands separator (.) and replace decimal (,) with .
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else if (cleaned.includes(',')) {
+      // Only comma - treat as decimal separator
+      cleaned = cleaned.replace(',', '.');
+    }
+    // If only dots, assume it's already correct format
+    
     return parseFloat(cleaned) || 0;
   }
   return 0;
@@ -141,6 +160,40 @@ function parseHtmlTable(htmlContent: string): any[][] {
 }
 
 /**
+ * Parse date from Italian format (DD/MM/YYYY or DD-MM-YYYY)
+ * Returns ISO date string or null
+ */
+function parseDateIT(value: string): string | null {
+  if (!value) return null;
+  
+  const cleaned = value.trim();
+  
+  // Try DD/MM/YYYY or DD-MM-YYYY
+  const match = cleaned.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Find the earliest date from a list of ISO date strings
+ */
+function findEarliestDate(dates: (string | null)[]): string | null {
+  const validDates = dates.filter((d): d is string => d !== null);
+  if (validDates.length === 0) return null;
+  
+  return validDates.sort()[0]; // ISO dates sort correctly as strings
+}
+
+/**
  * Parse Excel file (XLS/XLSX) and extract order data
  */
 export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
@@ -228,6 +281,7 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
           avgPrice: findColumnIndex(headers, COLUMN_MAPPINGS.avgPrice),
           quantity: findColumnIndex(headers, COLUMN_MAPPINGS.quantity),
           callPut: findColumnIndex(headers, COLUMN_MAPPINGS.callPut),
+          validityDate: findColumnIndex(headers, COLUMN_MAPPINGS.validityDate),
         };
         
         console.log('Column indices:', colIndices);
@@ -257,6 +311,9 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
           const optionType = colIndices.callPut !== -1 
             ? normalizeOptionType(String(row[colIndices.callPut] || ''))
             : null;
+          const validityDateRaw = colIndices.validityDate !== -1
+            ? String(row[colIndices.validityDate] || '').trim()
+            : undefined;
           
           // Skip rows with no symbol or quantity
           if (!symbol || quantity === 0) continue;
@@ -272,6 +329,7 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
             quantity,
             optionType,
             orderValue,
+            validityDate: validityDateRaw,
           });
         }
         
@@ -321,6 +379,10 @@ export function filterAndCalculateCallPremiums(
     }
   });
   
+  // Find earliest operation date from filtered orders
+  const dates = filteredOrders.map(o => o.validityDate ? parseDateIT(o.validityDate) : null);
+  const firstOperationDate = findEarliestDate(dates);
+  
   return {
     allOrders: orders,
     filteredOrders,
@@ -328,6 +390,7 @@ export function filterAndCalculateCallPremiums(
     totalSells,
     netPremium,
     grossPremium: Math.abs(netPremium),
+    firstOperationDate,
   };
 }
 
@@ -343,12 +406,16 @@ export interface PremiumMetrics {
   netPremium: number;
   grossPerShare: number; // grossPremium / (contracts * 100)
   netPerShare: number;   // netPremium / (contracts * 100)
+  firstOperationDate: string | null;
+  yieldPct: number;           // netPerShare / underlyingPrice * 100
+  annualizedYieldPct: number; // yieldPct * (365 / days)
 }
 
 export function calculatePremiumMetrics(
   parseResult: OrderParseResult,
   transactionCost: number,
-  contractsInPortfolio: number
+  contractsInPortfolio: number,
+  underlyingPrice: number = 0
 ): PremiumMetrics {
   const ordersFound = parseResult.filteredOrders.length;
   const commissions = ordersFound * transactionCost;
@@ -357,6 +424,19 @@ export function calculatePremiumMetrics(
   const totalShares = contractsInPortfolio * 100;
   const grossPerShare = totalShares > 0 ? parseResult.grossPremium / totalShares : 0;
   const netPerShare = totalShares > 0 ? netPremium / totalShares : 0;
+  
+  // Calculate yield %
+  const yieldPct = underlyingPrice > 0 ? (netPerShare / underlyingPrice) * 100 : 0;
+  
+  // Calculate annualized yield
+  let annualizedYieldPct = 0;
+  if (parseResult.firstOperationDate && yieldPct > 0) {
+    const firstDate = new Date(parseResult.firstOperationDate);
+    const today = new Date();
+    const diffTime = today.getTime() - firstDate.getTime();
+    const diffDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    annualizedYieldPct = yieldPct * (365 / diffDays);
+  }
   
   return {
     ordersFound,
@@ -367,5 +447,8 @@ export function calculatePremiumMetrics(
     netPremium,
     grossPerShare,
     netPerShare,
+    firstOperationDate: parseResult.firstOperationDate,
+    yieldPct,
+    annualizedYieldPct,
   };
 }
