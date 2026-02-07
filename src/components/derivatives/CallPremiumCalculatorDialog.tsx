@@ -18,7 +18,7 @@ import {
   ParsedOrder,
   OrderParseResult
 } from '@/lib/orderFileParser';
-import { formatCurrency, formatPercentage } from '@/lib/formatters';
+import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
@@ -268,12 +268,13 @@ export function CallPremiumCalculatorDialog({
                   </div>
                 </div>
 
-                {/* First operation date - visible under yields */}
-                {metrics.firstOperationDate && (
-                  <div className="text-center text-xs text-muted-foreground pt-1">
-                    📅 Prima operazione: {formatFirstOperationDate(metrics.firstOperationDate)}
-                  </div>
-                )}
+                {/* First operation date - always visible under yields */}
+                <div className="text-center text-xs text-muted-foreground pt-1">
+                  📅 Prima operazione: {metrics.firstOperationDate 
+                    ? formatFirstOperationDate(metrics.firstOperationDate)
+                    : <span className="italic">- (non trovata nel file)</span>
+                  }
+                </div>
 
                 {/* Collapsible: Other data */}
                 <Accordion type="single" collapsible className="border-t pt-2">
@@ -376,7 +377,7 @@ export function CallPremiumCalculatorDialog({
                                 </TableCell>
                                 <TableCell className="text-xs font-mono">{order.symbol}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
-                                <TableCell className="text-xs text-right">{order.avgPrice.toFixed(2)}</TableCell>
+                                <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
                                 <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
                                   {order.operation === 'sell' ? '+' : '-'}{formatCurrency(order.orderValue, 'USD')}
                                 </TableCell>

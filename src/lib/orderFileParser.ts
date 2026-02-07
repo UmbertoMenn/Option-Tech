@@ -43,10 +43,6 @@ function findColumnIndex(headers: string[], possibleNames: string[]): number {
 /**
  * Parse number from Italian format (comma as decimal separator)
  * Examples: "8,4" -> 8.4, "12,80" -> 12.80, "1.250,50" -> 1250.50
- */
-/**
- * Parse number from Italian format (comma as decimal separator)
- * Examples: "8,4" -> 8.4, "12,80" -> 12.80, "1.250,50" -> 1250.50
  * Also handles apostrophes (common in Excel exports): "'8,4" -> 8.4
  */
 function parseNumber(value: any): number {
@@ -209,6 +205,201 @@ export function findFirstOperationDate(validityDates: (string | undefined)[]): s
 }
 
 /**
+ * Check if the content appears to be HTML (table-based Excel export)
+ * Extended detection to catch files starting with <table> or containing HTML tags
+ */
+function isHtmlContent(textData: string): boolean {
+  const trimmed = textData.trim().toLowerCase();
+  
+  // Direct HTML document indicators
+  if (trimmed.startsWith('<html') || trimmed.startsWith('<!doctype')) {
+    return true;
+  }
+  
+  // Table-only HTML (common Italian broker export format)
+  if (trimmed.startsWith('<table')) {
+    return true;
+  }
+  
+  // Frameset HTML (old Excel web exports)
+  if (trimmed.startsWith('<frameset') || textData.includes('<frameset')) {
+    return true;
+  }
+  
+  // Microsoft Office Excel namespace
+  if (textData.includes('xmlns:x="urn:schemas-microsoft-com:office:excel"')) {
+    return true;
+  }
+  
+  // Contains typical HTML table structure tags
+  if (textData.includes('<table') && textData.includes('<tr') && textData.includes('<td')) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Check if parsed prices look suspicious (likely wrong decimal parsing)
+ * Returns true if prices seem implausibly high for options
+ */
+function hasSuspiciousPrices(orders: ParsedOrder[]): boolean {
+  if (orders.length === 0) return false;
+  
+  // Count how many prices are suspiciously high (>= 500 for options is very unusual)
+  const suspiciousCount = orders.filter(o => o.avgPrice >= 500).length;
+  
+  // If more than 30% of prices are suspicious, likely parsing error
+  return suspiciousCount > orders.length * 0.3;
+}
+
+/**
+ * Parse orders from raw text data (pure function for testing)
+ * This is the core parsing logic without FileReader
+ */
+export function parseOrdersFromTextData(textData: string): ParsedOrder[] {
+  let rawData: any[][] = [];
+  const shouldParseAsHtml = isHtmlContent(textData);
+  
+  if (shouldParseAsHtml) {
+    if (import.meta.env.DEV) {
+      console.log('[orderFileParser] Detected HTML-based Excel, parsing as HTML table');
+    }
+    rawData = parseHtmlTable(textData);
+    
+    // If HTML parsing didn't yield enough data, try xlsx as fallback
+    if (rawData.length < 2) {
+      if (import.meta.env.DEV) {
+        console.log('[orderFileParser] HTML parsing yielded insufficient data, trying xlsx fallback');
+      }
+      try {
+        const workbook = XLSX.read(textData, { type: 'string' });
+        for (const name of workbook.SheetNames) {
+          const ws = workbook.Sheets[name];
+          const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
+          if (sheetData.length > rawData.length) {
+            rawData = sheetData;
+          }
+        }
+      } catch (xlsxErr) {
+        if (import.meta.env.DEV) {
+          console.warn('[orderFileParser] XLSX fallback also failed:', xlsxErr);
+        }
+      }
+    }
+  } else {
+    // Try standard xlsx parsing with raw: false to preserve string formatting
+    try {
+      const workbook = XLSX.read(textData, { type: 'string' });
+      for (const name of workbook.SheetNames) {
+        const ws = workbook.Sheets[name];
+        const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
+        if (sheetData.length > rawData.length) {
+          rawData = sheetData;
+        }
+      }
+    } catch {
+      // If string parsing fails, the caller should try binary
+      throw new Error('PARSE_AS_BINARY');
+    }
+  }
+  
+  return parseOrdersFromRawData(rawData, textData);
+}
+
+/**
+ * Parse orders from raw 2D array data
+ */
+function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): ParsedOrder[] {
+  if (rawData.length < 2) {
+    throw new Error('Nessun dato trovato nel file');
+  }
+  
+  // First row is headers - handle potential empty cells and apostrophes
+  const headers = rawData[0].map(h => String(h || '').trim().replace(/^'+/, ''));
+  
+  if (import.meta.env.DEV) {
+    console.log('[orderFileParser] Headers found:', headers);
+  }
+  
+  // Find column indices
+  const colIndices = {
+    operation: findColumnIndex(headers, COLUMN_MAPPINGS.operation),
+    symbol: findColumnIndex(headers, COLUMN_MAPPINGS.symbol),
+    status: findColumnIndex(headers, COLUMN_MAPPINGS.status),
+    avgPrice: findColumnIndex(headers, COLUMN_MAPPINGS.avgPrice),
+    quantity: findColumnIndex(headers, COLUMN_MAPPINGS.quantity),
+    callPut: findColumnIndex(headers, COLUMN_MAPPINGS.callPut),
+    validityDate: findColumnIndex(headers, COLUMN_MAPPINGS.validityDate),
+  };
+  
+  // Validate required columns
+  if (colIndices.operation === -1 || colIndices.symbol === -1 || 
+      colIndices.status === -1 || colIndices.avgPrice === -1 || 
+      colIndices.quantity === -1) {
+    throw new Error(`File non valido: colonne richieste non trovate. Headers: ${headers.join(', ')}`);
+  }
+  
+  const orders: ParsedOrder[] = [];
+  
+  // Parse data rows (skip header)
+  for (let i = 1; i < rawData.length; i++) {
+    const row = rawData[i];
+    if (!row || row.length === 0) continue;
+    
+    const status = String(row[colIndices.status] || '').trim();
+    const operation = normalizeOperation(String(row[colIndices.operation] || ''));
+    const symbol = String(row[colIndices.symbol] || '').replace(/'/g, '').trim();
+    const avgPrice = parseNumber(row[colIndices.avgPrice]);
+    const quantity = parseNumber(row[colIndices.quantity]);
+    const optionType = colIndices.callPut !== -1 
+      ? normalizeOptionType(String(row[colIndices.callPut] || ''))
+      : null;
+    const validityDateRaw = colIndices.validityDate !== -1
+      ? String(row[colIndices.validityDate] || '').trim()
+      : undefined;
+    
+    // Skip rows with no symbol or quantity
+    if (!symbol || quantity === 0) continue;
+    
+    // Calculate order value (quantity * avgPrice * 100 for options)
+    const orderValue = quantity * avgPrice * 100;
+    
+    orders.push({
+      operation,
+      symbol,
+      status,
+      avgPrice,
+      quantity,
+      optionType,
+      orderValue,
+      validityDate: validityDateRaw,
+    });
+  }
+  
+  // SANITY CHECK: If prices look suspicious and we have HTML content, re-parse as HTML
+  if (hasSuspiciousPrices(orders) && originalTextData && isHtmlContent(originalTextData)) {
+    if (import.meta.env.DEV) {
+      console.warn('[orderFileParser] Suspicious prices detected, re-parsing as HTML table');
+    }
+    const htmlData = parseHtmlTable(originalTextData);
+    if (htmlData.length >= 2) {
+      const reprocessed = parseOrdersFromRawData(htmlData);
+      // Only use reprocessed if it has valid data and better prices
+      if (reprocessed.length > 0 && !hasSuspiciousPrices(reprocessed)) {
+        return reprocessed;
+      }
+    }
+  }
+  
+  if (import.meta.env.DEV) {
+    console.log(`[orderFileParser] Parsed ${orders.length} orders`);
+  }
+  
+  return orders;
+}
+
+/**
  * Parse Excel file (XLS/XLSX) and extract order data
  */
 export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
@@ -220,141 +411,49 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
         const data = e.target?.result;
         const textData = new TextDecoder().decode(data as ArrayBuffer);
         
-        // Check if this is an HTML file (common for old Excel exports)
-        const isHtmlFile = textData.trim().toLowerCase().startsWith('<html') || 
-                          textData.trim().toLowerCase().startsWith('<!doctype') ||
-                          textData.includes('xmlns:x="urn:schemas-microsoft-com:office:excel"');
-        
-        let rawData: any[][] = [];
-        
-        if (isHtmlFile) {
-          console.log('Detected HTML-based Excel file, parsing as HTML...');
-          
-          // Try to extract table data directly from HTML
-          rawData = parseHtmlTable(textData);
-          
-          // If no data from HTML parsing, try xlsx library anyway
-          if (rawData.length < 2) {
-            console.log('HTML parsing yielded no data, trying xlsx library...');
-            try {
-              const workbook = XLSX.read(textData, { type: 'string' });
-              for (const name of workbook.SheetNames) {
-                const ws = workbook.Sheets[name];
-                // Use raw: false to get formatted strings instead of coerced numbers
-                const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
-                if (sheetData.length > rawData.length) {
-                  rawData = sheetData;
-                }
-              }
-            } catch (xlsxErr) {
-              console.warn('XLSX parsing also failed:', xlsxErr);
-            }
+        // Try text-based parsing first (handles HTML and string-based xlsx)
+        try {
+          const orders = parseOrdersFromTextData(textData);
+          resolve(orders);
+          return;
+        } catch (textErr) {
+          // If it needs binary parsing, continue below
+          if (textErr instanceof Error && textErr.message !== 'PARSE_AS_BINARY') {
+            reject(textErr);
+            return;
           }
-        } else {
-          // Standard Excel binary format
-          let workbook;
+        }
+        
+        // Standard Excel binary format fallback
+        let workbook;
+        try {
+          workbook = XLSX.read(data, { type: 'array' });
+        } catch {
           try {
-            workbook = XLSX.read(data, { type: 'array' });
-          } catch {
-            try {
-              workbook = XLSX.read(data, { type: 'binary' });
-            } catch (err) {
-              console.error('Failed to parse as binary Excel:', err);
-              reject(new Error('Formato file non supportato. Usa .xlsx o esporta come "Cartella di lavoro Excel".'));
-              return;
-            }
-          }
-          
-          // Get best sheet with most data
-          for (const name of workbook.SheetNames) {
-            const ws = workbook.Sheets[name];
-            // Use raw: false to get formatted strings instead of coerced numbers
-            const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
-            if (sheetData.length > rawData.length) {
-              rawData = sheetData;
-            }
+            workbook = XLSX.read(data, { type: 'binary' });
+          } catch (err) {
+            console.error('Failed to parse as binary Excel:', err);
+            reject(new Error('Formato file non supportato. Usa .xlsx o esporta come "Cartella di lavoro Excel".'));
+            return;
           }
         }
         
-        if (rawData.length < 2) {
-          console.warn('No data found in file. This may be a frameset HTML file that references external sheets.');
-          reject(new Error('Nessun dato trovato. Se il file è in formato "Pagina Web", salvalo come "Cartella di lavoro Excel (.xlsx)" e riprova.'));
-          return;
+        // Get best sheet with most data
+        let rawData: any[][] = [];
+        for (const name of workbook.SheetNames) {
+          const ws = workbook.Sheets[name];
+          // Use raw: false to get formatted strings instead of coerced numbers
+          const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as any[][];
+          if (sheetData.length > rawData.length) {
+            rawData = sheetData;
+          }
         }
         
-        console.log(`Found ${rawData.length} rows in file`);
-        console.log('First row (headers):', rawData[0]);
-        
-        // First row is headers - handle potential empty cells
-        const headers = rawData[0].map(h => String(h || '').trim().replace(/^'+/, ''));
-        
-        console.log('Excel headers found:', headers);
-        
-        // Find column indices
-        const colIndices = {
-          operation: findColumnIndex(headers, COLUMN_MAPPINGS.operation),
-          symbol: findColumnIndex(headers, COLUMN_MAPPINGS.symbol),
-          status: findColumnIndex(headers, COLUMN_MAPPINGS.status),
-          avgPrice: findColumnIndex(headers, COLUMN_MAPPINGS.avgPrice),
-          quantity: findColumnIndex(headers, COLUMN_MAPPINGS.quantity),
-          callPut: findColumnIndex(headers, COLUMN_MAPPINGS.callPut),
-          validityDate: findColumnIndex(headers, COLUMN_MAPPINGS.validityDate),
-        };
-        
-        console.log('Column indices:', colIndices);
-        
-        // Validate required columns
-        if (colIndices.operation === -1 || colIndices.symbol === -1 || 
-            colIndices.status === -1 || colIndices.avgPrice === -1 || 
-            colIndices.quantity === -1) {
-          console.error('Missing required columns:', colIndices);
-          console.error('Available headers:', headers);
-          reject(new Error(`File non valido: colonne richieste non trovate. Headers: ${headers.join(', ')}`));
-          return;
-        }
-        
-        const orders: ParsedOrder[] = [];
-        
-        // Parse data rows (skip header)
-        for (let i = 1; i < rawData.length; i++) {
-          const row = rawData[i];
-          if (!row || row.length === 0) continue;
-          
-          const status = String(row[colIndices.status] || '').trim();
-          const operation = normalizeOperation(String(row[colIndices.operation] || ''));
-          const symbol = String(row[colIndices.symbol] || '').replace(/'/g, '').trim();
-          const avgPrice = parseNumber(row[colIndices.avgPrice]);
-          const quantity = parseNumber(row[colIndices.quantity]);
-          const optionType = colIndices.callPut !== -1 
-            ? normalizeOptionType(String(row[colIndices.callPut] || ''))
-            : null;
-          const validityDateRaw = colIndices.validityDate !== -1
-            ? String(row[colIndices.validityDate] || '').trim()
-            : undefined;
-          
-          // Skip rows with no symbol or quantity
-          if (!symbol || quantity === 0) continue;
-          
-          // Calculate order value (quantity * avgPrice * 100 for options)
-          const orderValue = quantity * avgPrice * 100;
-          
-          orders.push({
-            operation,
-            symbol,
-            status,
-            avgPrice,
-            quantity,
-            optionType,
-            orderValue,
-            validityDate: validityDateRaw,
-          });
-        }
-        
-        console.log(`Parsed ${orders.length} orders from Excel`);
+        const orders = parseOrdersFromRawData(rawData, textData);
         resolve(orders);
       } catch (error) {
         console.error('Error parsing Excel file:', error);
-        reject(new Error('Errore durante la lettura del file'));
+        reject(error instanceof Error ? error : new Error('Errore durante la lettura del file'));
       }
     };
     
