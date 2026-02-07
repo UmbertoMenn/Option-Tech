@@ -1,155 +1,162 @@
 
-# Piano: Calcolatrice Premi CALL per Covered Call
+# Piano: Correzioni Calcolatrice Premi CALL
 
-## Obiettivo
-Aggiungere un pulsante calcolatrice su ogni riga Covered Call che permette di:
-1. Caricare un file PDF o Excel con gli ordini eseguiti
-2. Filtrare solo gli ordini "Eseguito" di tipo CALL per il sottostante specifico
-3. Calcolare i premi netti incassati
+## Problemi Identificati
 
-## Flusso Utente
+### 1. Bug Parsing Numeri
+Il file Excel ha formato italiano con virgole come separatori decimali (es. `8,4` = 8.40 USD). Il parser HTML attuale non gestisce correttamente questo formato, risultando in valori gonfiati (es. 8,4 diventa 84).
 
-```text
-+---------------------------------------+
-|  COVERED CALL ROW                     |
-|  NVIDIA OPTION CALL 150 MAR/26  [🧮]  | <-- Click calcolatrice
-+---------------------------------------+
-                |
-                v
-+---------------------------------------+
-|  DIALOG: Calcola Premi CALL           |
-|  Sottostante: NVIDIA                  |
-|---------------------------------------|
-|  [📄 Carica file ordini (PDF/Excel)]  |
-|  Formati: .xls, .xlsx, .pdf           |
-|---------------------------------------|
-|  Costo unitario transazione:          |
-|  [10] USD                             |
-|---------------------------------------|
-|  RISULTATI (dopo upload):             |
-|  +--------------------------------+   |
-|  | Ordini trovati: 12             |   |
-|  | Vendite: 8  |  Acquisti: 4     |   |
-|  +--------------------------------+   |
-|  | Lordo Premi:      $2,450.00    |   |
-|  | Commissioni:      $120.00      |   |
-|  | Netto Comm.:      $2,330.00    |   |
-|  +--------------------------------+   |
-|  | Lordo Unitario:   $24.50       |   |
-|  | Netto Unitario:   $23.30       |   |
-|  +--------------------------------+   |
-|                                       |
-|  [Chiudi]                             |
-+---------------------------------------+
-```
+### 2. Dati Mancanti
+- **Data prima operazione**: non viene estratta dal file (colonna "Data Validità")
+- **Rendimento %**: non calcolato
+- **Rendimento % annualizzato**: non calcolato
 
-## Logica di Calcolo
+### 3. UI da Migliorare
+- I dati sintetici piu importanti (Netto Unitario, Rendimento %) non sono in evidenza
+- Troppi dati visibili subito, meglio una struttura gerarchica
+- Manca la possibilita di rimuovere singole operazioni
 
-### 1. Parsing del File Ordini
+---
 
-Dal file Excel caricato:
-- **Colonne chiave**: Operazione, Simbolo, Stato, Prz Medio, Qta Eseguita, Call/Put
-- **Filtro**: `Stato === "Eseguito"` AND `Call/Put === "CALL"`
-- **Matching sottostante**: Il simbolo contiene il ticker (es. "TSLA" in "TSLAG6C480")
+## Soluzione
 
-### 2. Calcoli
+### 1. Correzione Parser (`src/lib/orderFileParser.ts`)
 
-| Metrica | Formula |
-|---------|---------|
-| Valore ordine | `quantita × prezzo_medio × 100` |
-| Segno | Vendita = +, Acquisto = - |
-| **Lordo Premi** | Somma valori assoluti (val. assoluto del netto) |
-| **Commissioni** | `numero_ordini × costo_unitario` |
-| **Netto Commissioni** | `Lordo - Commissioni` |
-| **Lordo Unitario** | `Lordo / (contratti_cc × 100)` |
-| **Netto Unitario** | `Netto / (contratti_cc × 100)` |
+**Modifiche alla funzione `parseHtmlTable`:**
+- Gestione corretta del formato italiano dei numeri (virgola come decimale)
+- Estrazione della colonna "Data Validità" per ogni ordine
 
-Nota: I "contratti CC" sono quelli attualmente in portafoglio per quella covered call.
-
-## Modifiche Tecniche
-
-### File da creare/modificare
-
-| File | Azione |
-|------|--------|
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | **NUOVO** - Dialog con upload e calcoli |
-| `src/lib/orderFileParser.ts` | **NUOVO** - Parser per file ordini |
-| `src/pages/Derivatives.tsx` | Aggiungere icona calcolatrice a CoveredCallRow |
-
-### 1. Parser File Ordini (`src/lib/orderFileParser.ts`)
-
+**Nuovi campi in `ParsedOrder`:**
 ```typescript
 interface ParsedOrder {
-  operation: 'buy' | 'sell';
-  symbol: string;
-  status: string;
-  avgPrice: number;
-  quantity: number;
-  optionType: 'CALL' | 'PUT';
+  // campi esistenti...
+  validityDate?: string; // Data Validita in formato DD/MM/YYYY
 }
-
-// Parsing Excel: stessa libreria xlsx gia in uso
-// Parsing PDF: richiede estrazione testo tabellare
 ```
 
-### 2. Dialog Calcolatrice (`src/components/derivatives/CallPremiumCalculatorDialog.tsx`)
-
-Componenti:
-- Dropzone per file (PDF/Excel)
-- Input numerico per costo transazione (default: 10 USD)
-- Tabella risultati con i 4 valori calcolati
-- Dettaglio ordini trovati (espandibile)
-
-Props:
+**Nuove metriche in `PremiumMetrics`:**
 ```typescript
-interface Props {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  underlying: string;        // Nome sottostante per matching
-  ticker?: string;           // Ticker risolto (es. TSLA, NVDA)
-  contractsInPortfolio: number; // Per calcolo unitario
+interface PremiumMetrics {
+  // campi esistenti...
+  firstOperationDate: string | null;    // Data operazione piu vecchia
+  yieldPct: number;                      // Rendimento % = netPerShare / underlyingPrice
+  annualizedYieldPct: number;            // Rendimento annualizzato
 }
 ```
 
-### 3. Modifica CoveredCallRow
+### 2. Nuova Interfaccia Utente (`CallPremiumCalculatorDialog.tsx`)
 
-Aggiungere icona `Calculator` con onClick che apre il dialog:
+**Layout dopo upload:**
 
+```text
++------------------------------------------+
+|  Calcola Premi CALL                      |
+|  Sottostante: ALIBABA (BABA)             |
++------------------------------------------+
+|  [📄 file.xls caricato]  [🗑 Rimuovi]     |
++------------------------------------------+
+|                                          |
+|  METRICHE PRINCIPALI (sempre visibili)   |
+|  +------------------------------------+  |
+|  |  Netto Unitario                    |  |
+|  |  $12,45                            |  |
+|  +------------------------------------+  |
+|  |  Rendimento      |  Annualizzato   |  |
+|  |  7,8%            |  42,3%          |  |
+|  +------------------------------------+  |
+|                                          |
+|  📊 Altri dati                    [▼]    |
+|  +------------------------------------+  |
+|  | Lordo Premi:        $1.250,00      |  |
+|  | Commissioni:        -$120,00       |  |
+|  | Netto Commissioni:  $1.130,00      |  |
+|  | Lordo Unitario:     $13,89         |  |
+|  | Prima operazione:   08/09/2025     |  |
+|  | Costo transazione:  [10] USD       |  |
+|  +------------------------------------+  |
+|                                          |
+|  📋 Operazioni (9)                [▼]    |
+|  +------------------------------------+  |
+|  | Op | Simbolo      | Qtà | Prz | 🗑 |  |
+|  | V  | BABAH6C165   | 1   | 8,40| X |  |
+|  | A  | BABAU6C190   | 1   |12,80| X |  |
+|  | ...                               |  |
+|  +------------------------------------+  |
+|                                          |
+|  [Chiudi]                                |
++------------------------------------------+
+```
+
+**Funzionalita:**
+- Metriche principali sempre visibili in alto (Netto Unitario, Rendimento %)
+- "Altri dati" in sezione collassabile (Accordion)
+- Tabella operazioni con pulsante rimozione per ogni riga
+- Ricalcolo automatico quando si rimuove un'operazione
+
+### 3. Passaggio Prezzo Sottostante
+
+Il dialog necessita del prezzo corrente del sottostante per calcolare il rendimento %. Verra aggiunta una nuova prop:
+
+```typescript
+interface CallPremiumCalculatorDialogProps {
+  // props esistenti...
+  underlyingPrice: number; // Prezzo corrente del sottostante
+}
+```
+
+Nel componente `CoveredCallRow`, passare:
 ```tsx
-<Button variant="ghost" size="icon" onClick={() => setShowCalculator(true)}>
-  <Calculator className="w-4 h-4" />
-</Button>
-
 <CallPremiumCalculatorDialog
-  open={showCalculator}
-  onOpenChange={setShowCalculator}
-  underlying={option.underlying}
-  ticker={underlyingPrices[option.underlying]?.ticker}
-  contractsInPortfolio={contractsCovered}
+  // props esistenti...
+  underlyingPrice={underlying.current_price || 0}
 />
 ```
 
-## Supporto PDF
+---
 
-Per i PDF, il parsing e piu complesso:
-- Opzione 1: Usare `pdfjs-dist` per estrarre testo
-- Opzione 2: Richiedere solo Excel inizialmente, aggiungere PDF in seguito
+## Formule di Calcolo
 
-**Raccomandazione**: Iniziare con solo Excel (formato identico al file fornito), aggiungere PDF come miglioramento futuro.
+| Metrica | Formula |
+|---------|---------|
+| Netto Unitario | `(Lordo Premi - Commissioni) / (Contratti × 100)` |
+| Rendimento % | `Netto Unitario / Prezzo Sottostante × 100` |
+| Giorni trascorsi | `Data oggi - Data prima operazione` |
+| Rendimento Annualizzato | `Rendimento % × (365 / Giorni trascorsi)` |
 
-## Matching Sottostante
+---
 
-Il simbolo nell'Excel (es. "TSLAG6C480") contiene:
-- Ticker: TSLA
-- Codice opzione: G6 (mese/anno)
-- Tipo: C (Call) o P (Put)
-- Strike: 480
+## File da Modificare
 
-Per il matching, estraiamo i primi 2-4 caratteri del simbolo e confrontiamo con il ticker risolto della covered call.
+| File | Modifiche |
+|------|-----------|
+| `src/lib/orderFileParser.ts` | Correzione parsing numeri italiani, estrazione data, nuove metriche |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Nuova UI con layout gerarchico, rimozione operazioni |
+| `src/pages/Derivatives.tsx` | Passaggio `underlyingPrice` al dialog |
 
-## Note UI
+---
 
-- L'icona calcolatrice appare solo nelle righe Covered Call
-- Il dialog e modale e non blocca la navigazione
-- I risultati rimangono visibili finche il dialog e aperto
-- Possibilita di caricare piu file per aggiornare i calcoli
+## Verifica Calcoli
+
+Con il file fornito (BABA), filtrando solo CALL eseguiti:
+
+| Operazione | Simbolo | Prz Medio | Qtà | Valore |
+|------------|---------|-----------|-----|--------|
+| Vendita | BABAH6C165 | 8,40 | 1 | +840 |
+| Acquisto | BABAU6C190 | 12,80 | 1 | -1.280 |
+| Vendita | BABAU6C190 | 22,80 | 1 | +2.280 |
+| Acquisto | BABAM6C180 | 22,20 | 1 | -2.220 |
+| Vendita | BABAM6C180 | 14,95 | 1 | +1.495 |
+| Acquisto | BABAJ6C170 | 13,95 | 1 | -1.395 |
+| Vendita | BABAJ6C170 | 15,80 | 1 | +1.580 |
+| Acquisto | BABAG6C165 | 12,85 | 1 | -1.285 |
+| Vendita | BABAG6C165 | 10,40 | 1 | +1.040 |
+| Acquisto | BABAF6C160 | 7,40 | 1 | -740 |
+| Vendita | BABAF6C160 | 2,30 | 1 | +230 |
+| Vendita | BABAZ5C165 | 3,30 | 1 | +330 |
+| Acquisto | BABAZ5C170 | 2,12 | 1 | -212 |
+| Vendita | BABAZ5C170 | 4,60 | 1 | +460 |
+| Vendita | BABAX5C165 | 1,90 | 1 | +190 |
+
+**Totale Netto**: +1.313 USD (somma algebrica)
+**Prima operazione**: 12/11/2025 (data piu vecchia tra le CALL)
+
