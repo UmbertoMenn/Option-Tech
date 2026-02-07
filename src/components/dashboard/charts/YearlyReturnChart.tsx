@@ -13,6 +13,7 @@ import {
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
+import { formatEUR, formatPercentage } from '@/lib/formatters';
 
 interface YearlyReturnChartProps {
   historicalData: HistoricalDataEntry[];
@@ -23,6 +24,72 @@ interface YearlyReturnChartProps {
 interface YearlyDataPoint {
   year: string;
   returnPct: number;
+  startValue: number;
+  endValue: number;
+  deposits: number;
+  pl: number;
+  avgBalance: number;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: YearlyDataPoint }>;
+}
+
+function CustomTooltip({ active, payload }: CustomTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const data = payload[0].payload;
+  const isProfit = data.returnPct >= 0;
+
+  return (
+    <div className="bg-card border border-border rounded-lg p-3 shadow-lg text-sm">
+      <p className="font-semibold text-foreground mb-2">Anno {data.year}</p>
+
+      <div className="space-y-1 text-muted-foreground">
+        <div className="flex justify-between gap-4">
+          <span>Valore iniziale:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.startValue)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span>Valore finale:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.endValue)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span>Versamenti:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.deposits)}</span>
+        </div>
+      </div>
+
+      <div className="border-t border-border my-2" />
+
+      <div className="space-y-1">
+        <div className="flex justify-between gap-4 text-muted-foreground">
+          <span>P/L:</span>
+          <span className={`font-medium ${isProfit ? 'text-profit' : 'text-loss'}`}>
+            {formatEUR(data.pl)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4 text-muted-foreground">
+          <span>Giacenza media:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.avgBalance)}</span>
+        </div>
+      </div>
+
+      <div className="border-t border-border my-2" />
+
+      <div className="flex justify-between gap-4">
+        <span className="font-semibold text-foreground">Rendimento:</span>
+        <span className={`font-bold ${isProfit ? 'text-profit' : 'text-loss'}`}>
+          {formatPercentage(data.returnPct)}
+        </span>
+      </div>
+
+      <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border">
+        P/L ÷ (Valore iniziale + Versamenti/2)
+      </p>
+    </div>
+  );
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -114,6 +181,11 @@ export function YearlyReturnChart({
       data.push({
         year,
         returnPct,
+        startValue,
+        endValue,
+        deposits: yearDeposits,
+        pl,
+        avgBalance,
       });
     });
 
@@ -145,23 +217,7 @@ export function YearlyReturnChart({
           tickFormatter={(value) => `${value.toFixed(0)}%`}
         />
         <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '8px',
-            fontSize: '12px',
-          }}
-          labelStyle={{
-            color: 'hsl(var(--foreground))',
-            fontWeight: 500,
-          }}
-          itemStyle={{
-            color: 'hsl(var(--foreground))',
-          }}
-          formatter={(value: number) => [`${value.toFixed(2)}%`, 'Rendimento']}
-          labelFormatter={(label) => `Anno ${label}`}
-        />
+        <Tooltip content={<CustomTooltip />} />
         <Bar dataKey="returnPct" radius={[4, 4, 0, 0]}>
           {chartData.map((entry, index) => (
             <Cell
