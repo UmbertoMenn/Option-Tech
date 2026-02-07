@@ -100,7 +100,7 @@ export function CallPremiumCalculatorDialog({
 
     try {
       const orders = await parseOrderFile(file);
-      const result = filterAndCalculateCallPremiums(orders, ticker);
+      const result = filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       const calculatedMetrics = calculatePremiumMetrics(result, transactionCost, contractsInPortfolio, underlyingPrice);
       
       setMetrics(calculatedMetrics);
