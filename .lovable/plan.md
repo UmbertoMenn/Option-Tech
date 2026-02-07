@@ -1,234 +1,164 @@
 
-# Piano Aggiornato: Equity Exposure Storica nel Benchmark
+# Piano: Tooltip Dettagliato con Calcoli Reali - Istogramma Rendimento Annuo
 
-## Correzione Logica Fondamentale
+## Obiettivo
 
-L'equity exposure del **punto N** determina il rendimento benchmark **dal punto N al punto N+1**.
+Mostrare nel tooltip dell'istogramma i calcoli effettuati con i numeri reali, in modo che l'utente possa vedere esattamente come viene calcolato il rendimento annuo.
 
-```text
-Timeline:
-────────────────────────────────────────────────────────────►
-     Punto 1          Punto 2          Punto 3         Oggi
-     (40% eq)         (60% eq)         (70% eq)
-        │                │                │              │
-        ├────────────────┤                │              │
-        │  Benchmark:    │                │              │
-        │  40% Eq + 60% Bond              │              │
-        │                │                │              │
-                         ├────────────────┤              │
-                         │  Benchmark:    │              │
-                         │  60% Eq + 40% Bond            │
-                         │                │              │
-                                          ├──────────────┤
-                                          │  Benchmark:  │
-                                          │  70% Eq + 30% Bond
+## Esempio di Tooltip Atteso
+
+```
+Anno 2024
+
+Valore iniziale:     € 850.000
+Valore finale:       € 920.000
+Versamenti:          € 20.000
+────────────────────────────────
+P/L:                 € 50.000
+Giacenza media:      € 860.000
+────────────────────────────────
+Rendimento:          +5,81%
+
+Formula: (920.000 - 850.000 - 20.000) / (850.000 + 20.000/2) × 100
 ```
 
 ---
 
-## Modifiche al Database
+## Modifiche
 
-### Nuova colonna in `historical_data`
+### File: `src/components/dashboard/charts/YearlyReturnChart.tsx`
 
-```sql
-ALTER TABLE historical_data 
-ADD COLUMN equity_exposure_pct numeric DEFAULT 0.6;
+#### 1. Espandere l'interfaccia `YearlyDataPoint`
 
-COMMENT ON COLUMN historical_data.equity_exposure_pct IS 
-  'Equity exposure % (0-1) del portafoglio alla data dello snapshot. 
-   Usata per calcolare il benchmark nel periodo successivo.';
-```
-
----
-
-## File da Modificare
-
-| File | Modifiche |
-|------|-----------|
-| `src/types/historicalData.ts` | Aggiungi `equity_exposure_pct` ai tipi |
-| `src/components/dashboard/Dashboard.tsx` | Includi equity exposure nel salvataggio snapshot |
-| `src/components/dashboard/HistoricalDataForm.tsx` | Nuovo campo input per equity exposure % |
-| `src/hooks/useHistoricalData.ts` | Gestisci il nuovo campo nell'upsert |
-| `src/hooks/useBenchmarkData.ts` | Usa equity exposure storica punto-per-punto |
-| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Aggiorna tooltip benchmark |
-
----
-
-## Dettagli Implementazione
-
-### 1. Tipi (`src/types/historicalData.ts`)
+Includere tutti i valori intermedi necessari per il tooltip:
 
 ```typescript
-export interface HistoricalDataEntry {
-  id: string;
-  portfolio_id: string;
-  snapshot_date: string;
-  total_value: number;
-  netting_total: number;
-  netting_ex_cc: number;
-  netting_ex_cc_np: number;
-  deposits: number;
-  average_balance: number;
-  equity_exposure_pct: number; // NUOVO: 0-1, default 0.6
-  created_at: string;
-  updated_at: string;
-}
-
-export interface HistoricalDataInput {
-  snapshot_date: string;
-  total_value: number;
-  netting_total: number;
-  netting_ex_cc: number;
-  netting_ex_cc_np: number;
-  deposits: number;
-  average_balance: number;
-  equity_exposure_pct: number; // NUOVO
+interface YearlyDataPoint {
+  year: string;
+  returnPct: number;
+  startValue: number;    // NUOVO
+  endValue: number;      // NUOVO
+  deposits: number;      // NUOVO (yearDeposits)
+  pl: number;            // NUOVO
+  avgBalance: number;    // NUOVO
 }
 ```
 
-### 2. Dashboard - Salvataggio Snapshot
+#### 2. Salvare i valori nel data array
+
+Nel `useMemo`, salvare tutti i valori calcolati:
 
 ```typescript
-// In Dashboard.tsx
-const { equityExposurePct } = useEquityExposurePct();
-
-// Nel onClick di "Salva Snapshot"
-upsertHistoricalData({
-  snapshot_date: portfolio.snapshot_date,
-  total_value: summary?.totalValue ?? 0,
-  netting_total: netting.nettingTotal,
-  netting_ex_cc: netting.nettingExCoveredCall,
-  netting_ex_cc_np: netting.nettingExCCAndNP,
-  deposits: 0,
-  average_balance: 0,
-  equity_exposure_pct: equityExposurePct, // NUOVO: salva exposure attuale
+data.push({
+  year,
+  returnPct,
+  startValue,    // NUOVO
+  endValue,      // NUOVO
+  deposits: yearDeposits,  // NUOVO
+  pl,            // NUOVO
+  avgBalance,    // NUOVO
 });
 ```
 
-### 3. HistoricalDataForm - Campo manuale
+#### 3. Creare un Custom Tooltip
 
-Nuove props:
+Sostituire il Tooltip standard con un componente custom che mostra il breakdown completo:
+
 ```typescript
-interface HistoricalDataFormProps {
-  // ... esistenti ...
-  currentEquityExposurePct: number; // Per "Usa valori attuali"
+import { formatEUR, formatPercentage, formatNumber } from '@/lib/formatters';
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: YearlyDataPoint }>;
 }
-```
 
-Nuovo campo nel form:
-- Label: "Equity Exposure (%)"
-- Input numerico: 0-100 (visualizzazione user-friendly)
-- Conversione: input/100 per salvare come 0-1
-- Placeholder: "es. 65"
-
-Il bottone "Usa valori attuali" popola anche questo campo.
-
-### 4. useBenchmarkData - Logica corretta
-
-```typescript
-export function useBenchmarkData(
-  historicalData: HistoricalDataEntry[], // Include equity_exposure_pct
-  selectedPeriod: string,
-  currentEquityExposure?: number // Exposure attuale per ultimo periodo
-) {
-  // ...
+function CustomTooltip({ active, payload }: CustomTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
   
-  // Ordina per data crescente
-  const sortedHistory = [...historicalData].sort(
-    (a, b) => new Date(a.snapshot_date).getTime() - new Date(b.snapshot_date).getTime()
+  const data = payload[0].payload;
+  const isProfit = data.returnPct >= 0;
+  
+  return (
+    <div className="bg-card border border-border rounded-lg p-3 shadow-lg text-sm">
+      <p className="font-semibold text-foreground mb-2">Anno {data.year}</p>
+      
+      <div className="space-y-1 text-muted-foreground">
+        <div className="flex justify-between gap-4">
+          <span>Valore iniziale:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.startValue)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span>Valore finale:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.endValue)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span>Versamenti:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.deposits)}</span>
+        </div>
+      </div>
+      
+      <div className="border-t border-border my-2" />
+      
+      <div className="space-y-1">
+        <div className="flex justify-between gap-4 text-muted-foreground">
+          <span>P/L:</span>
+          <span className={`font-medium ${isProfit ? 'text-profit' : 'text-loss'}`}>
+            {formatEUR(data.pl)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4 text-muted-foreground">
+          <span>Giacenza media:</span>
+          <span className="text-foreground font-medium">{formatEUR(data.avgBalance)}</span>
+        </div>
+      </div>
+      
+      <div className="border-t border-border my-2" />
+      
+      <div className="flex justify-between gap-4">
+        <span className="font-semibold">Rendimento:</span>
+        <span className={`font-bold ${isProfit ? 'text-profit' : 'text-loss'}`}>
+          {formatPercentage(data.returnPct)}
+        </span>
+      </div>
+      
+      <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border">
+        P/L ÷ (Valore iniziale + Versamenti/2)
+      </p>
+    </div>
   );
-  
-  let cumulativeBenchmarkReturn = 0;
-  
-  for (let i = 0; i < sortedHistory.length; i++) {
-    const entry = sortedHistory[i];
-    const nextDate = i < sortedHistory.length - 1 
-      ? sortedHistory[i + 1].snapshot_date 
-      : today; // Ultimo punto → oggi
-    
-    // CHIAVE: L'equity exposure di QUESTO punto
-    // determina il benchmark per il periodo SUCCESSIVO
-    const equityPct = entry.equity_exposure_pct > 0 
-      ? entry.equity_exposure_pct 
-      : 0.6; // Fallback per dati legacy
-    
-    // Calcola rendimenti Equity e Bond nel periodo
-    const equityReturn = getEquityReturnBetween(entry.snapshot_date, nextDate);
-    const bondReturn = getBondReturnBetween(entry.snapshot_date, nextDate);
-    
-    // Benchmark ponderato per il periodo
-    const periodReturn = equityPct * equityReturn + (1 - equityPct) * bondReturn;
-    
-    // Compounding
-    cumulativeBenchmarkReturn = (1 + cumulativeBenchmarkReturn) * (1 + periodReturn) - 1;
-  }
-  
-  // ...
 }
 ```
 
-### 5. Tooltip Benchmark aggiornato
+#### 4. Usare il Custom Tooltip nel grafico
 
-```typescript
-const benchmarkTooltip = (
-  <>
-    <strong>Benchmark Dinamico Ponderato</strong>
-    <br /><br />
-    Paniere Equity (Media URTH/SPY/ACWI/EXSA.DE) e Bond (AGG) 
-    ponderato per l'equity exposure storica del portafoglio.
-    <br /><br />
-    <strong>Ponderazione variabile:</strong> Il peso Equity/Bond 
-    cambia nel tempo in base all'esposizione salvata in ogni snapshot.
-    L'exposure di ciascun punto determina la ponderazione 
-    per il periodo successivo.
-    <br /><br />
-    Equity exposure attuale: <strong>{(equityExposurePct * 100).toFixed(0)}%</strong>
-  </>
-);
+```tsx
+<Tooltip content={<CustomTooltip />} />
 ```
 
 ---
 
-## Edge Cases
+## Struttura del Tooltip Finale
 
-| Scenario | Comportamento |
-|----------|---------------|
-| Snapshot legacy senza equity_exposure_pct | Usa fallback 60% |
-| equity_exposure_pct = 0 | Usa fallback 60% (0 = non impostato) |
-| equity_exposure_pct = 0.01 (intenzionale 1%) | Usa 1% (valore valido) |
-| Solo 1 snapshot | Usa la sua equity exposure per tutto il periodo fino ad oggi |
-| Form: input > 100 | Clamp a 100 |
-| Form: input < 0 | Clamp a 0 |
-
----
-
-## Flusso Utente
-
-1. **Salvataggio automatico snapshot**: L'equity exposure attuale viene catturata automaticamente
-2. **Inserimento manuale**: L'utente deve inserire l'equity exposure che aveva in quella data storica
-3. **Modifica snapshot esistente**: Può correggere l'equity exposure se era sbagliata
-4. **Visualizzazione benchmark**: Ogni segmento del grafico usa la ponderazione appropriata
+| Sezione | Contenuto |
+|---------|-----------|
+| **Header** | Anno XXXX |
+| **Valori** | Valore iniziale, Valore finale, Versamenti |
+| **Calcoli** | P/L, Giacenza media |
+| **Risultato** | Rendimento % (colorato) |
+| **Formula** | Spiegazione breve della formula |
 
 ---
 
-## Migrazione Dati
+## File Coinvolti
 
-I dati esistenti senza `equity_exposure_pct` useranno il default 60%.
-L'utente può modificare ogni entry per inserire il valore corretto se lo ricorda.
+| File | Modifiche |
+|------|-----------|
+| `src/components/dashboard/charts/YearlyReturnChart.tsx` | Espandi data model, aggiungi custom tooltip |
 
 ---
 
-## Test di Verifica
+## Vantaggi
 
-1. **Scenario multi-periodo**:
-   - Salva snapshot gen 2024 con equity 40%
-   - Salva snapshot feb 2024 con equity 70%
-   - Verifica che il benchmark gen→feb usi 40%, feb→oggi usi 70%
-
-2. **Form manuale**:
-   - Inserisci dato storico con equity 50%
-   - Verifica salvataggio corretto (0.5 nel DB)
-
-3. **Tooltip**:
-   - Hover su "Benchmark" nel grafico
-   - Verifica menzione ponderazione variabile
+1. **Trasparenza**: L'utente vede esattamente come viene calcolato il rendimento
+2. **Debug facile**: Se qualcosa non torna, i numeri sono visibili
+3. **Educativo**: Mostra la formula della giacenza media ponderata
