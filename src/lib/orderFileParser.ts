@@ -111,22 +111,52 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'array' });
+        // Try multiple parsing strategies for different Excel formats
+        let workbook;
+        try {
+          // First try as binary array (works for most .xls/.xlsx)
+          workbook = XLSX.read(data, { type: 'array' });
+        } catch {
+          // If that fails, try as string (HTML-based Excel files)
+          try {
+            const textData = new TextDecoder().decode(data as ArrayBuffer);
+            workbook = XLSX.read(textData, { type: 'string' });
+          } catch {
+            // Last resort: raw binary
+            workbook = XLSX.read(data, { type: 'binary' });
+          }
+        }
         
-        // Get first sheet
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
+        // Get first sheet (some HTML Excel files have different naming)
+        let sheetName = workbook.SheetNames[0];
+        let worksheet = workbook.Sheets[sheetName];
         
         // Convert to array of arrays
-        const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        let rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // If data is empty or too small, the file might be HTML frameset-based
+        // Try to extract data from all sheets
+        if (rawData.length < 2) {
+          for (const name of workbook.SheetNames) {
+            const ws = workbook.Sheets[name];
+            const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+            if (data.length > rawData.length) {
+              rawData = data;
+              worksheet = ws;
+            }
+          }
+        }
         
         if (rawData.length < 2) {
+          console.warn('No data found in Excel file. Sheets:', workbook.SheetNames);
           resolve([]);
           return;
         }
         
-        // First row is headers
+        // First row is headers - handle potential empty cells
         const headers = rawData[0].map(h => String(h || '').trim());
+        
+        console.log('Excel headers found:', headers);
         
         // Find column indices
         const colIndices = {
@@ -138,12 +168,15 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
           callPut: findColumnIndex(headers, COLUMN_MAPPINGS.callPut),
         };
         
+        console.log('Column indices:', colIndices);
+        
         // Validate required columns
         if (colIndices.operation === -1 || colIndices.symbol === -1 || 
             colIndices.status === -1 || colIndices.avgPrice === -1 || 
             colIndices.quantity === -1) {
           console.error('Missing required columns:', colIndices);
-          reject(new Error('File non valido: colonne richieste non trovate'));
+          console.error('Available headers:', headers);
+          reject(new Error(`File non valido: colonne richieste non trovate. Headers: ${headers.join(', ')}`));
           return;
         }
         
@@ -163,6 +196,9 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
             ? normalizeOptionType(String(row[colIndices.callPut] || ''))
             : null;
           
+          // Skip rows with no symbol or quantity
+          if (!symbol || quantity === 0) continue;
+          
           // Calculate order value (quantity * avgPrice * 100 for options)
           const orderValue = quantity * avgPrice * 100;
           
@@ -177,6 +213,7 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
           });
         }
         
+        console.log(`Parsed ${orders.length} orders from Excel`);
         resolve(orders);
       } catch (error) {
         console.error('Error parsing Excel file:', error);
