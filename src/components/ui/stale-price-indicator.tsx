@@ -1,12 +1,17 @@
 import * as React from "react";
 import { AlertTriangle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
+import { isMarketOpen } from "@/lib/marketHours";
 
 interface StalePriceIndicatorProps {
   className?: string;
+  ticker?: string;  // Ticker per determinare il mercato
 }
 
-export function StalePriceIndicator({ className }: StalePriceIndicatorProps) {
+export function StalePriceIndicator({ className, ticker }: StalePriceIndicatorProps) {
+  const isMarketClosed = ticker && !isMarketOpen(ticker);
+  const message = isMarketClosed ? "Mercato chiuso" : "Prezzo non aggiornato";
+  
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -15,7 +20,7 @@ export function StalePriceIndicator({ className }: StalePriceIndicatorProps) {
         />
       </TooltipTrigger>
       <TooltipContent>
-        <p>Prezzo non aggiornato</p>
+        <p>{message}</p>
       </TooltipContent>
     </Tooltip>
   );

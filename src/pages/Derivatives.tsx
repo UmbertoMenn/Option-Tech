@@ -660,7 +660,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             {option.underlying && underlyingPrices[option.underlying]?.isStale && (
-              <StalePriceIndicator />
+              <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
             )}
           </div>
           
@@ -819,7 +819,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
                   </TooltipContent>
                 </Tooltip>
                 {option.underlying && underlyingPrices[option.underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
             ) : (
@@ -1007,7 +1007,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                   </TooltipContent>
                 </Tooltip>
                 {underlyingPrices[underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
             ) : (
@@ -1243,7 +1243,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                   </TooltipContent>
                 </Tooltip>
                 {underlyingPrices[underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
             ) : (
@@ -1564,7 +1564,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                   </TooltipContent>
                 </Tooltip>
                 {underlyingPrices[underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
             ) : (
@@ -1867,7 +1867,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                   </TooltipContent>
                 </Tooltip>
                 {option.underlying && underlyingPrices[option.underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
             ) : (
@@ -2012,7 +2012,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                   </TooltipContent>
                 </Tooltip>
                 {option.underlying && underlyingPrices[option.underlying]?.isStale && (
-                  <StalePriceIndicator />
+                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
             ) : (
