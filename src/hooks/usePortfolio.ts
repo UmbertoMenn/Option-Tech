@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfolio';
+import { DerivativeOverride } from '@/types/derivativeOverrides';
+import { remapOverridesAfterUpload } from '@/lib/overrideMatching';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
@@ -82,7 +84,18 @@ export function usePortfolio() {
       const portfolioId = targetPortfolioId || portfolio?.id;
       if (!portfolioId) throw new Error('Portfolio non trovato');
       
-      // First delete all existing positions for the target portfolio
+      // ========= STEP 0: Read current state BEFORE delete =========
+      const { data: oldPositions } = await supabase
+        .from('positions')
+        .select('*')
+        .eq('portfolio_id', portfolioId);
+      
+      const { data: existingOverrides } = await supabase
+        .from('derivative_overrides')
+        .select('*')
+        .eq('portfolio_id', portfolioId);
+      
+      // ========= STEP 1: Delete + Insert (as before) =========
       const { error: deleteError } = await supabase
         .from('positions')
         .delete()
@@ -90,17 +103,49 @@ export function usePortfolio() {
       
       if (deleteError) throw deleteError;
       
-      // Then insert new positions
-      const { data, error } = await supabase
+      // Insert new positions and return them with their new IDs
+      const { data: insertedPositions, error } = await supabase
         .from('positions')
         .insert(positions.map(p => ({
           ...p,
           portfolio_id: portfolioId,
-        })));
+        })))
+        .select();
       
       if (error) throw error;
       
-      // Update portfolio totals (IMPORTANT: derivatives must NOT be included in total portfolio value)
+      // ========= STEP 2: Remap overrides =========
+      if (existingOverrides && existingOverrides.length > 0 && insertedPositions) {
+        const typedOverrides = existingOverrides as unknown as DerivativeOverride[];
+        const typedOldPositions = (oldPositions || []) as unknown as Position[];
+        const typedNewPositions = insertedPositions as unknown as Position[];
+        
+        const result = await remapOverridesAfterUpload(
+          portfolioId,
+          typedOldPositions,
+          typedNewPositions,
+          typedOverrides
+        );
+        
+        console.log('[OverrideRemap] Result:', result);
+        
+        if (result.matched > 0 || result.orphaned > 0) {
+          if (result.matched > 0 && result.orphaned === 0) {
+            toast.info(`Override preservati: ${result.matched}`);
+          } else if (result.matched > 0 && result.orphaned > 0) {
+            toast.info(`Override preservati: ${result.matched}`, {
+              description: `${result.orphaned} override non più validi rimossi.`
+            });
+          } else if (result.orphaned > 0) {
+            toast.warning(`${result.orphaned} override rimossi`, {
+              description: 'Le opzioni corrispondenti non sono più presenti.'
+            });
+          }
+        }
+      }
+      
+      // ========= STEP 3: Update portfolio totals =========
+      // IMPORTANT: derivatives must NOT be included in total portfolio value
       const investedNonDerivatives = positions
         .filter(p => p.asset_type !== 'derivative')
         .reduce((sum, p) => sum + (p.market_value || 0), 0);
@@ -124,11 +169,12 @@ export function usePortfolio() {
         })
         .eq('id', portfolioId);
       
-      return data;
+      return insertedPositions;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['positions'] });
       queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      queryClient.invalidateQueries({ queryKey: ['derivative-overrides'] });
       toast.success('Portfolio aggiornato!');
     },
     onError: (error) => {
