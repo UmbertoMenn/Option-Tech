@@ -1,162 +1,142 @@
 
-# Piano: Correzioni Calcolatrice Premi CALL
+
+# Piano: Correzione Calcoli e UI Calcolatrice Premi CALL
 
 ## Problemi Identificati
 
 ### 1. Bug Parsing Numeri
-Il file Excel ha formato italiano con virgole come separatori decimali (es. `8,4` = 8.40 USD). Il parser HTML attuale non gestisce correttamente questo formato, risultando in valori gonfiati (es. 8,4 diventa 84).
+Guardando lo screenshot, il "Netto Unitario" mostra **1.124,50 $** che corrisponde a **1124.50 USD** (formato italiano). Questo valore e troppo alto - dovrebbe essere circa **13,13 $** per un contratto.
 
-### 2. Dati Mancanti
-- **Data prima operazione**: non viene estratta dal file (colonna "Data Validità")
-- **Rendimento %**: non calcolato
-- **Rendimento % annualizzato**: non calcolato
+**Causa probabile**: I numeri vengono letti correttamente come decimali (es. "8,4" → 8.4), ma il problema e nell'HTML parsing. Alcuni valori potrebbero essere estratti senza la virgola, trasformando "8,4" in "84" invece di "8.4".
 
-### 3. UI da Migliorare
-- I dati sintetici piu importanti (Netto Unitario, Rendimento %) non sono in evidenza
-- Troppi dati visibili subito, meglio una struttura gerarchica
-- Manca la possibilita di rimuovere singole operazioni
+### 2. Rendimento Annualizzato = 0%
+La funzione `calculatePremiumMetrics` ha questa condizione:
+```typescript
+if (parseResult.firstOperationDate && yieldPct > 0) {
+  // calcola annualizzato
+}
+```
+Se il rendimento e 0 o negativo (cosa impossibile con yield al 645%), il problema e probabilmente nella **data prima operazione** che non viene estratta correttamente.
+
+**Causa probabile**: Le date nel file hanno formato `'DD/MM/YYYY` con apostrofo iniziale (es. `'12/11/2025`). La funzione `parseDateIT` non gestisce questo apostrofo.
+
+### 3. Data Prima Operazione Nascosta
+Attualmente la data e visibile solo nella sezione collassabile "Altri dati". L'utente vuole vederla subito sotto ai rendimenti.
 
 ---
 
-## Soluzione
+## Soluzioni
 
-### 1. Correzione Parser (`src/lib/orderFileParser.ts`)
+### 1. Correzione Parser HTML (`src/lib/orderFileParser.ts`)
 
-**Modifiche alla funzione `parseHtmlTable`:**
-- Gestione corretta del formato italiano dei numeri (virgola come decimale)
-- Estrazione della colonna "Data Validità" per ogni ordine
-
-**Nuovi campi in `ParsedOrder`:**
+**A. Gestione apostrofi nelle date:**
 ```typescript
-interface ParsedOrder {
-  // campi esistenti...
-  validityDate?: string; // Data Validita in formato DD/MM/YYYY
+// Rimuovere apostrofi iniziali dai valori
+let cellValue = cellMatch[1]
+  .replace(/<[^>]*>/g, '')
+  .replace(/^'+/, '')  // NUOVO: rimuove apostrofi iniziali
+  .replace(/&nbsp;/g, ' ')
+  // ...
+```
+
+**B. Verifica parsing numeri:**
+Aggiungere log dettagliati per debug e assicurarsi che la funzione `parseNumber` gestisca correttamente i numeri con virgola estratti dall'HTML.
+
+**C. Gestione date con apostrofo:**
+```typescript
+function parseDateIT(value: string): string | null {
+  if (!value) return null;
+  
+  // Rimuovi apostrofi iniziali (comuni nei file Excel italiani)
+  const cleaned = value.trim().replace(/^'+/, '');
+  // ...
 }
 ```
 
-**Nuove metriche in `PremiumMetrics`:**
+### 2. Calcolo Rendimento Annualizzato
+
+**Rimuovere condizione `yieldPct > 0`:**
+Il rendimento annualizzato deve essere calcolato sempre, anche se il yield e negativo.
+
 ```typescript
-interface PremiumMetrics {
-  // campi esistenti...
-  firstOperationDate: string | null;    // Data operazione piu vecchia
-  yieldPct: number;                      // Rendimento % = netPerShare / underlyingPrice
-  annualizedYieldPct: number;            // Rendimento annualizzato
-}
+// PRIMA (bug)
+if (parseResult.firstOperationDate && yieldPct > 0) {
+
+// DOPO (corretto)
+if (parseResult.firstOperationDate) {
 ```
 
-### 2. Nuova Interfaccia Utente (`CallPremiumCalculatorDialog.tsx`)
+### 3. UI - Mostrare Data Prima Operazione
 
-**Layout dopo upload:**
+Aggiungere la data sotto ai rendimenti nella sezione sempre visibile:
 
 ```text
 +------------------------------------------+
-|  Calcola Premi CALL                      |
-|  Sottostante: ALIBABA (BABA)             |
+|        NETTO UNITARIO                    |
+|           13,13 $                        |
+|     su 1 contratti (100 azioni)          |
 +------------------------------------------+
-|  [📄 file.xls caricato]  [🗑 Rimuovi]     |
+|   Rendimento      |   Annualizzato       |
+|    📊 +7,54%      |     📊 +31,23%       |
 +------------------------------------------+
-|                                          |
-|  METRICHE PRINCIPALI (sempre visibili)   |
-|  +------------------------------------+  |
-|  |  Netto Unitario                    |  |
-|  |  $12,45                            |  |
-|  +------------------------------------+  |
-|  |  Rendimento      |  Annualizzato   |  |
-|  |  7,8%            |  42,3%          |  |
-|  +------------------------------------+  |
-|                                          |
-|  📊 Altri dati                    [▼]    |
-|  +------------------------------------+  |
-|  | Lordo Premi:        $1.250,00      |  |
-|  | Commissioni:        -$120,00       |  |
-|  | Netto Commissioni:  $1.130,00      |  |
-|  | Lordo Unitario:     $13,89         |  |
-|  | Prima operazione:   08/09/2025     |  |
-|  | Costo transazione:  [10] USD       |  |
-|  +------------------------------------+  |
-|                                          |
-|  📋 Operazioni (9)                [▼]    |
-|  +------------------------------------+  |
-|  | Op | Simbolo      | Qtà | Prz | 🗑 |  |
-|  | V  | BABAH6C165   | 1   | 8,40| X |  |
-|  | A  | BABAU6C190   | 1   |12,80| X |  |
-|  | ...                               |  |
-|  +------------------------------------+  |
-|                                          |
-|  [Chiudi]                                |
+|     📅 Prima operazione: 12/11/2025      |  ← NUOVO
 +------------------------------------------+
-```
-
-**Funzionalita:**
-- Metriche principali sempre visibili in alto (Netto Unitario, Rendimento %)
-- "Altri dati" in sezione collassabile (Accordion)
-- Tabella operazioni con pulsante rimozione per ogni riga
-- Ricalcolo automatico quando si rimuove un'operazione
-
-### 3. Passaggio Prezzo Sottostante
-
-Il dialog necessita del prezzo corrente del sottostante per calcolare il rendimento %. Verra aggiunta una nuova prop:
-
-```typescript
-interface CallPremiumCalculatorDialogProps {
-  // props esistenti...
-  underlyingPrice: number; // Prezzo corrente del sottostante
-}
-```
-
-Nel componente `CoveredCallRow`, passare:
-```tsx
-<CallPremiumCalculatorDialog
-  // props esistenti...
-  underlyingPrice={underlying.current_price || 0}
-/>
 ```
 
 ---
 
-## Formule di Calcolo
-
-| Metrica | Formula |
-|---------|---------|
-| Netto Unitario | `(Lordo Premi - Commissioni) / (Contratti × 100)` |
-| Rendimento % | `Netto Unitario / Prezzo Sottostante × 100` |
-| Giorni trascorsi | `Data oggi - Data prima operazione` |
-| Rendimento Annualizzato | `Rendimento % × (365 / Giorni trascorsi)` |
-
----
-
-## File da Modificare
+## Modifiche File
 
 | File | Modifiche |
 |------|-----------|
-| `src/lib/orderFileParser.ts` | Correzione parsing numeri italiani, estrazione data, nuove metriche |
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Nuova UI con layout gerarchico, rimozione operazioni |
-| `src/pages/Derivatives.tsx` | Passaggio `underlyingPrice` al dialog |
+| `src/lib/orderFileParser.ts` | Gestione apostrofi, fix parsing numeri HTML, debug logging |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Mostrare data prima operazione sotto i rendimenti |
 
 ---
 
-## Verifica Calcoli
+## Dettaglio Tecnico: Parsing HTML
 
-Con il file fornito (BABA), filtrando solo CALL eseguiti:
+Il problema principale e nel metodo `parseHtmlTable`. Quando legge le celle, alcuni valori numerici con virgola potrebbero essere malformati.
 
-| Operazione | Simbolo | Prz Medio | Qtà | Valore |
-|------------|---------|-----------|-----|--------|
-| Vendita | BABAH6C165 | 8,40 | 1 | +840 |
-| Acquisto | BABAU6C190 | 12,80 | 1 | -1.280 |
-| Vendita | BABAU6C190 | 22,80 | 1 | +2.280 |
-| Acquisto | BABAM6C180 | 22,20 | 1 | -2.220 |
-| Vendita | BABAM6C180 | 14,95 | 1 | +1.495 |
-| Acquisto | BABAJ6C170 | 13,95 | 1 | -1.395 |
-| Vendita | BABAJ6C170 | 15,80 | 1 | +1.580 |
-| Acquisto | BABAG6C165 | 12,85 | 1 | -1.285 |
-| Vendita | BABAG6C165 | 10,40 | 1 | +1.040 |
-| Acquisto | BABAF6C160 | 7,40 | 1 | -740 |
-| Vendita | BABAF6C160 | 2,30 | 1 | +230 |
-| Vendita | BABAZ5C165 | 3,30 | 1 | +330 |
-| Acquisto | BABAZ5C170 | 2,12 | 1 | -212 |
-| Vendita | BABAZ5C170 | 4,60 | 1 | +460 |
-| Vendita | BABAX5C165 | 1,90 | 1 | +190 |
+**Debug aggiunto:**
+```typescript
+console.log('Raw cell value:', cellMatch[1]);
+console.log('Cleaned cell value:', cellValue);
+```
 
-**Totale Netto**: +1.313 USD (somma algebrica)
-**Prima operazione**: 12/11/2025 (data piu vecchia tra le CALL)
+**Gestione numeri migliorata:**
+```typescript
+function parseNumber(value: any): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    // Rimuovi whitespace e apostrofi
+    let cleaned = value.replace(/\s/g, '').replace(/^'+/, '');
+    
+    // Log per debug
+    console.log('parseNumber input:', value, '-> cleaned:', cleaned);
+    
+    // Italian format: . = thousands, , = decimal
+    if (cleaned.includes('.') && cleaned.includes(',')) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else if (cleaned.includes(',')) {
+      cleaned = cleaned.replace(',', '.');
+    }
+    
+    const result = parseFloat(cleaned) || 0;
+    console.log('parseNumber result:', result);
+    return result;
+  }
+  return 0;
+}
+```
+
+---
+
+## Verifica Attesa
+
+Dopo le correzioni, con il file BABA:
+- **Netto Unitario**: ~13,13 $ (non 1.124,50 $)
+- **Rendimento**: ~7,5% (non 645%)
+- **Annualizzato**: ~31% (non 0%)
+- **Data visibile**: 12/11/2025 sotto i rendimenti
 
