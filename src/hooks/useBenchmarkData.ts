@@ -79,54 +79,14 @@ async function fetchAllBenchmarkPrices(from: string, to: string): Promise<Benchm
   return allPrices;
 }
 
-/**
- * Calculate the equity exposure percentage from a historical data entry
- */
-function getEquityExposure(entry: HistoricalDataEntry, viewMode: ViewMode): number {
-  const baseValue = entry.total_value;
-  
-  if (baseValue <= 0) return 0;
-  
-  switch (viewMode) {
-    case 'base':
-      return 0.6; // Conservative default
-    case 'netting_total':
-    case 'netting_ex_cc':
-    case 'netting_ex_cc_np': {
-      const nettingValue = viewMode === 'netting_total' 
-        ? entry.netting_total 
-        : viewMode === 'netting_ex_cc' 
-          ? entry.netting_ex_cc 
-          : (entry.netting_ex_cc_np ?? entry.netting_ex_cc);
-      
-      const ratio = nettingValue / baseValue;
-      return Math.min(ratio, 1.5);
-    }
-    default:
-      return 0.6;
-  }
-}
-
-/**
- * Select appropriate benchmark based on equity exposure
- */
-function selectBenchmarkWeight(equityExposure: number): { equityWeight: number; useBalanced: boolean } {
-  if (equityExposure >= 0.9) {
-    return { equityWeight: 1, useBalanced: false };
-  } else if (equityExposure >= 0.4 && equityExposure <= 0.6) {
-    return { equityWeight: 0, useBalanced: true };
-  } else if (equityExposure > 0.6) {
-    const t = (equityExposure - 0.6) / 0.3;
-    return { equityWeight: t, useBalanced: false };
-  } else {
-    return { equityWeight: 0, useBalanced: true };
-  }
-}
+// Note: getEquityExposure and selectBenchmarkWeight are deprecated.
+// The benchmark now uses the real equity exposure percentage from useEquityExposurePct hook.
 
 export function useBenchmarkData(
   historicalData: HistoricalDataEntry[],
   viewMode: ViewMode,
-  currentDate?: string | null
+  currentDate?: string | null,
+  equityExposurePct?: number | null
 ) {
   const queryClient = useQueryClient();
 
@@ -280,7 +240,7 @@ export function useBenchmarkData(
     const returns: Array<{
       date: string;
       equityReturn: number;
-      balancedReturn: number;
+      bondReturn: number;
       scaledReturn: number;
     }> = [];
 
@@ -289,7 +249,7 @@ export function useBenchmarkData(
         returns.push({
           date: entry.snapshot_date,
           equityReturn: 0,
-          balancedReturn: 0,
+          bondReturn: 0,
           scaledReturn: 0,
         });
         return;
@@ -332,35 +292,22 @@ export function useBenchmarkData(
         ? equityReturns.reduce((a, b) => a + b, 0) / equityReturns.length 
         : 0;
 
-      // Calculate balanced return (50% SPY + 50% AGG)
-      const spyBase = basePrices[BALANCED_EQUITY_TICKER];
-      const spyResult = getClosestPrice(BALANCED_EQUITY_TICKER, entry.snapshot_date);
+      // Calculate bond return (AGG)
       const aggBase = basePrices[BOND_TICKER];
-      
-      let balancedReturn = 0;
-      if (spyBase && spyResult.price && aggBase && aggResult.price) {
-        const spyReturn = ((spyResult.price - spyBase) / spyBase) * 100;
-        const aggReturn = ((aggResult.price - aggBase) / aggBase) * 100;
-        balancedReturn = 0.5 * spyReturn + 0.5 * aggReturn;
+      let bondReturn = 0;
+      if (aggBase && aggResult.price) {
+        bondReturn = ((aggResult.price - aggBase) / aggBase) * 100;
       }
 
-      // Calculate scaled return based on equity exposure
-      const equityExposure = getEquityExposure(entry, viewMode);
-      const { equityWeight, useBalanced } = selectBenchmarkWeight(equityExposure);
-      
-      let scaledReturn: number;
-      if (useBalanced) {
-        scaledReturn = balancedReturn;
-      } else if (equityWeight === 1) {
-        scaledReturn = avgEquityReturn;
-      } else {
-        scaledReturn = equityWeight * avgEquityReturn + (1 - equityWeight) * balancedReturn;
-      }
+      // Calculate scaled return using real equity exposure percentage
+      // Formula: scaledReturn = equityPct * equityReturn + (1 - equityPct) * bondReturn
+      const equityPct = equityExposurePct ?? 0.6; // Fallback to 60% if not provided
+      const scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
 
       returns.push({
         date: entry.snapshot_date,
         equityReturn: avgEquityReturn,
-        balancedReturn,
+        bondReturn,
         scaledReturn,
       });
     });
@@ -403,36 +350,21 @@ export function useBenchmarkData(
         ? equityReturnsCurrent.reduce((a, b) => a + b, 0) / equityReturnsCurrent.length 
         : 0;
 
-      // Use last historical entry for equity exposure
-      const lastEntry = sortedHistory[sortedHistory.length - 1];
-      const equityExposure = getEquityExposure(lastEntry, viewMode);
-      const { equityWeight, useBalanced } = selectBenchmarkWeight(equityExposure);
-      
-      // Calculate balanced return for current date
-      const spyBase = basePrices[BALANCED_EQUITY_TICKER];
-      const spyResult = getClosestPrice(BALANCED_EQUITY_TICKER, currentDate);
+      // Calculate bond return for current date
       const aggBase = basePrices[BOND_TICKER];
-      
-      let balancedReturnCurrent = 0;
-      if (spyBase && spyResult.price && aggBase && aggResultCurrent.price) {
-        const spyReturn = ((spyResult.price - spyBase) / spyBase) * 100;
-        const aggReturn = ((aggResultCurrent.price - aggBase) / aggBase) * 100;
-        balancedReturnCurrent = 0.5 * spyReturn + 0.5 * aggReturn;
+      let bondReturnCurrent = 0;
+      if (aggBase && aggResultCurrent.price) {
+        bondReturnCurrent = ((aggResultCurrent.price - aggBase) / aggBase) * 100;
       }
 
-      let scaledReturnCurrent: number;
-      if (useBalanced) {
-        scaledReturnCurrent = balancedReturnCurrent;
-      } else if (equityWeight === 1) {
-        scaledReturnCurrent = avgEquityReturnCurrent;
-      } else {
-        scaledReturnCurrent = equityWeight * avgEquityReturnCurrent + (1 - equityWeight) * balancedReturnCurrent;
-      }
+      // Calculate scaled return using real equity exposure percentage
+      const equityPct = equityExposurePct ?? 0.6;
+      const scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
 
       returns.push({
         date: currentDate,
         equityReturn: avgEquityReturnCurrent,
-        balancedReturn: balancedReturnCurrent,
+        bondReturn: bondReturnCurrent,
         scaledReturn: scaledReturnCurrent,
       });
     }
@@ -459,7 +391,7 @@ export function useBenchmarkData(
     }
 
     return { benchmarkReturns: returns, dataGaps: gaps, staleSummary: summary };
-  }, [benchmarkPrices, historicalData, viewMode, currentDate, dateRange?.to]);
+  }, [benchmarkPrices, historicalData, currentDate, dateRange?.to, equityExposurePct]);
 
   return {
     benchmarkReturns,

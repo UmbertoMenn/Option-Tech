@@ -21,8 +21,10 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useBenchmarkData, BenchmarkStaleSummary } from '@/hooks/useBenchmarkData';
+import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { formatNumber } from '@/lib/formatters';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -73,26 +75,37 @@ function formatStaleSummary(staleSummary: BenchmarkStaleSummary[]): string {
 // Custom legend component with benchmark tooltip
 function CustomLegend({ 
   hasBenchmarkData, 
-  viewMode,
   isHoveringBenchmark,
   onBenchmarkHover,
   hasDataGaps,
   staleSummary,
   onRefresh,
   isRefreshing,
+  equityExposurePct,
+  equityExposureEUR,
+  assetsTotalEUR,
+  hasEquityData,
 }: { 
   hasBenchmarkData: boolean; 
-  viewMode: ViewMode;
   isHoveringBenchmark: boolean;
   onBenchmarkHover: (hovering: boolean) => void;
   hasDataGaps: boolean;
   staleSummary: BenchmarkStaleSummary[];
   onRefresh: () => void;
   isRefreshing: boolean;
+  equityExposurePct: number;
+  equityExposureEUR: number;
+  assetsTotalEUR: number;
+  hasEquityData: boolean;
 }) {
-  const benchmarkDescription = viewMode === 'base' 
-    ? 'Media ponderata di MSCI World (URTH), S&P 500 (SPY), MSCI ACWI (ACWI), Stoxx 600 (EXSA.DE). Benchmark scalato al 60% equity per la vista base.'
-    : 'Benchmark dinamico basato sull\'esposizione equity:\n• Esposizione equity ≥90% → 100% equity (media URTH, SPY, ACWI, EXSA.DE)\n• Esposizione equity 40-60% → 50% SPY + 50% AGG (bond)\n• Valori intermedi → blend proporzionale';
+  const equityPctFormatted = (equityExposurePct * 100).toFixed(1);
+  const bondPctFormatted = ((1 - equityExposurePct) * 100).toFixed(1);
+  
+  const benchmarkDescription = hasEquityData
+    ? `Equity exposure (Risk Analyzer): ${equityPctFormatted}%\n` +
+      `Calcolo: ${formatNumber(equityExposureEUR, 0)}€ / ${formatNumber(assetsTotalEUR, 0)}€\n\n` +
+      `Benchmark: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
+    : 'Benchmark dinamico basato sull\'esposizione equity del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 
   const staleInfo = formatStaleSummary(staleSummary);
   const showWarning = hasDataGaps || staleSummary.length > 0;
@@ -152,8 +165,16 @@ export function PerformanceEvolutionChart({
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Fetch benchmark data
-  const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(historicalData, viewMode, currentDate);
+  // Get equity exposure from Risk Analyzer logic
+  const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct();
+  
+  // Fetch benchmark data with real equity exposure
+  const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(
+    historicalData, 
+    viewMode, 
+    currentDate,
+    hasEquityData ? equityExposurePct : null
+  );
   
   // Log warning if there are data gaps
   if (dataGaps && dataGaps.length > 0) {
@@ -275,13 +296,16 @@ export function PerformanceEvolutionChart({
     <div className="h-full flex flex-col">
       <CustomLegend 
         hasBenchmarkData={hasBenchmarkData} 
-        viewMode={viewMode}
         isHoveringBenchmark={isHoveringBenchmark}
         onBenchmarkHover={setIsHoveringBenchmark}
         hasDataGaps={dataGaps && dataGaps.length > 0}
         staleSummary={staleSummary}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
+        equityExposurePct={equityExposurePct}
+        equityExposureEUR={equityExposureEUR}
+        assetsTotalEUR={assetsTotalEUR}
+        hasEquityData={hasEquityData}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
