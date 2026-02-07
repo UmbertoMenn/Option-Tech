@@ -26,7 +26,7 @@ import {
   OtherStrategyPosition,
   GroupedOtherStrategy
 } from '@/lib/derivativeStrategies';
-import { formatCurrency, formatPercentage } from '@/lib/formatters';
+import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
   calculateOptionPayoff, 
   findBreakevenPoints, 
@@ -603,7 +603,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_5rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -694,7 +694,17 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                   }`}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {netPerShare !== undefined ? `$${netPerShare.toFixed(2)}` : '-'}
+                  {netPerShare !== undefined 
+                    ? <>
+                        UNIT: {formatNumber(netPerShare, 2)} ${' '}
+                        {underlyingPrice > 0 && (
+                          <span className="text-muted-foreground">
+                            ({formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
+                          </span>
+                        )}
+                      </>
+                    : '-'
+                  }
                 </span>
               </TooltipTrigger>
               <TooltipContent>
