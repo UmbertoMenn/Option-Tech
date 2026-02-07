@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { usePortfolio } from '@/hooks/usePortfolio';
-import { useETFAllocations } from '@/hooks/useETFAllocations';
+import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useSectorMappings } from '@/hooks/useSectorMappings';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
@@ -20,14 +20,11 @@ import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
 import { SectorAllocationView } from '@/components/risk/SectorAllocationView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
-import { calculateCurrencyExposure } from '@/lib/currencyExposure';
-import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 import { calculateSectorExposure } from '@/lib/sectorExposure';
 
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
-  const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
   const [includeDerivatives, setIncludeDerivatives] = useState(true);
   const [includeBonds, setIncludeBonds] = useState(true);
   
@@ -35,38 +32,18 @@ export function RiskAnalyzer() {
   const { isLoading, ...analysis } = riskAnalysis;
   const { summary } = usePortfolio();
   
-  const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
   const toastShownRef = useRef(false);
   
-  // Calculate base currency exposure from existing data
-  const baseCurrencyExposure = useMemo(() => 
-    calculateCurrencyExposure(analysis, { includeDerivatives, includeBonds }), 
-    [analysis, includeDerivatives, includeBonds]
-  );
-  
-  // Extract ETF ISINs from stock details - use the isETF flag from riskCalculator
-  const etfIsins = useMemo(() => {
-    const isins: string[] = [];
-    const seen = new Set<string>();
-    
-    for (const stock of analysis.stockDetails) {
-      // Use the isETF flag (derived from asset_type === 'etf') instead of pattern matching
-      if (stock.isin && !seen.has(stock.isin) && stock.isETF) {
-        seen.add(stock.isin);
-        isins.push(stock.isin);
-      }
-    }
-    return isins;
-  }, [analysis.stockDetails]);
-  
-  // Fetch ETF allocations ONCE when component mounts (needed for ALL views including equity)
-  useEffect(() => {
-    if (etfIsins.length > 0 && !hasFetchedETFs) {
-      setHasFetchedETFs(true);
-      fetchMultipleAllocations(etfIsins);
-    }
-  }, [etfIsins, hasFetchedETFs, fetchMultipleAllocations]);
+  // Use centralized currency exposure hook
+  const {
+    exposures: currencyExposure,
+    isLoading: isCurrencyLoading,
+    isETFDataLoading,
+    etfCount,
+    loadedETFCount,
+    allocations,
+  } = useCurrencyExposure({ includeDerivatives, includeBonds });
   
   // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
   const stocksForSectorMapping = useMemo(() => {
@@ -135,23 +112,10 @@ export function RiskAnalyzer() {
     }
   }, [resolvingCount]);
   
-  // Apply ETF decomposition to currency exposure
-  const currencyExposure = useMemo(() => {
-    if (Object.keys(allocations).length === 0) {
-      return baseCurrencyExposure;
-    }
-    return applyETFDecomposition(baseCurrencyExposure, allocations);
-  }, [baseCurrencyExposure, allocations]);
-  
   // Calculate sector exposure with dynamic mappings
   const sectorExposure = useMemo(() => {
     return calculateSectorExposure(analysis, allocations, { includeDerivatives, sectorMappings });
   }, [analysis, allocations, includeDerivatives, sectorMappings]);
-  
-  
-  
-  // Check if any ETF data is still loading
-  const isETFDataLoading = Object.values(etfLoading).some(Boolean);
   
   return (
     <div className="min-h-screen bg-background">
@@ -197,7 +161,7 @@ export function RiskAnalyzer() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {isLoading ? (
+        {isLoading || isCurrencyLoading ? (
           <Card className="border-border bg-card">
             <CardContent className="py-12">
               <div className="text-center text-muted-foreground">
@@ -228,8 +192,8 @@ export function RiskAnalyzer() {
                   currencyExposure={currencyExposure}
                   grandTotal={currencyExposure.reduce((sum, c) => sum + c.totalRisk, 0)}
                   isLoadingETFData={isETFDataLoading}
-                  etfCount={etfIsins.length}
-                  loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
+                  etfCount={etfCount}
+                  loadedETFCount={loadedETFCount}
                   includeDerivatives={includeDerivatives}
                   onIncludeDerivativesChange={setIncludeDerivatives}
                   includeBonds={includeBonds}
@@ -242,8 +206,8 @@ export function RiskAnalyzer() {
                   sectorExposure={sectorExposure}
                   grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
                   isLoadingETFData={isETFDataLoading}
-                  etfCount={etfIsins.length}
-                  loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
+                  etfCount={etfCount}
+                  loadedETFCount={loadedETFCount}
                   includeDerivatives={includeDerivatives}
                   onIncludeDerivativesChange={setIncludeDerivatives}
                   isResolvingSectors={sectorMappingsLoading}

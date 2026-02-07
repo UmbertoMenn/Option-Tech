@@ -14,6 +14,7 @@ const BENCHMARK_TICKERS = [
   "ACWI",    // MSCI ACWI
   "EXSA.DE", // Stoxx Europe 600 (iShares)
   "AGG",     // iShares Core US Aggregate Bond
+  "EURUSD=X", // EUR/USD exchange rate
 ];
 
 // Backfill period in years

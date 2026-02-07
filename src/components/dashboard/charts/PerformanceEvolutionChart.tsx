@@ -22,7 +22,9 @@ import {
 } from '@/components/ui/tooltip';
 import { useBenchmarkData, BenchmarkStaleSummary } from '@/hooks/useBenchmarkData';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
+import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { formatNumber } from '@/lib/formatters';
 
@@ -72,7 +74,7 @@ function formatStaleSummary(staleSummary: BenchmarkStaleSummary[]): string {
   return '\n\n⚠️ Dati obsoleti:\n' + lines.join('\n');
 }
 
-// Custom legend component with benchmark tooltip
+// Custom legend component with benchmark tooltip and currency toggle
 function CustomLegend({ 
   hasBenchmarkData, 
   isHoveringBenchmark,
@@ -85,6 +87,10 @@ function CustomLegend({
   equityExposureEUR,
   assetsTotalEUR,
   hasEquityData,
+  currencyAdjusted,
+  onCurrencyAdjustedChange,
+  usdExposurePct,
+  hasUsdData,
 }: { 
   hasBenchmarkData: boolean; 
   isHoveringBenchmark: boolean;
@@ -97,9 +103,14 @@ function CustomLegend({
   equityExposureEUR: number;
   assetsTotalEUR: number;
   hasEquityData: boolean;
+  currencyAdjusted: boolean;
+  onCurrencyAdjustedChange: (checked: boolean) => void;
+  usdExposurePct: number;
+  hasUsdData: boolean;
 }) {
   const equityPctFormatted = (equityExposurePct * 100).toFixed(1);
   const bondPctFormatted = ((1 - equityExposurePct) * 100).toFixed(1);
+  const usdPctFormatted = (usdExposurePct * 100).toFixed(1);
   
   const benchmarkDescription = hasEquityData
     ? `Paniere Equity/Bond ponderato per l'equity exposure del portafoglio.\n\n` +
@@ -108,11 +119,18 @@ function CustomLegend({
       `Benchmark: ${equityPctFormatted}% × Equity (URTH/SPY/ACWI/EXSA.DE) + ${bondPctFormatted}% × Bond (AGG)`
     : 'Paniere Equity/Bond ponderato per l\'equity exposure del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 
+  const currencyTooltip = hasUsdData
+    ? `Aggiusta il benchmark per l'effetto valutario EUR/USD.\n\n` +
+      `Viene utilizzata l'esposizione in dollari attuale del portafoglio (${usdPctFormatted}%) come proxy per quella storica.\n\n` +
+      `Derivati esclusi, bond inclusi.\n\n` +
+      `Formula: benchmarkAdjusted = benchmarkNominale - (${usdPctFormatted}% × variazione EUR/USD)`
+    : 'Dati esposizione USD non disponibili.';
+
   const staleInfo = formatStaleSummary(staleSummary);
   const showWarning = hasDataGaps || staleSummary.length > 0;
 
   return (
-    <div className="flex items-center justify-center gap-4 text-xs mb-2">
+    <div className="flex items-center justify-center gap-4 text-xs mb-2 flex-wrap">
       <div className="flex items-center gap-1.5">
         <div className="w-3 h-0.5 bg-profit rounded" />
         <span className="text-foreground">Portafoglio</span>
@@ -137,6 +155,30 @@ function CustomLegend({
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-md">
             <p className="text-xs whitespace-pre-line">{benchmarkDescription}{staleInfo}</p>
+          </TooltipContent>
+        </UITooltip>
+      )}
+      {hasBenchmarkData && hasUsdData && (
+        <UITooltip delayDuration={0}>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1.5">
+              <Switch
+                id="currency-adjusted"
+                checked={currencyAdjusted}
+                onCheckedChange={onCurrencyAdjustedChange}
+                className="h-4 w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+              />
+              <label 
+                htmlFor="currency-adjusted" 
+                className="text-xs text-foreground cursor-pointer flex items-center gap-1"
+              >
+                Currency
+                <HelpCircle className="w-3 h-3 text-muted-foreground" />
+              </label>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-sm">
+            <p className="text-xs whitespace-pre-line">{currencyTooltip}</p>
           </TooltipContent>
         </UITooltip>
       )}
@@ -165,16 +207,26 @@ export function PerformanceEvolutionChart({
 }: PerformanceEvolutionChartProps) {
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currencyAdjusted, setCurrencyAdjusted] = useState(false);
   
   // Get equity exposure from Risk Analyzer logic
   const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct();
   
-  // Fetch benchmark data with real equity exposure
+  // Get USD exposure for currency adjustment (derivatives excluded, bonds included)
+  const { usdExposurePct, totalExposure: usdTotalExposure, isLoading: isUsdLoading } = useCurrencyExposure({ 
+    includeDerivatives: false, 
+    includeBonds: true 
+  });
+  const hasUsdData = !isUsdLoading && usdTotalExposure > 0;
+  
+  // Fetch benchmark data with real equity exposure and currency adjustment
   const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(
     historicalData, 
     viewMode, 
     currentDate,
-    hasEquityData ? equityExposurePct : null
+    hasEquityData ? equityExposurePct : null,
+    hasUsdData ? usdExposurePct : null,
+    currencyAdjusted
   );
   
   // Log warning if there are data gaps
@@ -307,6 +359,10 @@ export function PerformanceEvolutionChart({
         equityExposureEUR={equityExposureEUR}
         assetsTotalEUR={assetsTotalEUR}
         hasEquityData={hasEquityData}
+        currencyAdjusted={currencyAdjusted}
+        onCurrencyAdjustedChange={setCurrencyAdjusted}
+        usdExposurePct={usdExposurePct}
+        hasUsdData={hasUsdData}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -341,7 +397,10 @@ export function PerformanceEvolutionChart({
               }}
               formatter={(value: number, name: string) => {
                 if (name === 'returnPct') return [`${value.toFixed(2)}%`, 'Rendimento'];
-                if (name === 'benchmarkReturn') return [`${value.toFixed(2)}%`, 'Benchmark'];
+                if (name === 'benchmarkReturn') {
+                  const label = currencyAdjusted ? 'Benchmark (Adj.)' : 'Benchmark';
+                  return [`${value.toFixed(2)}%`, label];
+                }
                 return [value, name];
               }}
               labelFormatter={(label) => `Data: ${label}`}

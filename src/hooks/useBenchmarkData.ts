@@ -31,8 +31,8 @@ export interface BenchmarkStaleSummary {
 // Benchmark tickers
 const EQUITY_BENCHMARKS = ['URTH', 'SPY', 'ACWI', 'EXSA.DE'] as const;
 const BOND_TICKER = 'AGG';
-const BALANCED_EQUITY_TICKER = 'SPY';
-const ALL_TICKERS = [...EQUITY_BENCHMARKS, BOND_TICKER] as const;
+const EURUSD_TICKER = 'EURUSD=X';
+const ALL_TICKERS = [...EQUITY_BENCHMARKS, BOND_TICKER, EURUSD_TICKER] as const;
 
 // Pagination settings
 const PAGE_SIZE = 1000;
@@ -86,7 +86,9 @@ export function useBenchmarkData(
   historicalData: HistoricalDataEntry[],
   viewMode: ViewMode,
   currentDate?: string | null,
-  equityExposurePct?: number | null
+  equityExposurePct?: number | null,
+  usdExposurePct?: number | null,
+  currencyAdjusted?: boolean
 ) {
   const queryClient = useQueryClient();
 
@@ -236,12 +238,26 @@ export function useBenchmarkData(
       if (result.price) basePrices[ticker] = result.price;
     });
 
+    // Helper to calculate EUR/USD variation for currency adjustment
+    // Formula: variazione_EURUSD = ((EURUSD_current / EURUSD_base) - 1) * 100
+    // If EUR appreciates (EURUSD goes up), USD assets lose value in EUR terms
+    const calculateEurusdVariation = (targetDate: string): number => {
+      const eurusdBase = basePrices[EURUSD_TICKER];
+      const eurusdResult = getClosestPrice(EURUSD_TICKER, targetDate);
+      
+      if (!eurusdBase || !eurusdResult.price) return 0;
+      
+      // Variation in percentage: if EURUSD goes from 1.10 to 1.15, variation is ~4.5%
+      return ((eurusdResult.price / eurusdBase) - 1) * 100;
+    };
+
     // Calculate returns for each historical snapshot
     const returns: Array<{
       date: string;
       equityReturn: number;
       bondReturn: number;
       scaledReturn: number;
+      eurusdVariation?: number;
     }> = [];
 
     sortedHistory.forEach((entry, index) => {
@@ -251,6 +267,7 @@ export function useBenchmarkData(
           equityReturn: 0,
           bondReturn: 0,
           scaledReturn: 0,
+          eurusdVariation: 0,
         });
         return;
       }
@@ -302,13 +319,23 @@ export function useBenchmarkData(
       // Calculate scaled return using real equity exposure percentage
       // Formula: scaledReturn = equityPct * equityReturn + (1 - equityPct) * bondReturn
       const equityPct = equityExposurePct ?? 0.6; // Fallback to 60% if not provided
-      const scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
+      let scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
+
+      // Apply currency adjustment if enabled
+      // Formula: adjustedReturn = nominalReturn - (usdExposurePct * eurusdVariation)
+      let eurusdVariation = 0;
+      if (currencyAdjusted && usdExposurePct && usdExposurePct > 0) {
+        eurusdVariation = calculateEurusdVariation(entry.snapshot_date);
+        // If EUR appreciates (positive variation), USD assets lose value → reduce benchmark
+        scaledReturn = scaledReturn - (usdExposurePct * eurusdVariation);
+      }
 
       returns.push({
         date: entry.snapshot_date,
         equityReturn: avgEquityReturn,
         bondReturn,
         scaledReturn,
+        eurusdVariation,
       });
     });
 
@@ -359,22 +386,31 @@ export function useBenchmarkData(
 
       // Calculate scaled return using real equity exposure percentage
       const equityPct = equityExposurePct ?? 0.6;
-      const scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
+      let scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
+
+      // Apply currency adjustment if enabled
+      let eurusdVariationCurrent = 0;
+      if (currencyAdjusted && usdExposurePct && usdExposurePct > 0) {
+        eurusdVariationCurrent = calculateEurusdVariation(currentDate);
+        scaledReturnCurrent = scaledReturnCurrent - (usdExposurePct * eurusdVariationCurrent);
+      }
 
       returns.push({
         date: currentDate,
         equityReturn: avgEquityReturnCurrent,
         bondReturn: bondReturnCurrent,
         scaledReturn: scaledReturnCurrent,
+        eurusdVariation: eurusdVariationCurrent,
       });
     }
 
     // Calculate stale summary (global overview for the most recent target date)
+    // Exclude EURUSD from staleness warnings as it's internal
     const targetDate = currentDate || dateRange?.to || '';
     const summary: BenchmarkStaleSummary[] = [];
     
     if (targetDate) {
-      ALL_TICKERS.forEach(ticker => {
+      [...EQUITY_BENCHMARKS, BOND_TICKER].forEach(ticker => {
         const lastDate = lastFetchedDateByTicker[ticker];
         if (lastDate) {
           const target = new Date(targetDate);
@@ -391,7 +427,7 @@ export function useBenchmarkData(
     }
 
     return { benchmarkReturns: returns, dataGaps: gaps, staleSummary: summary };
-  }, [benchmarkPrices, historicalData, currentDate, dateRange?.to, equityExposurePct]);
+  }, [benchmarkPrices, historicalData, currentDate, dateRange?.to, equityExposurePct, usdExposurePct, currencyAdjusted]);
 
   return {
     benchmarkReturns,
