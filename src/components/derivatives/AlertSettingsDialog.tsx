@@ -1002,7 +1002,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     </ul>
                     <p className="pt-2">
                       Il sistema ricomincerà a monitorare le posizioni da zero. 
-                      Utile se hai caricato un Excel sbagliato con posizioni errate.
+                      Utile se hai caricato un Excel sbagliato con posizioni errate o se hai necessità di resettare gli alerts.
                     </p>
                     <p className="text-sm font-medium text-foreground pt-2">
                       Le tue configurazioni (soglie, notifiche) NON verranno modificate.
