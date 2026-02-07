@@ -524,7 +524,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                       <Slider
                         value={[bulkThreshold]}
                         onValueChange={([val]) => setBulkThreshold(val)}
-                        min={0.5}
+                        min={0}
                         max={20}
                         step={0.5}
                         className="flex-1"
