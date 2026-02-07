@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Move, Check, X, Link } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -285,15 +285,21 @@ export function MoveOptionMenu({ option, availableStocks, currentCategory }: Mov
   );
 }
 
-// Badge to indicate manual override
-export function OverrideBadge() {
+// Badge to indicate manual override - uses forwardRef for Radix compatibility
+export const OverrideBadge = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement>
+>((props, ref) => {
   return (
     <Badge 
+      ref={ref}
       variant="outline" 
       className="text-[10px] px-1.5 py-0 h-4 bg-blue-500/10 text-blue-500 border-blue-500/30"
       title="Classificazione manuale"
+      {...props}
     >
       M
     </Badge>
   );
-}
+});
+OverrideBadge.displayName = "OverrideBadge";
