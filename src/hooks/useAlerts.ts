@@ -140,3 +140,33 @@ export function useMarkAllAlertsAsRead() {
     },
   });
 }
+
+// Reset entire alert system (clear alerts + alert_states)
+export function useResetAlertSystem() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  
+  return useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error('User not authenticated');
+      
+      // Delete all alert_states (the "memory" of positions)
+      const { error: statesError } = await supabase
+        .from('alert_states')
+        .delete()
+        .eq('user_id', user.id);
+      if (statesError) throw statesError;
+      
+      // Delete all alerts (the notification log)
+      const { error: alertsError } = await supabase
+        .from('alerts')
+        .delete()
+        .eq('user_id', user.id);
+      if (alertsError) throw alertsError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['unread-alerts-count'] });
+    },
+  });
+}
