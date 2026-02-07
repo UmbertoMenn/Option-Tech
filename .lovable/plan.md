@@ -1,137 +1,110 @@
 
-# Piano: Riutilizzo Currency Exposure dal Risk Analyzer
+# Piano: Supporto Versamenti e Prelievi
 
-## Problema
+## Obiettivo
+Modificare la sezione "Versamenti" per supportare esplicitamente sia versamenti (importi positivi) che prelievi (importi negativi), migliorando l'UX e le etichette.
 
-Il calcolo dell'esposizione valutaria con decomposizione ETF avviene solo nel Risk Analyzer e i dati restano locali. Per l'aggiustamento valutario del benchmark serve riutilizzare questi dati nella Dashboard.
+## Analisi Impatto
 
-## Soluzione
+### Cosa GIÀ funziona
+La logica attuale supporta già importi negativi:
+- `parseValue()` in `DepositsSection.tsx` gestisce numeri negativi
+- `totalDeposits = reduce((sum, d) => sum + d.amount, 0)` somma correttamente positivi e negativi
+- I calcoli in `StatsCards.tsx`, `PerformanceEvolutionChart.tsx` e `YearlyReturnChart.tsx` usano la somma dei depositi senza distinzione di segno
 
-Creare un hook `useCurrencyExposure` che incapsula tutta la logica già presente nel Risk Analyzer, rendendola riutilizzabile ovunque.
+### Cosa va modificato
+Solo le etichette UI e l'esperienza utente del form.
 
 ## Modifiche Tecniche
 
-### 1. Nuovo Hook: `src/hooks/useCurrencyExposure.ts`
+### 1. File: `src/components/dashboard/DepositsSection.tsx`
 
-Hook che incapsula la logica completa di calcolo currency exposure:
+**Modifiche etichette:**
+- Titolo sezione: `"Versamenti"` → `"Versamenti e prelievi"`
+- Etichetta salvati: `"Versamenti salvati"` → `"Movimenti salvati"`
+- Titolo modifica: `"Modifica versamento"` → `"Modifica movimento"`
+- Titolo nuovo: `"Nuovo versamento"` → `"Nuovo movimento"`
+- Bottone: `"Aggiungi versamento"` → `"+ Aggiungi movimento"`
 
-```typescript
-export interface CurrencyExposureResult {
-  exposures: CurrencyExposure[];
-  usdExposure: CurrencyExposure | null;
-  usdExposurePct: number;  // 0-1
-  totalExposure: number;   // EUR
-  isLoading: boolean;
-  isETFDataLoading: boolean;
-  etfCount: number;
-  loadedETFCount: number;
-}
+**Miglioramento form input:**
+- Aggiungere pulsanti rapidi per selezionare il tipo di movimento (Versamento/Prelievo)
+- Se l'utente seleziona "Prelievo", il segno viene gestito automaticamente
+- Placeholder aggiornato: `"es. 5.000"` (il segno è determinato dal tipo selezionato)
 
-export function useCurrencyExposure(options?: {
-  includeDerivatives?: boolean;
-  includeBonds?: boolean;
-}): CurrencyExposureResult
-```
+**Visualizzazione lista:**
+- Già mostra `+` per positivi e nessun prefisso per negativi, i negativi hanno già il `-`
+- Colore già differenziato: verde per positivi, rosso per negativi
 
-Internamente:
-- Usa `useRiskAnalysis()` per ottenere l'analisi del rischio
-- Usa `useETFAllocations()` per le allocazioni ETF
-- Effettua il fetch delle allocazioni ETF (come fa RiskAnalyzer)
-- Applica `calculateCurrencyExposure()` + `applyETFDecomposition()`
-- Estrae l'esposizione USD e calcola la percentuale
+### 2. File: `src/hooks/useDeposits.ts`
 
-### 2. Edge Function: `supabase/functions/update-benchmark-prices/index.ts`
+**Modifiche messaggi toast:**
+- `"Versamento salvato!"` → `"Movimento salvato!"`
+- `"Versamento eliminato"` → `"Movimento eliminato"`
 
-Aggiungere `EURUSD=X` alla lista dei ticker benchmark:
+### 3. File: `src/components/dashboard/StatsCards.tsx`
 
-```typescript
-const BENCHMARK_TICKERS = [
-  "URTH", "SPY", "ACWI", "EXSA.DE", "AGG",
-  "EURUSD=X"  // Nuovo ticker per tasso di cambio
-];
-```
+**Modifiche etichette:**
+- Il subtext della giacenza media mostra `"Versamenti: €X"` → Modificare in `"Movimenti: €X"` per essere più generico
+- Oppure se negativo mostrare `"Prelievi netti: €X"` e se positivo `"Versamenti netti: €X"`
 
-### 3. Hook: `src/hooks/useBenchmarkData.ts`
-
-Modifiche:
-- Aggiungere parametri `usdExposurePct` e `currencyAdjusted`
-- Recuperare i dati storici di `EURUSD=X`
-- Calcolare la variazione cumulativa EUR/USD dalla data base
-- Applicare formula: `adjustedReturn = nominalReturn - (usdExposurePct × eurusdVariation)`
-
-### 4. Componente: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
-
-Modifiche:
-- Importare e usare `useCurrencyExposure({ includeDerivatives: false, includeBonds: true })`
-- Aggiungere stato `currencyAdjusted` (toggle)
-- Passare `usdExposurePct` e `currencyAdjusted` a `useBenchmarkData`
-- Aggiungere toggle UI nella legenda
-- Tooltip esplicativo:
-  > "Aggiusta il benchmark per l'effetto valutario EUR/USD. Viene utilizzata l'esposizione in dollari attuale del portafoglio (XX.X%) come proxy per quella storica. Derivati esclusi, bond inclusi."
-
-### 5. Refactor: `src/pages/RiskAnalyzer.tsx`
-
-Sostituire la logica locale con il nuovo hook:
-
-```typescript
-// Prima (righe 42-144 circa)
-const baseCurrencyExposure = useMemo(...);
-const etfIsins = useMemo(...);
-useEffect(() => { fetchMultipleAllocations... });
-const currencyExposure = useMemo(...);
-
-// Dopo
-const {
-  exposures: currencyExposure,
-  isLoading: isCurrencyLoading,
-  isETFDataLoading,
-  etfCount,
-  loadedETFCount
-} = useCurrencyExposure({ includeDerivatives, includeBonds });
-```
-
-## Flusso Dati
+## Struttura UI Aggiornata del Form
 
 ```text
-useCurrencyExposure()
-       │
-       ├── useRiskAnalysis()
-       │
-       ├── useETFAllocations()
-       │      └── fetchMultipleAllocations()
-       │
-       ├── calculateCurrencyExposure()
-       │
-       └── applyETFDecomposition()
-              │
-              ▼
-       { exposures, usdExposurePct, ... }
-              │
-     ┌────────┴────────┐
-     │                 │
-     ▼                 ▼
-RiskAnalyzer    PerformanceEvolutionChart
-(vista completa)  (solo usdExposurePct)
+┌─────────────────────────────────────────┐
+│ Nuovo movimento                         │
+├─────────────────────────────────────────┤
+│ Tipo movimento:                         │
+│ ┌─────────────┐  ┌─────────────┐        │
+│ │ Versamento  │  │  Prelievo   │        │
+│ │    (+)      │  │    (-)      │        │
+│ └─────────────┘  └─────────────┘        │
+├─────────────────────────────────────────┤
+│ Data: [date picker]                     │
+├─────────────────────────────────────────┤
+│ Importo (€): [input numerico]           │
+├─────────────────────────────────────────┤
+│ Descrizione: [input opzionale]          │
+├─────────────────────────────────────────┤
+│ [Annulla]  [Salva]                      │
+└─────────────────────────────────────────┘
 ```
 
-## File da Creare
+## Logica Tipo Movimento
 
-| File | Descrizione |
-|------|-------------|
-| `src/hooks/useCurrencyExposure.ts` | Hook che incapsula calcolo currency exposure con decomposizione ETF |
+Nuovo stato nel form:
+```typescript
+const [movementType, setMovementType] = useState<'deposit' | 'withdrawal'>('deposit');
+```
+
+Al salvataggio:
+```typescript
+const handleSave = () => {
+  const absAmount = Math.abs(parseValue(formAmount));
+  const finalAmount = movementType === 'withdrawal' ? -absAmount : absAmount;
+  // ...save con finalAmount
+};
+```
+
+In modifica, determinare il tipo dal segno:
+```typescript
+const startEdit = (entry: DepositEntry) => {
+  setMovementType(entry.amount >= 0 ? 'deposit' : 'withdrawal');
+  setFormAmount(Math.abs(entry.amount).toString());
+  // ...
+};
+```
 
 ## File da Modificare
 
 | File | Modifiche |
 |------|-----------|
-| `supabase/functions/update-benchmark-prices/index.ts` | Aggiungere `EURUSD=X` ai ticker |
-| `src/hooks/useBenchmarkData.ts` | Gestire EURUSD, calcolare aggiustamento valutario |
-| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Toggle UI + integrazione hook |
-| `src/pages/RiskAnalyzer.tsx` | Refactor per usare il nuovo hook |
+| `src/components/dashboard/DepositsSection.tsx` | Etichette + pulsanti tipo movimento + logica segno |
+| `src/hooks/useDeposits.ts` | Messaggi toast |
+| `src/components/dashboard/StatsCards.tsx` | Subtext giacenza media |
 
 ## Vantaggi
 
-1. **Riuso del codice**: La logica di calcolo è centralizzata
-2. **Consistenza**: Dashboard e Risk Analyzer usano gli stessi dati
-3. **Manutenibilità**: Modifiche future in un solo punto
-4. **Performance**: Il fetch ETF avviene una sola volta per sessione (cache del hook)
+1. **UX migliorata**: L'utente non deve ricordarsi di inserire il segno negativo
+2. **Chiarezza**: Distinzione visiva tra versamenti e prelievi
+3. **Retrocompatibilità**: I dati esistenti continuano a funzionare
+4. **Nessuna modifica database**: Il campo `amount` può già essere negativo
