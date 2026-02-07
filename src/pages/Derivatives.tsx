@@ -1711,6 +1711,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
             <Badge 
               variant="outline"
               className={`text-xs shrink-0 cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+              onClick={(e) => e.stopPropagation()}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -1732,7 +1733,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="text-sm text-muted-foreground cursor-help">
+            <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
               PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
             </span>
           </TooltipTrigger>
@@ -1774,8 +1775,13 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+      <div 
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+      >
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {isOpen ? (
               <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -1800,7 +1806,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             {hasUnderlyingPrice && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help">
+                  <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
                     PS: {formatCurrency(underlyingPrice, 'USD')}
                   </span>
                 </TooltipTrigger>
@@ -1814,7 +1820,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             </span>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">
+                <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
                   PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
                 </span>
               </TooltipTrigger>
@@ -1827,7 +1833,6 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             </span>
           </div>
         </div>
-      </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
