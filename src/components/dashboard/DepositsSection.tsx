@@ -33,6 +33,7 @@ export function DepositsSection({
   const [formDate, setFormDate] = useState<Date | undefined>(undefined);
   const [formAmount, setFormAmount] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [movementType, setMovementType] = useState<'deposit' | 'withdrawal'>('deposit');
 
   const parseValue = (val: string) => {
     // Support Italian number formats:
@@ -59,6 +60,7 @@ export function DepositsSection({
     setFormDate(undefined);
     setFormAmount('');
     setFormDescription('');
+    setMovementType('deposit');
     setIsAddingNew(false);
     setEditingId(null);
   };
@@ -66,10 +68,13 @@ export function DepositsSection({
   const handleSave = () => {
     if (!formDate) return;
     
+    const absAmount = Math.abs(parseValue(formAmount));
+    const finalAmount = movementType === 'withdrawal' ? -absAmount : absAmount;
+    
     onSave({
       id: editingId || undefined,
       deposit_date: format(formDate, 'yyyy-MM-dd'),
-      amount: parseValue(formAmount),
+      amount: finalAmount,
       description: formDescription || undefined,
     });
     
@@ -79,7 +84,8 @@ export function DepositsSection({
   const startEdit = (entry: DepositEntry) => {
     setEditingId(entry.id);
     setFormDate(new Date(entry.deposit_date));
-    setFormAmount(entry.amount.toString());
+    setMovementType(entry.amount >= 0 ? 'deposit' : 'withdrawal');
+    setFormAmount(Math.abs(entry.amount).toString());
     setFormDescription(entry.description || '');
     setIsAddingNew(false);
   };
@@ -99,7 +105,7 @@ export function DepositsSection({
       >
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-primary" />
-          <h3 className="font-semibold">Versamenti</h3>
+          <h3 className="font-semibold">Versamenti e prelievi</h3>
           {deposits.length > 0 && (
             <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
               {deposits.length}
@@ -128,7 +134,7 @@ export function DepositsSection({
           {/* Existing entries */}
           {deposits.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground font-medium">Versamenti salvati</p>
+              <p className="text-xs text-muted-foreground font-medium">Movimenti salvati</p>
               <div className="space-y-2 max-h-[250px] overflow-y-auto">
                 {deposits.map((entry) => (
                   <div
@@ -142,7 +148,7 @@ export function DepositsSection({
                       // Edit mode
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium">Modifica versamento</p>
+                          <p className="text-sm font-medium">Modifica movimento</p>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -151,6 +157,36 @@ export function DepositsSection({
                           >
                             <X className="w-4 h-4" />
                           </Button>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs">Tipo movimento</Label>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setMovementType('deposit')}
+                              className={cn(
+                                "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors border",
+                                movementType === 'deposit'
+                                  ? "bg-success/10 border-success text-success"
+                                  : "bg-muted/30 border-border text-muted-foreground hover:bg-muted/50"
+                              )}
+                            >
+                              Versamento (+)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setMovementType('withdrawal')}
+                              className={cn(
+                                "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors border",
+                                movementType === 'withdrawal'
+                                  ? "bg-destructive/10 border-destructive text-destructive"
+                                  : "bg-muted/30 border-border text-muted-foreground hover:bg-muted/50"
+                              )}
+                            >
+                              Prelievo (-)
+                            </button>
+                          </div>
                         </div>
 
                         <div className="space-y-2">
@@ -254,7 +290,37 @@ export function DepositsSection({
           {/* Add new entry form */}
           {isAddingNew ? (
             <div className="space-y-3 pt-2 border-t border-border">
-              <p className="text-sm font-medium">Nuovo versamento</p>
+              <p className="text-sm font-medium">Nuovo movimento</p>
+
+              <div className="space-y-2">
+                <Label className="text-xs">Tipo movimento</Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMovementType('deposit')}
+                    className={cn(
+                      "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors border",
+                      movementType === 'deposit'
+                        ? "bg-success/10 border-success text-success"
+                        : "bg-muted/30 border-border text-muted-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    Versamento (+)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMovementType('withdrawal')}
+                    className={cn(
+                      "flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors border",
+                      movementType === 'withdrawal'
+                        ? "bg-destructive/10 border-destructive text-destructive"
+                        : "bg-muted/30 border-border text-muted-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    Prelievo (-)
+                  </button>
+                </div>
+              </div>
 
               <div className="space-y-2">
                 <Label className="text-xs">Data</Label>
@@ -269,7 +335,7 @@ export function DepositsSection({
                 <Label className="text-xs">Importo ($)</Label>
                 <Input
                   type="text"
-                  placeholder="es. 5.000 (negativo per prelievi)"
+                  placeholder="es. 5.000"
                   value={formAmount}
                   onChange={(e) => setFormAmount(e.target.value)}
                   className="font-mono text-sm"
@@ -316,7 +382,7 @@ export function DepositsSection({
               disabled={editingId !== null}
             >
               <Plus className="w-4 h-4 mr-1" />
-              Aggiungi versamento
+              Aggiungi movimento
             </Button>
           )}
         </div>

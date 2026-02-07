@@ -296,8 +296,10 @@ export function StatsCards({
       dimmed: averageBalance === 0,
       subtext: isManualAverageBalance 
         ? 'modificato manualmente' 
-        : deposits > 0 
-          ? `Versamenti: ${formatCurrency(deposits)}`
+        : deposits !== 0 
+          ? deposits > 0 
+            ? `Versamenti netti: ${formatCurrency(deposits)}`
+            : `Prelievi netti: ${formatCurrency(Math.abs(deposits))}`
           : null,
       isEditable: true,
     },

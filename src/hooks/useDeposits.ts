@@ -61,7 +61,7 @@ export function useDeposits(portfolioId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] });
-      toast.success('Versamento salvato!');
+      toast.success('Movimento salvato!');
     },
     onError: (error) => {
       toast.error('Errore nel salvataggio', {
@@ -81,7 +81,7 @@ export function useDeposits(portfolioId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] });
-      toast.success('Versamento eliminato');
+      toast.success('Movimento eliminato');
     },
     onError: (error) => {
       toast.error('Errore nell\'eliminazione', {
