@@ -71,6 +71,20 @@ export function PortfolioEvolutionChart({
   currentValue,
   currentDate,
 }: PortfolioEvolutionChartProps) {
+  // Calculate the latest snapshot date from ALL historical data
+  // This is used to determine if currentDate is really the newest
+  const latestSnapshotDate = useMemo(() => {
+    if (historicalData.length === 0) return null;
+    return new Date(Math.max(...historicalData.map(d => new Date(d.snapshot_date).getTime())));
+  }, [historicalData]);
+
+  // Determine if we can append the current point (only if it's newer than the latest saved snapshot)
+  const canAppendCurrent = useMemo(() => {
+    if (!currentDate || currentValue <= 0) return false;
+    if (!latestSnapshotDate) return true; // No historical data, so current is newest
+    return new Date(currentDate) > latestSnapshotDate;
+  }, [currentDate, currentValue, latestSnapshotDate]);
+
   const chartData = useMemo(() => {
     if (historicalData.length === 0) return [];
 
@@ -85,21 +99,21 @@ export function PortfolioEvolutionChart({
       value: getValueForViewMode(entry, viewMode),
     }));
 
-    // Add current point if different from last snapshot
-    if (currentDate && currentValue > 0) {
-      const lastEntry = data[data.length - 1];
-      if (!lastEntry || lastEntry.date !== currentDate) {
-        data.push({
-          date: currentDate,
-          formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
-          value: currentValue,
-          isCurrent: true,
-        });
-      }
+    // Add current point ONLY if it's newer than the latest saved snapshot and not a duplicate
+    if (canAppendCurrent && currentDate && !data.some(d => d.date === currentDate)) {
+      data.push({
+        date: currentDate,
+        formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
+        value: currentValue,
+        isCurrent: true,
+      });
     }
 
+    // Ensure chronological order as a safety measure
+    data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
     return data;
-  }, [historicalData, viewMode, currentValue, currentDate]);
+  }, [historicalData, viewMode, currentValue, currentDate, canAppendCurrent]);
 
   if (chartData.length === 0) {
     return (

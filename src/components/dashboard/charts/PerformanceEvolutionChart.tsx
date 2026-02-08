@@ -265,6 +265,20 @@ export function PerformanceEvolutionChart({
   });
   const hasUsdData = !isUsdLoading && usdTotalExposure > 0;
   
+  // Calculate the latest snapshot date from ALL historical data (not filtered)
+  // This is used to determine if currentDate is really the newest
+  const latestSnapshotDate = useMemo(() => {
+    if (historicalData.length === 0) return null;
+    return new Date(Math.max(...historicalData.map(d => new Date(d.snapshot_date).getTime())));
+  }, [historicalData]);
+
+  // Determine if we can append the current point (only if it's newer than the latest saved snapshot)
+  const canAppendCurrent = useMemo(() => {
+    if (!currentDate || currentValue <= 0) return false;
+    if (!latestSnapshotDate) return true; // No historical data, so current is newest
+    return new Date(currentDate) > latestSnapshotDate;
+  }, [currentDate, currentValue, latestSnapshotDate]);
+
   // Filter historical data based on time range
   const filteredHistoricalData = useMemo(() => {
     if (timeRange === 'MAX') return historicalData;
@@ -278,11 +292,14 @@ export function PerformanceEvolutionChart({
     );
   }, [historicalData, timeRange]);
   
+  // For benchmark: only pass currentDate if it's actually the newest
+  const effectiveCurrentDateForBenchmark = canAppendCurrent ? currentDate : null;
+  
   // Fetch benchmark data with real equity exposure and currency adjustment
   const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(
     filteredHistoricalData, 
     viewMode, 
-    currentDate,
+    effectiveCurrentDateForBenchmark,
     hasEquityData ? equityExposurePct : null,
     hasUsdData ? usdExposurePct : null,
     currencyAdjusted
@@ -373,35 +390,35 @@ export function PerformanceEvolutionChart({
       };
     });
 
-    // Add current point if different from last snapshot
-    if (currentDate && currentValue > 0) {
-      const lastEntry = data[data.length - 1];
-      if (!lastEntry || lastEntry.date !== currentDate) {
-        const currentDateObj = new Date(currentDate);
-        const cumulativeDeposits = sortedDeposits
-          .filter((d) => {
-            const depositDate = new Date(d.deposit_date);
-            return depositDate > initialDate && depositDate <= currentDateObj;
-          })
-          .reduce((sum, d) => sum + d.amount, 0);
+    // Add current point ONLY if it's newer than the latest saved snapshot and not a duplicate
+    if (canAppendCurrent && currentDate && !data.some(d => d.date === currentDate)) {
+      const currentDateObj = new Date(currentDate);
+      const cumulativeDeposits = sortedDeposits
+        .filter((d) => {
+          const depositDate = new Date(d.deposit_date);
+          return depositDate > initialDate && depositDate <= currentDateObj;
+        })
+        .reduce((sum, d) => sum + d.amount, 0);
 
-        const pl = currentValue - initialValue - cumulativeDeposits;
-        const avgBalance = initialValue + cumulativeDeposits / 2;
-        const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
+      const pl = currentValue - initialValue - cumulativeDeposits;
+      const avgBalance = initialValue + cumulativeDeposits / 2;
+      const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
 
-        data.push({
-          date: currentDate,
-          formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
-          value: currentValue,
-          returnPct,
-          cumulativeDeposits,
-          benchmarkReturn: benchmarkByDate[currentDate],
-        });
-      }
+      data.push({
+        date: currentDate,
+        formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
+        value: currentValue,
+        returnPct,
+        cumulativeDeposits,
+        benchmarkReturn: benchmarkByDate[currentDate],
+      });
     }
 
+    // Ensure chronological order as a safety measure
+    data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
     return data;
-  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange]);
+  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, canAppendCurrent]);
 
   if (chartData.length === 0) {
     return (

@@ -11,7 +11,7 @@ import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2 } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
@@ -23,7 +23,10 @@ import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioCh
 import { HistoricalChartsCarousel } from '@/components/dashboard/HistoricalChartsCarousel';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { ClearDataDialog } from '@/components/dashboard/ClearDataDialog';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { formatRelativeTime } from '@/lib/formatters';
+import { format, parseISO } from 'date-fns';
+import { it } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
 
 export function Dashboard() {
@@ -40,7 +43,8 @@ export function Dashboard() {
   const { usdExposurePct } = useCurrencyExposure({ includeProtections: false, includeNakedPut: false, includeStrategies: false, includeLeapCall: false, includeBonds: true });
   const { 
     historicalData, 
-    earliestEntry, 
+    earliestEntry,
+    latestEntry, 
     upsertHistoricalData, 
     deleteHistoricalData,
     isUpserting 
@@ -85,6 +89,15 @@ export function Dashboard() {
     if (!portfolio?.id) return;
     await clearPortfolioData(portfolio.id, mode);
   };
+
+  // Check if Excel date is older than the latest saved snapshot
+  const excelDate = portfolio?.snapshot_date;
+  const lastSavedSnapshotDate = latestEntry?.snapshot_date;
+  const showOldExcelWarning = !!(
+    excelDate && 
+    lastSavedSnapshotDate && 
+    new Date(excelDate) < new Date(lastSavedSnapshotDate)
+  );
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -171,6 +184,17 @@ export function Dashboard() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
+        {/* Warning banner for old Excel */}
+        {showOldExcelWarning && excelDate && lastSavedSnapshotDate && (
+          <Alert variant="destructive" className="border-warning/50 bg-warning/10">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            <AlertTitle className="text-warning">Attenzione: Excel caricato con data antecedente all'ultimo snapshot salvato</AlertTitle>
+            <AlertDescription className="text-muted-foreground">
+              Excel: {format(parseISO(excelDate), "dd/MM/yy", { locale: it })} — Ultimo snapshot: {format(parseISO(lastSavedSnapshotDate), "dd/MM/yy", { locale: it })}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Unified View Mode Selector */}
         <ViewModeSelector viewMode={viewMode} onViewModeChange={setViewMode} />
 
