@@ -2,15 +2,31 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { DepositEntry, DepositInput } from '@/types/deposits';
+import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function useDeposits(portfolioId: string | undefined) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
+  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
 
   const depositsQuery = useQuery({
     queryKey: ['deposits', portfolioId],
     queryFn: async () => {
       if (!portfolioId) return [];
       
+      // Vista aggregata: fetch tutti i depositi
+      if (isAggregated && isAdmin) {
+        const { data, error } = await supabase
+          .from('deposits')
+          .select('*')
+          .order('deposit_date', { ascending: false });
+        
+        if (error) throw error;
+        return data as unknown as DepositEntry[];
+      }
+      
+      // Query normale per portfolio singolo
       const { data, error } = await supabase
         .from('deposits')
         .select('*')
@@ -20,7 +36,7 @@ export function useDeposits(portfolioId: string | undefined) {
       if (error) throw error;
       return data as unknown as DepositEntry[];
     },
-    enabled: !!portfolioId,
+    enabled: !!portfolioId && (!isAggregated || isAdmin),
   });
 
   const upsertMutation = useMutation({

@@ -3,6 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { DerivativeOverride, OverrideCategory, OverrideStrategyType } from '@/types/derivativeOverrides';
 import { toast } from 'sonner';
+import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CreateSingleOverrideParams {
   positionId: string;
@@ -20,8 +22,10 @@ interface CreateMultiLegOverrideParams {
 
 export function useDerivativeOverrides() {
   const { portfolio } = usePortfolio();
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const portfolioId = portfolio?.id;
+  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
 
   // Fetch all overrides for this portfolio
   const { data: overrides = [], isLoading } = useQuery({
@@ -29,6 +33,17 @@ export function useDerivativeOverrides() {
     queryFn: async () => {
       if (!portfolioId) return [];
       
+      // Vista aggregata: fetch tutti gli override
+      if (isAggregated && isAdmin) {
+        const { data, error } = await supabase
+          .from('derivative_overrides')
+          .select('*');
+        
+        if (error) throw error;
+        return data as DerivativeOverride[];
+      }
+      
+      // Query normale
       const { data, error } = await supabase
         .from('derivative_overrides')
         .select('*')
@@ -37,7 +52,7 @@ export function useDerivativeOverrides() {
       if (error) throw error;
       return data as DerivativeOverride[];
     },
-    enabled: !!portfolioId,
+    enabled: !!portfolioId && (!isAggregated || isAdmin),
   });
 
   // Create or update a single override

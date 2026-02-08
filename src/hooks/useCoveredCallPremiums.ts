@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { ParsedOrder } from '@/lib/orderFileParser';
+import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface CoveredCallPremium {
   id: string;
@@ -30,6 +32,8 @@ interface UpsertPremiumData {
 
 export function useCoveredCallPremiums(portfolioId: string | undefined) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
+  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
   
   // Query to fetch all premiums for the portfolio
   const { data: premiums = [], isLoading, refetch } = useQuery({
@@ -37,6 +41,21 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
     queryFn: async () => {
       if (!portfolioId) return [];
       
+      // Vista aggregata: fetch tutti i premiums
+      if (isAggregated && isAdmin) {
+        const { data, error } = await supabase
+          .from('covered_call_premiums')
+          .select('*');
+        
+        if (error) throw error;
+        
+        return (data || []).map(row => ({
+          ...row,
+          orders_json: (row.orders_json as unknown as ParsedOrder[]) || [],
+        })) as CoveredCallPremium[];
+      }
+      
+      // Query normale
       const { data, error } = await supabase
         .from('covered_call_premiums')
         .select('*')
@@ -50,7 +69,7 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
         orders_json: (row.orders_json as unknown as ParsedOrder[]) || [],
       })) as CoveredCallPremium[];
     },
-    enabled: !!portfolioId,
+    enabled: !!portfolioId && (!isAggregated || isAdmin),
   });
   
   // Get premium by ticker

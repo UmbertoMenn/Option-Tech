@@ -93,6 +93,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
     if (portfolios.length === 0) return;
     
+    // Se è selezionato AGGREGATED, non resettare - è una selezione valida per admin
+    if (selectedId === AGGREGATED_PORTFOLIO_ID) {
+      if (!hasInitialized) setHasInitialized(true);
+      return;
+    }
+    
     // PRIMA: verifica se selezione attuale è già valida - se sì, esci subito
     if (selectedId && portfolios.some(p => p.id === selectedId)) {
       if (!hasInitialized) setHasInitialized(true);
