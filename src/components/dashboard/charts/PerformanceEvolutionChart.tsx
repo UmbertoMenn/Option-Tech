@@ -250,7 +250,10 @@ export function PerformanceEvolutionChart({
   
   // Get USD exposure for currency adjustment (derivatives excluded, bonds included)
   const { usdExposurePct, totalExposure: usdTotalExposure, isLoading: isUsdLoading } = useCurrencyExposure({ 
-    includeDerivatives: false, 
+    includeProtections: false, 
+    includeNakedPut: false, 
+    includeStrategies: false, 
+    includeLeapCall: false, 
     includeBonds: true 
   });
   const hasUsdData = !isUsdLoading && usdTotalExposure > 0;

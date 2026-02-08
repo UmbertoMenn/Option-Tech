@@ -16,14 +16,26 @@ export interface CurrencyExposureResult {
   allocations: Record<string, ETFAllocation>;
 }
 
-export interface UseCurrencyExposureOptions extends CurrencyExposureOptions {}
+export interface UseCurrencyExposureOptions {
+  includeBonds?: boolean;
+  includeProtections?: boolean;
+  includeNakedPut?: boolean;
+  includeStrategies?: boolean;
+  includeLeapCall?: boolean;
+}
 
 /**
  * Centralized hook for calculating currency exposure with ETF decomposition.
  * Used by both RiskAnalyzer and PerformanceEvolutionChart.
  */
 export function useCurrencyExposure(options: UseCurrencyExposureOptions = {}): CurrencyExposureResult {
-  const { includeDerivatives = true, includeBonds = true } = options;
+  const { 
+    includeBonds = true, 
+    includeProtections = true, 
+    includeNakedPut = true, 
+    includeStrategies = true, 
+    includeLeapCall = true 
+  } = options;
   
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
   const riskAnalysis = useRiskAnalysis();
@@ -33,8 +45,14 @@ export function useCurrencyExposure(options: UseCurrencyExposureOptions = {}): C
   
   // Calculate base currency exposure from existing data
   const baseCurrencyExposure = useMemo(() => 
-    calculateCurrencyExposure(analysis, { includeDerivatives, includeBonds }), 
-    [analysis, includeDerivatives, includeBonds]
+    calculateCurrencyExposure(analysis, { 
+      includeBonds, 
+      includeProtections, 
+      includeNakedPut, 
+      includeStrategies, 
+      includeLeapCall 
+    }), 
+    [analysis, includeBonds, includeProtections, includeNakedPut, includeStrategies, includeLeapCall]
   );
   
   // Extract ETF ISINs from stock details - use the isETF flag from riskCalculator

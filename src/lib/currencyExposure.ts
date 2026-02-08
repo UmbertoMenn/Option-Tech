@@ -83,15 +83,24 @@ function getOrCreateCurrency(
 // The pattern matching was unreliable and has been removed
 
 export interface CurrencyExposureOptions {
-  includeDerivatives?: boolean; // default: true
-  includeBonds?: boolean; // default: true
+  includeBonds?: boolean;        // default: true
+  includeProtections?: boolean;  // default: true
+  includeNakedPut?: boolean;     // default: true
+  includeStrategies?: boolean;   // default: true
+  includeLeapCall?: boolean;     // default: true
 }
 
 export function calculateCurrencyExposure(
   analysis: RiskAnalysis,
   options: CurrencyExposureOptions = {}
 ): CurrencyExposure[] {
-  const { includeDerivatives = true, includeBonds = true } = options;
+  const { 
+    includeBonds = true, 
+    includeProtections = true, 
+    includeNakedPut = true, 
+    includeStrategies = true, 
+    includeLeapCall = true 
+  } = options;
   const byCurrency = new Map<string, CurrencyExposure>();
   
   // Aggregate stockDetails by currency (always included)
@@ -119,8 +128,8 @@ export function calculateCurrencyExposure(
       isETF
     });
     
-    // Add protection as separate derivative entry (if includeDerivatives is ON and has protection)
-    if (includeDerivatives && stock.hasProtection && stock.protectionContracts > 0 && stock.protectionOptionPrice) {
+    // Add protection as separate derivative entry (if includeProtections is ON and has protection)
+    if (includeProtections && stock.hasProtection && stock.protectionContracts > 0 && stock.protectionOptionPrice) {
       // Protection value = contracts × option price × 100 (mark-to-market, fallback avg_cost)
       const protectionValueOriginal = stock.protectionContracts * stock.protectionOptionPrice * 100;
       const protectionValueEUR = protectionValueOriginal / stock.exchangeRate;
@@ -175,9 +184,10 @@ export function calculateCurrencyExposure(
     });
   }
   
-  // Aggregate derivative details by currency (only if includeDerivatives is true)
-  if (includeDerivatives) {
-    // Aggregate nakedPutDetails by currency
+  // Aggregate derivative details by currency (each category controlled by its own toggle)
+  
+  // Aggregate nakedPutDetails by currency (if includeNakedPut is true)
+  if (includeNakedPut) {
     for (const np of analysis.nakedPutDetails) {
       const curr = np.currency || 'OTHER';
       const exposure = getOrCreateCurrency(byCurrency, curr);
@@ -193,8 +203,10 @@ export function calculateCurrencyExposure(
         details: `PUT ${np.strike} × ${np.contracts} (${np.expiry})`
       });
     }
-    
-    // Aggregate leapCallDetails by currency
+  }
+  
+  // Aggregate leapCallDetails by currency (if includeLeapCall is true)
+  if (includeLeapCall) {
     for (const lc of analysis.leapCallDetails) {
       const curr = lc.currency || 'OTHER';
       const exposure = getOrCreateCurrency(byCurrency, curr);
@@ -210,8 +222,10 @@ export function calculateCurrencyExposure(
         details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
       });
     }
-    
-    // Aggregate strategyDetails by currency
+  }
+  
+  // Aggregate strategyDetails by currency (if includeStrategies is true)
+  if (includeStrategies) {
     for (const strat of analysis.strategyDetails) {
       const curr = strat.currency || 'OTHER';
       const exposure = getOrCreateCurrency(byCurrency, curr);

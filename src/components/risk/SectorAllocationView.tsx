@@ -241,8 +241,14 @@ export function SectorAllocationView({
                       <TooltipTrigger asChild>
                         <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" className="max-w-xs text-xs">
-                        <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale, così come i bond.</p>
+                      <TooltipContent side="bottom" className="max-w-xs text-sm">
+                        <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+                        <ul className="list-disc ml-4 space-y-1">
+                          <li><b>Naked Put</b>: include rischio Naked PUT per settore</li>
+                          <li><b>Strategie</b>: include Max Loss delle strategie per settore</li>
+                          <li><b>Leap Call</b>: include valore di mercato Leap Call per settore</li>
+                        </ul>
+                        <p className="mt-2 text-muted-foreground">Commodities, Bond e Protezioni (Long PUT) sono sempre escluse dall'analisi settoriale.</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>

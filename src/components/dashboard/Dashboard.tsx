@@ -30,7 +30,7 @@ export function Dashboard() {
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
   const { equityExposurePct } = useEquityExposurePct();
-  const { usdExposurePct } = useCurrencyExposure({ includeDerivatives: false, includeBonds: true });
+  const { usdExposurePct } = useCurrencyExposure({ includeProtections: false, includeNakedPut: false, includeStrategies: false, includeLeapCall: false, includeBonds: true });
   const { 
     historicalData, 
     earliestEntry, 
