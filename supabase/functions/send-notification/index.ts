@@ -81,7 +81,8 @@ function getStrikeDisplay(alertType: string, strikePrice?: number, breakeven?: n
 async function sendEmail(
   email: string,
   alertData: AlertPayload,
-  isAdmin: boolean = false
+  isAdmin: boolean = false,
+  userName?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const severityEmoji = getSeverityEmoji(alertData.severity);
@@ -108,6 +109,12 @@ async function sendEmail(
           </div>
           <div style="padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
             <table style="width: 100%; border-collapse: collapse;">
+              ${isAdmin && userName ? `
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280; width: 120px;">Utente:</td>
+                <td style="padding: 8px 0;"><strong>${userName}</strong></td>
+              </tr>
+              ` : ''}
               <tr>
                 <td style="padding: 8px 0; color: #6b7280; width: 120px;">Ticker:</td>
                 <td style="padding: 8px 0;"><strong>${alertData.ticker}</strong></td>
@@ -151,7 +158,8 @@ async function sendEmail(
 async function sendTelegram(
   chatId: string,
   alertData: AlertPayload,
-  isAdmin: boolean = false
+  isAdmin: boolean = false,
+  userName?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const severityEmoji = getSeverityEmoji(alertData.severity);
@@ -165,6 +173,7 @@ async function sendTelegram(
     
     let text = `🚨 ${adminPrefix}*Avviso Portafoglio*
 ${severityEmoji} *${severityLabel}*
+${isAdmin && userName ? `\n👤 *Utente:* ${userName}` : ''}
 
 📈 *Ticker:* ${alertData.ticker}
 📊 *Strategia:* ${strategyName}
@@ -313,7 +322,7 @@ serve(async (req: Request): Promise<Response> => {
       if (adminProfiles) {
         for (const admin of adminProfiles) {
           if (admin.notify_email && admin.email) {
-            const emailResult = await sendEmail(admin.email, alertData, true);
+            const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
               alertData.alert_id,
@@ -324,7 +333,7 @@ serve(async (req: Request): Promise<Response> => {
             );
           }
           if (admin.notify_telegram && admin.telegram_chat_id) {
-            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true);
+            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
               alertData.alert_id,
