@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -28,10 +29,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check } from 'lucide-react';
+import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 
 export function PortfolioSelector() {
+  const { isAdmin } = useAuth();
   const {
     portfolios,
     selectedPortfolio,
@@ -40,6 +42,9 @@ export function PortfolioSelector() {
     deletePortfolio,
     renamePortfolio,
     isLoading,
+    isAdminMode,
+    isAggregatedView,
+    exitAdminMode,
   } = usePortfolioContext();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -90,85 +95,134 @@ export function PortfolioSelector() {
     );
   }
 
+  // Get display name for selector
+  const getDisplayName = () => {
+    if (isAggregatedView) return 'Aggregato - Tutti';
+    if (isAdminMode && selectedPortfolio) return `👤 ${selectedPortfolio.name}`;
+    return selectedPortfolio?.name || 'Seleziona Portfolio';
+  };
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="min-w-[180px] justify-between">
-            <span className="flex items-center gap-2 truncate">
-              <Briefcase className="w-4 h-4 shrink-0" />
-              <span className="truncate max-w-[120px]">
-                {selectedPortfolio?.name || 'Seleziona Portfolio'}
-              </span>
-            </span>
-            <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
+      <div className="flex items-center gap-2">
+        {/* Exit admin mode button */}
+        {(isAdminMode || isAggregatedView) && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-warning"
+            onClick={exitAdminMode}
+            title="Esci dalla modalità admin"
+          >
+            <X className="w-4 h-4" />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-[280px]">
-          {portfolios.map((portfolio) => (
-            <DropdownMenuItem
-              key={portfolio.id}
-              className="flex items-center justify-between group cursor-pointer"
-              onSelect={(e) => {
-                e.preventDefault();
-                selectPortfolio(portfolio.id);
-              }}
+        )}
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className={`min-w-[180px] justify-between ${(isAdminMode || isAggregatedView) ? 'border-warning text-warning' : ''}`}
             >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                {portfolio.id === selectedPortfolio?.id && (
-                  <Check className="w-4 h-4 text-primary shrink-0" />
+              <span className="flex items-center gap-2 truncate">
+                {isAggregatedView ? (
+                  <Users className="w-4 h-4 shrink-0" />
+                ) : (
+                  <Briefcase className="w-4 h-4 shrink-0" />
                 )}
-                {portfolio.id !== selectedPortfolio?.id && (
-                  <div className="w-4 h-4 shrink-0" />
-                )}
-                <span className="truncate">{portfolio.name}</span>
-                {portfolio.total_value && portfolio.total_value > 0 && (
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    {formatCurrency(portfolio.total_value)}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openRenameDialog(portfolio);
+                <span className="truncate max-w-[120px]">
+                  {getDisplayName()}
+                </span>
+              </span>
+              <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[280px]">
+            {/* Aggregated option for admin */}
+            {isAdmin && (
+              <>
+                <DropdownMenuItem
+                  className="flex items-center gap-2 cursor-pointer bg-background-secondary"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    selectPortfolio(AGGREGATED_PORTFOLIO_ID);
                   }}
                 >
-                  <Pencil className="w-3 h-3" />
-                </Button>
-                {portfolios.length > 1 && (
+                  {isAggregatedView && <Check className="w-4 h-4 text-warning shrink-0" />}
+                  {!isAggregatedView && <div className="w-4 h-4 shrink-0" />}
+                  <Users className="w-4 h-4 text-warning" />
+                  <span className="font-medium text-warning">Aggregato - Tutti gli Utenti</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            
+            {portfolios.map((portfolio) => (
+              <DropdownMenuItem
+                key={portfolio.id}
+                className="flex items-center justify-between group cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  selectPortfolio(portfolio.id);
+                }}
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {portfolio.id === selectedPortfolio?.id && !isAggregatedView && (
+                    <Check className="w-4 h-4 text-primary shrink-0" />
+                  )}
+                  {(portfolio.id !== selectedPortfolio?.id || isAggregatedView) && (
+                    <div className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="truncate">{portfolio.name}</span>
+                  {portfolio.total_value && portfolio.total_value > 0 && (
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {formatCurrency(portfolio.total_value)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-2">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    className="h-6 w-6"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openDeleteDialog(portfolio);
+                      openRenameDialog(portfolio);
                     }}
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <Pencil className="w-3 h-3" />
                   </Button>
-                )}
-              </div>
+                  {portfolios.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDeleteDialog(portfolio);
+                      }}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onSelect={() => {
+                setNewName('');
+                setCreateDialogOpen(true);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Nuovo Portfolio
             </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="cursor-pointer"
-            onSelect={() => {
-              setNewName('');
-              setCreateDialogOpen(true);
-            }}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Nuovo Portfolio
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Create Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

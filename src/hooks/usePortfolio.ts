@@ -1,13 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfolio';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { remapOverridesAfterUpload } from '@/lib/overrideMatching';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
-  const { selectedPortfolio } = usePortfolioContext();
+  const { selectedPortfolio, isAggregatedView } = usePortfolioContext();
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
 
   // Use the portfolio from context instead of fetching directly
@@ -53,9 +55,21 @@ export function usePortfolio() {
     },
   });
 
+  // Positions query - handle aggregated view
   const positionsQuery = useQuery({
-    queryKey: ['positions', portfolio?.id],
+    queryKey: ['positions', isAggregatedView ? AGGREGATED_PORTFOLIO_ID : portfolio?.id],
     queryFn: async () => {
+      if (isAggregatedView && isAdmin) {
+        // Fetch ALL positions for aggregated view
+        const { data, error } = await supabase
+          .from('positions')
+          .select('*')
+          .order('asset_type', { ascending: true });
+        
+        if (error) throw error;
+        return data as unknown as Position[];
+      }
+      
       if (!portfolio?.id) return [];
       
       const { data, error } = await supabase
@@ -67,10 +81,28 @@ export function usePortfolio() {
       if (error) throw error;
       return data as unknown as Position[];
     },
-    enabled: !!portfolio?.id,
+    enabled: !!portfolio?.id || (isAggregatedView && isAdmin),
   });
 
-  const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, portfolio?.cash_value || 0) : null;
+  // Aggregated portfolio calculation
+  const aggregatedPortfolio: Portfolio | null = isAggregatedView ? {
+    id: AGGREGATED_PORTFOLIO_ID,
+    user_id: 'aggregated',
+    name: 'Aggregato - Tutti gli Utenti',
+    total_value: 0, // Will be calculated from positions
+    cash_value: 0,
+    initial_value: null,
+    initial_date: null,
+    deposits: null,
+    average_balance: null,
+    average_balance_date: null,
+    snapshot_date: null,
+    last_updated: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  } : null;
+
+  const effectivePortfolio = isAggregatedView ? aggregatedPortfolio : portfolio;
+  const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, effectivePortfolio?.cash_value || 0) : null;
 
   const updatePositionsMutation = useMutation({
     mutationFn: async ({ 
@@ -185,10 +217,11 @@ export function usePortfolio() {
   });
 
   return {
-    portfolio,
+    portfolio: effectivePortfolio,
     positions: positionsQuery.data || [],
     summary,
     isLoading: positionsQuery.isLoading,
+    isReadOnly: isAggregatedView, // Aggregated view is read-only
     updatePositions: (args: { 
       positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
       targetPortfolioId?: string;

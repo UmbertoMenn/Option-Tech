@@ -9,11 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatDate } from '@/lib/formatters';
 import { SectorMappingManager } from './SectorMappingManager';
+import { PortfolioManager } from './PortfolioManager';
 
 interface UserWithRole {
   id: string;
@@ -272,6 +273,10 @@ export function AdminPanel() {
               <Users className="w-4 h-4 mr-2" />
               Utenti
             </TabsTrigger>
+            <TabsTrigger value="portfolios" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Briefcase className="w-4 h-4 mr-2" />
+              Portafogli
+            </TabsTrigger>
             <TabsTrigger value="sectors" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
               <PieChart className="w-4 h-4 mr-2" />
               Settori
@@ -357,6 +362,10 @@ export function AdminPanel() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="portfolios">
+            <PortfolioManager />
           </TabsContent>
 
           <TabsContent value="sectors">

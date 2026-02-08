@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 
 const SELECTED_PORTFOLIO_KEY = 'selectedPortfolioId';
 
+export const AGGREGATED_PORTFOLIO_ID = 'AGGREGATED';
+
 interface PortfolioContextType {
   portfolios: Portfolio[];
   selectedPortfolio: Portfolio | null;
@@ -15,6 +17,12 @@ interface PortfolioContextType {
   deletePortfolio: (id: string) => Promise<void>;
   renamePortfolio: (id: string, name: string) => Promise<void>;
   isLoading: boolean;
+  // Admin mode
+  isAdminMode: boolean;
+  adminViewUserId: string | null;
+  setAdminViewPortfolio: (portfolioId: string, ownerUserId: string) => void;
+  exitAdminMode: () => void;
+  isAggregatedView: boolean;
 }
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
@@ -26,8 +34,13 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem(SELECTED_PORTFOLIO_KEY);
   });
   const [hasInitialized, setHasInitialized] = useState(false);
+  
+  // Admin mode state
+  const [adminViewUserId, setAdminViewUserId] = useState<string | null>(null);
+  const isAdminMode = adminViewUserId !== null && adminViewUserId !== user?.id;
+  const isAggregatedView = selectedId === AGGREGATED_PORTFOLIO_ID;
 
-  // Fetch all portfolios for the user - ordered by last_updated DESC
+  // Fetch user's own portfolios - ordered by last_updated DESC
   const portfoliosQuery = useQuery({
     queryKey: ['portfolios', user?.id],
     queryFn: async () => {
@@ -45,6 +58,24 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     },
     enabled: !!user,
     staleTime: 30000, // 30 secondi - riduce refetch che causano race condition
+  });
+
+  // Fetch admin view portfolio (when in admin mode viewing another user's portfolio)
+  const adminPortfolioQuery = useQuery({
+    queryKey: ['admin-view-portfolio', selectedId],
+    queryFn: async () => {
+      if (!selectedId || selectedId === AGGREGATED_PORTFOLIO_ID) return null;
+      
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('*')
+        .eq('id', selectedId)
+        .single();
+      
+      if (error) throw error;
+      return data as unknown as Portfolio;
+    },
+    enabled: isAdminMode && !!selectedId && selectedId !== AGGREGATED_PORTFOLIO_ID,
   });
 
   const portfolios = portfoliosQuery.data || [];
@@ -90,7 +121,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     setHasInitialized(true);
   }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized]);
 
-  const selectedPortfolio = portfolios.find(p => p.id === selectedId) || null;
+  // Selected portfolio: use admin query if in admin mode, otherwise use own portfolios
+  const selectedPortfolio = isAdminMode 
+    ? adminPortfolioQuery.data || null 
+    : portfolios.find(p => p.id === selectedId) || null;
 
   const selectPortfolio = useCallback((id: string) => {
     setSelectedId(id);
@@ -187,6 +221,30 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     await renameMutation.mutateAsync({ id, name });
   };
 
+  // Admin mode functions
+  const setAdminViewPortfolio = useCallback((portfolioId: string, ownerUserId: string) => {
+    setAdminViewUserId(ownerUserId);
+    setSelectedId(portfolioId);
+    // Invalidate queries to fetch data for the new portfolio
+    queryClient.invalidateQueries({ queryKey: ['positions'] });
+    queryClient.invalidateQueries({ queryKey: ['deposits'] });
+    queryClient.invalidateQueries({ queryKey: ['historicalData'] });
+    queryClient.invalidateQueries({ queryKey: ['derivativeOverrides'] });
+  }, [queryClient]);
+
+  const exitAdminMode = useCallback(() => {
+    setAdminViewUserId(null);
+    // Reset to user's own portfolio
+    const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+    if (savedId && portfolios.some(p => p.id === savedId)) {
+      setSelectedId(savedId);
+    } else if (portfolios.length > 0) {
+      setSelectedId(portfolios[0].id);
+    }
+    queryClient.invalidateQueries({ queryKey: ['positions'] });
+    queryClient.invalidateQueries({ queryKey: ['deposits'] });
+  }, [portfolios, queryClient]);
+
   return (
     <PortfolioContext.Provider
       value={{
@@ -197,6 +255,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         deletePortfolio,
         renamePortfolio,
         isLoading: portfoliosQuery.isLoading,
+        // Admin mode
+        isAdminMode,
+        adminViewUserId,
+        setAdminViewPortfolio,
+        exitAdminMode,
+        isAggregatedView,
       }}
     >
       {children}
