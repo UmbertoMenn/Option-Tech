@@ -129,9 +129,10 @@ function CustomLegend({
 
   const currencyTooltip = hasUsdData
     ? `Aggiusta il benchmark per l'effetto valutario EUR/USD.\n\n` +
-      `Viene utilizzata l'esposizione in dollari attuale del portafoglio (${usdPctFormatted}%) come proxy per quella storica.\n\n` +
-      `Derivati esclusi, bond inclusi.\n\n` +
-      `Formula: benchmarkAdjusted = benchmarkNominale - (${usdPctFormatted}% × variazione EUR/USD)`
+      `Ponderazione dinamica: L'esposizione USD varia nel tempo in base al valore salvato in ogni snapshot.\n` +
+      `L'exposure di ciascun punto determina la correzione per il periodo successivo.\n\n` +
+      `USD exposure attuale: ${usdPctFormatted}%\n` +
+      `Derivati esclusi, bond inclusi.`
     : 'Dati esposizione USD non disponibili.';
 
   const staleInfo = formatStaleSummary(staleSummary);

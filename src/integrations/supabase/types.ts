@@ -428,6 +428,7 @@ export type Database = {
           snapshot_date: string
           total_value: number
           updated_at: string
+          usd_exposure_pct: number | null
         }
         Insert: {
           average_balance?: number
@@ -442,6 +443,7 @@ export type Database = {
           snapshot_date: string
           total_value?: number
           updated_at?: string
+          usd_exposure_pct?: number | null
         }
         Update: {
           average_balance?: number
@@ -456,6 +458,7 @@ export type Database = {
           snapshot_date?: string
           total_value?: number
           updated_at?: string
+          usd_exposure_pct?: number | null
         }
         Relationships: [
           {

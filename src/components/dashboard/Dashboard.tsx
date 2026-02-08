@@ -6,6 +6,7 @@ import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
+import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,6 +30,7 @@ export function Dashboard() {
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
   const { equityExposurePct } = useEquityExposurePct();
+  const { usdExposurePct } = useCurrencyExposure({ includeDerivatives: false, includeBonds: true });
   const { 
     historicalData, 
     earliestEntry, 
@@ -113,6 +115,7 @@ export function Dashboard() {
                     deposits: 0,
                     average_balance: 0,
                     equity_exposure_pct: equityExposurePct,
+                    usd_exposure_pct: usdExposurePct,
                   });
                   toast.success('Snapshot salvato nei dati storici');
                 }}
@@ -203,6 +206,7 @@ export function Dashboard() {
                   currentNettingExCC={netting.nettingExCoveredCall}
                   currentNettingExCCNP={netting.nettingExCCAndNP}
                   currentEquityExposurePct={equityExposurePct}
+                  currentUsdExposurePct={usdExposurePct}
                 />
                 <DepositsSection
                   deposits={deposits}

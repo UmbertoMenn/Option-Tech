@@ -20,6 +20,7 @@ interface HistoricalDataFormProps {
   currentNettingExCC: number;
   currentNettingExCCNP: number;
   currentEquityExposurePct: number; // 0-1
+  currentUsdExposurePct: number;    // 0-1
 }
 
 export function HistoricalDataForm({
@@ -32,6 +33,7 @@ export function HistoricalDataForm({
   currentNettingExCC,
   currentNettingExCCNP,
   currentEquityExposurePct,
+  currentUsdExposurePct,
 }: HistoricalDataFormProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -44,6 +46,7 @@ export function HistoricalDataForm({
   const [formNettingExCC, setFormNettingExCC] = useState('');
   const [formNettingExCCNP, setFormNettingExCCNP] = useState('');
   const [formEquityExposure, setFormEquityExposure] = useState(''); // 0-100 user input
+  const [formUsdExposure, setFormUsdExposure] = useState(''); // 0-100 user input
 
   const parseValue = (val: string) => {
     return parseFloat(val.replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
@@ -56,6 +59,7 @@ export function HistoricalDataForm({
     setFormNettingExCC('');
     setFormNettingExCCNP('');
     setFormEquityExposure('');
+    setFormUsdExposure('');
     setIsAddingNew(false);
     setEditingId(null);
   };
@@ -68,6 +72,11 @@ export function HistoricalDataForm({
     equityPct = Math.max(0, Math.min(100, equityPct)); // Clamp 0-100
     equityPct = equityPct / 100; // Convert to 0-1
     
+    // Parse USD exposure: user inputs 0-100, we save as 0-1
+    let usdPct = parseValue(formUsdExposure);
+    usdPct = Math.max(0, Math.min(100, usdPct)); // Clamp 0-100
+    usdPct = usdPct / 100; // Convert to 0-1
+    
     onSave({
       snapshot_date: format(formDate, 'yyyy-MM-dd'),
       total_value: parseValue(formTotalValue),
@@ -77,6 +86,7 @@ export function HistoricalDataForm({
       deposits: 0,
       average_balance: 0,
       equity_exposure_pct: equityPct,
+      usd_exposure_pct: usdPct,
     });
     
     resetForm();
@@ -92,6 +102,8 @@ export function HistoricalDataForm({
     // Convert 0-1 to 0-100 for display
     const equityPct = entry.equity_exposure_pct ?? 0.6;
     setFormEquityExposure((equityPct * 100).toFixed(1));
+    const usdPct = entry.usd_exposure_pct ?? 0.8;
+    setFormUsdExposure((usdPct * 100).toFixed(1));
     setIsAddingNew(false);
   };
 
@@ -107,6 +119,7 @@ export function HistoricalDataForm({
     setFormNettingExCCNP(currentNettingExCCNP.toString());
     // Convert 0-1 to 0-100 for display
     setFormEquityExposure((currentEquityExposurePct * 100).toFixed(1));
+    setFormUsdExposure((currentUsdExposurePct * 100).toFixed(1));
   };
 
   const isEditing = editingId !== null || isAddingNew;
@@ -157,17 +170,18 @@ export function HistoricalDataForm({
         </div>
       </div>
 
+      <div className="space-y-1">
+        <Label className="text-xs">Netting ex. CC e NP ($)</Label>
+        <Input
+          type="text"
+          placeholder="es. 99.000"
+          value={formNettingExCCNP}
+          onChange={(e) => setFormNettingExCCNP(e.target.value)}
+          className="font-mono text-sm"
+        />
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">Netting ex. CC e NP ($)</Label>
-          <Input
-            type="text"
-            placeholder="es. 99.000"
-            value={formNettingExCCNP}
-            onChange={(e) => setFormNettingExCCNP(e.target.value)}
-            className="font-mono text-sm"
-          />
-        </div>
         <div className="space-y-1">
           <Label className="text-xs">Equity Exposure (%)</Label>
           <Input
@@ -175,6 +189,16 @@ export function HistoricalDataForm({
             placeholder="es. 65"
             value={formEquityExposure}
             onChange={(e) => setFormEquityExposure(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">USD Exposure (%)</Label>
+          <Input
+            type="text"
+            placeholder="es. 80"
+            value={formUsdExposure}
+            onChange={(e) => setFormUsdExposure(e.target.value)}
             className="font-mono text-sm"
           />
         </div>
@@ -261,6 +285,7 @@ export function HistoricalDataForm({
                             <span>Netting ex. CC: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc)}</span></span>
                             <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
                             <span>Equity Exp.: <span className="font-mono text-foreground">{((entry.equity_exposure_pct ?? 0.6) * 100).toFixed(0)}%</span></span>
+                            <span>USD Exp.: <span className="font-mono text-foreground">{((entry.usd_exposure_pct ?? 0.8) * 100).toFixed(0)}%</span></span>
                           </div>
                         </div>
                         <div className="flex gap-1">
