@@ -353,7 +353,7 @@ export function SectorAllocationView({
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 space-y-1.5">
-                  {(showAllSectors ? chartData : chartData.slice(0, 8)).map((sector) => (
+                  {(showAllSectors ? chartData : chartData.slice(0, 6)).map((sector) => (
                     <div key={sector.name} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div
@@ -372,14 +372,14 @@ export function SectorAllocationView({
                       </div>
                     </div>
                   ))}
-                  {chartData.length > 8 && (
+                  {chartData.length > 6 && (
                     <button
                       onClick={() => setShowAllSectors(!showAllSectors)}
                       className="w-full text-xs text-primary hover:underline pt-2"
                     >
                       {showAllSectors 
                         ? 'Mostra meno' 
-                        : `Mostra altri ${chartData.length - 8} settori`}
+                        : `Mostra altri ${chartData.length - 6} settori`}
                     </button>
                   )}
                 </div>
