@@ -78,6 +78,7 @@ export function HistoricalDataForm({
     usdPct = usdPct / 100; // Convert to 0-1
     
     onSave({
+      id: editingId || undefined, // Pass id for update, undefined for new
       snapshot_date: format(formDate, 'yyyy-MM-dd'),
       total_value: parseValue(formTotalValue),
       netting_total: parseValue(formNettingTotal),

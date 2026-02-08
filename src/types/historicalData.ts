@@ -15,6 +15,7 @@ export interface HistoricalDataEntry {
 }
 
 export interface HistoricalDataInput {
+  id?: string; // Optional: used for updates
   snapshot_date: string;
   total_value: number;
   netting_total: number;

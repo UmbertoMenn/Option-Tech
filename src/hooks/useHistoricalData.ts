@@ -27,21 +27,25 @@ export function useHistoricalData(portfolioId: string | undefined) {
     mutationFn: async (entry: HistoricalDataInput) => {
       if (!portfolioId) throw new Error('Portfolio non trovato');
       
+      // Build upsert payload - use explicit type to satisfy TypeScript
+      const upsertPayload = {
+        portfolio_id: portfolioId,
+        snapshot_date: entry.snapshot_date,
+        total_value: entry.total_value,
+        netting_total: entry.netting_total,
+        netting_ex_cc: entry.netting_ex_cc,
+        netting_ex_cc_np: entry.netting_ex_cc_np,
+        deposits: entry.deposits,
+        average_balance: entry.average_balance,
+        equity_exposure_pct: entry.equity_exposure_pct,
+        usd_exposure_pct: entry.usd_exposure_pct,
+        ...(entry.id && { id: entry.id }), // Include id only if provided
+      };
+      
       const { data, error } = await supabase
         .from('historical_data')
-        .upsert({
-          portfolio_id: portfolioId,
-          snapshot_date: entry.snapshot_date,
-          total_value: entry.total_value,
-          netting_total: entry.netting_total,
-          netting_ex_cc: entry.netting_ex_cc,
-          netting_ex_cc_np: entry.netting_ex_cc_np,
-          deposits: entry.deposits,
-          average_balance: entry.average_balance,
-          equity_exposure_pct: entry.equity_exposure_pct,
-          usd_exposure_pct: entry.usd_exposure_pct,
-        }, {
-          onConflict: 'portfolio_id,snapshot_date'
+        .upsert(upsertPayload, {
+          onConflict: entry.id ? 'id' : 'portfolio_id,snapshot_date'
         })
         .select()
         .single();
