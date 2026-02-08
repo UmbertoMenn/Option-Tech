@@ -10,8 +10,10 @@ import {
   AccordionItem, 
   AccordionTrigger 
 } from '@/components/ui/accordion';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil, HelpCircle, TrendingDown, DollarSign, Layers } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil, HelpCircle, TrendingDown, DollarSign, Layers, ChevronDown } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   SectorExposure, 
@@ -22,6 +24,12 @@ import {
 import { formatEUR } from '@/lib/formatters';
 import { SectorOverrideDialog } from './SectorOverrideDialog';
 import { SectorOverrideData } from '@/hooks/useSectorOverride';
+import { 
+  StockRiskDetail, 
+  NakedPutRiskDetail, 
+  LeapCallRiskDetail, 
+  StrategyRiskDetail 
+} from '@/lib/riskCalculator';
 
 interface SectorAllocationViewProps {
   sectorExposure: SectorExposure[];
@@ -39,6 +47,11 @@ interface SectorAllocationViewProps {
   resolvingCount?: number;
   isAdmin?: boolean;
   onRefreshMappings?: () => void;
+  // Raw data for debug banner
+  rawStockDetails?: StockRiskDetail[];
+  rawNakedPutDetails?: NakedPutRiskDetail[];
+  rawLeapCallDetails?: LeapCallRiskDetail[];
+  rawStrategyDetails?: StrategyRiskDetail[];
 }
 
 const CATEGORY_CONFIG: Record<SectorInstrumentCategory, { label: string; icon: React.ComponentType<{ className?: string }>; colorClass: string }> = {
@@ -182,6 +195,10 @@ export function SectorAllocationView({
   resolvingCount,
   isAdmin = false,
   onRefreshMappings,
+  rawStockDetails = [],
+  rawNakedPutDetails = [],
+  rawLeapCallDetails = [],
+  rawStrategyDetails = [],
 }: SectorAllocationViewProps) {
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
   const [selectedInstrument, setSelectedInstrument] = useState<SectorOverrideData | null>(null);
@@ -224,8 +241,204 @@ export function SectorAllocationView({
     color: getSectorColor(s.sector),
   }));
 
+  // DEBUG: Analyze missing instruments
+  const missingInstrumentsAnalysis = useMemo(() => {
+    interface MissingItem {
+      name: string;
+      category: string;
+      risk: number;
+      reason: string;
+    }
+    
+    // Build set of displayed instrument names
+    const displayed = new Set<string>();
+    for (const sector of safeSectorExposure) {
+      for (const instr of sector.instruments) {
+        displayed.add(instr.name);
+      }
+    }
+    
+    const missing: MissingItem[] = [];
+    const isEuroforex = (name: string) => name?.toUpperCase().includes('EUROFOREX') || false;
+    const isValidRisk = (v: number) => Number.isFinite(v) && v > 0;
+    
+    // Check stocks
+    for (const stock of rawStockDetails) {
+      if (isEuroforex(stock.underlying)) {
+        missing.push({ name: stock.underlying, category: 'Stock', risk: stock.riskEUR, reason: 'EUROFOREX (escluso)' });
+        continue;
+      }
+      // Stocks use grossValueEUR in sector calculation, not riskEUR (which is net of protections)
+      const grossValueEUR = stock.stockValue / stock.exchangeRate;
+      if (!isValidRisk(grossValueEUR)) {
+        const reasonDetail = grossValueEUR === 0 ? 'Valore = 0' : `Valore non valido (${grossValueEUR})`;
+        missing.push({ name: stock.underlying, category: 'Stock', risk: grossValueEUR, reason: reasonDetail });
+        continue;
+      }
+      if (!displayed.has(stock.underlying)) {
+        // Check if it was filtered out by sector with totalRisk <= 0
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === stock.underlying));
+        if (foundInRaw) {
+          missing.push({ name: stock.underlying, category: 'Stock', risk: grossValueEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
+        } else {
+          missing.push({ name: stock.underlying, category: 'Stock', risk: grossValueEUR, reason: 'Non assegnato a nessun settore' });
+        }
+      }
+    }
+    
+    // Check Naked Puts
+    for (const np of rawNakedPutDetails) {
+      if (isEuroforex(np.underlying)) {
+        missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: 'EUROFOREX (escluso)' });
+        continue;
+      }
+      if (!includeNakedPut) {
+        missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: 'Toggle Naked Put OFF' });
+        continue;
+      }
+      if (!isValidRisk(np.riskEUR)) {
+        const reasonDetail = np.riskEUR === 0 ? 'Rischio = 0' : `Rischio non valido (${np.riskEUR})`;
+        missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: reasonDetail });
+        continue;
+      }
+      if (!displayed.has(np.underlying)) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === np.underlying && i.category === 'nakedPuts'));
+        if (foundInRaw) {
+          missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
+        } else {
+          missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: 'Non assegnato a nessun settore' });
+        }
+      }
+    }
+    
+    // Check Leap Calls
+    for (const lc of rawLeapCallDetails) {
+      if (isEuroforex(lc.underlying)) {
+        missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: 'EUROFOREX (escluso)' });
+        continue;
+      }
+      if (!includeLeapCall) {
+        missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: 'Toggle Leap Call OFF' });
+        continue;
+      }
+      if (!isValidRisk(lc.riskEUR)) {
+        const reasonDetail = lc.riskEUR === 0 ? 'Rischio = 0' : `Rischio non valido (${lc.riskEUR})`;
+        missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: reasonDetail });
+        continue;
+      }
+      if (!displayed.has(lc.underlying)) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === lc.underlying && i.category === 'leapCalls'));
+        if (foundInRaw) {
+          missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
+        } else {
+          missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: 'Non assegnato a nessun settore' });
+        }
+      }
+    }
+    
+    // Check Strategies
+    for (const strat of rawStrategyDetails) {
+      if (isEuroforex(strat.underlying)) {
+        missing.push({ name: `${strat.strategyName} (${strat.underlying})`, category: 'Strategia', risk: strat.maxLossEUR, reason: 'EUROFOREX (escluso)' });
+        continue;
+      }
+      if (!includeStrategies) {
+        missing.push({ name: `${strat.strategyName} (${strat.underlying})`, category: 'Strategia', risk: strat.maxLossEUR, reason: 'Toggle Strategie OFF' });
+        continue;
+      }
+      if (!isValidRisk(strat.maxLossEUR)) {
+        const reasonDetail = strat.maxLossEUR === 0 ? 'Max Loss = 0' : `Max Loss non valido (${strat.maxLossEUR})`;
+        missing.push({ name: `${strat.strategyName} (${strat.underlying})`, category: 'Strategia', risk: strat.maxLossEUR, reason: reasonDetail });
+        continue;
+      }
+      // Strategy underlying name may differ slightly
+      const stratName = strat.underlying;
+      if (!displayed.has(stratName)) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === stratName && i.category === 'strategies'));
+        if (foundInRaw) {
+          missing.push({ name: `${strat.strategyName} (${stratName})`, category: 'Strategia', risk: strat.maxLossEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
+        } else {
+          missing.push({ name: `${strat.strategyName} (${stratName})`, category: 'Strategia', risk: strat.maxLossEUR, reason: 'Non assegnato a nessun settore' });
+        }
+      }
+    }
+    
+    // Group by reason
+    const byReason = new Map<string, MissingItem[]>();
+    for (const item of missing) {
+      if (!byReason.has(item.reason)) {
+        byReason.set(item.reason, []);
+      }
+      byReason.get(item.reason)!.push(item);
+    }
+    
+    return { 
+      missing, 
+      byReason,
+      totalExpected: rawStockDetails.length + rawNakedPutDetails.length + rawLeapCallDetails.length + rawStrategyDetails.length,
+      totalDisplayed: displayed.size
+    };
+  }, [safeSectorExposure, sectorExposure, rawStockDetails, rawNakedPutDetails, rawLeapCallDetails, rawStrategyDetails, includeNakedPut, includeLeapCall, includeStrategies]);
+  
+  const [debugBannerOpen, setDebugBannerOpen] = useState(false);
+
   return (
     <div className="space-y-6">
+      {/* Debug Banner for Missing Instruments */}
+      {missingInstrumentsAnalysis.missing.length > 0 && (
+        <Collapsible open={debugBannerOpen} onOpenChange={setDebugBannerOpen}>
+          <Alert className="border-amber-500/50 bg-amber-500/10">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTitle className="flex items-center justify-between">
+              <span className="text-amber-600 dark:text-amber-400">
+                {missingInstrumentsAnalysis.missing.length} strumenti non visualizzati
+              </span>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                  <ChevronDown className={`h-4 w-4 transition-transform ${debugBannerOpen ? 'rotate-180' : ''}`} />
+                  {debugBannerOpen ? 'Nascondi' : 'Mostra dettagli'}
+                </Button>
+              </CollapsibleTrigger>
+            </AlertTitle>
+            <AlertDescription className="text-xs text-muted-foreground">
+              Attesi: {missingInstrumentsAnalysis.totalExpected} | Visualizzati nella torta: {missingInstrumentsAnalysis.totalDisplayed}
+            </AlertDescription>
+          </Alert>
+          <CollapsibleContent className="mt-2">
+            <Card className="border-amber-500/30">
+              <CardContent className="pt-4 space-y-3">
+                {Array.from(missingInstrumentsAnalysis.byReason.entries()).map(([reason, items]) => (
+                  <div key={reason}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
+                        {reason}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">({items.length})</span>
+                    </div>
+                    <div className="pl-3 space-y-0.5">
+                      {items.slice(0, 10).map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">
+                            <span className="text-foreground font-medium">{item.name}</span>
+                            <span className="ml-1 text-muted-foreground/70">({item.category})</span>
+                          </span>
+                          <span className="font-mono text-muted-foreground">{formatEUR(item.risk)}</span>
+                        </div>
+                      ))}
+                      {items.length > 10 && (
+                        <div className="text-xs text-muted-foreground italic">
+                          ... e altri {items.length - 10}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+      
       {/* Total Exposure Card with Large Donut Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Total Card */}
