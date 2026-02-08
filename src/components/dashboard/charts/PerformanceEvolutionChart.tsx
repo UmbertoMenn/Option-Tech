@@ -365,7 +365,7 @@ export function PerformanceEvolutionChart({
 
       return {
         date: entry.snapshot_date,
-        formattedDate: format(parseISO(entry.snapshot_date), 'MMM yy', { locale: it }),
+        formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
         value,
         returnPct,
         cumulativeDeposits,
@@ -391,7 +391,7 @@ export function PerformanceEvolutionChart({
 
         data.push({
           date: currentDate,
-          formattedDate: format(parseISO(currentDate), 'MMM yy', { locale: it }),
+          formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
           value: currentValue,
           returnPct,
           cumulativeDeposits,
@@ -442,9 +442,11 @@ export function PerformanceEvolutionChart({
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
             <XAxis
               dataKey="formattedDate"
-              tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+              tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
               tickLine={false}
               axisLine={{ stroke: 'hsl(var(--border))' }}
+              interval={0}
+              type="category"
             />
             <YAxis
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}

@@ -81,7 +81,7 @@ export function PortfolioEvolutionChart({
 
     const data: ChartDataPoint[] = sorted.map((entry) => ({
       date: entry.snapshot_date,
-      formattedDate: format(parseISO(entry.snapshot_date), 'MMM yy', { locale: it }),
+      formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
       value: getValueForViewMode(entry, viewMode),
     }));
 
@@ -91,7 +91,7 @@ export function PortfolioEvolutionChart({
       if (!lastEntry || lastEntry.date !== currentDate) {
         data.push({
           date: currentDate,
-          formattedDate: format(parseISO(currentDate), 'MMM yy', { locale: it }),
+          formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
           value: currentValue,
           isCurrent: true,
         });
@@ -126,9 +126,11 @@ export function PortfolioEvolutionChart({
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
         <XAxis
           dataKey="formattedDate"
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={{ stroke: 'hsl(var(--border))' }}
+          interval={0}
+          type="category"
         />
         <YAxis
           domain={[minValue - padding, maxValue + padding]}
