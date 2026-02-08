@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,6 +15,35 @@ export function usePortfolio() {
 
   // Use the portfolio from context instead of fetching directly
   const portfolio = selectedPortfolio;
+
+  // Query to fetch all portfolios for aggregated view calculations
+  const allPortfoliosQuery = useQuery({
+    queryKey: ['all-portfolios-for-aggregation'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('id, snapshot_date, cash_value, total_value');
+      if (error) throw error;
+      return data;
+    },
+    enabled: isAggregatedView && isAdmin,
+  });
+
+  // Calculate aggregated snapshot_date (most recent among all portfolios)
+  const aggregatedSnapshotDate = useMemo(() => {
+    const portfolios = allPortfoliosQuery.data || [];
+    const validDates = portfolios
+      .map(p => p.snapshot_date)
+      .filter((d): d is string => !!d);
+    if (validDates.length === 0) return null;
+    return validDates.sort().reverse()[0]; // Most recent date
+  }, [allPortfoliosQuery.data]);
+
+  // Calculate aggregated cash_value
+  const aggregatedCashValue = useMemo(() => {
+    const portfolios = allPortfoliosQuery.data || [];
+    return portfolios.reduce((sum, p) => sum + (p.cash_value || 0), 0);
+  }, [allPortfoliosQuery.data]);
 
   const updateInitialValueMutation = useMutation({
     mutationFn: async ({ 
@@ -84,19 +114,19 @@ export function usePortfolio() {
     enabled: !!portfolio?.id || (isAggregatedView && isAdmin),
   });
 
-  // Aggregated portfolio calculation
+  // Aggregated portfolio calculation with real data
   const aggregatedPortfolio: Portfolio | null = isAggregatedView ? {
     id: AGGREGATED_PORTFOLIO_ID,
     user_id: 'aggregated',
     name: 'Aggregato - Tutti gli Utenti',
     total_value: 0, // Will be calculated from positions
-    cash_value: 0,
+    cash_value: aggregatedCashValue,
     initial_value: null,
     initial_date: null,
     deposits: null,
     average_balance: null,
     average_balance_date: null,
-    snapshot_date: null,
+    snapshot_date: aggregatedSnapshotDate, // Aggregated date (most recent)
     last_updated: new Date().toISOString(),
     created_at: new Date().toISOString(),
   } : null;
