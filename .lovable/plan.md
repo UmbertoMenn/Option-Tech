@@ -1,92 +1,88 @@
 
 
-# Analisi Benchmark: Verifica Dati e Calcoli
+# Piano: Aggiunta Esposizione USD nel Tooltip + Rinomina Label
 
-## Riepilogo dell'Analisi
+## Obiettivo
+1. Aggiungere nel tooltip del grafico "Evoluzione Rendimento" l'esposizione USD (%) per ogni punto della curva
+2. Rinominare "Rend. USD" in "Rend. Bnchmrk USD" per maggiore chiarezza
 
-Ho verificato in dettaglio i dati nel database e i calcoli del benchmark. Ecco i numeri reali:
+## Modifiche Necessarie
 
-### 1. Dati Prezzi Benchmark (dal database)
+### 1. `src/hooks/useBenchmarkData.ts`
 
-| Data | SPY | QQQ | AGG | EURUSD |
-|------|-----|-----|-----|--------|
-| 31/12/24 (base) | 579.28 | 508.65 | 92.88 | 1.0406 |
-| 31/12/25 | 681.92 | 614.31 | 99.56 | 1.1747 |
-| 30/01/26 | 691.97 | 621.87 | 99.81 | 1.1966 |
-| 06/02/26 | 690.62 | 609.65 | 100.13 | 1.1820 |
+Il hook attualmente restituisce `equityPctUsed` ma **non** restituisce `usdPctUsed`. Devo aggiungere questo campo nell'output.
 
-**Nota**: Il benchmark usa i dati del 06/02 per lo snapshot del 07/02 (closest price).
+**Modifiche:**
+- Aggiungere `usdPctUsed?: number` all'interfaccia del tipo di ritorno (riga ~256-262)
+- Popolare `usdPctUsed` in tutti i punti dove viene calcolato (righe ~351-358 e ~431-438)
 
-### 2. Calcoli del Benchmark
-
-#### Rendimento Equity (media SPY+QQQ) dal 31/12/2024:
-
-| Data | SPY Return | QQQ Return | Media Equity |
-|------|------------|------------|--------------|
-| 31/12/25 | +17.72% | +20.78% | +19.25% |
-| 30/01/26 | +19.46% | +22.26% | +20.86% |
-| 07/02/26 | +19.22% | +19.85% | +19.54% |
-
-#### Rendimento Benchmark Pesato (con equity ~49%, bond ~51%):
-
-| Data | Scaled USD | EURUSD Var | Currency Adj | **Benchmark EUR** |
-|------|------------|------------|--------------|-------------------|
-| 31/12/25 | +13.07% | +12.88% | -5.64% | **+7.43%** |
-| 30/01/26 | +14.11% | +14.99% | -6.57% | **+7.54%** |
-| 07/02/26 | +13.58% | +13.58% | -5.95% | **+7.63%** |
-
-### 3. Spiegazione del Benchmark "Piatto"
-
-**Il benchmark appare piatto tra 31/12/25 e 07/02/26 perché:**
-
-```text
-Dal 30/01 al 07/02:
-├─ Mercati USA: -0.53% (QQQ -2%, SPY -0.2%)
-├─ EURUSD: -1.22% (dollaro si è APPREZZATO)
-└─ Effetto netto in EUR: +0.09% (quasi zero)
+```typescript
+// Struttura returns aggiornata
+const returns: Array<{
+  date: string;
+  equityReturn: number;
+  bondReturn: number;
+  scaledReturn: number;
+  eurusdVariation?: number;
+  equityPctUsed?: number;
+  usdPctUsed?: number;  // ← NUOVO
+}> = [];
 ```
 
-**La matematica è corretta**: il calo dei mercati equity (~0.5%) è stato compensato dall'apprezzamento del dollaro (~1.2%), risultando in un rendimento quasi piatto in termini EUR.
+### 2. `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
 
-### 4. Possibili Cause di Confusione
+**A. Aggiornare interfaccia `ChartDataPoint` (riga ~42-54)**
+```typescript
+interface ChartDataPoint {
+  // ... esistenti
+  benchmarkUsdPctUsed?: number;  // ← NUOVO
+}
+```
 
-1. **Currency Adjustment attivo per default**: Se l'utente si aspetta di vedere il rendimento in USD, il benchmark sembra piatto mentre in realtà i mercati sono scesi.
+**B. Mappare il nuovo campo nel `benchmarkByDate` (righe ~360-375)**
+```typescript
+benchmarkByDate[br.date] = {
+  // ... esistenti
+  usdPctUsed: br.usdPctUsed,  // ← NUOVO
+};
+```
 
-2. **Il toggle "Currency" è attivo**: Verificare se l'utente vuole vedere il benchmark senza currency adjustment.
+**C. Passare il valore ai punti dati (righe ~400-412 e ~429-441)**
+```typescript
+benchmarkUsdPctUsed: bm?.usdPctUsed,
+```
 
----
+**D. Aggiornare il tooltip (righe ~554-580)**
+- Rinominare "Rend. USD" → "Rend. Bnchmrk USD" (riga ~568)
+- Aggiungere riga con "Exp. USD" prima di "Var. EUR/USD" quando `currencyAdjusted` è attivo
 
-## Proposta di Miglioramento
+```typescript
+{/* Aggiunto: Esposizione USD */}
+{currencyAdjusted && dataPoint.benchmarkUsdPctUsed !== undefined && (
+  <div className="flex justify-between gap-4">
+    <span>├─ Exp. USD:</span>
+    <span className="font-mono">{(dataPoint.benchmarkUsdPctUsed * 100).toFixed(1)}%</span>
+  </div>
+)}
+```
 
-Per rendere più chiaro il comportamento del benchmark, propongo di aggiungere **logging nel tooltip** che mostri i componenti del calcolo:
+## Struttura Finale del Tooltip
 
-### Modifica al Tooltip del Grafico
-
-Quando l'utente passa il mouse su un punto benchmark, mostrare:
+Il tooltip mostrerà (quando Currency Adjusted è attivo):
 ```
 Benchmark (Adj.): +7.54%
-├─ Equity (USD): +20.86%
-├─ Bond (USD): +7.46%
-├─ Peso Equity: 49.2%
-├─ Rendimento USD: +14.11%
-├─ Variazione EUR/USD: +14.99%
-└─ Rendimento EUR: +7.54%
+├─ Equity (USD):     +19.54%
+├─ Bond (USD):       +7.81%
+├─ Peso Equity:      49.2%
+├─ Rend. Bnchmrk USD: +13.58%  ← Rinominato
+├─ Exp. USD:         43.8%     ← NUOVO
+├─ Var. EUR/USD:     +13.58%
+└─ Rend. EUR:        +7.63%
 ```
 
-### File da Modificare
-
-| File | Modifica |
-|------|----------|
-| `src/hooks/useBenchmarkData.ts` | Esporre `equityReturn`, `bondReturn`, `eurusdVariation` nell'output |
-| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Mostrare dettagli nel tooltip |
-
----
-
-## Conclusione
-
-**Non c'è un bug nel calcolo del benchmark.** I numeri sono matematicamente corretti:
-- Il benchmark pesato (49% equity, 51% bond) ha reso +7.5% in EUR dal 31/12/24
-- La compensazione tra calo equity e apprezzamento USD spiega il movimento piatto recente
-
-Se desideri procedere con l'implementazione del tooltip dettagliato per rendere più trasparenti i calcoli, posso farlo dopo la tua approvazione.
+## File Coinvolti
+| File | Tipo Modifica |
+|------|---------------|
+| `src/hooks/useBenchmarkData.ts` | Aggiungere `usdPctUsed` all'output |
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Interfaccia + mapping + tooltip |
 
