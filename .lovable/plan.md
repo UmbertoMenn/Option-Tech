@@ -1,231 +1,201 @@
 
+# Piano: Ottimizzazione Risoluzione AI Settori + Rimozione Toast Bloccante
 
-# Piano: Correzione Bug Vista Aggregata
+## Problemi Identificati
 
-## Problema Identificato
+### 1. Lentezza nella Risoluzione AI
+La edge function `update-prices-cron` processa gli strumenti **sequenzialmente** con un ciclo `for...of` che include:
+- Delay di 200ms tra ogni richiesta
+- 1-3 secondi per chiamata AI (Lovable AI Gateway)
+- 39 strumenti × ~1.5s = **~60 secondi totali**
 
-Quando l'admin clicca su "Aggregato - Tutti", la schermata resta nera a causa di **errori SQL a cascata**.
-
-### Causa Root
-
-L'ID speciale `'AGGREGATED'` viene passato agli hook di fetch che tentano query con:
-```sql
-WHERE portfolio_id = 'AGGREGATED'
-```
-
-Ma `portfolio_id` è di tipo `uuid` in PostgreSQL, che genera l'errore:
-```
-ERROR: invalid input syntax for type uuid: "AGGREGATED"
-```
-
-Questo errore non gestito causa il crash dell'applicazione React.
-
-### Log Database Rilevati
-
-```text
-[ERROR] invalid input syntax for type uuid: "AGGREGATED"
-[ERROR] invalid input syntax for type uuid: "AGGREGATED"
-[ERROR] invalid input syntax for type uuid: "AGGREGATED"
-```
-
-Multipli errori simultanei perche vari hook eseguono query parallele.
+### 2. Toast Bloccante
+Il toast `toast.loading()` di Sonner in `RiskAnalyzer.tsx` appare in basso a destra con `duration: Infinity`, bloccando l'accesso ai pulsanti sottostanti.
 
 ---
 
-## Soluzione
+## Soluzione 1: Ottimizzare la Edge Function
 
-### Approccio
+### Approccio: Elaborazione in Batch Paralleli
 
-Per la vista aggregata, gli hook devono:
-1. **Riconoscere** l'ID speciale `'AGGREGATED'`
-2. **Modificare la query** per fetchare TUTTI i dati (senza filtro `portfolio_id`)
-3. **Aggregare** i risultati dove appropriato
+Modificare la logica in `supabase/functions/update-prices-cron/index.ts` per:
+
+1. **Raggruppare in batch di 5-8 strumenti** per evitare rate limiting
+2. **Eseguire chiamate AI in parallelo** all'interno di ogni batch usando `Promise.all()`
+3. **Ridurre il delay** tra batch a 100ms (invece di 200ms per ogni singolo item)
+
+**Codice proposto** (righe ~782-860 e ~864-1018):
+
+```typescript
+// BEFORE: Sequential processing
+for (const isin of isins) {
+  // ... resolve one at a time
+  await new Promise(resolve => setTimeout(resolve, 200));
+}
+
+// AFTER: Parallel batch processing
+const BATCH_SIZE = 5;
+const isinBatches = chunkArray(isins, BATCH_SIZE);
+
+for (const batch of isinBatches) {
+  const batchResults = await Promise.all(
+    batch.map(async (isin) => {
+      // ... resolve logic (unchanged)
+      return { isin, ticker, sector, source };
+    })
+  );
+  results.push(...batchResults);
+  
+  // Shorter delay between batches
+  await new Promise(resolve => setTimeout(resolve, 100));
+}
+```
+
+### Stima Miglioramento
+- Prima: 39 × 1.5s = **~60 secondi**
+- Dopo: 8 batch × (1.5s + 0.1s) = **~13 secondi** (~4.5x più veloce)
 
 ---
 
-## Modifiche Tecniche
+## Soluzione 2: Rimuovere il Toast Bloccante
 
-### 1. `src/contexts/PortfolioContext.tsx`
+### Approccio A: Rimuovere Completamente il Toast (Raccomandato)
 
-Evitare che l'useEffect di auto-selezione resetti l'ID aggregato:
+Il feedback visivo è già presente nel componente `SectorAllocationView.tsx` (righe 276-287) con:
+- Spinner + testo "Risoluzione AI in corso (N strumenti)..."
+- Icona check verde "Settori aggiornati" al completamento
+
+**Modifiche in `src/pages/RiskAnalyzer.tsx`**:
+
+Rimuovere completamente l'useEffect che mostra il toast (righe 117-129):
 
 ```typescript
-// Riga 97 - Aggiungere check per AGGREGATED
-if (selectedId === AGGREGATED_PORTFOLIO_ID) {
-  if (!hasInitialized) setHasInitialized(true);
-  return; // Non resettare se e' AGGREGATED
-}
-if (selectedId && portfolios.some(p => p.id === selectedId)) {
-  ...
-}
+// REMOVE this entire useEffect:
+useEffect(() => {
+  if (resolvingCount > 0 && !toastShownRef.current) {
+    toastShownRef.current = true;
+    toast.loading(`Risoluzione AI settori per ${resolvingCount} strumenti...`, {
+      id: 'sector-resolution',
+      duration: Infinity,
+    });
+  } else if (resolvingCount === 0 && toastShownRef.current) {
+    toast.dismiss('sector-resolution');
+    toast.success('Settori aggiornati', { duration: 2000 });
+    toastShownRef.current = false;
+  }
+}, [resolvingCount]);
 ```
 
-### 2. `src/hooks/useHistoricalData.ts`
-
-Gestire il caso aggregato fetchando tutti i dati storici:
+Rimuovere anche la dichiarazione `toastShownRef` (riga ~31):
 
 ```typescript
-export function useHistoricalData(portfolioId: string | undefined) {
-  const { isAdmin } = useAuth();
-  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
-  
-  const historicalDataQuery = useQuery({
-    queryKey: ['historical-data', portfolioId],
-    queryFn: async () => {
-      if (!portfolioId) return [];
-      
-      if (isAggregated && isAdmin) {
-        // Fetch ALL historical data, aggregate by date
-        const { data, error } = await supabase
-          .from('historical_data')
-          .select('*')
-          .order('snapshot_date', { ascending: false });
-        
-        if (error) throw error;
-        return aggregateHistoricalByDate(data);
-      }
-      
-      // Normal single-portfolio query
-      const { data, error } = await supabase
-        .from('historical_data')
-        .select('*')
-        .eq('portfolio_id', portfolioId)
-        .order('snapshot_date', { ascending: false });
-      
-      if (error) throw error;
-      return data as HistoricalDataEntry[];
-    },
-    enabled: !!portfolioId && (portfolioId !== AGGREGATED_PORTFOLIO_ID || isAdmin),
-  });
-  ...
-}
-```
-
-### 3. `src/hooks/useDeposits.ts`
-
-Stesso pattern: fetch tutti i depositi e aggregare per data:
-
-```typescript
-if (isAggregated && isAdmin) {
-  const { data, error } = await supabase
-    .from('deposits')
-    .select('*')
-    .order('deposit_date', { ascending: false });
-  
-  if (error) throw error;
-  return data as DepositEntry[];
-}
-```
-
-### 4. `src/hooks/useDerivativeOverrides.ts`
-
-Fetch tutti gli override per vista aggregata:
-
-```typescript
-const { data: overrides = [], isLoading } = useQuery({
-  queryKey: ['derivative-overrides', portfolioId],
-  queryFn: async () => {
-    if (!portfolioId) return [];
-    
-    if (portfolioId === AGGREGATED_PORTFOLIO_ID && isAdmin) {
-      // Fetch ALL overrides
-      const { data, error } = await supabase
-        .from('derivative_overrides')
-        .select('*');
-      
-      if (error) throw error;
-      return data as DerivativeOverride[];
-    }
-    
-    // Normal query
-    const { data, error } = await supabase
-      .from('derivative_overrides')
-      .select('*')
-      .eq('portfolio_id', portfolioId);
-    
-    if (error) throw error;
-    return data as DerivativeOverride[];
-  },
-  enabled: !!portfolioId && (portfolioId !== AGGREGATED_PORTFOLIO_ID || isAdmin),
-});
-```
-
-### 5. `src/hooks/usePortfolio.ts`
-
-Il hook già gestisce `isAggregatedView` parzialmente, ma devo assicurarmi che l'aggregated portfolio abbia i valori corretti sommati:
-
-```typescript
-// Fetch all portfolios for aggregated view to sum values
-const allPortfoliosQuery = useQuery({
-  queryKey: ['all-portfolios-for-aggregation'],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('portfolios')
-      .select('*');
-    
-    if (error) throw error;
-    return data as Portfolio[];
-  },
-  enabled: isAggregatedView && isAdmin,
-});
-
-// Calculate aggregated portfolio with real sums
-const aggregatedPortfolio: Portfolio | null = isAggregatedView ? {
-  id: AGGREGATED_PORTFOLIO_ID,
-  user_id: 'aggregated',
-  name: 'Aggregato - Tutti gli Utenti',
-  total_value: (allPortfoliosQuery.data || []).reduce((sum, p) => sum + (p.total_value || 0), 0),
-  cash_value: (allPortfoliosQuery.data || []).reduce((sum, p) => sum + (p.cash_value || 0), 0),
-  // ... altri campi sommati
-} : null;
+// REMOVE:
+const toastShownRef = useRef(false);
 ```
 
 ---
 
-## Funzione Helper per Aggregazione Dati Storici
-
-Per aggregare i dati storici per data:
-
-```typescript
-function aggregateHistoricalByDate(data: HistoricalDataEntry[]): HistoricalDataEntry[] {
-  const byDate = new Map<string, HistoricalDataEntry>();
-  
-  data.forEach(entry => {
-    const existing = byDate.get(entry.snapshot_date);
-    if (existing) {
-      byDate.set(entry.snapshot_date, {
-        ...existing,
-        total_value: (existing.total_value || 0) + (entry.total_value || 0),
-        netting_total: (existing.netting_total || 0) + (entry.netting_total || 0),
-        netting_ex_cc: (existing.netting_ex_cc || 0) + (entry.netting_ex_cc || 0),
-        netting_ex_cc_np: (existing.netting_ex_cc_np || 0) + (entry.netting_ex_cc_np || 0),
-        deposits: (existing.deposits || 0) + (entry.deposits || 0),
-      });
-    } else {
-      byDate.set(entry.snapshot_date, { ...entry });
-    }
-  });
-  
-  return Array.from(byDate.values())
-    .sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
-}
-```
-
----
-
-## File Coinvolti
+## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/contexts/PortfolioContext.tsx` | Evitare reset di AGGREGATED nell'useEffect |
-| `src/hooks/useHistoricalData.ts` | Gestire query aggregata |
-| `src/hooks/useDeposits.ts` | Gestire query aggregata |
-| `src/hooks/useDerivativeOverrides.ts` | Gestire query aggregata |
-| `src/hooks/usePortfolio.ts` | Sommare valori da tutti i portfolios |
+| `supabase/functions/update-prices-cron/index.ts` | Aggiungere funzione `chunkArray()` + riscrivere loop ISIN e names con batch paralleli |
+| `src/pages/RiskAnalyzer.tsx` | Rimuovere useEffect del toast e relativo ref |
+
+---
+
+## Dettaglio Tecnico: Edge Function
+
+### Helper Function da Aggiungere
+
+```typescript
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+```
+
+### Loop ISIN Ottimizzato (righe ~782-860)
+
+```typescript
+const BATCH_SIZE = 5;
+const isinBatches = chunkArray(isins, BATCH_SIZE);
+
+for (const batch of isinBatches) {
+  const batchPromises = batch.map(async (isin) => {
+    // 1. Check cache
+    const { data: existing } = await supabase
+      .from('isin_mappings')
+      .select('ticker, sector, industry')
+      .eq('isin', isin)
+      .single();
+    
+    if (existing?.sector) {
+      return { isin, ticker: existing.ticker, sector: existing.sector, source: 'cache' };
+    }
+    
+    // 2. Resolve ticker if needed
+    let ticker = existing?.ticker || null;
+    const description = descriptions[isin] || '';
+    
+    if (!ticker) {
+      const searchResult = await searchYahooByISIN(isin);
+      if (!searchResult) {
+        return { isin, sector: null, source: 'error', error: 'Could not resolve ticker' };
+      }
+      ticker = searchResult.ticker;
+    }
+    
+    // 3. Get sector
+    const sectorInfo = await fetchYahooSectorInfo(ticker, description);
+    
+    // 4. Upsert to DB
+    await supabase
+      .from('isin_mappings')
+      .upsert({
+        isin,
+        ticker,
+        sector: sectorInfo.sector,
+        industry: sectorInfo.industry,
+        source: sectorInfo.sector ? 'ai' : 'unknown',
+        last_verified_at: new Date().toISOString(),
+      }, { onConflict: 'isin' });
+    
+    return { isin, ticker, sector: sectorInfo.sector, source: sectorInfo.sector ? 'resolved' : 'unknown' };
+  });
+  
+  const batchResults = await Promise.all(batchPromises);
+  results.push(...batchResults.filter(r => r !== null));
+  
+  // Short delay between batches
+  if (isinBatches.indexOf(batch) < isinBatches.length - 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+```
+
+### Loop Names Ottimizzato (righe ~864-1018)
+
+Stessa logica di batching per i nomi dei derivati.
+
+---
+
+## Riepilogo Benefici
+
+| Aspetto | Prima | Dopo |
+|---------|-------|------|
+| Tempo risoluzione 39 strumenti | ~60 secondi | ~13 secondi |
+| Toast bloccante | Sì | Rimosso |
+| Feedback visivo | Toast + inline | Solo inline (già presente) |
+| Complessità | Bassa | Media |
 
 ---
 
 ## Note Importanti
 
-La vista aggregata e **read-only**: le operazioni di modifica (upsert, delete) devono essere disabilitate quando `isAggregatedView` e `true`. Questo e già parzialmente gestito tramite `isReadOnly` in alcuni hook, ma verifichero che sia consistente.
-
+1. **Rate Limiting**: Il batch size di 5 è conservativo per evitare problemi con Yahoo Finance e Lovable AI Gateway
+2. **Fallback**: La logica di fallback (cache DB → Yahoo → AI) rimane invariata
+3. **Caching**: La prima esecuzione sarà più lenta, le successive useranno la cache
