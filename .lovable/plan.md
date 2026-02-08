@@ -1,150 +1,172 @@
 
-# Piano: Correzione Errore React "Should have a queue"
+# Piano: Copia Portfolio Globale per Admin
 
-## Problema Identificato
+## Situazione Attuale
 
-L'errore si verifica perche' il `useMemo` per `syntheticDeposits` (righe 217-253 di `useHistoricalData.ts`) tenta di ricalcolare gli apporti sintetici partendo dalle `entries` gia' aggregate, ma queste hanno tutte `portfolio_id: 'AGGREGATED'` dopo l'aggregazione.
+L'admin può copiare **solo i propri portafogli** su altri utenti. Le limitazioni sono:
 
-### Flusso Attuale (Errato)
-```text
-1. Query fetcha dati raw dal DB
-2. aggregateHistoricalWithInterpolation():
-   - Raggruppa per portfolio_id ✓
-   - Calcola syntheticDeposits con viewMode='base' ✓
-   - Aggrega entries (portfolio_id diventa 'AGGREGATED') ✓
-3. useMemo per syntheticDeposits:
-   - Prova a raggruppare entries per portfolio_id
-   - Ma tutte hanno portfolio_id='AGGREGATED' → un solo gruppo
-   - Risultato errato
-```
+1. **Edge Function** (`admin-copy-portfolio`): verifica che il portafoglio sorgente appartenga all'admin (riga 71-84)
+2. **UI** (`PortfolioManager`): mostra il pulsante "Copia" solo nella sezione "I Miei Portafogli"
+3. **CopyPortfolioDialog**: la lista destinatari esclude l'admin stesso
 
-### Problema Root Cause
-Il `useMemo` non puo' ricalcolare i synthetic deposits perche' le entries restituite dalla query hanno gia' perso l'informazione del portfolio originale.
+## Obiettivo
+
+Permettere all'admin di:
+- Copiare **qualsiasi portafoglio** (anche di altri utenti)
+- Incollarlo su **qualsiasi utente** (incluso se stesso)
 
 ---
 
-## Soluzione
+## Modifiche Richieste
 
-### Strategia A: Salvare i Dati Raw nella Query
+### 1. Edge Function: Rimuovere Restrizione Proprietà
 
-Modificare la struttura di ritorno della query per includere anche i dati raw (non aggregati) da usare per ricalcolare i syntheticDeposits.
+**File:** `supabase/functions/admin-copy-portfolio/index.ts`
+
+Modificare la verifica del portafoglio sorgente per permettere la copia di qualsiasi portafoglio:
 
 ```typescript
-interface AggregatedHistoricalResult {
-  entries: HistoricalDataEntry[];
-  syntheticDeposits: SyntheticDeposit[];
-  rawEntries?: HistoricalDataEntry[]; // NEW: dati originali per ricalcolo
-}
+// PRIMA (riga 71-84):
+const { data: sourcePortfolio, error: sourceError } = await supabaseAdmin
+  .from('portfolios')
+  .select('*')
+  .eq('id', sourcePortfolioId)
+  .eq('user_id', user.id)  // ❌ Limita ai propri portafogli
+  .single();
+
+// DOPO:
+const { data: sourcePortfolio, error: sourceError } = await supabaseAdmin
+  .from('portfolios')
+  .select('*')
+  .eq('id', sourcePortfolioId)
+  // Rimosso: .eq('user_id', user.id) - l'admin può copiare qualsiasi portfolio
+  .single();
 ```
 
-### Modifiche a useHistoricalData.ts
-
-**1. Modificare la funzione di aggregazione per restituire anche i dati raw:**
-
+Aggiornare anche il messaggio di errore:
 ```typescript
-function aggregateHistoricalWithInterpolation(
-  data: HistoricalDataEntry[],
-  viewMode: ViewMode = 'base'
-): AggregatedHistoricalResult {
-  // ... codice esistente ...
-  
-  return {
-    entries: aggregated.sort(...),
-    syntheticDeposits,
-    rawEntries: data, // Salva i dati originali
-  };
-}
+// PRIMA:
+{ error: 'Source portfolio not found or does not belong to you' }
+
+// DOPO:
+{ error: 'Source portfolio not found' }
 ```
 
-**2. Modificare la queryFn per passare rawEntries:**
+---
+
+### 2. UI: Aggiungere Pulsante Copia ai Portafogli Utenti
+
+**File:** `src/components/admin/PortfolioManager.tsx`
+
+Aggiungere un pulsante "Copia" anche nella tabella dei portafogli degli altri utenti:
 
 ```typescript
-// Vista aggregata
-if (isAggregated && isAdmin) {
-  const { data, error } = await supabase
-    .from('historical_data')
-    .select('*')
-    .order('snapshot_date', { ascending: false });
-  
-  if (error) throw error;
-  const result = aggregateHistoricalWithInterpolation(
-    data as unknown as HistoricalDataEntry[], 
-    'base'
-  );
-  // rawEntries gia' incluso nel risultato
-  return result;
-}
+// Nella sezione "Portafogli Utenti" (riga 178-199)
+{userGroup.portfolios.map((portfolio) => (
+  <TableRow key={portfolio.id} ...>
+    {/* ... celle esistenti ... */}
+    <TableCell className="text-right">
+      <div className="flex items-center justify-end gap-2">
+        {/* Nuovo pulsante Copia */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation(); // Evita che si apra il portfolio
+            handleCopyClick(portfolio);
+          }}
+        >
+          <Copy className="w-4 h-4 mr-2" />
+          Copia
+        </Button>
+        {/* Pulsante Apri esistente */}
+        <Button variant="ghost" size="sm">
+          <ExternalLink className="w-4 h-4 mr-2" />
+          Apri
+        </Button>
+      </div>
+    </TableCell>
+  </TableRow>
+))}
 ```
 
-**3. Modificare il useMemo per usare rawEntries:**
+---
+
+### 3. CopyPortfolioDialog: Includere Tutti gli Utenti
+
+**File:** `src/components/admin/PortfolioManager.tsx`
+
+Modificare la lista utenti per il dialog di copia includendo anche l'admin:
 
 ```typescript
-const syntheticDeposits = useMemo((): SyntheticDeposit[] => {
-  // Usa rawEntries se disponibile (vista aggregata)
-  const rawEntries = historicalDataQuery.data?.rawEntries;
+// PRIMA (riga 48-53):
+const allUsersForCopy = otherUsers.map(u => ({
+  userId: u.userId,
+  email: u.email,
+  name: u.name,
+}));
+
+// DOPO:
+const allUsersForCopy = useMemo(() => {
+  // Includi tutti gli utenti, compreso l'admin
+  const users = Object.values(portfoliosByUser).map(u => ({
+    userId: u.userId,
+    email: u.email,
+    name: u.name,
+  }));
   
-  // Per non-aggregated o senza raw data
-  if (!isAggregated || !rawEntries || rawEntries.length === 0) {
-    return [];
+  // Se l'admin non ha portafogli, potrebbe non essere nella lista
+  // Aggiungiamolo manualmente se necessario
+  if (user && !users.find(u => u.userId === user.id)) {
+    // L'admin potrebbe non avere profilo visibile, aggiungiamolo
+    // Nota: questo caso è raro perché il profilo viene creato al signup
   }
   
-  // Raggruppa per portfolio_id originale
-  const byPortfolio = new Map<string, HistoricalDataEntry[]>();
-  rawEntries.forEach(entry => {
-    const list = byPortfolio.get(entry.portfolio_id) || [];
-    list.push(entry);
-    byPortfolio.set(entry.portfolio_id, list);
-  });
-  
-  // ... resto del calcolo con viewMode attuale
-}, [historicalDataQuery.data?.rawEntries, viewMode, isAggregated]);
+  return users;
+}, [portfoliosByUser, user]);
 ```
+
+Nota: con questa modifica, l'admin può copiare un portafoglio di un altro utente su se stesso, o il proprio su se stesso (creando un duplicato).
 
 ---
 
-## Modifiche ai Tipi
+### 4. Hook: Esporre portfoliosByUser
 
-**File: `src/types/historicalData.ts`**
+**File:** `src/hooks/useAdminPortfolios.ts`
 
-```typescript
-export interface AggregatedHistoricalResult {
-  entries: HistoricalDataEntry[];
-  syntheticDeposits: SyntheticDeposit[];
-  rawEntries?: HistoricalDataEntry[]; // Dati originali per ricalcolo viewMode
-}
-```
+Il hook già espone `portfoliosByUser`, quindi non serve modifica.
 
 ---
 
-## Riepilogo Modifiche
+## Riepilogo File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/types/historicalData.ts` | Aggiungere campo `rawEntries` opzionale a `AggregatedHistoricalResult` |
-| `src/hooks/useHistoricalData.ts` | 1. Salvare dati raw nel risultato aggregazione 2. Usare `rawEntries` nel useMemo per syntheticDeposits |
-
----
-
-## Flusso Corretto Dopo le Modifiche
-
-```text
-1. Query fetcha dati raw dal DB
-2. aggregateHistoricalWithInterpolation():
-   - Raggruppa per portfolio_id ✓
-   - Calcola syntheticDeposits iniziali (viewMode='base') ✓
-   - Aggrega entries (portfolio_id='AGGREGATED') ✓
-   - SALVA rawEntries (dati originali con portfolio_id veri) ✓
-3. useMemo per syntheticDeposits:
-   - USA rawEntries (non entries aggregate) ✓
-   - Raggruppa per portfolio_id originale ✓
-   - Ricalcola con viewMode attuale ✓
-```
+| `supabase/functions/admin-copy-portfolio/index.ts` | Rimuovere `.eq('user_id', user.id)` dalla query del portafoglio sorgente |
+| `src/components/admin/PortfolioManager.tsx` | 1. Aggiungere pulsante "Copia" ai portafogli degli altri utenti; 2. Includere tutti gli utenti nella lista destinatari |
 
 ---
 
 ## Comportamento Atteso
 
-1. **Nessun errore React**: Il useMemo opera su dati stabili e corretti
-2. **Cambio viewMode funziona**: I syntheticDeposits vengono ricalcolati correttamente
-3. **Uscita admin mode**: Transizione pulita senza crash
-4. **Calcoli corretti**: P/L e giacenza media usano i valori giusti per la viewMode selezionata
+### Prima
+- Admin vede "Copia su Utente" solo per i propri portafogli
+- La lista destinatari esclude l'admin
+
+### Dopo
+- Admin vede "Copia" su **tutti** i portafogli (propri e altrui)
+- La lista destinatari include **tutti** gli utenti (incluso l'admin stesso)
+- L'admin può:
+  - Copiare il proprio portfolio su un altro utente ✓
+  - Copiare il proprio portfolio su se stesso (duplicato) ✓
+  - Copiare il portfolio di un utente su un altro utente ✓
+  - Copiare il portfolio di un utente su se stesso ✓
+
+---
+
+## Considerazioni di Sicurezza
+
+La funzionalità rimane sicura perché:
+1. **Solo admin**: la Edge Function verifica il ruolo admin prima di procedere
+2. **Utente valido**: la Edge Function verifica che l'utente destinatario esista
+3. **Audit trail**: ogni copia crea nuovi record con timestamp aggiornati
