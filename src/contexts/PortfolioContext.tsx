@@ -214,6 +214,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       toast.success('Portfolio rinominato');
     },
     onError: (error) => {
