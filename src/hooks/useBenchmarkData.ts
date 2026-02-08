@@ -260,6 +260,7 @@ export function useBenchmarkData(
       scaledReturn: number;
       eurusdVariation?: number;
       equityPctUsed?: number; // Track which equity % was used for debugging
+      usdPctUsed?: number; // Track which USD % was used for currency adjustment
     }> = [];
 
     sortedHistory.forEach((entry, index) => {
@@ -348,6 +349,12 @@ export function useBenchmarkData(
         }
       }
 
+      // Track the USD exposure used for this period
+      const historicalUsdPct = prevEntry.usd_exposure_pct;
+      const usdPctForTracking = currencyAdjusted && historicalUsdPct && historicalUsdPct > 0 
+        ? historicalUsdPct 
+        : (currencyAdjusted ? (usdExposurePct ?? 0.8) : undefined);
+
       returns.push({
         date: entry.snapshot_date,
         equityReturn: avgEquityReturn,
@@ -355,6 +362,7 @@ export function useBenchmarkData(
         scaledReturn,
         eurusdVariation,
         equityPctUsed: equityPct,
+        usdPctUsed: usdPctForTracking,
       });
     });
 
@@ -428,6 +436,12 @@ export function useBenchmarkData(
         }
       }
 
+      // Track the USD exposure used for current point
+      const historicalUsdPct = lastEntry?.usd_exposure_pct;
+      const usdPctForTrackingCurrent = currencyAdjusted && historicalUsdPct && historicalUsdPct > 0 
+        ? historicalUsdPct 
+        : (currencyAdjusted ? (usdExposurePct ?? 0.8) : undefined);
+
       returns.push({
         date: currentDate,
         equityReturn: avgEquityReturnCurrent,
@@ -435,6 +449,7 @@ export function useBenchmarkData(
         scaledReturn: scaledReturnCurrent,
         eurusdVariation: eurusdVariationCurrent,
         equityPctUsed: equityPct,
+        usdPctUsed: usdPctForTrackingCurrent,
       });
     }
 

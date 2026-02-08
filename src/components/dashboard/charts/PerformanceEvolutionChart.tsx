@@ -51,6 +51,7 @@ interface ChartDataPoint {
   benchmarkBondReturn?: number;
   benchmarkEquityPctUsed?: number;
   benchmarkEurusdVariation?: number;
+  benchmarkUsdPctUsed?: number;
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -363,6 +364,7 @@ export function PerformanceEvolutionChart({
       bondReturn: number;
       equityPctUsed?: number;
       eurusdVariation?: number;
+      usdPctUsed?: number;
     }> = {};
     benchmarkReturns.forEach((br) => {
       benchmarkByDate[br.date] = {
@@ -371,6 +373,7 @@ export function PerformanceEvolutionChart({
         bondReturn: br.bondReturn,
         equityPctUsed: br.equityPctUsed,
         eurusdVariation: br.eurusdVariation,
+        usdPctUsed: br.usdPctUsed,
       };
     });
 
@@ -409,6 +412,7 @@ export function PerformanceEvolutionChart({
         benchmarkBondReturn: bm?.bondReturn,
         benchmarkEquityPctUsed: bm?.equityPctUsed,
         benchmarkEurusdVariation: bm?.eurusdVariation,
+        benchmarkUsdPctUsed: bm?.usdPctUsed,
       };
     });
 
@@ -438,6 +442,7 @@ export function PerformanceEvolutionChart({
         benchmarkBondReturn: bmCurrent?.bondReturn,
         benchmarkEquityPctUsed: bmCurrent?.equityPctUsed,
         benchmarkEurusdVariation: bmCurrent?.eurusdVariation,
+        benchmarkUsdPctUsed: bmCurrent?.usdPctUsed,
       });
     }
 
@@ -565,9 +570,15 @@ export function PerformanceEvolutionChart({
                             <span className="font-mono">{(equityPct * 100).toFixed(1)}%</span>
                           </div>
                           <div className="flex justify-between gap-4">
-                            <span>├─ Rend. USD:</span>
+                            <span>├─ Rend. Bnchmrk USD:</span>
                             <span className="font-mono">{scaledUsdReturn.toFixed(2)}%</span>
                           </div>
+                          {currencyAdjusted && dataPoint.benchmarkUsdPctUsed !== undefined && (
+                            <div className="flex justify-between gap-4">
+                              <span>├─ Exp. USD:</span>
+                              <span className="font-mono">{(dataPoint.benchmarkUsdPctUsed * 100).toFixed(1)}%</span>
+                            </div>
+                          )}
                           {currencyAdjusted && dataPoint.benchmarkEurusdVariation !== undefined && (
                             <div className="flex justify-between gap-4">
                               <span>├─ Var. EUR/USD:</span>
