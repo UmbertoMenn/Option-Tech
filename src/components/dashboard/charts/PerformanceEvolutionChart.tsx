@@ -46,6 +46,11 @@ interface ChartDataPoint {
   returnPct: number;
   cumulativeDeposits: number;
   benchmarkReturn?: number;
+  // Benchmark breakdown details
+  benchmarkEquityReturn?: number;
+  benchmarkBondReturn?: number;
+  benchmarkEquityPctUsed?: number;
+  benchmarkEurusdVariation?: number;
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -351,10 +356,22 @@ export function PerformanceEvolutionChart({
       (a, b) => new Date(a.deposit_date).getTime() - new Date(b.deposit_date).getTime()
     );
 
-    // Create a map of benchmark returns by date
-    const benchmarkByDate: Record<string, number> = {};
+    // Create a map of benchmark returns by date with full details
+    const benchmarkByDate: Record<string, {
+      scaledReturn: number;
+      equityReturn: number;
+      bondReturn: number;
+      equityPctUsed?: number;
+      eurusdVariation?: number;
+    }> = {};
     benchmarkReturns.forEach((br) => {
-      benchmarkByDate[br.date] = br.scaledReturn;
+      benchmarkByDate[br.date] = {
+        scaledReturn: br.scaledReturn,
+        equityReturn: br.equityReturn,
+        bondReturn: br.bondReturn,
+        equityPctUsed: br.equityPctUsed,
+        eurusdVariation: br.eurusdVariation,
+      };
     });
 
     const data: ChartDataPoint[] = sorted.map((entry) => {
@@ -380,13 +397,18 @@ export function PerformanceEvolutionChart({
       // Return % = P/L / average balance * 100
       const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
 
+      const bm = benchmarkByDate[entry.snapshot_date];
       return {
         date: entry.snapshot_date,
         formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
         value,
         returnPct,
         cumulativeDeposits,
-        benchmarkReturn: benchmarkByDate[entry.snapshot_date],
+        benchmarkReturn: bm?.scaledReturn,
+        benchmarkEquityReturn: bm?.equityReturn,
+        benchmarkBondReturn: bm?.bondReturn,
+        benchmarkEquityPctUsed: bm?.equityPctUsed,
+        benchmarkEurusdVariation: bm?.eurusdVariation,
       };
     });
 
@@ -404,13 +426,18 @@ export function PerformanceEvolutionChart({
       const avgBalance = initialValue + cumulativeDeposits / 2;
       const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
 
+      const bmCurrent = benchmarkByDate[currentDate];
       data.push({
         date: currentDate,
         formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
         value: currentValue,
         returnPct,
         cumulativeDeposits,
-        benchmarkReturn: benchmarkByDate[currentDate],
+        benchmarkReturn: bmCurrent?.scaledReturn,
+        benchmarkEquityReturn: bmCurrent?.equityReturn,
+        benchmarkBondReturn: bmCurrent?.bondReturn,
+        benchmarkEquityPctUsed: bmCurrent?.equityPctUsed,
+        benchmarkEurusdVariation: bmCurrent?.eurusdVariation,
       });
     }
 
@@ -486,15 +513,77 @@ export function PerformanceEvolutionChart({
               itemStyle={{
                 color: 'hsl(var(--foreground))',
               }}
-              formatter={(value: number, name: string) => {
-                if (name === 'returnPct') return [`${value.toFixed(2)}%`, 'Rendimento'];
-                if (name === 'benchmarkReturn') {
-                  const label = currencyAdjusted ? 'Benchmark (Adj.)' : 'Benchmark';
-                  return [`${value.toFixed(2)}%`, label];
-                }
-                return [value, name];
+              content={({ active, payload, label }) => {
+                if (!active || !payload || payload.length === 0) return null;
+                
+                const dataPoint = payload[0]?.payload as ChartDataPoint | undefined;
+                if (!dataPoint) return null;
+
+                const hasBenchmark = dataPoint.benchmarkReturn !== undefined;
+                const equityPct = dataPoint.benchmarkEquityPctUsed ?? 0;
+                const bondPct = 1 - equityPct;
+                
+                // Calculate scaled USD return (before currency adjustment)
+                const scaledUsdReturn = equityPct * (dataPoint.benchmarkEquityReturn ?? 0) 
+                  + bondPct * (dataPoint.benchmarkBondReturn ?? 0);
+
+                return (
+                  <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+                    <p className="text-foreground font-medium text-sm mb-2">Data: {label}</p>
+                    
+                    {/* Portfolio return */}
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-2 h-2 rounded-full bg-profit" />
+                      <span className="text-foreground text-xs">
+                        Rendimento: <span className="font-medium">{dataPoint.returnPct.toFixed(2)}%</span>
+                      </span>
+                    </div>
+                    
+                    {/* Benchmark with breakdown */}
+                    {hasBenchmark && (
+                      <div className="mt-2 pt-2 border-t border-border">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(30, 100%, 50%)' }} />
+                          <span className="text-foreground text-xs">
+                            {currencyAdjusted ? 'Benchmark (Adj.)' : 'Benchmark'}: 
+                            <span className="font-medium ml-1">{dataPoint.benchmarkReturn?.toFixed(2)}%</span>
+                          </span>
+                        </div>
+                        
+                        {/* Benchmark breakdown details */}
+                        <div className="ml-4 mt-1 space-y-0.5 text-[10px] text-muted-foreground">
+                          <div className="flex justify-between gap-4">
+                            <span>├─ Equity (USD):</span>
+                            <span className="font-mono">{dataPoint.benchmarkEquityReturn?.toFixed(2)}%</span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span>├─ Bond (USD):</span>
+                            <span className="font-mono">{dataPoint.benchmarkBondReturn?.toFixed(2)}%</span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span>├─ Peso Equity:</span>
+                            <span className="font-mono">{(equityPct * 100).toFixed(1)}%</span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span>├─ Rend. USD:</span>
+                            <span className="font-mono">{scaledUsdReturn.toFixed(2)}%</span>
+                          </div>
+                          {currencyAdjusted && dataPoint.benchmarkEurusdVariation !== undefined && (
+                            <div className="flex justify-between gap-4">
+                              <span>├─ Var. EUR/USD:</span>
+                              <span className="font-mono">{dataPoint.benchmarkEurusdVariation.toFixed(2)}%</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between gap-4 font-medium text-foreground">
+                            <span>└─ Rend. EUR:</span>
+                            <span className="font-mono">{dataPoint.benchmarkReturn?.toFixed(2)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
               }}
-              labelFormatter={(label) => `Data: ${label}`}
             />
             <Line
               type="monotone"
