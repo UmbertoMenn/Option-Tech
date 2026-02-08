@@ -77,25 +77,30 @@ export function Dashboard() {
   const [averageBalance, setAverageBalance] = useState<number>(0);
   const [isManualAverageBalance, setIsManualAverageBalance] = useState<boolean>(false);
 
-  // Flag to prevent re-initialization on each render
-  const [hasInitializedDate, setHasInitializedDate] = useState(false);
-
-  // Initialize selectedHistoricalDate only ONCE when data first loads
+  // Reset calculated values when portfolio changes (but NOT selectedHistoricalDate)
   useEffect(() => {
-    if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
-      setSelectedHistoricalDate(earliestEntry.snapshot_date);
-      setHasInitializedDate(true);
-    }
-  }, [earliestEntry, historicalData.length, hasInitializedDate]);
-
-  // Reset all state when portfolio changes (including exit from admin mode)
-  useEffect(() => {
-    setHasInitializedDate(false);
-    setSelectedHistoricalDate(null);
     setPlDeposits(0);
     setAverageBalance(0);
     setIsManualAverageBalance(false);
   }, [portfolio?.id]);
+
+  // Validate and initialize selectedHistoricalDate when historical data changes
+  useEffect(() => {
+    // If no historical data, reset to null
+    if (historicalData.length === 0) {
+      setSelectedHistoricalDate(null);
+      return;
+    }
+    
+    // Check if current date exists in the new data
+    const currentDateExists = selectedHistoricalDate && 
+      historicalData.some(h => h.snapshot_date === selectedHistoricalDate);
+    
+    // If date doesn't exist in new data (or never set), use earliest entry
+    if (!currentDateExists && earliestEntry) {
+      setSelectedHistoricalDate(earliestEntry.snapshot_date);
+    }
+  }, [historicalData, earliestEntry, selectedHistoricalDate]);
 
   // Combine real deposits with synthetic deposits for aggregated view
   const allDepositsForCharts = useMemo((): DepositEntry[] => {
