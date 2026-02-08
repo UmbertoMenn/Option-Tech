@@ -9,12 +9,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2 } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatDate } from '@/lib/formatters';
 import { SectorMappingManager } from './SectorMappingManager';
 import { PortfolioManager } from './PortfolioManager';
+import { TickerMappingManager } from './TickerMappingManager';
 
 interface UserWithRole {
   id: string;
@@ -281,6 +282,10 @@ export function AdminPanel() {
               <PieChart className="w-4 h-4 mr-2" />
               Settori
             </TabsTrigger>
+            <TabsTrigger value="tickers" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Link2 className="w-4 h-4 mr-2" />
+              Ticker
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
@@ -370,6 +375,10 @@ export function AdminPanel() {
 
           <TabsContent value="sectors">
             <SectorMappingManager />
+          </TabsContent>
+
+          <TabsContent value="tickers">
+            <TickerMappingManager />
           </TabsContent>
         </Tabs>
       </main>

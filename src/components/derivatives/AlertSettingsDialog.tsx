@@ -152,9 +152,6 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [bulkThreshold, setBulkThreshold] = useState(DEFAULT_DISTANCE_THRESHOLD_PCT);
   const [newTicker, setNewTicker] = useState('');
   
-  // State for unresolved ticker mappings
-  const [unresolvedMappings, setUnresolvedMappings] = useState<Record<string, string>>({});
-  const [savingMapping, setSavingMapping] = useState<string | null>(null);
   
   // State for new price alert
   const [newPriceTicker, setNewPriceTicker] = useState('');
@@ -347,47 +344,6 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
     );
   };
   
-  // Save ticker mapping for unresolved underlying
-  const handleSaveUnresolvedMapping = async (underlying: string) => {
-    const ticker = unresolvedMappings[underlying]?.trim().toUpperCase();
-    if (!ticker) {
-      toast.error('Inserisci un ticker valido');
-      return;
-    }
-    
-    setSavingMapping(underlying);
-    
-    try {
-      // Save to underlying_mappings table
-      const { error } = await supabase
-        .from('underlying_mappings')
-        .upsert({
-          underlying,
-          ticker,
-          source: 'manual-alert-config',
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'underlying' });
-      
-      if (error) throw error;
-      
-      toast.success(`Mapping salvato: ${underlying} → ${ticker}`);
-      
-      // Remove from unresolved mappings state
-      setUnresolvedMappings(prev => {
-        const updated = { ...prev };
-        delete updated[underlying];
-        return updated;
-      });
-      
-      // Note: The underlying will still show as unresolved until the next fetch
-      // because underlyingPrices is passed from the parent component
-    } catch (error) {
-      console.error('Error saving ticker mapping:', error);
-      toast.error('Errore nel salvataggio del mapping');
-    } finally {
-      setSavingMapping(null);
-    }
-  };
   
   // Format cooldown for display
   const formatCooldown = (minutes: number) => {
@@ -657,7 +613,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 </div>
               )}
               
-              {/* Unresolved underlyings */}
+              {/* Unresolved underlyings - read-only info */}
               {unresolvedUnderlyings.length > 0 && (
                 <div className="space-y-3 p-4 border rounded-lg border-amber-500/30 bg-amber-500/5">
                   <div className="flex items-center gap-2">
@@ -665,38 +621,18 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     <p className="text-sm font-medium">Ticker non risolti:</p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Questi sottostanti non hanno un ticker associato. Inserisci il ticker corretto per poterli usare negli avvisi.
+                    I seguenti sottostanti non hanno un ticker associato e non possono essere usati per gli avvisi di distanza. 
+                    Contatta un amministratore per risolvere questi mapping.
                   </p>
-                  
-                  <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
                     {unresolvedUnderlyings.map(underlying => (
-                      <div key={underlying} className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground min-w-[150px] truncate">
-                          {underlying}
-                        </span>
-                        <span className="text-muted-foreground">→</span>
-                        <Input
-                          placeholder="Ticker (es. APP)"
-                          value={unresolvedMappings[underlying] || ''}
-                          onChange={e => setUnresolvedMappings(prev => ({ 
-                            ...prev, 
-                            [underlying]: e.target.value.toUpperCase() 
-                          }))}
-                          className="flex-1 h-8 text-sm"
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSaveUnresolvedMapping(underlying)}
-                          disabled={savingMapping === underlying || !unresolvedMappings[underlying]?.trim()}
-                        >
-                          {savingMapping === underlying ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            'Salva'
-                          )}
-                        </Button>
-                      </div>
+                      <Badge 
+                        key={underlying} 
+                        variant="outline" 
+                        className="text-amber-500 border-amber-500/30"
+                      >
+                        {underlying}
+                      </Badge>
                     ))}
                   </div>
                 </div>
