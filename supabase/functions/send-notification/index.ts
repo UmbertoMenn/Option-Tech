@@ -20,6 +20,8 @@ interface AlertPayload {
   strike_price?: number;
   underlying_price?: number;
   threshold_value?: number; // For OOB alerts, this contains the breakeven
+  option_type?: string;
+  option_expiry?: string;
 }
 
 interface Profile {
@@ -55,9 +57,15 @@ function getSeverityLabel(severity: string): string {
   return 'Info';
 }
 
-// Build strike/breakeven display
-function getStrikeDisplay(alertType: string, strikePrice?: number, breakeven?: number): { label: string; value: string } | null {
-  // For OOB alerts, show breakeven instead of strike
+// Format option display: "CALL 280 LUG/26" or "PUT 220 MAG/26"
+function formatOptionDisplay(
+  alertType: string, 
+  optionType?: string,
+  strikePrice?: number, 
+  optionExpiry?: string,
+  breakeven?: number
+): { label: string; value: string } | null {
+  // For OOB alerts, show breakeven instead of option
   if (alertType === 'action_strategy_oob') {
     if (breakeven) {
       return { label: 'Breakeven', value: `$${breakeven.toFixed(2)}` };
@@ -67,15 +75,36 @@ function getStrikeDisplay(alertType: string, strikePrice?: number, breakeven?: n
   
   if (!strikePrice) return null;
   
-  // Distance alerts
-  if (alertType.includes('_call') || alertType === 'action_covered_call_itm') {
-    return { label: 'Strike', value: `CALL $${strikePrice.toFixed(2)}` };
-  }
-  if (alertType.includes('_put') || alertType === 'action_naked_put_itm') {
-    return { label: 'Strike', value: `PUT $${strikePrice.toFixed(2)}` };
+  // Determine option type from alert_type if not provided
+  let type = optionType?.toUpperCase();
+  if (!type) {
+    if (alertType.includes('_call') || alertType === 'action_covered_call_itm') {
+      type = 'CALL';
+    } else if (alertType.includes('_put') || alertType === 'action_naked_put_itm') {
+      type = 'PUT';
+    }
   }
   
-  return { label: 'Strike', value: `$${strikePrice.toFixed(2)}` };
+  // Format expiry (e.g., "LUG/26")
+  let expiryStr = '';
+  if (optionExpiry) {
+    const date = new Date(optionExpiry);
+    const months = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 
+                   'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear().toString().slice(-2);
+    expiryStr = ` ${month}/${year}`;
+  }
+  
+  // Format strike (no decimals if whole number)
+  const strikeStr = Math.floor(strikePrice) === strikePrice 
+    ? strikePrice.toString() 
+    : strikePrice.toFixed(2);
+  
+  return { 
+    label: 'Opzione', 
+    value: `${type} ${strikeStr}${expiryStr}` 
+  };
 }
 
 async function sendEmail(
@@ -93,7 +122,15 @@ async function sendEmail(
     const adminPrefix = isAdmin ? "[ADMIN] " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
-    const strikeInfo = getStrikeDisplay(alertData.alert_type, alertData.strike_price, alertData.threshold_value);
+    const optionInfo = formatOptionDisplay(
+      alertData.alert_type,
+      alertData.option_type,
+      alertData.strike_price, 
+      alertData.option_expiry,
+      alertData.threshold_value
+    );
+    const priceLabel = alertData.underlying_price ? 
+      `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     const priceLabel = alertData.underlying_price ? 
       `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     
@@ -127,10 +164,10 @@ async function sendEmail(
                 <td style="padding: 8px 0; color: #6b7280;">Messaggio:</td>
                 <td style="padding: 8px 0;">${alertData.message}</td>
               </tr>
-              ${strikeInfo ? `
+              ${optionInfo ? `
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">${strikeInfo.label}:</td>
-                <td style="padding: 8px 0;">${strikeInfo.value}</td>
+                <td style="padding: 8px 0; color: #6b7280;">📋 ${optionInfo.label}:</td>
+                <td style="padding: 8px 0;">${optionInfo.value}</td>
               </tr>
               ` : ''}
             </table>
@@ -167,7 +204,15 @@ async function sendTelegram(
     const adminPrefix = isAdmin ? "*[ADMIN]* " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
-    const strikeInfo = getStrikeDisplay(alertData.alert_type, alertData.strike_price, alertData.threshold_value);
+    const optionInfo = formatOptionDisplay(
+      alertData.alert_type,
+      alertData.option_type,
+      alertData.strike_price, 
+      alertData.option_expiry,
+      alertData.threshold_value
+    );
+    const priceLabel = alertData.underlying_price ? 
+      `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     const priceLabel = alertData.underlying_price ? 
       `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
@@ -179,8 +224,8 @@ ${isAdmin && userName ? `\n👤 *Utente:* ${userName}` : ''}
 📊 *Strategia:* ${strategyName}
 📝 *Messaggio:* ${alertData.message}`;
 
-    if (strikeInfo) {
-      text += `\n🎯 *${strikeInfo.label}:* ${strikeInfo.value}`;
+    if (optionInfo) {
+      text += `\n📋 *${optionInfo.label}:* ${optionInfo.value}`;
     }
     
     if (priceLabel) {
@@ -246,10 +291,10 @@ serve(async (req: Request): Promise<Response> => {
     console.log("Received alert:", alertData);
     
     // Fetch additional alert details from database if missing
-    if (!alertData.strategy_type || !alertData.strike_price || !alertData.underlying_price || !alertData.threshold_value) {
+    if (!alertData.strategy_type || !alertData.strike_price || !alertData.underlying_price || !alertData.threshold_value || !alertData.option_type || !alertData.option_expiry) {
       const { data: alertDetails } = await supabase
         .from('alerts')
-        .select('strategy_type, strike_price, underlying_price, threshold_value')
+        .select('strategy_type, strike_price, underlying_price, threshold_value, option_type, option_expiry')
         .eq('id', alertData.alert_id)
         .single();
       
@@ -258,6 +303,8 @@ serve(async (req: Request): Promise<Response> => {
         alertData.strike_price = alertData.strike_price || alertDetails.strike_price;
         alertData.underlying_price = alertData.underlying_price || alertDetails.underlying_price;
         alertData.threshold_value = alertData.threshold_value || alertDetails.threshold_value;
+        alertData.option_type = alertData.option_type || alertDetails.option_type;
+        alertData.option_expiry = alertData.option_expiry || alertDetails.option_expiry;
       }
     }
 

@@ -105,6 +105,8 @@ export type Database = {
           direction: string | null
           id: string
           message: string
+          option_expiry: string | null
+          option_type: string | null
           portfolio_id: string | null
           read_at: string | null
           severity: Database["public"]["Enums"]["alert_severity"] | null
@@ -122,6 +124,8 @@ export type Database = {
           direction?: string | null
           id?: string
           message: string
+          option_expiry?: string | null
+          option_type?: string | null
           portfolio_id?: string | null
           read_at?: string | null
           severity?: Database["public"]["Enums"]["alert_severity"] | null
@@ -139,6 +143,8 @@ export type Database = {
           direction?: string | null
           id?: string
           message?: string
+          option_expiry?: string | null
+          option_type?: string | null
           portfolio_id?: string | null
           read_at?: string | null
           severity?: Database["public"]["Enums"]["alert_severity"] | null
@@ -782,7 +788,9 @@ export type Database = {
           is_range_strategy: boolean | null
           portfolio_id: string
           position_ids: string[]
+          sold_call_expiry: string | null
           sold_call_strike: number | null
+          sold_put_expiry: string | null
           sold_put_strike: number | null
           strategy_key: string
           strategy_type: string
@@ -797,7 +805,9 @@ export type Database = {
           is_range_strategy?: boolean | null
           portfolio_id: string
           position_ids: string[]
+          sold_call_expiry?: string | null
           sold_call_strike?: number | null
+          sold_put_expiry?: string | null
           sold_put_strike?: number | null
           strategy_key: string
           strategy_type: string
@@ -812,7 +822,9 @@ export type Database = {
           is_range_strategy?: boolean | null
           portfolio_id?: string
           position_ids?: string[]
+          sold_call_expiry?: string | null
           sold_call_strike?: number | null
+          sold_put_expiry?: string | null
           sold_put_strike?: number | null
           strategy_key?: string
           strategy_type?: string

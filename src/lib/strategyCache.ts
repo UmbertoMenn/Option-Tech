@@ -22,6 +22,8 @@ interface StrategyRecord {
   bought_put_strike: number | null;
   bought_call_strike: number | null;
   is_range_strategy: boolean;
+  sold_call_expiry: string | null;
+  sold_put_expiry: string | null;
 }
 
 /**
@@ -79,6 +81,8 @@ export async function saveStrategyCache(
       bought_put_strike: null,
       bought_call_strike: null,
       is_range_strategy: false, // CC uses ITM logic, not OOR
+      sold_call_expiry: cc.option.expiry_date || null,
+      sold_put_expiry: null,
     });
   });
   
@@ -99,6 +103,8 @@ export async function saveStrategyCache(
       bought_put_strike: null,
       bought_call_strike: null,
       is_range_strategy: false, // NP uses ITM logic, not OOR
+      sold_call_expiry: null,
+      sold_put_expiry: np.option.expiry_date || null,
     });
   });
   
@@ -118,6 +124,8 @@ export async function saveStrategyCache(
       bought_put_strike: ic.boughtPut.strike_price || null,
       bought_call_strike: ic.boughtCall.strike_price || null,
       is_range_strategy: true,
+      sold_call_expiry: ic.soldCall.expiry_date || null,
+      sold_put_expiry: ic.soldPut.expiry_date || null,
     });
   });
   
@@ -137,6 +145,8 @@ export async function saveStrategyCache(
       bought_put_strike: dd.boughtPut.strike_price || null,
       bought_call_strike: dd.boughtCall.strike_price || null,
       is_range_strategy: true,
+      sold_call_expiry: dd.soldCall.expiry_date || null,
+      sold_put_expiry: dd.soldPut.expiry_date || null,
     });
   });
   
@@ -157,6 +167,8 @@ export async function saveStrategyCache(
       bought_put_strike: null,
       bought_call_strike: lc.option.strike_price || null,
       is_range_strategy: false,
+      sold_call_expiry: null,
+      sold_put_expiry: null,
     });
   });
   
@@ -165,11 +177,13 @@ export async function saveStrategyCache(
     const ticker = resolveTicker(gs.underlying, underlyingPrices);
     const positionIds = gs.options.map(o => o.option.id);
     
-    // Calculate sold strikes
+    // Calculate sold strikes and expiry
     let soldPutStrike: number | null = null;
     let soldCallStrike: number | null = null;
     let boughtPutStrike: number | null = null;
     let boughtCallStrike: number | null = null;
+    let soldPutExpiry: string | null = null;
+    let soldCallExpiry: string | null = null;
     
     for (const opt of gs.options) {
       const o = opt.option;
@@ -178,11 +192,13 @@ export async function saveStrategyCache(
         if (o.option_type === 'put' && o.strike_price) {
           if (!soldPutStrike || o.strike_price > soldPutStrike) {
             soldPutStrike = o.strike_price;
+            soldPutExpiry = o.expiry_date || null;
           }
         }
         if (o.option_type === 'call' && o.strike_price) {
           if (!soldCallStrike || o.strike_price < soldCallStrike) {
             soldCallStrike = o.strike_price;
+            soldCallExpiry = o.expiry_date || null;
           }
         }
       } else {
@@ -220,6 +236,8 @@ export async function saveStrategyCache(
       bought_put_strike: boughtPutStrike,
       bought_call_strike: boughtCallStrike,
       is_range_strategy: isRangeStrategy,
+      sold_call_expiry: soldCallExpiry,
+      sold_put_expiry: soldPutExpiry,
     });
   });
   

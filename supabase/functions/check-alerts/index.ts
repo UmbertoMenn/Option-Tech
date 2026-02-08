@@ -60,6 +60,8 @@ interface StrategyCache {
   bought_put_strike: number | null;
   bought_call_strike: number | null;
   is_range_strategy: boolean;
+  sold_call_expiry: string | null;
+  sold_put_expiry: string | null;
 }
 
 interface Position {
@@ -428,7 +430,9 @@ serve(async (req) => {
                     strike_price: soldCallStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < distConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'call',
+                    option_expiry: strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -535,7 +539,9 @@ serve(async (req) => {
                     strike_price: soldPutStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < distConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'put',
+                    option_expiry: strategy.sold_put_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -646,7 +652,9 @@ serve(async (req) => {
                     strike_price: soldPutStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < putDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'put',
+                    option_expiry: strategy.sold_put_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -701,7 +709,9 @@ serve(async (req) => {
                     strike_price: soldCallStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < callDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'call',
+                    option_expiry: strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -812,7 +822,9 @@ serve(async (req) => {
                     strike_price: soldPutStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < putDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'put',
+                    option_expiry: strategy.sold_put_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -867,7 +879,9 @@ serve(async (req) => {
                     strike_price: soldCallStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < callDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'call',
+                    option_expiry: strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -978,7 +992,9 @@ serve(async (req) => {
                     strike_price: soldPutStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < putDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'put',
+                    option_expiry: strategy.sold_put_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -1033,7 +1049,9 @@ serve(async (req) => {
                     strike_price: soldCallStrike,
                     underlying_price: underlyingPrice,
                     message,
-                    severity: distancePct < callDistConfig.threshold_pct / 2 ? 'critical' : 'warning',
+                    severity: 'warning',
+                    option_type: 'call',
+                    option_expiry: strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
