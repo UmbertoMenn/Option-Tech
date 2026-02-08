@@ -161,7 +161,6 @@ export function AuthForm() {
             <IronCondorIcon size={32} className="text-primary" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight">Option Tech</h1>
-          <p className="text-muted-foreground">Gestisci il tuo portafoglio derivati</p>
         </div>
 
         <Card className="border-border/50 bg-card/80 backdrop-blur">
