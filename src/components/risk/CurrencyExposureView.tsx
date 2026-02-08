@@ -243,8 +243,16 @@ export function CurrencyExposureView({
                       <TooltipTrigger asChild>
                         <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" className="max-w-xs text-xs">
-                        <p>Le azioni sono calcolate al lordo delle protezioni, mentre queste ultime sono aggiunte alla lista con la valorizzazione ai prezzi di mercato. Le strategie sono valorizzate come max loss convertite al cambio.</p>
+                      <TooltipContent side="bottom" className="max-w-xs text-sm">
+                        <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+                        <ul className="list-disc ml-4 space-y-1">
+                          <li><b>Bond</b>: include obbligazioni nell'esposizione</li>
+                          <li><b>Protezioni</b>: include Long PUT (valorizzate a mercato)</li>
+                          <li><b>Naked Put</b>: include rischio Naked PUT</li>
+                          <li><b>Strategie</b>: include Max Loss delle strategie</li>
+                          <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
+                        </ul>
+                        <p className="mt-2 text-muted-foreground">Le azioni sono sempre valorizzate al lordo delle protezioni.</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>

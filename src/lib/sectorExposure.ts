@@ -311,7 +311,9 @@ function getStockSectorWithMapping(
 }
 
 export interface SectorExposureOptions {
-  includeDerivatives?: boolean;
+  includeNakedPut?: boolean;     // default: true
+  includeStrategies?: boolean;   // default: true
+  includeLeapCall?: boolean;     // default: true
   sectorMappings?: Record<string, SectorMapping>;
 }
 
@@ -320,7 +322,12 @@ export function calculateSectorExposure(
   etfAllocations: Record<string, ETFAllocation>,
   options: SectorExposureOptions = {}
 ): SectorExposure[] {
-  const { includeDerivatives = true, sectorMappings = {} } = options;
+  const { 
+    includeNakedPut = true, 
+    includeStrategies = true, 
+    includeLeapCall = true, 
+    sectorMappings = {} 
+  } = options;
   const bySector = new Map<string, SectorExposure>();
   
   const getOrCreateSector = (sector: string): SectorExposure => {
@@ -432,9 +439,10 @@ export function calculateSectorExposure(
     }
   }
   
-  // Process derivatives if enabled - NOW USES DYNAMIC MAPPINGS + EUROFOREX FILTER
-  if (includeDerivatives) {
-    // Naked PUTs - assign by underlying sector using dynamic mappings
+  // Process derivatives with granular toggles - USES DYNAMIC MAPPINGS + EUROFOREX FILTER
+  
+  // Naked PUTs - assign by underlying sector using dynamic mappings
+  if (includeNakedPut) {
     for (const np of analysis.nakedPutDetails) {
       // Skip EUROFOREX instruments
       if (isEuroforex(np.underlying)) continue;
@@ -451,8 +459,10 @@ export function calculateSectorExposure(
         category: 'nakedPuts',
       });
     }
-    
-    // Leap CALLs - assign by underlying sector using dynamic mappings
+  }
+  
+  // Leap CALLs - assign by underlying sector using dynamic mappings
+  if (includeLeapCall) {
     for (const lc of analysis.leapCallDetails) {
       // Skip EUROFOREX instruments
       if (isEuroforex(lc.underlying)) continue;
@@ -469,8 +479,10 @@ export function calculateSectorExposure(
         category: 'leapCalls',
       });
     }
-    
-    // Strategies - assign by underlying sector using dynamic mappings
+  }
+  
+  // Strategies - assign by underlying sector using dynamic mappings
+  if (includeStrategies) {
     for (const strat of analysis.strategyDetails) {
       // Skip EUROFOREX instruments
       if (isEuroforex(strat.underlying)) continue;

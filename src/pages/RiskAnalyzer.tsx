@@ -38,10 +38,8 @@ export function RiskAnalyzer() {
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
   const toastShownRef = useRef(false);
   
-  // Compute includeDerivatives based on individual toggles
-  const includeDerivatives = includeProtections || includeNakedPut || includeStrategies || includeLeapCall;
   
-  // Use centralized currency exposure hook
+  // Use centralized currency exposure hook with granular toggles
   const {
     exposures: currencyExposure,
     isLoading: isCurrencyLoading,
@@ -49,7 +47,13 @@ export function RiskAnalyzer() {
     etfCount,
     loadedETFCount,
     allocations,
-  } = useCurrencyExposure({ includeDerivatives, includeBonds });
+  } = useCurrencyExposure({ 
+    includeBonds, 
+    includeProtections, 
+    includeNakedPut, 
+    includeStrategies, 
+    includeLeapCall 
+  });
   
   // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
   const stocksForSectorMapping = useMemo(() => {
@@ -118,10 +122,15 @@ export function RiskAnalyzer() {
     }
   }, [resolvingCount]);
   
-  // Calculate sector exposure with dynamic mappings
+  // Calculate sector exposure with dynamic mappings and granular toggles
   const sectorExposure = useMemo(() => {
-    return calculateSectorExposure(analysis, allocations, { includeDerivatives, sectorMappings });
-  }, [analysis, allocations, includeDerivatives, sectorMappings]);
+    return calculateSectorExposure(analysis, allocations, { 
+      includeNakedPut, 
+      includeStrategies, 
+      includeLeapCall, 
+      sectorMappings 
+    });
+  }, [analysis, allocations, includeNakedPut, includeStrategies, includeLeapCall, sectorMappings]);
   
   return (
     <div className="min-h-screen bg-background">
