@@ -66,6 +66,52 @@ export function useSectorMappings() {
         }
       }
       
+      // 2b. Extract potential tickers from derivative names and fetch by ticker
+      const potentialTickers: string[] = [];
+      for (const name of derivativeNames) {
+        const upperName = name.toUpperCase();
+        // Extract ticker pattern (1-5 uppercase letters at start)
+        const tickerMatch = upperName.match(/^([A-Z]{1,5})(?:\s|$)/);
+        if (tickerMatch) {
+          potentialTickers.push(tickerMatch[1]);
+        }
+        // Also try extracting 2-5 letter words (potential tickers like META, AAPL)
+        const words = upperName.split(/\s+/);
+        for (const word of words) {
+          if (/^[A-Z]{2,5}$/.test(word)) {
+            potentialTickers.push(word);
+          }
+        }
+      }
+      
+      // Fetch by ticker for derivatives (only tickers not already in mappings)
+      const tickersToFetch = [...new Set(potentialTickers)].filter(
+        ticker => !newMappings[`ticker:${ticker}`]
+      );
+      
+      if (tickersToFetch.length > 0) {
+        const { data: tickerData, error: tickerError } = await supabase
+          .from('isin_mappings')
+          .select('isin, ticker, sector, industry')
+          .in('ticker', tickersToFetch);
+        
+        if (tickerError) {
+          console.error('Error fetching sector mappings by ticker:', tickerError);
+        } else if (tickerData) {
+          console.log(`Fetched ${tickerData.length} mappings by ticker from DB`);
+          for (const row of tickerData) {
+            if (row.sector && row.ticker) {
+              // Store by ticker key
+              newMappings[`ticker:${row.ticker.toUpperCase()}`] = {
+                ticker: row.ticker,
+                sector: row.sector,
+                industry: row.industry || '',
+              };
+            }
+          }
+        }
+      }
+      
       // 3. Find ISINs that need resolution
       const missingIsins = isins.filter(isin => !existingIsins.has(isin));
       const needsSectorUpdate = existingData.filter((d: any) => d.ticker && !d.sector).map((d: any) => d.isin);

@@ -34,8 +34,7 @@ export function getSectorColor(sector: string): string {
 // Mapping of known stock tickers to sectors (GICS sectors)
 const STOCK_SECTORS: Record<string, string> = {
   // Technology
-  'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology', 'GOOG': 'Technology',
-  'META': 'Technology', 'NVDA': 'Technology', 'AVGO': 'Technology', 'CSCO': 'Technology',
+  'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'AVGO': 'Technology', 'CSCO': 'Technology',
   'ORCL': 'Technology', 'ACN': 'Technology', 'ADBE': 'Technology', 'CRM': 'Technology',
   'INTC': 'Technology', 'AMD': 'Technology', 'TXN': 'Technology', 'QCOM': 'Technology',
   'IBM': 'Technology', 'NOW': 'Technology', 'INTU': 'Technology', 'AMAT': 'Technology',
@@ -105,7 +104,8 @@ const STOCK_SECTORS: Record<string, string> = {
   'PSA': 'Real Estate', 'SPG': 'Real Estate', 'O': 'Real Estate', 'WELL': 'Real Estate',
   'DLR': 'Real Estate', 'AVB': 'Real Estate', 'EQR': 'Real Estate', 'VTR': 'Real Estate',
   
-  // Communication Services
+  // Communication Services (includes social media, search, streaming)
+  'META': 'Communication Services', 'GOOGL': 'Communication Services', 'GOOG': 'Communication Services',
   'NFLX': 'Communication Services', 'DIS': 'Communication Services', 'CMCSA': 'Communication Services',
   'VZ': 'Communication Services', 'T': 'Communication Services', 'TMUS': 'Communication Services',
   'CHTR': 'Communication Services', 'EA': 'Communication Services', 'ATVI': 'Communication Services',
