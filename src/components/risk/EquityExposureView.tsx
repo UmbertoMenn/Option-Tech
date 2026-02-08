@@ -269,79 +269,82 @@ export function EquityExposureView({
         {/* Total Card */}
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded bg-primary/20">
-                  <ShieldAlert className="w-4 h-4 text-primary" />
+            <div className="flex justify-between gap-4">
+              {/* Left column: title, value, description */}
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-1.5 rounded bg-primary/20">
+                    <ShieldAlert className="w-4 h-4 text-primary" />
+                  </div>
+                  <span className="text-sm font-medium text-primary">Esposizione in Equity e Commodities</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-sm">
+                        <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+                        <ul className="list-disc ml-4 space-y-1">
+                          <li><b>Protezioni</b>: calcola azioni al netto delle Long PUT</li>
+                          <li><b>Naked Put</b>: include rischio Naked PUT (Strike × Ctr × 100)</li>
+                          <li><b>Strategie</b>: include Max Loss delle strategie</li>
+                          <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
-                <span className="text-sm font-medium text-primary">Esposizione in Equity e Commodities</span>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs text-sm">
-                      <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
-                      <ul className="list-disc ml-4 space-y-1">
-                        <li><b>Protezioni</b>: calcola azioni al netto delle Long PUT</li>
-                        <li><b>Naked Put</b>: include rischio Naked PUT (Strike × Ctr × 100)</li>
-                        <li><b>Strategie</b>: include Max Loss delle strategie</li>
-                        <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
-                      </ul>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
+                <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
+                {portfolioTotalValue && portfolioTotalValue > 0 && (
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
-            <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
-            {portfolioTotalValue && portfolioTotalValue > 0 && (
-              <div className="text-xs text-muted-foreground mt-0.5">
-                ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
-              </div>
-            )}
-            
-            {/* Toggle Row */}
-            <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-border/50">
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="protections-toggle"
-                  checked={includeProtections}
-                  onCheckedChange={setIncludeProtections}
-                />
-                <Label htmlFor="protections-toggle" className="text-sm cursor-pointer">
-                  Protezioni
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="naked-put-toggle"
-                  checked={includeNakedPut}
-                  onCheckedChange={setIncludeNakedPut}
-                />
-                <Label htmlFor="naked-put-toggle" className="text-sm cursor-pointer">
-                  Naked Put
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="strategies-toggle"
-                  checked={includeStrategies}
-                  onCheckedChange={setIncludeStrategies}
-                />
-                <Label htmlFor="strategies-toggle" className="text-sm cursor-pointer">
-                  Strategie
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="leap-call-toggle"
-                  checked={includeLeapCall}
-                  onCheckedChange={setIncludeLeapCall}
-                />
-                <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">
-                  Leap Call
-                </Label>
+              
+              {/* Right column: toggles stacked vertically */}
+              <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="protections-toggle"
+                    checked={includeProtections}
+                    onCheckedChange={setIncludeProtections}
+                  />
+                  <Label htmlFor="protections-toggle" className="text-sm cursor-pointer">
+                    Protezioni
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="naked-put-toggle"
+                    checked={includeNakedPut}
+                    onCheckedChange={setIncludeNakedPut}
+                  />
+                  <Label htmlFor="naked-put-toggle" className="text-sm cursor-pointer">
+                    Naked Put
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="strategies-toggle"
+                    checked={includeStrategies}
+                    onCheckedChange={setIncludeStrategies}
+                  />
+                  <Label htmlFor="strategies-toggle" className="text-sm cursor-pointer">
+                    Strategie
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="leap-call-toggle"
+                    checked={includeLeapCall}
+                    onCheckedChange={setIncludeLeapCall}
+                  />
+                  <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">
+                    Leap Call
+                  </Label>
+                </div>
               </div>
             </div>
           </CardContent>
