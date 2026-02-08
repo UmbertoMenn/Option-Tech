@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { Dashboard } from "@/components/dashboard/Dashboard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AdminPanel } from "@/components/admin/AdminPanel";
 import { Derivatives } from "@/pages/Derivatives";
 import { RiskAnalyzer } from "@/pages/RiskAnalyzer";
@@ -42,7 +43,11 @@ function AppRoutes() {
   return (
     <PortfolioProvider>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={
+          <ErrorBoundary title="Errore nel caricamento della dashboard">
+            <Dashboard />
+          </ErrorBoundary>
+        } />
         <Route path="/derivatives" element={<Derivatives />} />
         <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
         <Route path="/admin" element={<AdminPanel />} />

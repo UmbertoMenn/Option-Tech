@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
@@ -70,14 +70,32 @@ export function Dashboard() {
   
   const { clearPortfolioData, isClearing } = useClearPortfolio();
   
-  const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
-    earliestEntry?.snapshot_date || null
-  );
+  const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(null);
   
   // New state for P/L calculation
   const [plDeposits, setPlDeposits] = useState<number>(0);
   const [averageBalance, setAverageBalance] = useState<number>(0);
   const [isManualAverageBalance, setIsManualAverageBalance] = useState<boolean>(false);
+
+  // Flag to prevent re-initialization on each render
+  const [hasInitializedDate, setHasInitializedDate] = useState(false);
+
+  // Initialize selectedHistoricalDate only ONCE when data first loads
+  useEffect(() => {
+    if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
+      setSelectedHistoricalDate(earliestEntry.snapshot_date);
+      setHasInitializedDate(true);
+    }
+  }, [earliestEntry, historicalData.length, hasInitializedDate]);
+
+  // Reset all state when portfolio changes (including exit from admin mode)
+  useEffect(() => {
+    setHasInitializedDate(false);
+    setSelectedHistoricalDate(null);
+    setPlDeposits(0);
+    setAverageBalance(0);
+    setIsManualAverageBalance(false);
+  }, [portfolio?.id]);
 
   // Combine real deposits with synthetic deposits for aggregated view
   const allDepositsForCharts = useMemo((): DepositEntry[] => {
@@ -95,11 +113,6 @@ export function Dashboard() {
     
     return [...deposits, ...syntheticAsDeposits];
   }, [deposits, syntheticDeposits, isAggregatedView]);
-
-  // Update selected date when earliest entry changes (on first load)
-  if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
-    setSelectedHistoricalDate(earliestEntry.snapshot_date);
-  }
   
   // Reset deposits and averageBalance when historical date changes
   const handleHistoricalDateChange = (date: string | null) => {

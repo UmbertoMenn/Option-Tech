@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { HistoricalDataEntry, HistoricalDataInput, SyntheticDeposit, AggregatedHistoricalResult } from '@/types/historicalData';
@@ -180,11 +181,11 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
   const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
 
   const historicalDataQuery = useQuery({
-    queryKey: ['historical-data', portfolioId, viewMode],
+    queryKey: ['historical-data', portfolioId],
     queryFn: async (): Promise<AggregatedHistoricalResult> => {
       if (!portfolioId) return { entries: [], syntheticDeposits: [] };
       
-      // Vista aggregata: fetch tutti i dati e aggrega per data
+      // Vista aggregata: fetch tutti i dati e aggrega per data (use 'base' for initial aggregation)
       if (isAggregated && isAdmin) {
         const { data, error } = await supabase
           .from('historical_data')
@@ -192,7 +193,8 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
           .order('snapshot_date', { ascending: false });
         
         if (error) throw error;
-        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], viewMode);
+        // Always use 'base' mode for initial aggregation - syntheticDeposits will be recalculated below
+        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'base');
       }
       
       // Query normale per portfolio singolo
@@ -210,6 +212,45 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
     },
     enabled: !!portfolioId && (!isAggregated || isAdmin),
   });
+
+  // Recalculate syntheticDeposits based on current viewMode (without refetching data)
+  const syntheticDeposits = useMemo((): SyntheticDeposit[] => {
+    const rawEntries = historicalDataQuery.data?.entries || [];
+    
+    // For non-aggregated view, no synthetic deposits
+    if (!isAggregated || rawEntries.length === 0) {
+      return [];
+    }
+    
+    // Group entries by portfolio_id and calculate first value for current viewMode
+    const byPortfolio = new Map<string, HistoricalDataEntry[]>();
+    rawEntries.forEach(entry => {
+      const list = byPortfolio.get(entry.portfolio_id) || [];
+      list.push(entry);
+      byPortfolio.set(entry.portfolio_id, list);
+    });
+    
+    // Sort each portfolio by date ascending
+    byPortfolio.forEach((entries, key) => {
+      entries.sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
+      byPortfolio.set(key, entries);
+    });
+    
+    // Calculate synthetic deposits based on viewMode
+    const deposits: SyntheticDeposit[] = [];
+    byPortfolio.forEach((entries, portfolioId) => {
+      if (entries.length === 0) return;
+      const firstEntry = entries[0];
+      const firstValue = getValueForViewMode(firstEntry, viewMode);
+      deposits.push({
+        date: firstEntry.snapshot_date,
+        amount: firstValue,
+        portfolioId,
+      });
+    });
+    
+    return deposits;
+  }, [historicalDataQuery.data?.entries, viewMode, isAggregated]);
 
   const upsertMutation = useMutation({
     mutationFn: async (entry: HistoricalDataInput) => {
@@ -274,7 +315,6 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
 
   // Extract entries from the result
   const entries = historicalDataQuery.data?.entries || [];
-  const syntheticDeposits = historicalDataQuery.data?.syntheticDeposits || [];
 
   // Get the earliest entry for initial value calculation
   const earliestEntry = entries.length 
