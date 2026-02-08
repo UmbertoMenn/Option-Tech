@@ -332,13 +332,20 @@ export function useBenchmarkData(
       
       let scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
 
-      // Apply currency adjustment if enabled
-      // Formula: adjustedReturn = nominalReturn - (usdExposurePct * eurusdVariation)
+      // Apply currency adjustment if enabled using HISTORICAL USD exposure
+      // Same logic as equity: use previous point's USD exposure for this period's adjustment
       let eurusdVariation = 0;
-      if (currencyAdjusted && usdExposurePct && usdExposurePct > 0) {
-        eurusdVariation = calculateEurusdVariation(entry.snapshot_date);
-        // If EUR appreciates (positive variation), USD assets lose value → reduce benchmark
-        scaledReturn = scaledReturn - (usdExposurePct * eurusdVariation);
+      if (currencyAdjusted) {
+        const historicalUsdPct = prevEntry.usd_exposure_pct;
+        const usdPct = historicalUsdPct && historicalUsdPct > 0 
+          ? historicalUsdPct 
+          : (usdExposurePct ?? 0.8);
+        
+        if (usdPct > 0) {
+          eurusdVariation = calculateEurusdVariation(entry.snapshot_date);
+          // If EUR appreciates (positive variation), USD assets lose value → reduce benchmark
+          scaledReturn = scaledReturn - (usdPct * eurusdVariation);
+        }
       }
 
       returns.push({
@@ -407,11 +414,18 @@ export function useBenchmarkData(
         
       let scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
 
-      // Apply currency adjustment if enabled
+      // Apply currency adjustment if enabled using last historical USD exposure
       let eurusdVariationCurrent = 0;
-      if (currencyAdjusted && usdExposurePct && usdExposurePct > 0) {
-        eurusdVariationCurrent = calculateEurusdVariation(currentDate);
-        scaledReturnCurrent = scaledReturnCurrent - (usdExposurePct * eurusdVariationCurrent);
+      if (currencyAdjusted) {
+        const historicalUsdPct = lastEntry?.usd_exposure_pct;
+        const usdPct = historicalUsdPct && historicalUsdPct > 0 
+          ? historicalUsdPct 
+          : (usdExposurePct ?? 0.8);
+        
+        if (usdPct > 0) {
+          eurusdVariationCurrent = calculateEurusdVariation(currentDate);
+          scaledReturnCurrent = scaledReturnCurrent - (usdPct * eurusdVariationCurrent);
+        }
       }
 
       returns.push({
