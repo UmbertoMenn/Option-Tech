@@ -15,6 +15,61 @@ interface ResetLinkRequest {
   origin: string;
 }
 
+// Simple in-memory rate limiting (per email and per IP)
+// In production, consider using Redis or database-backed rate limiting
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const MAX_REQUESTS_PER_WINDOW = 3; // Max 3 requests per email per hour
+
+// Allowed origins whitelist
+const ALLOWED_ORIGINS = [
+  "https://optionmonitor.lovable.app",
+  "https://id-preview--74d3b9d7-602b-4421-9524-4fb4f90db9e9.lovable.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+function isRateLimited(key: string): boolean {
+  const now = Date.now();
+  const record = rateLimitMap.get(key);
+  
+  if (!record || now > record.resetTime) {
+    // Reset or create new record
+    rateLimitMap.set(key, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+  
+  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
+    return true;
+  }
+  
+  record.count++;
+  return false;
+}
+
+function validateEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email) && email.length <= 255;
+}
+
+function validateOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return ALLOWED_ORIGINS.some(allowed => {
+      const allowedUrl = new URL(allowed);
+      return url.origin === allowedUrl.origin;
+    });
+  } catch {
+    return false;
+  }
+}
+
+// Generic success response - NEVER reveal if email exists or not
+const genericSuccessResponse = () => new Response(
+  JSON.stringify({ success: true, message: "If an account with that email exists, a reset link has been sent." }),
+  { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+);
+
 serve(async (req: Request): Promise<Response> => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
@@ -26,10 +81,43 @@ serve(async (req: Request): Promise<Response> => {
 
     // Validate required fields
     if (!email || !origin) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields: email and origin" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      // Return generic response to prevent information leakage
+      console.log("Missing required fields");
+      return genericSuccessResponse();
+    }
+
+    // Validate email format
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!validateEmail(trimmedEmail)) {
+      console.log("Invalid email format:", trimmedEmail.substring(0, 3) + "***");
+      return genericSuccessResponse();
+    }
+
+    // Validate origin against whitelist to prevent open redirect
+    if (!validateOrigin(origin)) {
+      console.error("Invalid origin attempted:", origin);
+      return genericSuccessResponse();
+    }
+
+    // Rate limiting by email
+    const emailKey = `email:${trimmedEmail}`;
+    if (isRateLimited(emailKey)) {
+      console.log("Rate limited for email:", trimmedEmail.substring(0, 3) + "***");
+      // Still return success to prevent email enumeration
+      return genericSuccessResponse();
+    }
+
+    // Get client IP for additional rate limiting (if available)
+    const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || 
+                     req.headers.get("x-real-ip") || 
+                     "unknown";
+    
+    if (clientIP !== "unknown") {
+      const ipKey = `ip:${clientIP}`;
+      if (isRateLimited(ipKey)) {
+        console.log("Rate limited for IP:", clientIP);
+        return genericSuccessResponse();
+      }
     }
 
     // Create Supabase admin client
@@ -45,37 +133,33 @@ serve(async (req: Request): Promise<Response> => {
     );
 
     // Generate recovery link using admin API
+    // Note: This will fail silently if email doesn't exist (which is what we want)
     const { data, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
-      email: email,
+      email: trimmedEmail,
     });
 
     if (linkError) {
-      console.error("Error generating recovery link:", linkError);
-      return new Response(
-        JSON.stringify({ error: "Failed to generate recovery link" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      // Log error but return success to prevent email enumeration
+      console.error("Error generating recovery link (may be invalid email):", linkError.message);
+      return genericSuccessResponse();
     }
 
     if (!data?.properties?.hashed_token) {
-      console.error("No hashed_token in response:", data);
-      return new Response(
-        JSON.stringify({ error: "Invalid recovery link data" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      console.error("No hashed_token in response - email may not exist");
+      return genericSuccessResponse();
     }
 
     // Build reset URL with token_hash as query parameter (survives redirects!)
     const tokenHash = data.properties.hashed_token;
     const resetUrl = `${origin}/reset-password?token_hash=${encodeURIComponent(tokenHash)}&type=recovery`;
 
-    console.log("Generated reset URL for:", email);
+    console.log("Generated reset URL for:", trimmedEmail.substring(0, 3) + "***");
 
     // Send email using Resend
     const emailResponse = await resend.emails.send({
       from: "Portfolio Monitor <noreply@resend.dev>",
-      to: [email],
+      to: [trimmedEmail],
       subject: "Reset della password",
       html: `
         <!DOCTYPE html>
@@ -118,17 +202,13 @@ serve(async (req: Request): Promise<Response> => {
       `,
     });
 
-    console.log("Email sent successfully:", emailResponse);
+    console.log("Email sent successfully");
 
-    return new Response(
-      JSON.stringify({ success: true, message: "Reset email sent" }),
-      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
+    // Always return generic success
+    return genericSuccessResponse();
   } catch (error: any) {
     console.error("Error in generate-reset-link function:", error);
-    return new Response(
-      JSON.stringify({ error: error.message || "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
+    // Return generic success even on error to prevent information leakage
+    return genericSuccessResponse();
   }
 });
