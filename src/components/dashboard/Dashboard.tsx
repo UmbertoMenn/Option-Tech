@@ -7,10 +7,11 @@ import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
+import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
@@ -21,6 +22,7 @@ import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelec
 import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioChart';
 import { HistoricalChartsCarousel } from '@/components/dashboard/HistoricalChartsCarousel';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
+import { ClearDataDialog } from '@/components/dashboard/ClearDataDialog';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
 
@@ -50,8 +52,11 @@ export function Dashboard() {
     deleteDeposit,
     isUpserting: isUpsertingDeposit,
   } = useDeposits(portfolio?.id);
+  
+  const { clearPortfolioData, isClearing } = useClearPortfolio();
 
   // Centralized state for unified carousel
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('base');
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
     earliestEntry?.snapshot_date || null
@@ -73,6 +78,12 @@ export function Dashboard() {
     setPlDeposits(0);
     setAverageBalance(0);
     setIsManualAverageBalance(false);
+  };
+
+  // Handler for clearing portfolio data
+  const handleClearData = async (mode: ClearMode) => {
+    if (!portfolio?.id) return;
+    await clearPortfolioData(portfolio.id, mode);
   };
 
   if (isLoading) {
@@ -222,12 +233,31 @@ export function Dashboard() {
                 />
               </div>
             </div>
-            <div>
+            <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
               <FileUploader />
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => setClearDialogOpen(true)}
+                disabled={positions.length === 0 || isClearing}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Pulisci Dati Portfolio
+              </Button>
             </div>
           </div>
         </div>
+
+        {/* Clear Data Dialog */}
+        <ClearDataDialog
+          open={clearDialogOpen}
+          onOpenChange={setClearDialogOpen}
+          portfolioName={portfolio?.name ?? 'Portfolio'}
+          onConfirm={handleClearData}
+          isClearing={isClearing}
+        />
 
         {/* Historical Charts Carousel */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
