@@ -160,6 +160,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [newPriceTicker, setNewPriceTicker] = useState('');
   const [newPriceDirection, setNewPriceDirection] = useState<'above' | 'below'>('below');
   const [newPriceTarget, setNewPriceTarget] = useState('');
+  const [newPriceDeleteAfterTrigger, setNewPriceDeleteAfterTrigger] = useState(false);
   const [validatingTicker, setValidatingTicker] = useState(false);
   const [tickerValidation, setTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
   
@@ -439,11 +440,13 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
         direction: newPriceDirection,
         target_price: targetPrice,
         cooldown_minutes: cooldownMinutes,
+        delete_after_trigger: newPriceDeleteAfterTrigger,
       });
       
       toast.success(`Avviso di prezzo creato per ${ticker}`);
       setNewPriceTicker('');
       setNewPriceTarget('');
+      setNewPriceDeleteAfterTrigger(false);
       setTickerValidation(null);
     } catch (error: any) {
       if (error.code === '23505') {
@@ -887,6 +890,19 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                       Aggiungi
                     </Button>
                   </div>
+                  
+                  <div className="flex items-center gap-2 pt-2">
+                    <input
+                      type="checkbox"
+                      id="delete-after-trigger"
+                      checked={newPriceDeleteAfterTrigger}
+                      onChange={(e) => setNewPriceDeleteAfterTrigger(e.target.checked)}
+                      className="h-4 w-4 rounded border border-primary ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    />
+                    <Label htmlFor="delete-after-trigger" className="text-sm cursor-pointer">
+                      Elimina regola dopo trigger
+                    </Label>
+                  </div>
                 </div>
               </div>
               
@@ -911,6 +927,12 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                           <Badge variant="outline" className="font-mono">
                             {alert.ticker}
                           </Badge>
+                          
+                          {alert.delete_after_trigger && (
+                            <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
+                              Una tantum
+                            </Badge>
+                          )}
                           
                           <div className="flex items-center gap-1">
                             {alert.direction === 'above' ? (

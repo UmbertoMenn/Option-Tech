@@ -139,6 +139,7 @@ export interface PriceAlert {
   enabled: boolean;
   last_triggered_at: string | null;
   cooldown_minutes: number;
+  delete_after_trigger: boolean;
   created_at: string;
   updated_at: string;
 }

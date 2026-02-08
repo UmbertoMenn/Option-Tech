@@ -679,6 +679,7 @@ export type Database = {
         Row: {
           cooldown_minutes: number
           created_at: string
+          delete_after_trigger: boolean
           direction: string
           enabled: boolean
           id: string
@@ -691,6 +692,7 @@ export type Database = {
         Insert: {
           cooldown_minutes?: number
           created_at?: string
+          delete_after_trigger?: boolean
           direction: string
           enabled?: boolean
           id?: string
@@ -703,6 +705,7 @@ export type Database = {
         Update: {
           cooldown_minutes?: number
           created_at?: string
+          delete_after_trigger?: boolean
           direction?: string
           enabled?: boolean
           id?: string
