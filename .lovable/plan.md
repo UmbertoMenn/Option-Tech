@@ -1,159 +1,143 @@
 
-# Piano: Separare gli State dei Toggle per Ogni Vista
+# Piano: Correzione Equity Exposure per Benchmark (Solo Protezioni)
 
 ## Problema
 
-I toggle con lo stesso nome (Naked Put, Strategie, Leap Call) sono condivisi tra **Currency Exposure** e **Sector Allocation** perché usano le stesse variabili di state in `RiskAnalyzer.tsx`:
+Il benchmark del grafico Evoluzione Rendimento utilizza l'`equity_exposure_pct` che include **tutte le categorie di derivati**: Naked PUT, Leap CALL, Strategie.
 
-```typescript
-const [includeNakedPut, setIncludeNakedPut] = useState(true);
-const [includeStrategies, setIncludeStrategies] = useState(true);
-const [includeLeapCall, setIncludeLeapCall] = useState(true);
-```
-
-Questi state vengono passati sia a `CurrencyExposureView` che a `SectorAllocationView`, quindi attivare/disattivare un toggle in una vista lo cambia anche nell'altra.
-
----
+L'utente ha correttamente identificato che:
+- Le **Naked PUT** non sono esposizione equity diretta, ma solo potenziale
+- Le **Leap CALL** e **Strategie** hanno un profilo rischio/rendimento diverso dalla detenzione diretta di equity
+- Un confronto corretto richiede un'esposizione calcolata con **solo le protezioni** (Long PUT che proteggono le azioni)
 
 ## Soluzione
 
-Creare **state separati** per ogni vista, con prefissi specifici:
+### Formula Corretta per Benchmark
 
-### State Separati per Vista
+```text
+Equity Exposure = (ETF + Stocks al netto protezioni + Commodities) / Valore Totale Assets
+```
 
-**Currency Exposure** (5 toggle):
-- `currencyIncludeBonds`
-- `currencyIncludeProtections`
-- `currencyIncludeNakedPut`
-- `currencyIncludeStrategies`
-- `currencyIncludeLeapCall`
-
-**Sector Allocation** (3 toggle):
-- `sectorIncludeNakedPut`
-- `sectorIncludeStrategies`
-- `sectorIncludeLeapCall`
-
-**Equity Exposure** (4 toggle):
-Già gestiti internamente nel componente `EquityExposureView`
+Configurazione toggle equivalente:
+- Protezioni: ✅ ON (azioni nette)
+- Naked Put: ❌ OFF
+- Strategie: ❌ OFF
+- Leap Call: ❌ OFF
 
 ---
 
-## Modifica Tecnica
+## Modifiche Tecniche
 
-**File**: `src/pages/RiskAnalyzer.tsx`
+### 1. `src/hooks/useEquityExposurePct.ts`
 
-### 1. Aggiornare le dichiarazioni di state (linee 28-32)
+**Aggiungere parametri di configurazione** per permettere il calcolo con/senza derivati:
 
-**Prima**:
 ```typescript
-const [includeBonds, setIncludeBonds] = useState(true);
-const [includeProtections, setIncludeProtections] = useState(true);
-const [includeNakedPut, setIncludeNakedPut] = useState(true);
-const [includeStrategies, setIncludeStrategies] = useState(true);
-const [includeLeapCall, setIncludeLeapCall] = useState(true);
+export interface UseEquityExposurePctOptions {
+  includeNakedPut?: boolean;     // default: true
+  includeStrategies?: boolean;   // default: true
+  includeLeapCall?: boolean;     // default: true
+}
+
+export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}): EquityExposureResult {
+  const {
+    includeNakedPut = true,
+    includeStrategies = true,
+    includeLeapCall = true
+  } = options;
+  
+  // ...calcolo con filtro basato sulle opzioni...
+}
 ```
 
-**Dopo**:
-```typescript
-// Currency Exposure toggles
-const [currencyIncludeBonds, setCurrencyIncludeBonds] = useState(true);
-const [currencyIncludeProtections, setCurrencyIncludeProtections] = useState(true);
-const [currencyIncludeNakedPut, setCurrencyIncludeNakedPut] = useState(true);
-const [currencyIncludeStrategies, setCurrencyIncludeStrategies] = useState(true);
-const [currencyIncludeLeapCall, setCurrencyIncludeLeapCall] = useState(true);
+**Modificare il calcolo del `grandTotal`** per rispettare i flag:
 
-// Sector Allocation toggles
-const [sectorIncludeNakedPut, setSectorIncludeNakedPut] = useState(true);
-const [sectorIncludeStrategies, setSectorIncludeStrategies] = useState(true);
-const [sectorIncludeLeapCall, setSectorIncludeLeapCall] = useState(true);
+```typescript
+// grandTotal dinamico
+const grandTotal = 
+  analysis.totalStockRisk +        // Azioni (già nette protezioni)
+  analysis.totalCommodityRisk +    // Commodities
+  (includeNakedPut ? analysis.totalNakedPutRisk : 0) +
+  (includeLeapCall ? analysis.totalLeapCallRisk : 0) +
+  (includeStrategies ? analysis.totalStrategyRisk : 0);
 ```
 
-### 2. Aggiornare chiamata a `useCurrencyExposure` (linee 50-56)
+---
+
+### 2. `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+
+**Modificare la chiamata a `useEquityExposurePct`** (linea ~249):
 
 ```typescript
-const {
-  exposures: currencyExposure,
-  ...
-} = useCurrencyExposure({ 
-  includeBonds: currencyIncludeBonds, 
-  includeProtections: currencyIncludeProtections, 
-  includeNakedPut: currencyIncludeNakedPut, 
-  includeStrategies: currencyIncludeStrategies, 
-  includeLeapCall: currencyIncludeLeapCall 
+// Get equity exposure for BENCHMARK only: protections on, all others off
+const { 
+  equityExposurePct, 
+  equityExposureEUR, 
+  assetsTotalEUR, 
+  hasData: hasEquityData 
+} = useEquityExposurePct({
+  includeNakedPut: false,
+  includeStrategies: false,
+  includeLeapCall: false
 });
 ```
 
-### 3. Aggiornare calcolo `sectorExposure` (linee 126-133)
+---
+
+### 3. Aggiornare il Tooltip del Benchmark
+
+**Modificare la descrizione** in `CustomLegend` (linee 122-128):
 
 ```typescript
-const sectorExposure = useMemo(() => {
-  return calculateSectorExposure(analysis, allocations, { 
-    includeNakedPut: sectorIncludeNakedPut, 
-    includeStrategies: sectorIncludeStrategies, 
-    includeLeapCall: sectorIncludeLeapCall, 
-    sectorMappings 
-  });
-}, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings]);
-```
-
-### 4. Aggiornare props di `CurrencyExposureView` (linee 212-221)
-
-```tsx
-<CurrencyExposureView 
-  currencyExposure={currencyExposure}
-  grandTotal={currencyExposure.reduce((sum, c) => sum + c.totalRisk, 0)}
-  isLoadingETFData={isETFDataLoading}
-  etfCount={etfCount}
-  loadedETFCount={loadedETFCount}
-  includeBonds={currencyIncludeBonds}
-  onIncludeBondsChange={setCurrencyIncludeBonds}
-  includeProtections={currencyIncludeProtections}
-  onIncludeProtectionsChange={setCurrencyIncludeProtections}
-  includeNakedPut={currencyIncludeNakedPut}
-  onIncludeNakedPutChange={setCurrencyIncludeNakedPut}
-  includeStrategies={currencyIncludeStrategies}
-  onIncludeStrategiesChange={setCurrencyIncludeStrategies}
-  includeLeapCall={currencyIncludeLeapCall}
-  onIncludeLeapCallChange={setCurrencyIncludeLeapCall}
-/>
-```
-
-### 5. Aggiornare props di `SectorAllocationView` (linee 232-237)
-
-```tsx
-<SectorAllocationView 
-  sectorExposure={sectorExposure}
-  grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
-  isLoadingETFData={isETFDataLoading}
-  etfCount={etfCount}
-  loadedETFCount={loadedETFCount}
-  includeNakedPut={sectorIncludeNakedPut}
-  onIncludeNakedPutChange={setSectorIncludeNakedPut}
-  includeStrategies={sectorIncludeStrategies}
-  onIncludeStrategiesChange={setSectorIncludeStrategies}
-  includeLeapCall={sectorIncludeLeapCall}
-  onIncludeLeapCallChange={setSectorIncludeLeapCall}
-  isResolvingSectors={sectorMappingsLoading}
-  resolvingCount={resolvingCount}
-  isAdmin={isAdmin}
-  onRefreshMappings={...}
-/>
+const benchmarkDescription = hasEquityData
+  ? `Paniere Equity/Bond ponderato per l'equity exposure storica del portafoglio.\n\n` +
+    `Ponderazione dinamica: Il peso Equity/Bond varia nel tempo in base all'esposizione salvata in ogni snapshot.\n` +
+    `L'exposure di ciascun punto determina la ponderazione per il periodo successivo.\n\n` +
+    `⚠️ Nota metodologica: Per comparabilità, l'esposizione equity esclude Naked PUT, Leap CALL e Strategie.\n` +
+    `I derivati rappresentano esposizione potenziale con profilo rischio/rendimento diverso dalla detenzione diretta di equity.\n\n` +
+    `Equity exposure attuale: ${equityPctFormatted}%\n` +
+    `Benchmark attuale: ${equityPctFormatted}% × Equity (SPY/QQQ) + ${bondPctFormatted}% × Bond (AGG)`
+  : 'Paniere Equity/Bond ponderato per l\'equity exposure storica del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
 ```
 
 ---
 
-## Riepilogo
+### 4. Aggiornare i Dati Storici (equity_exposure_pct)
+
+**Nel `Dashboard.tsx`**, quando si salva lo snapshot, calcolare l'equity exposure **con la stessa logica** del benchmark:
+
+```typescript
+// Calcolare equity exposure per benchmark (solo protezioni)
+const { equityExposurePct: benchmarkEquityPct } = useEquityExposurePct({
+  includeNakedPut: false,
+  includeStrategies: false,
+  includeLeapCall: false
+});
+
+// Usare questo valore nel salvataggio snapshot
+upsertHistoricalData({
+  // ...
+  equity_exposure_pct: benchmarkEquityPct, // ← ora coerente con il benchmark
+  // ...
+});
+```
+
+---
+
+## Riepilogo File da Modificare
 
 | File | Modifiche |
 |------|-----------|
-| `src/pages/RiskAnalyzer.tsx` | Separare state: 5 toggle per Currency, 3 toggle per Sector |
+| `src/hooks/useEquityExposurePct.ts` | Aggiungere interfaccia opzioni + logica condizionale per grandTotal |
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Passare opzioni all'hook + aggiornare tooltip benchmark |
+| `src/components/dashboard/Dashboard.tsx` | Usare hook con opzioni per salvare equity_exposure_pct coerente |
 
 ---
 
 ## Risultato Atteso
 
-- Toggle in **Currency Exposure** → cambiano solo i dati di Currency Exposure
-- Toggle in **Sector Allocation** → cambiano solo i dati di Sector Allocation
-- Toggle in **Equity Exposure** → già indipendenti (gestiti internamente)
+1. **Benchmark corretto**: Il confronto con SPY/QQQ/AGG utilizzerà un'equity exposure che rappresenta l'esposizione **diretta** a mercati azionari
 
-Ogni vista avrà i propri toggle completamente indipendenti dalle altre.
+2. **Tooltip informativo**: L'utente saprà che le strategie derivati sono state escluse per motivi metodologici
+
+3. **Coerenza storica**: Gli snapshot futuri salveranno un'equity_exposure_pct coerente con la nuova logica
