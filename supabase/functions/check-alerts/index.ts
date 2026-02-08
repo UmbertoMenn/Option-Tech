@@ -1277,19 +1277,38 @@ serve(async (req) => {
                 });
                 totalAlertsCreated++;
                 
-                await supabase.from('alert_states').upsert({
-                  user_id: userId,
-                  portfolio_id: null,
-                  position_key: positionKey,
-                  alert_type: alertType,
-                  current_state: 'alerted',
-                  last_alerted_at: new Date().toISOString(),
-                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
-                
-                await supabase
-                  .from('price_alerts')
-                  .update({ last_triggered_at: new Date().toISOString() })
-                  .eq('id', priceAlert.id);
+                // Check if this is a one-time alert
+                if (priceAlert.delete_after_trigger) {
+                  // Delete the alert rule
+                  await supabase
+                    .from('price_alerts')
+                    .delete()
+                    .eq('id', priceAlert.id);
+                  
+                  // Delete associated alert state
+                  await supabase
+                    .from('alert_states')
+                    .delete()
+                    .eq('user_id', userId)
+                    .eq('position_key', positionKey);
+                    
+                  console.log(`Price alert ${priceAlert.id} deleted after trigger (one-time)`);
+                } else {
+                  // Standard behavior: update state and last_triggered_at
+                  await supabase.from('alert_states').upsert({
+                    user_id: userId,
+                    portfolio_id: null,
+                    position_key: positionKey,
+                    alert_type: alertType,
+                    current_state: 'alerted',
+                    last_alerted_at: new Date().toISOString(),
+                  }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                  
+                  await supabase
+                    .from('price_alerts')
+                    .update({ last_triggered_at: new Date().toISOString() })
+                    .eq('id', priceAlert.id);
+                }
               }
             } else if (!isTriggered && currentState?.current_state === 'alerted') {
               await supabase.from('alert_states')

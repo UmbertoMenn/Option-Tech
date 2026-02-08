@@ -36,6 +36,7 @@ export function useCreatePriceAlert() {
       direction: 'above' | 'below';
       target_price: number;
       cooldown_minutes?: number;
+      delete_after_trigger?: boolean;
     }) => {
       if (!user?.id) throw new Error('User not authenticated');
       
@@ -47,6 +48,7 @@ export function useCreatePriceAlert() {
           direction: alert.direction,
           target_price: alert.target_price,
           cooldown_minutes: alert.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES,
+          delete_after_trigger: alert.delete_after_trigger ?? false,
           enabled: true,
         })
         .select()
