@@ -22,10 +22,16 @@ interface CurrencyExposureViewProps {
   isLoadingETFData?: boolean;
   etfCount?: number;
   loadedETFCount?: number;
-  includeDerivatives: boolean;
-  onIncludeDerivativesChange: (value: boolean) => void;
   includeBonds: boolean;
   onIncludeBondsChange: (value: boolean) => void;
+  includeProtections: boolean;
+  onIncludeProtectionsChange: (value: boolean) => void;
+  includeNakedPut: boolean;
+  onIncludeNakedPutChange: (value: boolean) => void;
+  includeStrategies: boolean;
+  onIncludeStrategiesChange: (value: boolean) => void;
+  includeLeapCall: boolean;
+  onIncludeLeapCallChange: (value: boolean) => void;
 }
 
 const CATEGORY_CONFIG = {
@@ -144,10 +150,16 @@ export function CurrencyExposureView({
   isLoadingETFData = false,
   etfCount = 0,
   loadedETFCount = 0,
-  includeDerivatives,
-  onIncludeDerivativesChange,
   includeBonds,
-  onIncludeBondsChange
+  onIncludeBondsChange,
+  includeProtections,
+  onIncludeProtectionsChange,
+  includeNakedPut,
+  onIncludeNakedPutChange,
+  includeStrategies,
+  onIncludeStrategiesChange,
+  includeLeapCall,
+  onIncludeLeapCallChange
 }: CurrencyExposureViewProps) {
   const safeCurrencyExposure = currencyExposure.filter((c) => {
     return (
@@ -218,81 +230,70 @@ export function CurrencyExposureView({
         {/* Total Card */}
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded bg-primary/20">
-                  <Coins className="w-4 h-4 text-primary" />
+            <div className="flex justify-between gap-4">
+              {/* Left column: title, value, description */}
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-1.5 rounded bg-primary/20">
+                    <Coins className="w-4 h-4 text-primary" />
+                  </div>
+                  <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-xs text-xs">
+                        <p>Le azioni sono calcolate al lordo delle protezioni, mentre queste ultime sono aggiunte alla lista con la valorizzazione ai prezzi di mercato. Le strategie sono valorizzate come max loss convertite al cambio.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
-                <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs text-xs">
-                      <p>Le azioni sono calcolate al lordo delle protezioni, mentre queste ultime sono aggiunte alla lista con la valorizzazione ai prezzi di mercato. Le strategie sono valorizzate come max loss convertite al cambio.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                {hasData && (
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Non-EUR totale: <span className="font-medium text-foreground">{formatEUR(nonEurTotal)}</span>
+                  </div>
+                )}
+                <div className="text-xs text-muted-foreground mt-1">
+                  Rischio aggregato per valuta
+                  {isLoadingETFData && (
+                    <span className="ml-2 text-primary animate-pulse">
+                      Caricamento dati ETF ({loadedETFCount}/{etfCount})...
+                    </span>
+                  )}
+                  {!isLoadingETFData && etfCount > 0 && (
+                    <span className="ml-2 text-green-500">
+                      ✓ {loadedETFCount} ETF analizzati
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-4">
+              
+              {/* Right column: toggles stacked vertically */}
+              <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
                 <div className="flex items-center gap-2">
-                  <Switch 
-                    id="include-derivatives"
-                    checked={includeDerivatives}
-                    onCheckedChange={onIncludeDerivativesChange}
-                  />
-                  <Label htmlFor="include-derivatives" className="text-sm text-muted-foreground cursor-pointer">
-                    Derivati
-                  </Label>
+                  <Switch id="bonds-toggle" checked={includeBonds} onCheckedChange={onIncludeBondsChange} />
+                  <Label htmlFor="bonds-toggle" className="text-sm cursor-pointer">Bond</Label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Switch 
-                    id="include-bonds"
-                    checked={includeBonds}
-                    onCheckedChange={onIncludeBondsChange}
-                  />
-                  <Label htmlFor="include-bonds" className="text-sm text-muted-foreground cursor-pointer">
-                    Bond
-                  </Label>
+                  <Switch id="protections-toggle" checked={includeProtections} onCheckedChange={onIncludeProtectionsChange} />
+                  <Label htmlFor="protections-toggle" className="text-sm cursor-pointer">Protezioni</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch id="naked-put-toggle" checked={includeNakedPut} onCheckedChange={onIncludeNakedPutChange} />
+                  <Label htmlFor="naked-put-toggle" className="text-sm cursor-pointer">Naked Put</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch id="strategies-toggle" checked={includeStrategies} onCheckedChange={onIncludeStrategiesChange} />
+                  <Label htmlFor="strategies-toggle" className="text-sm cursor-pointer">Strategie</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch id="leap-call-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
+                  <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">Leap Call</Label>
                 </div>
               </div>
             </div>
-            <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-            {hasData && (
-              <div className="text-sm text-muted-foreground mt-1">
-                Non-EUR totale: <span className="font-medium text-foreground">{formatEUR(nonEurTotal)}</span>
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground mt-1">
-              Rischio aggregato per valuta
-              {isLoadingETFData && (
-                <span className="ml-2 text-primary animate-pulse">
-                  Caricamento dati ETF ({loadedETFCount}/{etfCount})...
-                </span>
-              )}
-              {!isLoadingETFData && etfCount > 0 && (
-                <span className="ml-2 text-green-500">
-                  ✓ {loadedETFCount} ETF analizzati
-                </span>
-              )}
-            </div>
-            {!includeDerivatives && (
-              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
-                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                <span className="text-xs text-amber-600 dark:text-amber-400">
-                  Derivati esclusi dall'analisi (Protezioni, Naked Put, Leap Call, Strategie)
-                </span>
-              </div>
-            )}
-            {!includeBonds && (
-              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
-                <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                <span className="text-xs text-blue-600 dark:text-blue-400">
-                  Obbligazioni escluse dall'analisi
-                </span>
-              </div>
-            )}
           </CardContent>
         </Card>
 

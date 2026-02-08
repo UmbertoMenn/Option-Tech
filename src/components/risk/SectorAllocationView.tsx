@@ -29,8 +29,12 @@ interface SectorAllocationViewProps {
   isLoadingETFData: boolean;
   etfCount: number;
   loadedETFCount: number;
-  includeDerivatives: boolean;
-  onIncludeDerivativesChange: (value: boolean) => void;
+  includeNakedPut: boolean;
+  onIncludeNakedPutChange: (value: boolean) => void;
+  includeStrategies: boolean;
+  onIncludeStrategiesChange: (value: boolean) => void;
+  includeLeapCall: boolean;
+  onIncludeLeapCallChange: (value: boolean) => void;
   isResolvingSectors?: boolean;
   resolvingCount?: number;
   isAdmin?: boolean;
@@ -168,8 +172,12 @@ export function SectorAllocationView({
   isLoadingETFData,
   etfCount,
   loadedETFCount,
-  includeDerivatives,
-  onIncludeDerivativesChange,
+  includeNakedPut,
+  onIncludeNakedPutChange,
+  includeStrategies,
+  onIncludeStrategiesChange,
+  includeLeapCall,
+  onIncludeLeapCallChange,
   isResolvingSectors,
   resolvingCount,
   isAdmin = false,
@@ -220,80 +228,82 @@ export function SectorAllocationView({
         {/* Total Card */}
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded bg-primary/20">
-                  <Building2 className="w-4 h-4 text-primary" />
+            <div className="flex justify-between gap-4">
+              {/* Left column: title, value, description */}
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-1.5 rounded bg-primary/20">
+                    <Building2 className="w-4 h-4 text-primary" />
+                  </div>
+                  <span className="text-sm font-medium text-primary">Esposizione Settoriale Totale</span>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-xs text-xs">
+                        <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale, così come i bond.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
-                <span className="text-sm font-medium text-primary">Esposizione Settoriale Totale</span>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs text-xs">
-                      <p>Le azioni sono valorizzate al lordo delle protezioni. Le protezioni (Long PUT) non vengono incluse nell'analisi settoriale, così come i bond.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="include-derivatives-sector"
-                  checked={includeDerivatives}
-                  onCheckedChange={onIncludeDerivativesChange}
-                />
-                <Label htmlFor="include-derivatives-sector" className="text-sm text-muted-foreground cursor-pointer">
-                  Includi Derivati
-                </Label>
-              </div>
-            </div>
-            <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-            {hasData && safeSectorExposure.length > 0 && (
-              <div className="text-sm text-muted-foreground mt-1">
-                Settore principale: <span className="font-medium text-foreground">{safeSectorExposure[0].sector} ({safeSectorExposure[0].percentage.toFixed(1)}%)</span>
-              </div>
-            )}
-            <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-              <div>
-                {safeSectorExposure.length} settori identificati
-                {isLoadingETFData && (
-                  <span className="ml-2 text-primary animate-pulse">
-                    Caricamento dati ETF ({loadedETFCount}/{etfCount})...
-                  </span>
+                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                {hasData && safeSectorExposure.length > 0 && (
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Settore principale: <span className="font-medium text-foreground">{safeSectorExposure[0].sector} ({safeSectorExposure[0].percentage.toFixed(1)}%)</span>
+                  </div>
                 )}
-                {!isLoadingETFData && etfCount > 0 && (
-                  <span className="ml-2 text-green-500">
-                    ✓ {loadedETFCount} ETF analizzati
+                <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                  <div>
+                    {safeSectorExposure.length} settori identificati
+                    {isLoadingETFData && (
+                      <span className="ml-2 text-primary animate-pulse">
+                        Caricamento dati ETF ({loadedETFCount}/{etfCount})...
+                      </span>
+                    )}
+                    {!isLoadingETFData && etfCount > 0 && (
+                      <span className="ml-2 text-green-500">
+                        ✓ {loadedETFCount} ETF analizzati
+                      </span>
+                    )}
+                  </div>
+                  {isResolvingSectors && resolvingCount && resolvingCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-blue-500">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Risoluzione AI in corso ({resolvingCount} strumenti)...</span>
+                    </div>
+                  )}
+                  {!isResolvingSectors && !isLoadingETFData && resolvingCount === 0 && (
+                    <div className="flex items-center gap-1.5 text-green-500">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Settori aggiornati</span>
+                    </div>
+                  )}
+                </div>
+                {/* Info box: esclusioni */}
+                <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
+                  <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                  <span className="text-xs text-blue-600 dark:text-blue-400">
+                    Commodities, Bond e Protezioni (Long Put) escluse dall'analisi settoriale
                   </span>
-                )}
-              </div>
-              {isResolvingSectors && resolvingCount && resolvingCount > 0 && (
-                <div className="flex items-center gap-1.5 text-blue-500">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Risoluzione AI in corso ({resolvingCount} strumenti)...</span>
                 </div>
-              )}
-              {!isResolvingSectors && !isLoadingETFData && resolvingCount === 0 && (
-                <div className="flex items-center gap-1.5 text-green-500">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Settori aggiornati</span>
-                </div>
-              )}
-            </div>
-            {!includeDerivatives && (
-              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
-                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                <span className="text-xs text-amber-600 dark:text-amber-400">
-                  Derivati esclusi dall'analisi (Naked Put, Leap Call, Strategie)
-                </span>
               </div>
-            )}
-            <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
-              <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
-              <span className="text-xs text-blue-600 dark:text-blue-400">
-                Commodities, Bond e Protezioni (Long Put) escluse dall'analisi settoriale
-              </span>
+              
+              {/* Right column: toggles stacked vertically */}
+              <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
+                <div className="flex items-center gap-2">
+                  <Switch id="naked-put-sector-toggle" checked={includeNakedPut} onCheckedChange={onIncludeNakedPutChange} />
+                  <Label htmlFor="naked-put-sector-toggle" className="text-sm cursor-pointer">Naked Put</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch id="strategies-sector-toggle" checked={includeStrategies} onCheckedChange={onIncludeStrategiesChange} />
+                  <Label htmlFor="strategies-sector-toggle" className="text-sm cursor-pointer">Strategie</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch id="leap-call-sector-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
+                  <Label htmlFor="leap-call-sector-toggle" className="text-sm cursor-pointer">Leap Call</Label>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
