@@ -251,7 +251,7 @@ export function PerformanceEvolutionChart({
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currencyAdjusted, setCurrencyAdjusted] = useState(true);
-  const [timeRange, setTimeRange] = useState<TimeRange>('MAX');
+  const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
   
   // Get equity exposure for BENCHMARK only: protections on, all derivatives off
   // This ensures a fair comparison with direct equity holdings (SPY/QQQ/AGG)
