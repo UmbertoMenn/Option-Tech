@@ -93,6 +93,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
     if (portfolios.length === 0) return;
     
+    // Skip auto-selection when in admin mode (viewing another user's portfolio)
+    if (adminViewUserId !== null && adminViewUserId !== user?.id) {
+      if (!hasInitialized) setHasInitialized(true);
+      return;
+    }
+    
     // Se è selezionato AGGREGATED, non resettare - è una selezione valida per admin
     if (selectedId === AGGREGATED_PORTFOLIO_ID) {
       if (!hasInitialized) setHasInitialized(true);
@@ -125,7 +131,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
     
     setHasInitialized(true);
-  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized]);
+  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized, adminViewUserId, user?.id]);
 
   // Selected portfolio: use admin query if in admin mode, otherwise use own portfolios
   const selectedPortfolio = isAdminMode 
