@@ -240,10 +240,6 @@ export function RiskAnalyzer() {
                       }, 300);
                     }
                   }}
-                  rawStockDetails={analysis.stockDetails}
-                  rawNakedPutDetails={analysis.nakedPutDetails}
-                  rawLeapCallDetails={analysis.leapCallDetails}
-                  rawStrategyDetails={analysis.strategyDetails}
                 />
               </ErrorBoundary>
             )}
