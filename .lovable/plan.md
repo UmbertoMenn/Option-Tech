@@ -1,107 +1,112 @@
 
-## Problema Identificato
 
-La discrepanza tra il totale dell'esposizione settoriale e la torta è causata da due problemi distinti:
+## Obiettivo
+Aggiungere un banner di debug nella vista Sector Allocation che mostri quali strumenti mancano dalla visualizzazione e il motivo dell'esclusione.
 
-### Problema 1: Race Condition nei Mapping Settoriali
-Il `useMemo` per `sectorExposure` viene calcolato anche quando `sectorMappings` è ancora vuoto. Quando i mapping arrivano dal database, il calcolo viene rifatto, ma c'è un momento iniziale dove il fallback statico potrebbe non funzionare correttamente per alcuni strumenti.
+## Cosa verrà aggiunto
 
-### Problema 2: Filtro Inconsistente
-Il `grandTotal` passato come prop include TUTTI i settori:
+Un componente collapsibile (Alert/Collapsible) nella parte superiore della sezione Sector Allocation che mostra:
+- Numero di strumenti attesi vs effettivamente visualizzati
+- Lista degli strumenti esclusi raggruppata per motivo:
+  - **EUROFOREX**: esclusi dal calcolo
+  - **Toggle OFF**: esclusi perché il toggle corrispondente è disattivato
+  - **Rischio zero o non valido**: strumenti con `riskEUR = 0`, `NaN` o `Infinity`
+  - **Settore con totale zero**: strumenti il cui settore è stato filtrato via dalla UI
+
+## Implementazione Tecnica
+
+### File: `src/components/risk/SectorAllocationView.tsx`
+
+1. Aggiungere nuove props per ricevere i dati grezzi necessari al confronto:
 ```typescript
-grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
+interface SectorAllocationViewProps {
+  // ... existing props ...
+  // Per debug banner
+  rawStockDetails?: StockRiskDetail[];
+  rawNakedPutDetails?: NakedPutRiskDetail[];
+  rawLeapCallDetails?: LeapCallRiskDetail[];
+  rawStrategyDetails?: StrategyRiskDetail[];
+}
 ```
 
-Ma la torta e la legenda usano `safeSectorExposure` che esclude settori con `totalRisk <= 0`:
+2. Calcolare gli strumenti mancanti con `useMemo`:
 ```typescript
-const safeSectorExposure = sectorExposure.filter((s) => s.totalRisk > 0);
+const missingInstrumentsAnalysis = useMemo(() => {
+  const expected: Array<{ name: string; category: string; risk: number }> = [];
+  const displayed = new Set<string>();
+  
+  // Costruisci set strumenti visualizzati
+  for (const sector of safeSectorExposure) {
+    for (const instr of sector.instruments) {
+      displayed.add(instr.name);
+    }
+  }
+  
+  // Costruisci lista attesa (escludi EUROFOREX)
+  // ... logica per ogni categoria ...
+  
+  // Calcola mancanti e motivo
+  const missing: Array<{ name: string; reason: string; risk: number }> = [];
+  // ... confronto ...
+  
+  return { expected: expected.length, displayed: displayed.size, missing };
+}, [safeSectorExposure, rawStockDetails, ...]);
 ```
 
-Questo può creare discrepanze se alcuni settori hanno rischio zero.
-
----
-
-## Soluzione Proposta
-
-### Parte 1: Allineare il calcolo del grandTotal nella vista
-
-In `SectorAllocationView.tsx`, ricalcolare il `grandTotal` usando `safeSectorExposure` invece di riceverlo come prop:
-
+3. Renderizzare il banner solo se ci sono strumenti mancanti:
 ```typescript
-// Invece di usare grandTotal passato come prop
-const displayedGrandTotal = safeSectorExposure.reduce((sum, s) => sum + s.totalRisk, 0);
+{missingInstrumentsAnalysis.missing.length > 0 && (
+  <Collapsible>
+    <Alert variant="destructive">
+      <AlertTriangle className="w-4 h-4" />
+      <AlertTitle>
+        {missingInstrumentsAnalysis.missing.length} strumenti non visualizzati
+      </AlertTitle>
+      <CollapsibleTrigger>Mostra dettagli</CollapsibleTrigger>
+    </Alert>
+    <CollapsibleContent>
+      {/* Lista raggruppata per motivo */}
+    </CollapsibleContent>
+  </Collapsible>
+)}
 ```
 
-Questo garantisce che il totale visualizzato corrisponda esattamente alla somma dei settori mostrati nella torta.
+### File: `src/pages/RiskAnalyzer.tsx`
 
-### Parte 2: Aggiungere logging di debug
-
-Aggiungere log temporanei per tracciare:
-- Quali strumenti vengono assegnati a quale settore
-- Il valore `maxLossEUR` delle strategie
-- Lo stato dei `sectorMappings` al momento del calcolo
-
-### Parte 3: Verificare il flusso per META PLATFORMS
-
-Per la strategia META PLATFORMS Iron Condor, verificare che:
-1. L'underlying sia correttamente identificato come "META PLATFORMS"
-2. Il ticker "META" venga estratto e trovato nei mapping
-3. Il `maxLossEUR` sia un valore positivo
-
----
-
-## Modifiche Tecniche
-
-### File: src/components/risk/SectorAllocationView.tsx
-
-Modificare il calcolo del totale per usare solo i dati effettivamente visualizzati:
-
+Passare i dati grezzi al componente:
 ```typescript
-// Prima di safeSectorExposure (linea 205)
-const safeSectorExposure = sectorExposure.filter((s) => {
-  return (
-    typeof s.sector === 'string' &&
-    Number.isFinite(s.totalRisk) &&
-    s.totalRisk > 0 &&
-    Number.isFinite(s.percentage)
-  );
-});
-
-// NUOVO: Ricalcolare il totale dai dati visualizzati
-const displayedGrandTotal = safeSectorExposure.reduce((sum, s) => sum + s.totalRisk, 0);
+<SectorAllocationView 
+  // ... existing props ...
+  rawStockDetails={analysis.stockDetails}
+  rawNakedPutDetails={analysis.nakedPutDetails}
+  rawLeapCallDetails={analysis.leapCallDetails}
+  rawStrategyDetails={analysis.strategyDetails}
+/>
 ```
 
-Sostituire `grandTotal` con `displayedGrandTotal` nel template dove viene visualizzato il totale (linea ~244):
+## Ragioni di esclusione che verranno rilevate
 
-```typescript
-<div className="text-3xl font-bold text-primary">{formatEUR(displayedGrandTotal)}</div>
-```
+| Motivo | Descrizione |
+|--------|-------------|
+| `EUROFOREX` | Strumento escluso perché contiene "EUROFOREX" nel nome |
+| `Toggle Naked Put OFF` | Toggle Naked Put disattivato |
+| `Toggle Strategie OFF` | Toggle Strategie disattivato |  
+| `Toggle Leap Call OFF` | Toggle Leap Call disattivato |
+| `Rischio = 0` | Il valore `riskEUR` o `maxLossEUR` è zero |
+| `Rischio non valido` | Il valore è `NaN` o `Infinity` |
+| `Settore filtrato` | Lo strumento esiste ma il suo settore ha `totalRisk <= 0` |
 
-### File: src/pages/RiskAnalyzer.tsx (opzionale)
+## UI del Banner
 
-In alternativa, passare il grandTotal ricalcolato:
+- **Colore**: Giallo/Warning (non rosso, perché alcune esclusioni sono intenzionali)
+- **Icona**: AlertTriangle
+- **Stato collassato**: Mostra solo conteggio "X strumenti non visualizzati"
+- **Stato espanso**: Lista dettagliata raggruppata per motivo
 
-```typescript
-grandTotal={sectorExposure.filter(s => s.totalRisk > 0).reduce((sum, s) => sum + s.totalRisk, 0)}
-```
-
----
-
-## Benefici
-
-- Il totale visualizzato corrisponderà sempre esattamente alla somma dei settori nella torta
-- Eliminata la discrepanza visiva tra i due valori
-- Non ci saranno più strumenti "fantasma" che contribuiscono al totale ma non appaiono nella visualizzazione
-
-## File da Modificare
+## File da modificare
 
 | File | Modifica |
 |------|----------|
-| `src/components/risk/SectorAllocationView.tsx` | Ricalcolare `grandTotal` internamente da `safeSectorExposure` |
+| `src/components/risk/SectorAllocationView.tsx` | Aggiungere props, logica di confronto e banner UI |
+| `src/pages/RiskAnalyzer.tsx` | Passare i dati grezzi dell'analisi come props |
 
-## Testing
-
-Dopo le modifiche, verificare su MauroG che:
-1. META PLATFORMS Iron Condor appaia in "Communication Services"
-2. Il totale esposizione settoriale corrisponda alla somma dei settori nella torta
-3. Tutti gli strumenti derivati (strategie, naked put, leap call) appaiano nei rispettivi settori
