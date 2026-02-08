@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { differenceInDays, parseISO } from 'date-fns';
 import {
   Select,
@@ -109,6 +110,7 @@ export function StatsCards({
   onManualAverageBalanceToggle,
   allDeposits,
 }: StatsCardsProps) {
+  const { isAggregatedView } = usePortfolioContext();
   const [isEditingGiacenza, setIsEditingGiacenza] = useState(false);
   const [giacenzaInputValue, setGiacenzaInputValue] = useState('');
   // Legacy fields removed - only use historical_data for P/L calculations
@@ -301,7 +303,7 @@ export function StatsCards({
             ? `Versamenti netti: ${formatCurrency(deposits)}`
             : `Prelievi netti: ${formatCurrency(Math.abs(deposits))}`
           : null,
-      isEditable: true,
+      isEditable: !isAggregatedView, // Disabilita editing in vista aggregata
     },
     {
       key: 'pl',

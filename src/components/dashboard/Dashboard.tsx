@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
@@ -31,6 +32,7 @@ import { Link } from 'react-router-dom';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
+  const { isAggregatedView } = usePortfolioContext();
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
@@ -127,33 +129,35 @@ export function Dashboard() {
             </div>
             
             <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => {
-                  if (!portfolio?.snapshot_date) {
-                    toast.error('Nessuna data disponibile. Carica prima un file Excel.');
-                    return;
-                  }
-                  upsertHistoricalData({
-                    snapshot_date: portfolio.snapshot_date,
-                    total_value: summary?.totalValue ?? 0,
-                    netting_total: netting.nettingTotal,
-                    netting_ex_cc: netting.nettingExCoveredCall,
-                    netting_ex_cc_np: netting.nettingExCCAndNP,
-                    deposits: 0,
-                    average_balance: 0,
-                    equity_exposure_pct: equityExposurePct,
-                    usd_exposure_pct: usdExposurePct,
-                  });
-                  toast.success('Snapshot salvato nei dati storici');
-                }}
-                disabled={isUpserting || !summary}
-                title="Salva snapshot corrente nei dati storici"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Salva Snapshot
-              </Button>
+              {!isAggregatedView && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    if (!portfolio?.snapshot_date) {
+                      toast.error('Nessuna data disponibile. Carica prima un file Excel.');
+                      return;
+                    }
+                    upsertHistoricalData({
+                      snapshot_date: portfolio.snapshot_date,
+                      total_value: summary?.totalValue ?? 0,
+                      netting_total: netting.nettingTotal,
+                      netting_ex_cc: netting.nettingExCoveredCall,
+                      netting_ex_cc_np: netting.nettingExCCAndNP,
+                      deposits: 0,
+                      average_balance: 0,
+                      equity_exposure_pct: equityExposurePct,
+                      usd_exposure_pct: usdExposurePct,
+                    });
+                    toast.success('Snapshot salvato nei dati storici');
+                  }}
+                  disabled={isUpserting || !summary}
+                  title="Salva snapshot corrente nei dati storici"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Salva Snapshot
+                </Button>
+              )}
               <Button variant="outline" size="sm" asChild>
                 <Link to="/derivatives">
                   <TrendingUp className="w-4 h-4 mr-2" />
@@ -231,47 +235,49 @@ export function Dashboard() {
             viewMode={viewMode}
           />
 
-          {/* File Upload & Historical Data */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Gestione Dati</h3>
+          {/* File Upload & Historical Data - Hidden in aggregated view */}
+          {!isAggregatedView && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">Gestione Dati</h3>
+                <div className="space-y-3">
+                  <HistoricalDataForm
+                    historicalData={historicalData}
+                    onSave={upsertHistoricalData}
+                    onDelete={deleteHistoricalData}
+                    isLoading={isUpserting}
+                    currentTotalValue={summary?.totalValue ?? 0}
+                    currentNettingTotal={netting.nettingTotal}
+                    currentNettingExCC={netting.nettingExCoveredCall}
+                    currentNettingExCCNP={netting.nettingExCCAndNP}
+                    currentEquityExposurePct={equityExposurePct}
+                    currentUsdExposurePct={usdExposurePct}
+                  />
+                  <DepositsSection
+                    deposits={deposits}
+                    totalDeposits={totalDeposits}
+                    onSave={upsertDeposit}
+                    onDelete={deleteDeposit}
+                    isLoading={isUpsertingDeposit}
+                  />
+                </div>
+              </div>
               <div className="space-y-3">
-                <HistoricalDataForm
-                  historicalData={historicalData}
-                  onSave={upsertHistoricalData}
-                  onDelete={deleteHistoricalData}
-                  isLoading={isUpserting}
-                  currentTotalValue={summary?.totalValue ?? 0}
-                  currentNettingTotal={netting.nettingTotal}
-                  currentNettingExCC={netting.nettingExCoveredCall}
-                  currentNettingExCCNP={netting.nettingExCCAndNP}
-                  currentEquityExposurePct={equityExposurePct}
-                  currentUsdExposurePct={usdExposurePct}
-                />
-                <DepositsSection
-                  deposits={deposits}
-                  totalDeposits={totalDeposits}
-                  onSave={upsertDeposit}
-                  onDelete={deleteDeposit}
-                  isLoading={isUpsertingDeposit}
-                />
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
+                <FileUploader />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={() => setClearDialogOpen(true)}
+                  disabled={positions.length === 0 || isClearing}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Pulisci Dati Portfolio
+                </Button>
               </div>
             </div>
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
-              <FileUploader />
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => setClearDialogOpen(true)}
-                disabled={positions.length === 0 || isClearing}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Pulisci Dati Portfolio
-              </Button>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Clear Data Dialog */}

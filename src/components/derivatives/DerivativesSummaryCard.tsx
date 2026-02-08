@@ -612,9 +612,10 @@ interface RecentAlertsCardProps {
 }
 
 function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProps) {
-  const { selectedPortfolio } = usePortfolioContext();
+  const { selectedPortfolio, isAggregatedView } = usePortfolioContext();
   const portfolioId = selectedPortfolio?.id;
   
+  // Hooks devono essere sempre chiamati, prima di qualsiasi return condizionale
   const { data: alerts = [], isLoading: alertsLoading } = useAlerts(portfolioId);
   const { data: unreadCount = 0 } = useUnreadAlertsCount(portfolioId);
   const markAsReadMutation = useMarkAlertAsRead();
@@ -642,9 +643,36 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
   };
   
   const handleDeleteAlert = (e: React.MouseEvent, alertId: string) => {
-    e.stopPropagation(); // Prevent triggering mark as read
+    e.stopPropagation();
     deleteAlertMutation.mutate(alertId);
   };
+  
+  // In vista aggregata, mostra messaggio informativo (dopo gli hooks!)
+  if (isAggregatedView) {
+    return (
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Newspaper className="w-5 h-5 text-muted-foreground" />
+            <CardTitle className="text-xl font-bold tracking-tight text-muted-foreground">
+              Avvisi recenti (24 h)
+            </CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="flex flex-col items-center justify-center min-h-[200px] text-center">
+            <Info className="w-8 h-8 text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground">
+              Gli avvisi sono disponibili per i singoli portfolio.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Seleziona un portfolio specifico per visualizzare e gestire gli avvisi.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
   
   return (
     <>
