@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
@@ -29,6 +29,7 @@ import { formatRelativeTime } from '@/lib/formatters';
 import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
+import { DepositEntry } from '@/types/deposits';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
@@ -43,14 +44,22 @@ export function Dashboard() {
     includeLeapCall: false
   });
   const { usdExposurePct } = useCurrencyExposure({ includeProtections: false, includeNakedPut: false, includeStrategies: false, includeLeapCall: false, includeBonds: true });
+
+  // Centralized state for unified carousel
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('base');
+  
+  // Historical data hook now receives viewMode for synthetic deposits calculation
   const { 
     historicalData, 
+    syntheticDeposits,
     earliestEntry,
     latestEntry, 
     upsertHistoricalData, 
     deleteHistoricalData,
     isUpserting 
-  } = useHistoricalData(portfolio?.id);
+  } = useHistoricalData(portfolio?.id, viewMode);
+  
   const {
     deposits,
     totalDeposits,
@@ -60,10 +69,7 @@ export function Dashboard() {
   } = useDeposits(portfolio?.id);
   
   const { clearPortfolioData, isClearing } = useClearPortfolio();
-
-  // Centralized state for unified carousel
-  const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('base');
+  
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
     earliestEntry?.snapshot_date || null
   );
@@ -72,6 +78,23 @@ export function Dashboard() {
   const [plDeposits, setPlDeposits] = useState<number>(0);
   const [averageBalance, setAverageBalance] = useState<number>(0);
   const [isManualAverageBalance, setIsManualAverageBalance] = useState<boolean>(false);
+
+  // Combine real deposits with synthetic deposits for aggregated view
+  const allDepositsForCharts = useMemo((): DepositEntry[] => {
+    if (!isAggregatedView) return deposits;
+    
+    const syntheticAsDeposits: DepositEntry[] = syntheticDeposits.map(sd => ({
+      id: `synthetic-${sd.portfolioId}-${sd.date}`,
+      portfolio_id: 'AGGREGATED',
+      deposit_date: sd.date,
+      amount: sd.amount,
+      description: 'Apporto sintetico (ingresso portafoglio)',
+      created_at: '',
+      updated_at: '',
+    }));
+    
+    return [...deposits, ...syntheticAsDeposits];
+  }, [deposits, syntheticDeposits, isAggregatedView]);
 
   // Update selected date when earliest entry changes (on first load)
   if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
@@ -220,7 +243,7 @@ export function Dashboard() {
             onDepositsChange={setPlDeposits}
             onAverageBalanceChange={setAverageBalance}
             onManualAverageBalanceToggle={setIsManualAverageBalance}
-            allDeposits={deposits}
+            allDeposits={allDepositsForCharts}
           />
         )}
 
@@ -301,7 +324,7 @@ export function Dashboard() {
               : netting.nettingExCCAndNP
             }
             currentDate={portfolio?.snapshot_date ?? null}
-            deposits={deposits}
+            deposits={allDepositsForCharts}
           />
         </div>
 

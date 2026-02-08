@@ -26,3 +26,14 @@ export interface HistoricalDataInput {
   equity_exposure_pct: number; // 0-1
   usd_exposure_pct: number;    // 0-1
 }
+
+export interface SyntheticDeposit {
+  date: string;
+  amount: number;
+  portfolioId: string;
+}
+
+export interface AggregatedHistoricalResult {
+  entries: HistoricalDataEntry[];
+  syntheticDeposits: SyntheticDeposit[];
+}

@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { HistoricalDataEntry, HistoricalDataInput } from '@/types/historicalData';
+import { HistoricalDataEntry, HistoricalDataInput, SyntheticDeposit, AggregatedHistoricalResult } from '@/types/historicalData';
 import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 
 // Helper: interpola il valore tra due snapshot
 function interpolateValue(
@@ -34,9 +35,27 @@ function interpolateValue(
   };
 }
 
-// Aggregazione intelligente con interpolazione lineare
-function aggregateHistoricalWithInterpolation(data: HistoricalDataEntry[]): HistoricalDataEntry[] {
-  if (data.length === 0) return [];
+// Helper: get value based on view mode
+function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
+  switch (viewMode) {
+    case 'netting_total':
+      return entry.netting_total;
+    case 'netting_ex_cc':
+      return entry.netting_ex_cc;
+    case 'netting_ex_cc_np':
+      return entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+    case 'base':
+    default:
+      return entry.total_value;
+  }
+}
+
+// Aggregazione intelligente con interpolazione lineare e apporti sintetici
+function aggregateHistoricalWithInterpolation(
+  data: HistoricalDataEntry[],
+  viewMode: ViewMode = 'base'
+): AggregatedHistoricalResult {
+  if (data.length === 0) return { entries: [], syntheticDeposits: [] };
   
   // Raggruppa per portfolio_id
   const byPortfolio = new Map<string, HistoricalDataEntry[]>();
@@ -46,10 +65,23 @@ function aggregateHistoricalWithInterpolation(data: HistoricalDataEntry[]): Hist
     byPortfolio.set(entry.portfolio_id, list);
   });
   
-  // Ordina ogni portfolio per data
+  // Ordina ogni portfolio per data (ascendente per trovare il primo)
   byPortfolio.forEach((entries, key) => {
     entries.sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
     byPortfolio.set(key, entries);
+  });
+  
+  // Calcola gli apporti sintetici: il valore del primo snapshot di ogni portfolio
+  const syntheticDeposits: SyntheticDeposit[] = [];
+  byPortfolio.forEach((entries, portfolioId) => {
+    if (entries.length === 0) return;
+    const firstEntry = entries[0];
+    const firstValue = getValueForViewMode(firstEntry, viewMode);
+    syntheticDeposits.push({
+      date: firstEntry.snapshot_date,
+      amount: firstValue,
+      portfolioId,
+    });
   });
   
   // Raccogli tutte le date uniche
@@ -136,18 +168,21 @@ function aggregateHistoricalWithInterpolation(data: HistoricalDataEntry[]): Hist
     };
   });
   
-  return aggregated.sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
+  return {
+    entries: aggregated.sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date)),
+    syntheticDeposits,
+  };
 }
 
-export function useHistoricalData(portfolioId: string | undefined) {
+export function useHistoricalData(portfolioId: string | undefined, viewMode: ViewMode = 'base') {
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
   const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
 
   const historicalDataQuery = useQuery({
-    queryKey: ['historical-data', portfolioId],
-    queryFn: async () => {
-      if (!portfolioId) return [];
+    queryKey: ['historical-data', portfolioId, viewMode],
+    queryFn: async (): Promise<AggregatedHistoricalResult> => {
+      if (!portfolioId) return { entries: [], syntheticDeposits: [] };
       
       // Vista aggregata: fetch tutti i dati e aggrega per data
       if (isAggregated && isAdmin) {
@@ -157,7 +192,7 @@ export function useHistoricalData(portfolioId: string | undefined) {
           .order('snapshot_date', { ascending: false });
         
         if (error) throw error;
-        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[]);
+        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], viewMode);
       }
       
       // Query normale per portfolio singolo
@@ -168,7 +203,10 @@ export function useHistoricalData(portfolioId: string | undefined) {
         .order('snapshot_date', { ascending: false });
       
       if (error) throw error;
-      return data as unknown as HistoricalDataEntry[];
+      return { 
+        entries: data as unknown as HistoricalDataEntry[], 
+        syntheticDeposits: [] 
+      };
     },
     enabled: !!portfolioId && (!isAggregated || isAdmin),
   });
@@ -234,16 +272,21 @@ export function useHistoricalData(portfolioId: string | undefined) {
     },
   });
 
+  // Extract entries from the result
+  const entries = historicalDataQuery.data?.entries || [];
+  const syntheticDeposits = historicalDataQuery.data?.syntheticDeposits || [];
+
   // Get the earliest entry for initial value calculation
-  const earliestEntry = historicalDataQuery.data?.length 
-    ? historicalDataQuery.data[historicalDataQuery.data.length - 1] 
+  const earliestEntry = entries.length 
+    ? entries[entries.length - 1] 
     : null;
 
   // Get the latest entry for current comparison
-  const latestEntry = historicalDataQuery.data?.[0] || null;
+  const latestEntry = entries[0] || null;
 
   return {
-    historicalData: historicalDataQuery.data || [],
+    historicalData: entries,
+    syntheticDeposits,
     isLoading: historicalDataQuery.isLoading,
     earliestEntry,
     latestEntry,
