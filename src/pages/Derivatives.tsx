@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle } from 'lucide-react';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
@@ -199,7 +199,24 @@ export function Derivatives() {
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <h1 className="text-lg font-bold">Strategie Derivati</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold">Strategie Derivati</h1>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs p-3">
+                      <div className="space-y-2 text-sm">
+                        <p>
+                          <strong>Prezzi Sottostanti (PS):</strong> aggiornati automaticamente ogni 5 minuti durante le ore di mercato.
+                        </p>
+                        <p>
+                          <strong>Prezzi Opzioni:</strong> valori statici caricati dal file Excel.
+                        </p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {derivatives.length} posizioni
                 </p>
