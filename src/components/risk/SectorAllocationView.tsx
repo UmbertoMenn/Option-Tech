@@ -352,7 +352,7 @@ export function SectorAllocationView({
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="flex-1 space-y-1.5 max-h-48 overflow-y-auto">
+                <div className="flex-1 space-y-1.5">
                   {(showAllSectors ? chartData : chartData.slice(0, 8)).map((sector) => (
                     <div key={sector.name} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
