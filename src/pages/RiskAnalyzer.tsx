@@ -25,11 +25,17 @@ import { calculateSectorExposure } from '@/lib/sectorExposure';
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
-  const [includeBonds, setIncludeBonds] = useState(true);
-  const [includeProtections, setIncludeProtections] = useState(true);
-  const [includeNakedPut, setIncludeNakedPut] = useState(true);
-  const [includeStrategies, setIncludeStrategies] = useState(true);
-  const [includeLeapCall, setIncludeLeapCall] = useState(true);
+  // Currency Exposure toggles
+  const [currencyIncludeBonds, setCurrencyIncludeBonds] = useState(true);
+  const [currencyIncludeProtections, setCurrencyIncludeProtections] = useState(true);
+  const [currencyIncludeNakedPut, setCurrencyIncludeNakedPut] = useState(true);
+  const [currencyIncludeStrategies, setCurrencyIncludeStrategies] = useState(true);
+  const [currencyIncludeLeapCall, setCurrencyIncludeLeapCall] = useState(true);
+  
+  // Sector Allocation toggles
+  const [sectorIncludeNakedPut, setSectorIncludeNakedPut] = useState(true);
+  const [sectorIncludeStrategies, setSectorIncludeStrategies] = useState(true);
+  const [sectorIncludeLeapCall, setSectorIncludeLeapCall] = useState(true);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
@@ -48,11 +54,11 @@ export function RiskAnalyzer() {
     loadedETFCount,
     allocations,
   } = useCurrencyExposure({ 
-    includeBonds, 
-    includeProtections, 
-    includeNakedPut, 
-    includeStrategies, 
-    includeLeapCall 
+    includeBonds: currencyIncludeBonds, 
+    includeProtections: currencyIncludeProtections, 
+    includeNakedPut: currencyIncludeNakedPut, 
+    includeStrategies: currencyIncludeStrategies, 
+    includeLeapCall: currencyIncludeLeapCall 
   });
   
   // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
@@ -125,12 +131,12 @@ export function RiskAnalyzer() {
   // Calculate sector exposure with dynamic mappings and granular toggles
   const sectorExposure = useMemo(() => {
     return calculateSectorExposure(analysis, allocations, { 
-      includeNakedPut, 
-      includeStrategies, 
-      includeLeapCall, 
+      includeNakedPut: sectorIncludeNakedPut, 
+      includeStrategies: sectorIncludeStrategies, 
+      includeLeapCall: sectorIncludeLeapCall, 
       sectorMappings 
     });
-  }, [analysis, allocations, includeNakedPut, includeStrategies, includeLeapCall, sectorMappings]);
+  }, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings]);
   
   return (
     <div className="min-h-screen bg-background">
@@ -209,16 +215,16 @@ export function RiskAnalyzer() {
                   isLoadingETFData={isETFDataLoading}
                   etfCount={etfCount}
                   loadedETFCount={loadedETFCount}
-                  includeBonds={includeBonds}
-                  onIncludeBondsChange={setIncludeBonds}
-                  includeProtections={includeProtections}
-                  onIncludeProtectionsChange={setIncludeProtections}
-                  includeNakedPut={includeNakedPut}
-                  onIncludeNakedPutChange={setIncludeNakedPut}
-                  includeStrategies={includeStrategies}
-                  onIncludeStrategiesChange={setIncludeStrategies}
-                  includeLeapCall={includeLeapCall}
-                  onIncludeLeapCallChange={setIncludeLeapCall}
+                  includeBonds={currencyIncludeBonds}
+                  onIncludeBondsChange={setCurrencyIncludeBonds}
+                  includeProtections={currencyIncludeProtections}
+                  onIncludeProtectionsChange={setCurrencyIncludeProtections}
+                  includeNakedPut={currencyIncludeNakedPut}
+                  onIncludeNakedPutChange={setCurrencyIncludeNakedPut}
+                  includeStrategies={currencyIncludeStrategies}
+                  onIncludeStrategiesChange={setCurrencyIncludeStrategies}
+                  includeLeapCall={currencyIncludeLeapCall}
+                  onIncludeLeapCallChange={setCurrencyIncludeLeapCall}
                 />
               </ErrorBoundary>
             ) : (
@@ -229,12 +235,12 @@ export function RiskAnalyzer() {
                   isLoadingETFData={isETFDataLoading}
                   etfCount={etfCount}
                   loadedETFCount={loadedETFCount}
-                  includeNakedPut={includeNakedPut}
-                  onIncludeNakedPutChange={setIncludeNakedPut}
-                  includeStrategies={includeStrategies}
-                  onIncludeStrategiesChange={setIncludeStrategies}
-                  includeLeapCall={includeLeapCall}
-                  onIncludeLeapCallChange={setIncludeLeapCall}
+                  includeNakedPut={sectorIncludeNakedPut}
+                  onIncludeNakedPutChange={setSectorIncludeNakedPut}
+                  includeStrategies={sectorIncludeStrategies}
+                  onIncludeStrategiesChange={setSectorIncludeStrategies}
+                  includeLeapCall={sectorIncludeLeapCall}
+                  onIncludeLeapCallChange={setSectorIncludeLeapCall}
                   isResolvingSectors={sectorMappingsLoading}
                   resolvingCount={resolvingCount}
                   isAdmin={isAdmin}
