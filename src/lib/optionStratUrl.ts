@@ -17,14 +17,111 @@ function thirdFriday(year: number, month: number): Date {
   return new Date(year, month, firstFriday + 14);
 }
 
-// Format expiry date as YYMMDD (3rd Friday of the month)
+// Easter Sunday using the Anonymous Gregorian algorithm (Computus)
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month, day);
+}
+
+// Observed date for a fixed holiday: Fri if falls on Sat, Mon if falls on Sun
+function observedDate(year: number, month: number, day: number): Date {
+  const d = new Date(year, month, day);
+  const dow = d.getDay();
+  if (dow === 6) d.setDate(day - 1); // Saturday -> Friday
+  if (dow === 0) d.setDate(day + 1); // Sunday -> Monday
+  return d;
+}
+
+// Check if a date is a US stock market holiday
+function isUSMarketHoliday(date: Date): boolean {
+  const year = date.getFullYear();
+  const time = date.getTime();
+
+  const holidays: Date[] = [
+    observedDate(year, 0, 1),   // New Year's Day
+    observedDate(year, 5, 19),  // Juneteenth
+    observedDate(year, 6, 4),   // Independence Day
+    observedDate(year, 11, 25), // Christmas
+  ];
+
+  // Good Friday (2 days before Easter Sunday)
+  const easter = easterSunday(year);
+  const goodFriday = new Date(easter);
+  goodFriday.setDate(easter.getDate() - 2);
+  holidays.push(goodFriday);
+
+  // Thanksgiving: 4th Thursday of November
+  const nov1 = new Date(year, 10, 1);
+  const nov1Dow = nov1.getDay();
+  const firstThu = 1 + ((4 - nov1Dow + 7) % 7);
+  holidays.push(new Date(year, 10, firstThu + 21));
+
+  // MLK Day: 3rd Monday Jan
+  const jan1 = new Date(year, 0, 1);
+  const firstMonJan = 1 + ((1 - jan1.getDay() + 7) % 7);
+  holidays.push(new Date(year, 0, firstMonJan + 14));
+
+  // Presidents' Day: 3rd Monday Feb
+  const feb1 = new Date(year, 1, 1);
+  const firstMonFeb = 1 + ((1 - feb1.getDay() + 7) % 7);
+  holidays.push(new Date(year, 1, firstMonFeb + 14));
+
+  // Memorial Day: last Monday May
+  const may31 = new Date(year, 4, 31);
+  const lastMonMay = 31 - ((may31.getDay() - 1 + 7) % 7);
+  holidays.push(new Date(year, 4, lastMonMay));
+
+  // Labor Day: 1st Monday Sep
+  const sep1 = new Date(year, 8, 1);
+  const firstMonSep = 1 + ((1 - sep1.getDay() + 7) % 7);
+  holidays.push(new Date(year, 8, firstMonSep));
+
+  return holidays.some(h =>
+    h.getFullYear() === date.getFullYear() &&
+    h.getMonth() === date.getMonth() &&
+    h.getDate() === date.getDate()
+  );
+}
+
+// Get options expiration date adjusting for holidays
+function optionsExpirationDate(year: number, month: number): Date {
+  const tf = thirdFriday(year, month);
+
+  if (isUSMarketHoliday(tf)) {
+    const thursday = new Date(tf);
+    thursday.setDate(tf.getDate() - 1);
+    if (isUSMarketHoliday(thursday)) {
+      // Both Thu+Fri are holidays -> Monday after
+      const monday = new Date(tf);
+      monday.setDate(tf.getDate() + 3);
+      return monday;
+    }
+    return thursday;
+  }
+  return tf;
+}
+
+// Format expiry date as YYMMDD (options expiration, holiday-adjusted)
 function formatExpiry(date: string | null | undefined): string {
   if (!date) return '000000';
   const d = new Date(date);
-  const tf = thirdFriday(d.getFullYear(), d.getMonth());
-  const yy = String(tf.getFullYear()).slice(-2);
-  const mm = String(tf.getMonth() + 1).padStart(2, '0');
-  const dd = String(tf.getDate()).padStart(2, '0');
+  const exp = optionsExpirationDate(d.getFullYear(), d.getMonth());
+  const yy = String(exp.getFullYear()).slice(-2);
+  const mm = String(exp.getMonth() + 1).padStart(2, '0');
+  const dd = String(exp.getDate()).padStart(2, '0');
   return `${yy}${mm}${dd}`;
 }
 
