@@ -9,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2 } from 'lucide-react';
-import { Link, Navigate } from 'react-router-dom';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut } from 'lucide-react';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { formatDate } from '@/lib/formatters';
 import { SectorMappingManager } from './SectorMappingManager';
@@ -26,7 +28,8 @@ interface UserWithRole {
 }
 
 export function AdminPanel() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -195,30 +198,78 @@ export function AdminPanel() {
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" asChild>
-                <Link to="/">
-                  <ArrowLeft className="w-5 h-5" />
-                </Link>
-              </Button>
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-warning/10">
-                  <Shield className="w-6 h-6 text-warning" />
-                </div>
-                <div>
-                  <h1 className="text-lg font-bold">Pannello Admin</h1>
-                  <p className="text-xs text-muted-foreground">Gestione utenti e iscrizioni</p>
-                </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <IronCondorIcon size={24} className="text-primary" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold">Option Tech</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">Gestione utenti e iscrizioni</p>
               </div>
             </div>
+
+            {/* Mobile: Indice dropdown */}
+            <div className="sm:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Indice <Menu className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => navigate('/')}>
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/derivatives')}>
+                    <TrendingUp className="w-4 h-4 mr-2" /> Strategie Derivati
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/risk-analyzer')}>
+                    <ShieldAlert className="w-4 h-4 mr-2" /> Risk Analyzer
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setShowAddDialog(true)}>
+                    <UserPlus className="w-4 h-4 mr-2" /> Aggiungi Utente
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={signOut}>
+                    <LogOut className="w-4 h-4 mr-2" /> Esci
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             
-            <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-              <DialogTrigger asChild>
-                <Button className="bg-primary hover:bg-primary-glow">
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Aggiungi Utente
-                </Button>
-              </DialogTrigger>
+            {/* Desktop: full button bar */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild className="shrink-0">
+                <Link to="/">
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="ml-2">Dashboard</span>
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
+                <Link to="/derivatives">
+                  <TrendingUp className="w-4 h-4" />
+                  <span className="ml-2">Strategie Derivati</span>
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
+                <Link to="/risk-analyzer">
+                  <ShieldAlert className="w-4 h-4" />
+                  <span className="ml-2">Risk Analyzer</span>
+                </Link>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
+                <LogOut className="w-4 h-4" />
+                <span className="ml-2">Esci</span>
+              </Button>
+              
+              <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+                <DialogTrigger asChild>
+                  <Button className="bg-primary hover:bg-primary-glow">
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Aggiungi Utente
+                  </Button>
+                </DialogTrigger>
               <DialogContent className="bg-card border-border">
                 <DialogHeader>
                   <DialogTitle>Nuovo Utente</DialogTitle>
@@ -263,6 +314,7 @@ export function AdminPanel() {
                 </form>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
         </div>
       </header>

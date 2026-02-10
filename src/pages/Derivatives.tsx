@@ -8,7 +8,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu } from 'lucide-react';
+import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { useNavigate } from 'react-router-dom';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
@@ -52,6 +55,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
+  const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { premiums: ccPremiums, getPremiumByTicker } = useCoveredCallPremiums(portfolio?.id);
@@ -194,16 +198,16 @@ export function Derivatives() {
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 shrink-0">
               <div className="p-2 rounded-lg bg-primary/10">
-                <TrendingUp className="w-6 h-6 text-primary" />
+                <IronCondorIcon size={24} className="text-primary" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold">Strategie Derivati</h1>
+                  <h1 className="text-lg font-bold">Option Tech</h1>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help hidden sm:inline" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs p-3">
                       <div className="space-y-2 text-sm">
@@ -217,39 +221,72 @@ export function Derivatives() {
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground hidden sm:block">
                   {derivatives.length} posizioni
                 </p>
               </div>
-              <div className="ml-4">
+              <div className="ml-4 hidden sm:block">
                 <PortfolioSelector />
               </div>
             </div>
+
+            {/* Mobile: Indice dropdown */}
+            <div className="sm:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Indice <Menu className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
+                    <div className="w-full"><PortfolioSelector /></div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate('/')}>
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/risk-analyzer')}>
+                    <ShieldAlert className="w-4 h-4 mr-2" /> Risk Analyzer
+                  </DropdownMenuItem>
+                  {isAdmin && (
+                    <DropdownMenuItem onClick={() => navigate('/admin')}>
+                      <Settings className="w-4 h-4 mr-2" /> Admin
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={signOut}>
+                    <LogOut className="w-4 h-4 mr-2" /> Esci
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             
-            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+            {/* Desktop: full button bar */}
+            <div className="hidden sm:flex items-center gap-2 overflow-x-auto flex-nowrap">
               <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/">
                   <ArrowLeft className="w-4 h-4" />
-                  <span className="hidden sm:inline ml-2">Dashboard</span>
+                  <span className="ml-2">Dashboard</span>
                 </Link>
               </Button>
               <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/risk-analyzer">
                   <ShieldAlert className="w-4 h-4" />
-                  <span className="hidden sm:inline ml-2">Risk Analyzer</span>
+                  <span className="ml-2">Risk Analyzer</span>
                 </Link>
               </Button>
               {isAdmin && (
                 <Button variant="outline" size="sm" asChild className="shrink-0">
                   <Link to="/admin">
                     <Settings className="w-4 h-4" />
-                    <span className="hidden sm:inline ml-2">Admin</span>
+                    <span className="ml-2">Admin</span>
                   </Link>
                 </Button>
               )}
               <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
                 <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline ml-2">Esci</span>
+                <span className="ml-2">Esci</span>
               </Button>
             </div>
           </div>
