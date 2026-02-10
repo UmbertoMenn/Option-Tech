@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { DisclaimerDialog } from "@/components/auth/DisclaimerDialog";
 
 // Lazy load heavy components to improve FCP
 const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then(m => ({ default: m.Dashboard })));
@@ -34,6 +35,14 @@ function PageLoader() {
 function AppRoutes() {
   const { user, loading } = useAuth();
   const location = useLocation();
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(
+    () => sessionStorage.getItem('disclaimerAccepted') === 'true'
+  );
+
+  const handleAcceptDisclaimer = () => {
+    sessionStorage.setItem('disclaimerAccepted', 'true');
+    setDisclaimerAccepted(true);
+  };
 
   // Allow reset-password route even when not logged in
   if (location.pathname === '/reset-password') {
@@ -50,6 +59,10 @@ function AppRoutes() {
 
   if (!user) {
     return <AuthForm />;
+  }
+
+  if (!disclaimerAccepted) {
+    return <DisclaimerDialog open={true} onAccept={handleAcceptDisclaimer} />;
   }
 
   return (
