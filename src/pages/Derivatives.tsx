@@ -13,6 +13,15 @@ import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useNavigate } from 'react-router-dom';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
+import { isMarketOpen } from '@/lib/marketHours';
+
+// Helper: show stale indicator when price is stale OR market is closed
+function shouldShowStaleIndicator(priceData: UnderlyingPrice | undefined): boolean {
+  if (!priceData) return false;
+  if (priceData.isStale) return true;
+  if (priceData.ticker && !isMarketOpen(priceData.ticker)) return true;
+  return false;
+}
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
@@ -777,7 +786,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                   <p>Prezzo Sottostante</p>
                 </TooltipContent>
               </Tooltip>
-              {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+              {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
                 <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
               )}
             </div>
@@ -946,7 +955,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
@@ -1134,7 +1143,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {underlyingPrices[underlying]?.isStale && (
+                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
@@ -1370,7 +1379,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {underlyingPrices[underlying]?.isStale && (
+                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
@@ -1691,7 +1700,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {underlyingPrices[underlying]?.isStale && (
+                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
                 )}
               </>
@@ -1999,7 +2008,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
@@ -2144,7 +2153,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                     <p>Prezzo Sottostante</p>
                   </TooltipContent>
                 </Tooltip>
-                {option.underlying && underlyingPrices[option.underlying]?.isStale && (
+                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
                   <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
                 )}
               </>
