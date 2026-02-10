@@ -119,7 +119,6 @@ async function sendEmail(
     const severityColor = alertData.severity === "critical" ? "#dc2626" : 
                           alertData.severity === "warning" ? "#f59e0b" : "#3b82f6";
     
-    const adminPrefix = isAdmin ? "[ADMIN] " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
     const optionInfo = formatOptionDisplay(
@@ -135,11 +134,11 @@ async function sendEmail(
     await resend.emails.send({
       from: "Portfolio Alerts <noreply@resend.dev>",
       to: [email],
-      subject: `${adminPrefix}${severityEmoji} Avviso Portfolio: ${alertData.ticker}`,
+      subject: `${severityEmoji} Avviso Portfolio: ${alertData.ticker}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: ${severityColor}; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">🚨 ${adminPrefix}Avviso Portafoglio</h2>
+            <h2 style="margin: 0;">🚨 Avviso Portafoglio</h2>
             <p style="margin: 8px 0 0 0; font-size: 14px;">${severityEmoji} ${severityLabel}</p>
           </div>
           <div style="padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
@@ -199,7 +198,6 @@ async function sendTelegram(
   try {
     const severityEmoji = getSeverityEmoji(alertData.severity);
     const severityLabel = getSeverityLabel(alertData.severity);
-    const adminPrefix = isAdmin ? "*[ADMIN]* " : "";
     const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
     const strategyName = alertData.strategy_type || 'Altre Strategie';
     const optionInfo = formatOptionDisplay(
@@ -212,7 +210,7 @@ async function sendTelegram(
     const priceLabel = alertData.underlying_price ? 
       `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
-    let text = `🚨 ${adminPrefix}*Avviso Portafoglio*
+    let text = `🚨 *Avviso Portafoglio*
 ${severityEmoji} *${severityLabel}*
 ${isAdmin && userName ? `\n👤 *Utente:* ${userName}` : ''}
 
