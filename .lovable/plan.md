@@ -1,47 +1,24 @@
-# Piano: Gestione Ticker Mapping - COMPLETATO ✅
 
-## Obiettivo
-1. ✅ Rendere la sezione "Ticker non risolti" in `AlertSettingsDialog` solo informativa (rimuovere input e pulsante Salva)
-2. ✅ Aggiornare le policy RLS di `underlying_mappings` per permettere scrittura solo agli admin
-3. ✅ Aggiungere una nuova tab "Ticker" nel pannello Admin per gestire i mapping non risolti
 
----
+## Informativa bloccante post-login
 
-## Modifiche Eseguite
+### Come funziona
+Dopo il login, prima di poter accedere all'app, l'utente vede un dialog modale a schermo intero con il testo dell'informativa. Solo cliccando "Confermo ed accetto quanto sopra" potra proseguire. L'accettazione viene salvata in `sessionStorage` cosi da non ripresentarsi durante la stessa sessione (ma riappare ad ogni nuovo accesso).
 
-### Database
-- ✅ Rimossa policy "Authenticated users can upsert underlying mappings"
-- ✅ Creata policy "Admins can manage underlying mappings" (solo admin può scrivere)
-- ✅ La policy SELECT "Anyone can read underlying mappings" rimane invariata
+### Modifiche
 
-### Frontend
+**1. Nuovo componente: `src/components/auth/DisclaimerDialog.tsx`**
+- Dialog modale bloccante (non chiudibile con ESC o click esterno)
+- Testo dell'informativa formattato con paragrafi separati
+- Pulsante "Confermo ed accetto quanto sopra" ben visibile (grande, colore primario)
+- Al click: salva accettazione in `sessionStorage` e chiama callback `onAccept`
 
-#### `AlertSettingsDialog.tsx`
-- ✅ Rimosso stato `unresolvedMappings` e `savingMapping`
-- ✅ Rimossa funzione `handleSaveUnresolvedMapping`
-- ✅ Sezione "Ticker non risolti" trasformata in avviso read-only con Badge
+**2. Modifica: `src/App.tsx`**
+- In `AppRoutes`, dopo il check `user` autenticato, aggiungere uno stato `disclaimerAccepted` (inizializzato da `sessionStorage`)
+- Se l'utente e autenticato ma non ha accettato, mostrare `DisclaimerDialog` invece delle route
+- Al click su "Confermo ed accetto quanto sopra", settare lo stato e salvare in `sessionStorage`
 
-#### `AdminPanel.tsx`
-- ✅ Aggiunto import `TickerMappingManager`
-- ✅ Aggiunta tab "Ticker" con icona Link2
-- ✅ Aggiunto TabsContent con `TickerMappingManager`
+### Dettagli tecnici
 
-#### Nuovi File
-- ✅ `src/hooks/useUnderlyingMappings.ts` - Hook per CRUD mapping
-- ✅ `src/components/admin/TickerMappingManager.tsx` - Componente gestione admin
+Il componente `DisclaimerDialog` utilizzera il componente `AlertDialog` di Radix (gia presente nel progetto) configurato per non essere chiudibile dall'utente se non tramite il pulsante di conferma. L'accettazione viene memorizzata solo per la sessione corrente del browser (`sessionStorage`), quindi ad ogni nuovo login l'informativa riappare.
 
----
-
-## Risultato
-
-### Utenti normali
-- Vedono avviso "Ticker non risolti" con lista sottostanti problematici
-- Messaggio che invita a contattare un amministratore
-- Non possono più salvare mapping manualmente
-
-### Admin
-- Tab "Ticker" nel Pannello Admin mostra tutti i ticker non risolti
-- Possono inserire il ticker corretto e salvare
-- Possono vedere e gestire tutti i mapping esistenti
-- Possono aggiungere nuovi mapping manualmente
-- Possono eliminare mapping errati
