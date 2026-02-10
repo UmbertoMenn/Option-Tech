@@ -685,7 +685,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -828,7 +828,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             </Tooltip>
             
             {/* Col 12: Prezzo + % */}
-            <div className="flex items-center gap-1 justify-end">
+            <div className="flex items-center gap-1 justify-end whitespace-nowrap">
               <span className="font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, 'USD')}
               </span>
@@ -905,7 +905,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1004,7 +1004,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
           </Tooltip>
           
           {/* Col 10: Prezzo */}
-          <div className="flex items-center gap-1 justify-end">
+          <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
               {formatCurrency(option.current_price || 0, 'USD')}
             </span>
@@ -1978,7 +1978,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2062,7 +2062,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           </Tooltip>
           
           {/* Col 10: Prezzo */}
-          <div className="flex items-center gap-1 justify-end">
+          <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
               {formatCurrency(option.current_price || 0, 'USD')}
             </span>
@@ -2128,7 +2128,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2212,7 +2212,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           </Tooltip>
           
           {/* Col 10: Prezzo + % */}
-          <div className="flex items-center gap-1 justify-end">
+          <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
               {formatCurrency(currentPrice, 'USD')}
             </span>
