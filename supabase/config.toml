@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.generate-reset-link]
 verify_jwt = false
+
+[functions.update-option-prices-cron]
+verify_jwt = false

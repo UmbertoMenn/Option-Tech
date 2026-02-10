@@ -23,6 +23,16 @@ function shouldShowStaleIndicator(priceData: UnderlyingPrice | undefined): boole
   if (priceData.ticker && !isMarketOpen(priceData.ticker)) return true;
   return false;
 }
+
+// Helper: show stale indicator for option prices (based on position updated_at)
+function shouldShowOptionStaleIndicator(option: Position, ticker?: string): boolean {
+  if (!option.updated_at) return false;
+  const STALE_MS = 10 * 60 * 1000; // 10 minutes
+  const isStale = Date.now() - new Date(option.updated_at).getTime() > STALE_MS;
+  if (isStale) return true;
+  if (ticker && !isMarketOpen(ticker)) return true;
+  return false;
+}
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
@@ -225,9 +235,9 @@ export function Derivatives() {
                         <p>
                           <strong>Prezzi Sottostanti (PS):</strong> aggiornati automaticamente ogni 5 minuti durante le ore di mercato.
                         </p>
-                        <p>
-                          <strong>Prezzi Opzioni:</strong> valori statici caricati dal file Excel.
-                        </p>
+                         <p>
+                           <strong>Prezzi Opzioni (PO):</strong> aggiornati ogni 5 minuti con (bid+ask)/2 da Yahoo Finance.
+                         </p>
                       </div>
                     </TooltipContent>
                   </Tooltip>
@@ -822,6 +832,9 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               <span className="font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, 'USD')}
               </span>
+              {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+                <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+              )}
               {priceChangePct !== null && (
                 <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
                   {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
@@ -991,9 +1004,14 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
           </Tooltip>
           
           {/* Col 10: Prezzo */}
-          <span className="font-semibold text-sm text-right">
-            {formatCurrency(option.current_price || 0, 'USD')}
-          </span>
+          <div className="flex items-center gap-1 justify-end">
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+            {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+              <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+            )}
+          </div>
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
@@ -2044,9 +2062,14 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           </Tooltip>
           
           {/* Col 10: Prezzo */}
-          <span className="font-semibold text-sm text-right">
-            {formatCurrency(option.current_price || 0, 'USD')}
-          </span>
+          <div className="flex items-center gap-1 justify-end">
+            <span className="font-semibold text-sm">
+              {formatCurrency(option.current_price || 0, 'USD')}
+            </span>
+            {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+              <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+            )}
+          </div>
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
@@ -2193,6 +2216,9 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             <span className="font-semibold text-sm">
               {formatCurrency(currentPrice, 'USD')}
             </span>
+            {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+              <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+            )}
             {priceChangePct !== null && (
               <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                 {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
