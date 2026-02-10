@@ -8,6 +8,9 @@ import { Loader2, Copy } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Portfolio } from '@/types/portfolio';
+import { useQueryClient } from '@tanstack/react-query';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface UserOption {
   userId: string;
@@ -30,6 +33,9 @@ export function CopyPortfolioDialog({
   users,
   onSuccess,
 }: CopyPortfolioDialogProps) {
+  const queryClient = useQueryClient();
+  const { selectPortfolio } = usePortfolioContext();
+  const { user } = useAuth();
   const [targetUserId, setTargetUserId] = useState<string>('');
   const [newName, setNewName] = useState('');
   const [isCopying, setIsCopying] = useState(false);
@@ -54,6 +60,14 @@ export function CopyPortfolioDialog({
       toast.success('Portfolio copiato con successo!', {
         description: `Copiato su ${targetUser?.name || targetUser?.email}`,
       });
+
+      // Invalidate portfolio list so the new one appears in the selector
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+
+      // If copied to self (admin), auto-select the new portfolio
+      if (targetUserId === user?.id && data?.newPortfolioId) {
+        selectPortfolio(data.newPortfolioId);
+      }
 
       onSuccess();
       onOpenChange(false);
