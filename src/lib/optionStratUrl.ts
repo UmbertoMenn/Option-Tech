@@ -40,7 +40,7 @@ function formatLeg(ticker: string, option: Position): string {
   const type = option.option_type === 'call' ? 'C' : 'P';
   const expiry = formatExpiry(option.expiry_date);
   const strike = formatStrike(option.strike_price);
-  const price = formatStrike(option.current_price || option.avg_cost);
+  const price = formatStrike(option.avg_cost || option.current_price);
   
   const prefix = isSold ? '-' : '';
   return `${prefix}.${ticker}${expiry}${type}${strike}@${price}`;
