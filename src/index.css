@@ -97,10 +97,81 @@
     --shadow-glow-loss: 0 0 20px hsl(0 84% 60% / 0.3);
   }
 
-  /* Light mode - disabled for this trading app */
+  /* Light mode */
   .light {
-    --background: 220 20% 7%;
-    --foreground: 210 40% 98%;
+    --background: 0 0% 100%;
+    --background-secondary: 220 14% 96%;
+    --background-tertiary: 220 13% 91%;
+    
+    --foreground: 222 47% 11%;
+    --foreground-muted: 215 16% 47%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --card-hover: 220 14% 96%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 217 91% 50%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --profit: 142 71% 35%;
+    --profit-glow: 142 71% 45%;
+    --profit-bg: 142 71% 45% / 0.1;
+    
+    --loss: 0 84% 50%;
+    --loss-glow: 0 84% 60%;
+    --loss-bg: 0 84% 60% / 0.1;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 87%;
+    --border-subtle: 220 13% 91%;
+    --input: 220 13% 87%;
+    --ring: 217 91% 60%;
+
+    --sidebar-background: 220 14% 96%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 13% 91%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 13% 87%;
+    --sidebar-ring: 217 91% 60%;
+
+    --chart-bonds: 217 91% 60%;
+    --chart-stocks: 142 71% 35%;
+    --chart-etf: 280 70% 50%;
+    --chart-derivatives: 38 92% 50%;
+    --chart-commodities: 25 95% 50%;
+    --chart-cash: 215 16% 47%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%), hsl(280 70% 50%));
+    --gradient-profit: linear-gradient(135deg, hsl(142 71% 35%), hsl(160 70% 35%));
+    --gradient-loss: linear-gradient(135deg, hsl(0 84% 50%), hsl(20 84% 45%));
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 14% 98%) 100%);
+    
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+    --shadow-glow-primary: 0 0 15px hsl(217 91% 60% / 0.15);
+    --shadow-glow-profit: 0 0 15px hsl(142 71% 35% / 0.15);
+    --shadow-glow-loss: 0 0 15px hsl(0 84% 50% / 0.15);
   }
 }
 

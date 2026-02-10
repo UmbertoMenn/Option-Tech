@@ -10,6 +10,7 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { DisclaimerDialog } from "@/components/auth/DisclaimerDialog";
 import { toast } from "sonner";
+import { ThemeProvider } from "next-themes";
 
 // Lazy load heavy components to improve FCP
 const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then(m => ({ default: m.Dashboard })));
@@ -95,15 +96,17 @@ function AppRoutes() {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+    <ThemeProvider attribute="class" defaultTheme="dark" storageKey="option-tech-theme">
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

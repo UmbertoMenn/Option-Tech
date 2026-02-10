@@ -8,7 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useNavigate } from 'react-router-dom';
@@ -64,6 +65,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
@@ -264,6 +266,10 @@ export function Derivatives() {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                    {theme === 'dark' ? <Sun className="w-4 h-4 mr-2" /> : <Moon className="w-4 h-4 mr-2" />}
+                    {theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={signOut}>
                     <LogOut className="w-4 h-4 mr-2" /> Esci
                   </DropdownMenuItem>
@@ -293,6 +299,9 @@ export function Derivatives() {
                   </Link>
                 </Button>
               )}
+              <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'} className="shrink-0">
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
               <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
                 <LogOut className="w-4 h-4" />
                 <span className="ml-2">Esci</span>

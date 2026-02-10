@@ -10,8 +10,11 @@ import {
   TrendingUp, 
   LogOut,
   Menu,
-  Settings
+  Settings,
+  Sun,
+  Moon
 } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
@@ -28,6 +31,7 @@ import { calculateSectorExposure } from '@/lib/sectorExposure';
 
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   // Currency Exposure toggles - default: only Bond active
@@ -174,6 +178,10 @@ export function RiskAnalyzer() {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                    {theme === 'dark' ? <Sun className="w-4 h-4 mr-2" /> : <Moon className="w-4 h-4 mr-2" />}
+                    {theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={signOut}>
                     <LogOut className="w-4 h-4 mr-2" /> Esci
                   </DropdownMenuItem>
@@ -194,6 +202,9 @@ export function RiskAnalyzer() {
                   <TrendingUp className="w-4 h-4" />
                   <span className="ml-2">Strategie Derivati</span>
                 </Link>
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'} className="shrink-0">
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </Button>
               <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
                 <LogOut className="w-4 h-4" />
