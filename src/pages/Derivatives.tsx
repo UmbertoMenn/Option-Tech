@@ -58,6 +58,16 @@ import {
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { CallPremiumCalculatorDialog } from '@/components/derivatives/CallPremiumCalculatorDialog';
+import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
+import {
+  buildIronCondorUrl,
+  buildDoubleDiagonalUrl,
+  buildCoveredCallUrl,
+  buildNakedPutUrl,
+  buildLeapCallUrl,
+  buildLongPutUrl,
+  buildGroupedStrategyUrl,
+} from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
@@ -743,25 +753,28 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               currentCategory="covered_call" 
             />
             
-            {/* Col 7: Calculator button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowCalculator(true);
-                  }}
-                >
-                  <Calculator className="w-4 h-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Calcola premi CALL incassati</p>
+            {/* Col 7: Calculator + OptionStrat buttons */}
+            <div className="flex items-center gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowCalculator(true);
+                    }}
+                  >
+                    <Calculator className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Calcola premi CALL incassati</p>
               </TooltipContent>
-            </Tooltip>
+              </Tooltip>
+              <OptionStratButton url={ticker ? buildCoveredCallUrl(ticker, option) : null} />
+            </div>
             
             {/* Col 8: UNIT (net per share from saved premium) */}
             <Tooltip>
@@ -956,12 +969,15 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 6: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="protection" 
-          />
+          {/* Col 6: Menu + OptionStrat */}
+          <div className="flex items-center gap-0.5">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="protection" 
+            />
+            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLongPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          </div>
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
@@ -1084,7 +1100,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1096,10 +1112,13 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 2: Underlying */}
           <span className="font-medium truncate">{underlying}</span>
           
-          {/* Col 3: Badge IC */}
-          <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
-            IC
-          </Badge>
+          {/* Col 3: Badge IC + OptionStrat */}
+          <div className="flex items-center gap-1">
+            <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
+              IC
+            </Badge>
+            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
+          </div>
           
           {/* Col 4: IR/OOR */}
           <div className="flex justify-center">
@@ -1319,7 +1338,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1329,8 +1348,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           )}
           
-          {/* Col 2: Underlying */}
-          <span className="font-medium truncate">{underlying}</span>
+          {/* Col 2: Underlying + OptionStrat */}
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="font-medium truncate">{underlying}</span>
+            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildDoubleDiagonalUrl(underlyingPrices[underlying].ticker, soldPut, boughtPut, soldCall, boughtCall) : null} />
+          </div>
           
           {/* Col 3: IR/OOR */}
           <div className="flex justify-center">
@@ -1621,8 +1643,11 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
           )}
           
-          {/* Colonna 2: Underlying */}
-          <span className="font-medium truncate">{underlying}</span>
+          {/* Colonna 2: Underlying + OptionStrat */}
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="font-medium truncate">{underlying}</span>
+            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildGroupedStrategyUrl(underlyingPrices[underlying].ticker, options.map(o => o.option), strategyName) : null} />
+          </div>
           
           {/* Colonna 3: Badge Strategia */}
           <div className="flex justify-start">
@@ -2014,12 +2039,15 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             {hasOverride && <OverrideBadge />}
           </div>
           
-          {/* Col 6: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="naked_put" 
-          />
+          {/* Col 6: Menu + OptionStrat */}
+          <div className="flex items-center gap-0.5">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="naked_put" 
+            />
+            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          </div>
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
@@ -2165,11 +2193,15 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           </div>
           
           {/* Col 6: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="leap_call" 
-          />
+          {/* Col 6: Menu + OptionStrat */}
+          <div className="flex items-center gap-0.5">
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="leap_call" 
+            />
+            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLeapCallUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          </div>
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
