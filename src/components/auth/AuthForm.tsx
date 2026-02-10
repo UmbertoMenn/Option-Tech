@@ -4,24 +4,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Lock, Mail, User, ArrowLeft } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Lock, Mail, ArrowLeft } from 'lucide-react';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { toast } from 'sonner';
 
 export function AuthForm() {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const [loading, setLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  
-  const [signupEmail, setSignupEmail] = useState('');
-  const [signupPassword, setSignupPassword] = useState('');
-  const [signupName, setSignupName] = useState('');
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,24 +72,6 @@ export function AuthForm() {
     setLoading(false);
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    
-    const { error } = await signUp(signupEmail, signupPassword, signupName);
-    
-    if (error) {
-      toast.error('Errore di registrazione', {
-        description: error.message,
-      });
-    } else {
-      toast.success('Account creato!', {
-        description: 'Ora puoi accedere.',
-      });
-    }
-    
-    setLoading(false);
-  };
 
   // Forgot Password View
   if (showForgotPassword) {
@@ -164,134 +141,57 @@ export function AuthForm() {
         </div>
 
         <Card className="border-border/50 bg-card/80 backdrop-blur">
-          <Tabs defaultValue="login" className="w-full">
-            <CardHeader className="pb-4">
-              <TabsList className="grid w-full grid-cols-2 bg-background-tertiary">
-                <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  Accedi
-                </TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                  Registrati
-                </TabsTrigger>
-              </TabsList>
-            </CardHeader>
-            
-            <CardContent>
-              <TabsContent value="login" className="mt-0">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        id="login-email"
-                        type="email"
-                        placeholder="nome@esempio.it"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        className="pl-10 bg-background-secondary border-border"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        id="login-password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        className="pl-10 bg-background-secondary border-border"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <Button 
-                    type="submit" 
-                    className="w-full bg-primary hover:bg-primary-glow transition-all hover:shadow-glow-primary"
-                    disabled={loading}
-                  >
-                    {loading ? 'Accesso in corso...' : 'Accedi'}
-                  </Button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(true)}
-                    className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
-                  >
-                    Password dimenticata?
-                  </button>
-                </form>
-              </TabsContent>
+          <CardContent className="pt-6">
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-email">Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    id="login-email"
+                    type="email"
+                    placeholder="nome@esempio.it"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="pl-10 bg-background-secondary border-border"
+                    required
+                  />
+                </div>
+              </div>
               
-              <TabsContent value="signup" className="mt-0">
-                <form onSubmit={handleSignup} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-name">Nome completo</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        id="signup-name"
-                        type="text"
-                        placeholder="Mario Rossi"
-                        value={signupName}
-                        onChange={(e) => setSignupName(e.target.value)}
-                        className="pl-10 bg-background-secondary border-border"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        id="signup-email"
-                        type="email"
-                        placeholder="nome@esempio.it"
-                        value={signupEmail}
-                        onChange={(e) => setSignupEmail(e.target.value)}
-                        className="pl-10 bg-background-secondary border-border"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        id="signup-password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={signupPassword}
-                        onChange={(e) => setSignupPassword(e.target.value)}
-                        className="pl-10 bg-background-secondary border-border"
-                        minLength={6}
-                        required
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">Minimo 6 caratteri</p>
-                  </div>
-                  
-                  <Button 
-                    type="submit" 
-                    className="w-full bg-primary hover:bg-primary-glow transition-all hover:shadow-glow-primary"
-                    disabled={loading}
-                  >
-                    {loading ? 'Registrazione...' : 'Crea account'}
-                  </Button>
-                </form>
-              </TabsContent>
-            </CardContent>
-          </Tabs>
+              <div className="space-y-2">
+                <Label htmlFor="login-password">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    id="login-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="pl-10 bg-background-secondary border-border"
+                    required
+                  />
+                </div>
+              </div>
+              
+              <Button 
+                type="submit" 
+                className="w-full bg-primary hover:bg-primary-glow transition-all hover:shadow-glow-primary"
+                disabled={loading}
+              >
+                {loading ? 'Accesso in corso...' : 'Accedi'}
+              </Button>
+              
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="w-full text-sm text-muted-foreground hover:text-primary transition-colors"
+              >
+                Password dimenticata?
+              </button>
+            </form>
+          </CardContent>
         </Card>
         
         <p className="text-center text-xs text-muted-foreground">
