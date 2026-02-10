@@ -20,21 +20,21 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Calculate the 3rd Friday of a given month (0-indexed)
+function getThirdFriday(year: number, month: number): Date {
+  const firstDay = new Date(year, month, 1);
+  const firstFriday = 1 + ((5 - firstDay.getDay() + 7) % 7);
+  return new Date(year, month, firstFriday + 14);
+}
+
 // Build OCC symbol: {TICKER}{YYMMDD}{C/P}{STRIKE*1000 padded 8 digits}
-// Note: Broker stores expiry as Saturday, but OCC uses Friday (actual expiry day)
+// Broker stores expiry as ~21st of month; OCC requires the 3rd Friday
 function buildOCCSymbol(ticker: string, expiryDate: string, optionType: string, strikePrice: number): string {
   const d = new Date(expiryDate);
-  // If the date is a Saturday (6), shift to Friday (-1 day)
-  if (d.getDay() === 6) {
-    d.setDate(d.getDate() - 1);
-  }
-  // If the date is a Sunday (0), shift to Friday (-2 days)
-  if (d.getDay() === 0) {
-    d.setDate(d.getDate() - 2);
-  }
-  const yy = d.getFullYear().toString().slice(-2);
-  const mm = (d.getMonth() + 1).toString().padStart(2, '0');
-  const dd = d.getDate().toString().padStart(2, '0');
+  const thirdFri = getThirdFriday(d.getFullYear(), d.getMonth());
+  const yy = thirdFri.getFullYear().toString().slice(-2);
+  const mm = (thirdFri.getMonth() + 1).toString().padStart(2, '0');
+  const dd = thirdFri.getDate().toString().padStart(2, '0');
   const type = optionType.toLowerCase() === 'call' ? 'C' : 'P';
   // Strike * 1000, padded to 8 digits
   const strikeInt = Math.round(strikePrice * 1000);
