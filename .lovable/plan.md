@@ -1,73 +1,72 @@
 
 
-## Header unificato mobile per tutte le pagine
+## Due fix: notifiche admin sempre attive + chiavi strategia stabili
 
-### Obiettivo
-Applicare lo stesso pattern dell'header mobile della Dashboard (logo IronCondor + "Option Tech" + pulsante "Indice") alle pagine Strategie Derivati, Risk Analyzer e Admin Panel.
+### Fix 1: Admin riceve SEMPRE le notifiche di tutti gli utenti
 
-### Pattern da replicare
-Su mobile (sotto `sm`): logo IronCondor, titolo "Option Tech", e un singolo pulsante "Indice" con dropdown contenente: PortfolioSelector, link di navigazione (Dashboard, Derivati, Risk Analyzer, Admin), e Esci.
+**Problema**: L'admin riceve le copie delle notifiche degli utenti solo se i **propri** toggle (email/telegram) sono attivi. Se l'admin disattiva il toggle Telegram, non riceve piu nessuna copia Telegram degli avvisi degli altri utenti.
 
-Su desktop (`sm+`): il layout attuale di ciascuna pagina resta invariato, tranne la sostituzione dell'icona e del titolo con IronCondor + "Option Tech".
+**Richiesta**: L'admin deve ricevere SEMPRE email e Telegram per gli avvisi di TUTTI gli utenti, indipendentemente dai propri toggle. I toggle dell'admin controllano solo le notifiche dei propri avvisi personali.
 
-### Modifiche per file
+**File: `supabase/functions/send-notification/index.ts`**
 
-**1. `src/pages/Derivatives.tsx` (righe 191-257)**
-
-- Sostituire l'icona `TrendingUp` nell'header con `IronCondorIcon`
-- Cambiare titolo da "Strategie Derivati" a "Option Tech"
-- Spostare il sottotitolo e info tooltip come testo secondario
-- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `useNavigate`
-- Mobile (`sm:hidden`): mostrare solo logo + "Option Tech" + pulsante "Indice" con dropdown contenente:
-  - PortfolioSelector
-  - Dashboard (naviga a `/`)
-  - Risk Analyzer (naviga a `/risk-analyzer`)
-  - Admin (se `isAdmin`, naviga a `/admin`)
-  - Separatore + Esci
-- Desktop (`hidden sm:flex`): mantenere la barra pulsanti attuale (Dashboard, Risk Analyzer, Admin, Esci) + PortfolioSelector nel titolo
-
-**2. `src/pages/RiskAnalyzer.tsx` (righe 126-167)**
-
-- Sostituire l'icona `ShieldAlert` nell'header con `IronCondorIcon`
-- Cambiare titolo da "Risk Analyzer" a "Option Tech"
-- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `Settings`, `useNavigate`
-- Mobile (`sm:hidden`): logo + "Option Tech" + "Indice" dropdown con:
-  - PortfolioSelector
-  - Dashboard (naviga a `/`)
-  - Strategie Derivati (naviga a `/derivatives`)
-  - Admin (se `isAdmin`, naviga a `/admin`)
-  - Separatore + Esci
-- Desktop (`hidden sm:flex`): invariato + PortfolioSelector nel titolo
-
-**3. `src/components/admin/AdminPanel.tsx` (righe 192-213)**
-
-- Sostituire l'icona `Shield` nell'header con `IronCondorIcon`
-- Cambiare titolo da "Pannello Admin" a "Option Tech"
-- Rimuovere il pulsante freccia indietro (sostituito dal menu Indice su mobile)
-- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `TrendingUp`, `ShieldAlert`, `LogOut`, `useNavigate`
-- Aggiungere `signOut` e `useNavigate` nel componente
-- Mobile (`sm:hidden`): logo + "Option Tech" + "Indice" dropdown con:
-  - Dashboard (naviga a `/`)
-  - Strategie Derivati (naviga a `/derivatives`)
-  - Risk Analyzer (naviga a `/risk-analyzer`)
-  - Separatore + Esci
-- Desktop (`hidden sm:flex`): mantenere il pulsante "Aggiungi Utente" + pulsanti navigazione (Dashboard, Derivati, Risk, Esci)
-- Il pulsante "Aggiungi Utente" su mobile viene incluso nel dropdown come prima voce dopo le voci di navigazione
-
-### Struttura mobile comune a tutte le pagine
+Nella sezione admin (righe 370-392), rimuovere le condizioni sui toggle:
 
 ```
-[IronCondorIcon] Option Tech    [Indice v]
-                                    |
-                                    +-- Portfolio (PortfolioSelector) *
-                                    +-- Dashboard / [pagina corrente]
-                                    +-- Strategie Derivati / [altre pagine]
-                                    +-- Risk Analyzer / [altre pagine]
-                                    +-- Admin (se admin) *
-                                    +-- Aggiungi Utente (solo Admin page) *
-                                    +-- ---
-                                    +-- Esci
+// DA (riga 371):
+if (admin.notify_email && admin.email) {
+
+// A:
+if (admin.email) {
+
+// DA (riga 382):
+if (admin.notify_telegram && admin.telegram_chat_id) {
+
+// A:
+if (admin.telegram_chat_id) {
 ```
 
-*PortfolioSelector non presente in Admin. La voce della pagina corrente non viene mostrata (es: su Derivatives non si mostra "Strategie Derivati").
+Inoltre va corretto un bug presente: `priceLabel` e dichiarato due volte (righe duplicate) sia in `sendEmail` che in `sendTelegram`. Verra rimossa la duplicazione.
+
+---
+
+### Fix 2: Chiavi strategia stabili dopo upload Excel
+
+**Problema**: Le `strategy_key` nella cache usano gli UUID delle posizioni (es. `cc_07b5c724-...`). Quando si carica un nuovo Excel, tutte le posizioni vengono ricreate con nuovi UUID, quindi le chiavi cambiano e gli `alert_states` esistenti non corrispondono piu -- il sistema re-invia tutte le notifiche.
+
+**Soluzione**: Generare chiavi deterministiche basate su caratteristiche stabili della posizione:
+
+| Strategia | Chiave attuale | Chiave nuova |
+|---|---|---|
+| Covered Call | `cc_{uuid}` | `cc_{underlying}_{strike}_{YYYYMM}` |
+| Naked Put | `np_{uuid}` | `np_{underlying}_{strike}_{YYYYMM}` |
+| Iron Condor | `ic_{uuid1}_{uuid2}` | `ic_{underlying}_{putStrike}_{callStrike}_{YYYYMM}` |
+| Double Diagonal | `dd_{uuid1}_{uuid2}` | `dd_{underlying}_{putStrike}_{callStrike}_{YYYYMM}` |
+| LEAP Call | `leap_{uuid}` | `leap_{underlying}_{strike}_{YYYYMM}` |
+| Altre Strategie | `other_{uuids}` | `other_{underlying}_{sortedStrikes}_{YYYYMM}` |
+
+**File: `src/lib/strategyCache.ts`**
+
+Aggiungere una funzione helper per formattare l'expiry:
+```typescript
+function formatExpiryKey(expiry: string | null | undefined): string {
+  if (!expiry) return 'noexp';
+  const d = new Date(expiry);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+```
+
+Modificare ogni `strategy_key`:
+- Riga 74: `cc_${cc.option.id}` diventa `cc_${underlying}_${cc.option.strike_price || 0}_${formatExpiryKey(cc.option.expiry_date)}`
+- Riga 96: `np_${np.option.id}` diventa `np_${underlying}_${np.option.strike_price || 0}_${formatExpiryKey(np.option.expiry_date)}`
+- Riga 117: `ic_${ic.soldPut.id}_${ic.soldCall.id}` diventa `ic_${ic.underlying}_${ic.soldPut.strike_price || 0}_${ic.soldCall.strike_price || 0}_${formatExpiryKey(ic.soldCall.expiry_date)}`
+- Riga 137: `dd_${dd.soldPut.id}_${dd.soldCall.id}` diventa `dd_${dd.underlying}_${dd.soldPut.strike_price || 0}_${dd.soldCall.strike_price || 0}_${formatExpiryKey(dd.soldCall.expiry_date)}`
+- Riga 160: `leap_${lc.option.id}` diventa `leap_${underlying}_${lc.option.strike_price || 0}_${formatExpiryKey(lc.option.expiry_date)}`
+- Riga 229: `other_${positionIds.sort().join('_')}` diventa `other_${gs.underlying}_${[soldPutStrike, soldCallStrike].filter(Boolean).sort().join('_')}_${formatExpiryKey(soldCallExpiry || soldPutExpiry)}`
+
+Dopo il deploy sara necessario un reset una tantum degli alert states (il sistema si ri-allinea al primo ciclo di check-alerts).
+
+### File coinvolti
+1. `supabase/functions/send-notification/index.ts` -- condizioni admin + fix doppia dichiarazione priceLabel
+2. `src/lib/strategyCache.ts` -- chiavi deterministiche
 
