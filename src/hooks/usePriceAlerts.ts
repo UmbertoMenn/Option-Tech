@@ -1,33 +1,42 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { PriceAlert, DEFAULT_COOLDOWN_MINUTES } from '@/types/alerts';
 
-// Fetch all price alerts for the current user
+function useEffectiveUserId() {
+  const { user } = useAuth();
+  const { isAdminMode, adminViewUserId } = usePortfolioContext();
+  return isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
+}
+
+// Fetch all price alerts for the effective user
 export function usePriceAlerts() {
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useQuery({
-    queryKey: ['price-alerts', user?.id],
+    queryKey: ['price-alerts', effectiveUserId],
     queryFn: async () => {
-      if (!user?.id) return [];
+      if (!effectiveUserId) return [];
       
       const { data, error } = await supabase
         .from('price_alerts')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', effectiveUserId)
         .order('created_at', { ascending: false });
       
       if (error) throw error;
       return data as PriceAlert[];
     },
-    enabled: !!user?.id,
+    enabled: !!user && !!effectiveUserId,
   });
 }
 
 // Create a new price alert
 export function useCreatePriceAlert() {
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   const queryClient = useQueryClient();
   
   return useMutation({
@@ -38,12 +47,12 @@ export function useCreatePriceAlert() {
       cooldown_minutes?: number;
       delete_after_trigger?: boolean;
     }) => {
-      if (!user?.id) throw new Error('User not authenticated');
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
       const { data, error } = await supabase
         .from('price_alerts')
         .insert({
-          user_id: user.id,
+          user_id: effectiveUserId,
           ticker: alert.ticker.toUpperCase(),
           direction: alert.direction,
           target_price: alert.target_price,

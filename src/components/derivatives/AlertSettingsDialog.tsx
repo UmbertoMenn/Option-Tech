@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { 
   AlertDialog, 
@@ -128,6 +129,7 @@ function extractUniqueTickers(
 }
 
 export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
+  const { isAdminMode } = usePortfolioContext();
   const { data: configs = [], isLoading } = useAlertConfigs();
   const batchUpsertMutation = useBatchUpsertAlertConfigs();
   const deleteConfigMutation = useDeleteAlertConfig();
@@ -460,13 +462,13 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
           </div>
         ) : (
           <Tabs defaultValue="distance" className="w-full">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className={`grid w-full ${isAdminMode ? 'grid-cols-5' : 'grid-cols-6'}`}>
               <TabsTrigger value="distance">Distanza</TabsTrigger>
               <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
               <TabsTrigger value="price">Prezzo</TabsTrigger>
               <TabsTrigger value="action">Stato</TabsTrigger>
               <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
-              <TabsTrigger value="notifications">Notifiche</TabsTrigger>
+              {!isAdminMode && <TabsTrigger value="notifications">Notifiche</TabsTrigger>}
             </TabsList>
             
             {/* Tab 1: Global Distance Thresholds */}
@@ -985,10 +987,12 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
               </p>
             </TabsContent>
             
-            {/* Tab 5: Notification Settings */}
-            <TabsContent value="notifications" className="mt-4">
-              <NotificationSettings />
-            </TabsContent>
+            {/* Tab 5: Notification Settings (hidden in admin mode) */}
+            {!isAdminMode && (
+              <TabsContent value="notifications" className="mt-4">
+                <NotificationSettings />
+              </TabsContent>
+            )}
           </Tabs>
         )}
         
