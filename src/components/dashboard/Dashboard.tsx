@@ -151,7 +151,7 @@ export function Dashboard() {
       {/* Header */}
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-3 shrink-0">
               <div className="p-2 rounded-lg bg-primary/10">
                 <TrendingUp className="w-6 h-6 text-primary" />
@@ -166,7 +166,7 @@ export function Dashboard() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 flex-1 justify-end">
+            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 sm:flex-1 sm:justify-end">
               <div className="shrink-0">
                 <PortfolioSelector />
               </div>
