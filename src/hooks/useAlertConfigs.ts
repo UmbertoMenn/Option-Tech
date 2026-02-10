@@ -10,20 +10,28 @@ import {
   DEFAULT_COOLDOWN_MINUTES,
 } from '@/types/alerts';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 
-// Fetch alert configs for the current user
+function useEffectiveUserId() {
+  const { user } = useAuth();
+  const { isAdminMode, adminViewUserId } = usePortfolioContext();
+  return isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
+}
+
+// Fetch alert configs for the effective user
 export function useAlertConfigs() {
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useQuery({
-    queryKey: ['alert-configs', user?.id],
+    queryKey: ['alert-configs', effectiveUserId],
     queryFn: async (): Promise<AlertConfig[]> => {
-      if (!user) return [];
+      if (!effectiveUserId) return [];
       
       const { data, error } = await supabase
         .from('alert_configs')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', effectiveUserId)
         .order('ticker', { ascending: true, nullsFirst: true });
       
       if (error) {
@@ -36,7 +44,7 @@ export function useAlertConfigs() {
         alert_type: row.alert_type as AlertType,
       }));
     },
-    enabled: !!user,
+    enabled: !!user && !!effectiveUserId,
   });
 }
 
@@ -78,7 +86,7 @@ export function getEffectiveConfig(
   return {
     threshold_pct: isDistanceAlert ? DEFAULT_DISTANCE_THRESHOLD_PCT : 0,
     cooldown_minutes: DEFAULT_COOLDOWN_MINUTES,
-    enabled: true, // Default enabled
+    enabled: true,
   };
 }
 
@@ -86,6 +94,7 @@ export function getEffectiveConfig(
 export function useUpsertAlertConfig() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useMutation({
     mutationFn: async (config: {
@@ -95,13 +104,13 @@ export function useUpsertAlertConfig() {
       cooldown_minutes?: number;
       enabled?: boolean;
     }) => {
-      if (!user) throw new Error('User not authenticated');
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
       const { error } = await supabase
         .from('alert_configs')
         .upsert(
           {
-            user_id: user.id,
+            user_id: effectiveUserId,
             alert_type: config.alert_type,
             ticker: config.ticker || null,
             threshold_pct: config.threshold_pct ?? DEFAULT_DISTANCE_THRESHOLD_PCT,
@@ -119,10 +128,11 @@ export function useUpsertAlertConfig() {
   });
 }
 
-// Batch upsert configs (for saving all settings at once)
+// Batch upsert configs
 export function useBatchUpsertAlertConfigs() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useMutation({
     mutationFn: async (configs: Array<{
@@ -132,10 +142,10 @@ export function useBatchUpsertAlertConfigs() {
       cooldown_minutes?: number;
       enabled?: boolean;
     }>) => {
-      if (!user) throw new Error('User not authenticated');
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
       const upsertData = configs.map(config => ({
-        user_id: user.id,
+        user_id: effectiveUserId,
         alert_type: config.alert_type,
         ticker: config.ticker || null,
         threshold_pct: config.threshold_pct ?? DEFAULT_DISTANCE_THRESHOLD_PCT,
@@ -159,15 +169,16 @@ export function useBatchUpsertAlertConfigs() {
 export function useDeleteAlertConfig() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useMutation({
     mutationFn: async (params: { alert_type: AlertType; ticker: string }) => {
-      if (!user) throw new Error('User not authenticated');
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
       const { error } = await supabase
         .from('alert_configs')
         .delete()
-        .eq('user_id', user.id)
+        .eq('user_id', effectiveUserId)
         .eq('alert_type', params.alert_type)
         .eq('ticker', params.ticker);
       
@@ -179,14 +190,15 @@ export function useDeleteAlertConfig() {
   });
 }
 
-// Initialize default configs for a user (call on first setup)
+// Initialize default configs for the effective user
 export function useInitializeDefaultConfigs() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
   
   return useMutation({
     mutationFn: async () => {
-      if (!user) throw new Error('User not authenticated');
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
       const allAlertTypes = [
         ...DISTANCE_ALERT_TYPES,
@@ -195,7 +207,7 @@ export function useInitializeDefaultConfigs() {
       ];
       
       const defaultConfigs = allAlertTypes.map(alertType => ({
-        user_id: user.id,
+        user_id: effectiveUserId,
         alert_type: alertType,
         ticker: null,
         threshold_pct: DISTANCE_ALERT_TYPES.includes(alertType) ? DEFAULT_DISTANCE_THRESHOLD_PCT : 0,
