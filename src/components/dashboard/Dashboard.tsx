@@ -169,7 +169,7 @@ export function Dashboard() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
               {!isAggregatedView && (
                 <Button 
                   variant="outline" 
@@ -194,34 +194,35 @@ export function Dashboard() {
                   }}
                   disabled={isUpserting || !summary}
                   title="Salva snapshot corrente nei dati storici"
+                  className="shrink-0"
                 >
-                  <Save className="w-4 h-4 mr-2" />
-                  Salva Snapshot
+                  <Save className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Salva Snapshot</span>
                 </Button>
               )}
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/derivatives">
-                  <TrendingUp className="w-4 h-4 mr-2" />
-                  Strategie Derivati
+                  <TrendingUp className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Strategie Derivati</span>
                 </Link>
               </Button>
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/risk-analyzer">
-                  <ShieldAlert className="w-4 h-4 mr-2" />
-                  Risk Analyzer
+                  <ShieldAlert className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Risk Analyzer</span>
                 </Link>
               </Button>
               {isAdmin && (
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" asChild className="shrink-0">
                   <Link to="/admin">
-                    <Settings className="w-4 h-4 mr-2" />
-                    Admin
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline ml-2">Admin</span>
                   </Link>
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Esci
+              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline ml-2">Esci</span>
               </Button>
             </div>
           </div>

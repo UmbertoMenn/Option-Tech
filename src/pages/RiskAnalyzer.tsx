@@ -144,22 +144,22 @@ export function RiskAnalyzer() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
+            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Dashboard
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Dashboard</span>
                 </Link>
               </Button>
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/derivatives">
-                  <TrendingUp className="w-4 h-4 mr-2" />
-                  Strategie Derivati
+                  <TrendingUp className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Strategie Derivati</span>
                 </Link>
               </Button>
-              <Button variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Esci
+              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline ml-2">Esci</span>
               </Button>
             </div>
           </div>

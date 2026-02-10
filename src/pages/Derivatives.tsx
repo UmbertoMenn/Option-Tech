@@ -226,30 +226,30 @@ export function Derivatives() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
+            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Dashboard
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Dashboard</span>
                 </Link>
               </Button>
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" size="sm" asChild className="shrink-0">
                 <Link to="/risk-analyzer">
-                  <ShieldAlert className="w-4 h-4 mr-2" />
-                  Risk Analyzer
+                  <ShieldAlert className="w-4 h-4" />
+                  <span className="hidden sm:inline ml-2">Risk Analyzer</span>
                 </Link>
               </Button>
               {isAdmin && (
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" asChild className="shrink-0">
                   <Link to="/admin">
-                    <Settings className="w-4 h-4 mr-2" />
-                    Admin
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline ml-2">Admin</span>
                   </Link>
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Esci
+              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline ml-2">Esci</span>
               </Button>
             </div>
           </div>
@@ -294,7 +294,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessuna Covered Call presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.coveredCalls.map((cc, index) => (
                       <CoveredCallRow 
                         key={index} 
@@ -343,7 +343,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessuna protezione Long Put presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.longPuts.map((lp, index) => (
                       <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
@@ -383,7 +383,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessun Iron Condor presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.ironCondors.map((ic, index) => (
                       <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} />
                     ))}
@@ -423,7 +423,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessun Double Diagonal presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.doubleDiagonals.map((dd, index) => (
                       <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} />
                     ))}
@@ -463,7 +463,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessuna Naked Put presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.nakedPuts.map((np, index) => (
                       <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
@@ -503,7 +503,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessuna Leap Call presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.leapCalls.map((lc, index) => (
                       <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
@@ -543,7 +543,7 @@ export function Derivatives() {
                     <p className="text-sm">Nessuna altra strategia presente</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1 overflow-x-auto">
                     {categories.groupedOtherStrategies.map((group, index) => (
                       <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                     ))}
@@ -620,7 +620,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -837,7 +837,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1011,7 +1011,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1246,7 +1246,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1539,7 +1539,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
@@ -1905,7 +1905,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2050,7 +2050,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (

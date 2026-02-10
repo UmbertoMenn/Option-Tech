@@ -446,7 +446,7 @@ export function DerivativesSummaryCard({
   }
   
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <Card className="border-border bg-card">
       <CardHeader className="pb-3 border-b border-border">
         <div className="flex items-center gap-2">
