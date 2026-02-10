@@ -1,62 +1,66 @@
 
 
-## Fix: Calcolo data OCC errato + 128/234 opzioni non aggiornate
+## Migrazione a Yahoo Finance v7/finance/options per bid/ask reali
 
-### Problema identificato
+### Problema attuale
 
-Il broker salva la data di scadenza sempre come il **21 del mese** (es. 2026-04-21, 2026-05-21). Ma il formato OCC richiede il **3o venerdi del mese** (la vera data di scadenza delle opzioni USA).
-
-Il codice attuale corregge solo sabato e domenica:
-- Feb 21 = sabato -> venerdi 20 (3o venerdi, funziona per caso)
-- Mar 21 = sabato -> venerdi 20 (3o venerdi, funziona per caso)
-- **Apr 21 = martedi -> NON corretto -> 404**
-- **Mag 21 = giovedi -> NON corretto -> 404**
-- **Lug 21 = martedi -> NON corretto -> 404**
-- ...e cosi via per 8 mesi su 13
-
-Risultato: **128 opzioni su 234 (55%) restituiscono 404** da Yahoo Finance.
-
-### Indicatore stale
-
-L'indicatore stale (triangolino rosso) funziona correttamente: appare per le opzioni con `updated_at` vecchio di oltre 10 minuti e per quelle con mercato chiuso. Le opzioni senza triangolino sono quelle aggiornate con successo di recente (Feb/26 e Mar/26).
+L'endpoint `v8/finance/chart/{OCC_SYMBOL}` restituisce `bid=null, ask=null` per la maggior parte delle opzioni, facendo scattare il fallback su `regularMarketPrice` che non rappresenta il mid-price reale.
 
 ### Soluzione
 
+Usare l'endpoint **`v7/finance/options/{TICKER}?date={UNIX_TIMESTAMP}`** che restituisce l'intera option chain per un ticker e una scadenza, con bid e ask reali per ogni contratto.
+
+### Vantaggi
+
+- **Bid/Ask reali** per ogni opzione nella chain
+- **Meno chiamate API**: invece di 234 chiamate individuali (una per OCC symbol), si raggruppano per ticker+scadenza. Se ci sono 30 ticker con 2-3 scadenze ciascuno, servono circa 60-80 chiamate totali invece di 234
+- **Stesso rate limiting** gia in uso (delay 200ms tra chiamate, 2s tra batch)
+
+### Logica modificata
+
 **File: `supabase/functions/update-option-prices-cron/index.ts`**
 
-Sostituire la logica di aggiustamento sabato/domenica con il calcolo del **3o venerdi del mese di scadenza**:
+1. **Raggruppare** le posizioni per `ticker + mese di scadenza` (chiave: `TICKER_YYYY-MM`)
+2. Per ogni gruppo, chiamare `https://query1.finance.yahoo.com/v7/finance/options/{TICKER}?date={UNIX_3RD_FRIDAY}` 
+   - `date` e il timestamp Unix del 3o venerdi del mese
+3. La risposta contiene `optionChain.result[0].options[0].calls[]` e `.puts[]`
+4. Ogni elemento ha: `strike`, `bid`, `ask`, `lastPrice`, `contractSymbol`
+5. Per ogni posizione nel gruppo, cercare il contratto con lo strike corrispondente
+6. Calcolare `(bid + ask) / 2`, fallback su `lastPrice`
+7. Aggiornare `positions.current_price` e `updated_at`
 
-```typescript
-function getThirdFriday(year: number, month: number): Date {
-  // month is 0-indexed (0=Jan)
-  const firstDay = new Date(year, month, 1);
-  // Find first Friday: dayOfWeek 5 = Friday
-  const firstFriday = 1 + ((5 - firstDay.getDay() + 7) % 7);
-  // Third Friday = first Friday + 14
-  const thirdFriday = firstFriday + 14;
-  return new Date(year, month, thirdFriday);
-}
+### Struttura risposta Yahoo v7
 
-function buildOCCSymbol(ticker, expiryDate, optionType, strikePrice) {
-  const d = new Date(expiryDate);
-  // Calcola il 3o venerdi del mese di scadenza
-  const thirdFri = getThirdFriday(d.getFullYear(), d.getMonth());
-  const yy = thirdFri.getFullYear().toString().slice(-2);
-  const mm = (thirdFri.getMonth() + 1).toString().padStart(2, '0');
-  const dd = thirdFri.getDate().toString().padStart(2, '0');
-  // ... rest
-}
+```text
+optionChain.result[0]:
+  underlyingSymbol: "AAPL"
+  options[0]:
+    expirationDate: 1771027200  (Unix timestamp)
+    calls: [
+      { strike: 40, bid: 8.5, ask: 9.2, lastPrice: 8.85, contractSymbol: "AAPL260320C00040000" },
+      ...
+    ]
+    puts: [
+      { strike: 40, bid: 1.2, ask: 1.5, lastPrice: 1.35, contractSymbol: "AAPL260320P00040000" },
+      ...
+    ]
 ```
 
-Questo corregge TUTTI i mesi, non solo quelli dove il 21 cade di sabato/domenica.
+### Dettagli tecnici
+
+- La funzione `buildOCCSymbol` e `getThirdFriday` restano invariate (servono per il matching del contratto)
+- Il batching cambia: invece di batch di 50 OCC symbols, batch di 20 chiamate ticker+expiry
+- Delay 300ms tra chiamate, 2s tra batch (piu conservativo perche ogni chiamata restituisce piu dati)
+- Se un ticker non ha dati per una scadenza, si logga e si salta
 
 ### Riepilogo
 
-| Problema | Causa | Fix |
-|----------|-------|-----|
-| 128/234 opzioni 404 | Data OCC errata (usa il 21 invece del 3o venerdi) | Calcolare il 3o venerdi del mese |
-| Triangolino rosso su alcune opzioni | Funziona correttamente: mostra stale per opzioni non aggiornate | Nessun fix necessario |
-| Nessun triangolino su altre opzioni | Funziona correttamente: opzioni Feb/Mar aggiornate di recente | Nessun fix necessario |
+| Aspetto | Prima (v8/chart) | Dopo (v7/options) |
+|---------|-------------------|-------------------|
+| Endpoint | `/v8/finance/chart/{OCC}` | `/v7/finance/options/{TICKER}?date=` |
+| Chiamate API | ~234 (1 per opzione) | ~60-80 (1 per ticker+scadenza) |
+| Bid/Ask | Quasi sempre null | Reali dalla option chain |
+| Prezzo | Fallback su regularMarketPrice | `(bid+ask)/2`, fallback su lastPrice |
 
 Un solo file da modificare: `supabase/functions/update-option-prices-cron/index.ts`
 
