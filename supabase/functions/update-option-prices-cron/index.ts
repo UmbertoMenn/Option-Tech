@@ -6,7 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Chunk array into batches
 function chunkArray<T>(array: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < array.length; i += size) {
@@ -15,20 +14,16 @@ function chunkArray<T>(array: T[], size: number): T[][] {
   return chunks;
 }
 
-// Delay helper
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Calculate the 3rd Friday of a given month (0-indexed)
 function getThirdFriday(year: number, month: number): Date {
   const firstDay = new Date(year, month, 1);
   const firstFriday = 1 + ((5 - firstDay.getDay() + 7) % 7);
   return new Date(year, month, firstFriday + 14);
 }
 
-// Build OCC symbol: {TICKER}{YYMMDD}{C/P}{STRIKE*1000 padded 8 digits}
-// Broker stores expiry as ~21st of month; OCC requires the 3rd Friday
 function buildOCCSymbol(ticker: string, expiryDate: string, optionType: string, strikePrice: number): string {
   const d = new Date(expiryDate);
   const thirdFri = getThirdFriday(d.getFullYear(), d.getMonth());
@@ -36,68 +31,141 @@ function buildOCCSymbol(ticker: string, expiryDate: string, optionType: string, 
   const mm = (thirdFri.getMonth() + 1).toString().padStart(2, '0');
   const dd = thirdFri.getDate().toString().padStart(2, '0');
   const type = optionType.toLowerCase() === 'call' ? 'C' : 'P';
-  // Strike * 1000, padded to 8 digits
   const strikeInt = Math.round(strikePrice * 1000);
   const strikeStr = strikeInt.toString().padStart(8, '0');
   return `${ticker}${yy}${mm}${dd}${type}${strikeStr}`;
 }
 
-// Fetch option price from Yahoo Finance using (bid+ask)/2
-async function fetchOptionPrice(occSymbol: string): Promise<{ price: number } | null> {
+interface PositionToUpdate {
+  positionId: string;
+  occSymbol: string;
+  optionType: string;
+  strikePrice: number;
+  underlying: string;
+}
+
+interface GroupKey {
+  ticker: string;
+  expiryDate: string;
+  thirdFridayUnix: number;
+  positions: PositionToUpdate[];
+}
+
+// Obtain Yahoo crumb + cookie for authenticated API access
+async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(occSymbol)}?interval=1d&range=1d`;
-    
+    // Step 1: Get cookie from Yahoo
+    const initResp = await fetch('https://fc.yahoo.com', {
+      redirect: 'manual',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    // Consume body to avoid resource leak
+    await initResp.text();
+
+    const setCookies = initResp.headers.get('set-cookie') || '';
+    // Extract all cookies
+    const cookies = setCookies.split(',').map(c => c.split(';')[0].trim()).filter(Boolean).join('; ');
+
+    if (!cookies) {
+      console.log('No cookies from Yahoo');
+      return null;
+    }
+
+    // Step 2: Get crumb
+    const crumbResp = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookies,
+      },
+    });
+
+    if (!crumbResp.ok) {
+      console.log(`Crumb request failed: ${crumbResp.status}`);
+      await crumbResp.text();
+      return null;
+    }
+
+    const crumb = await crumbResp.text();
+    if (!crumb || crumb.length > 50) {
+      console.log('Invalid crumb received');
+      return null;
+    }
+
+    console.log(`Yahoo crumb obtained successfully (length=${crumb.length})`);
+    return { crumb, cookie: cookies };
+  } catch (error) {
+    console.error('Error getting Yahoo crumb:', error);
+    return null;
+  }
+}
+
+// Fetch the full option chain for a ticker+expiry
+async function fetchOptionChain(
+  ticker: string,
+  expiryUnix: number,
+  crumb: string,
+  cookie: string,
+): Promise<{
+  calls: Record<string, { bid: number; ask: number; lastPrice: number }>;
+  puts: Record<string, { bid: number; ask: number; lastPrice: number }>;
+} | null> {
+  try {
+    const url = `https://query2.finance.yahoo.com/v7/finance/options/${encodeURIComponent(ticker)}?date=${expiryUnix}&crumb=${encodeURIComponent(crumb)}`;
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookie,
       },
     });
-    
+
     if (!response.ok) {
-      console.log(`Yahoo API returned ${response.status} for ${occSymbol}`);
+      const body = await response.text();
+      console.log(`Yahoo v7 returned ${response.status} for ${ticker} date=${expiryUnix}: ${body.slice(0, 200)}`);
       return null;
     }
-    
+
     const data = await response.json();
-    const result = data.chart?.result?.[0];
-    
-    if (!result) {
-      console.log(`No result in Yahoo response for ${occSymbol}`);
+    const result = data.optionChain?.result?.[0];
+    if (!result || !result.options || result.options.length === 0) {
+      console.log(`No option chain data for ${ticker} date=${expiryUnix}`);
       return null;
     }
-    
-    const meta = result.meta;
-    
-    // Try (bid + ask) / 2 first
-    const bid = meta.bid;
-    const ask = meta.ask;
-    
-    if (bid != null && ask != null && bid > 0 && ask > 0) {
-      const price = (bid + ask) / 2;
-      console.log(`[Yahoo] ${occSymbol}: bid=${bid}, ask=${ask}, mid=${price.toFixed(4)}`);
-      return { price };
+
+    const options = result.options[0];
+    const calls: Record<string, { bid: number; ask: number; lastPrice: number }> = {};
+    const puts: Record<string, { bid: number; ask: number; lastPrice: number }> = {};
+
+    for (const c of (options.calls || [])) {
+      calls[c.contractSymbol] = { bid: c.bid ?? 0, ask: c.ask ?? 0, lastPrice: c.lastPrice ?? 0 };
     }
-    
-    // Fallback to regularMarketPrice
-    const regularPrice = meta.regularMarketPrice;
-    if (regularPrice && regularPrice > 0) {
-      console.log(`[Yahoo] ${occSymbol}: fallback to regularMarketPrice=${regularPrice}`);
-      return { price: regularPrice };
+    for (const p of (options.puts || [])) {
+      puts[p.contractSymbol] = { bid: p.bid ?? 0, ask: p.ask ?? 0, lastPrice: p.lastPrice ?? 0 };
     }
-    
-    // Try previousClose as last resort
-    const prevClose = meta.previousClose;
-    if (prevClose && prevClose > 0) {
-      console.log(`[Yahoo] ${occSymbol}: fallback to previousClose=${prevClose}`);
-      return { price: prevClose };
-    }
-    
-    console.log(`[Yahoo] No valid price for ${occSymbol}`);
-    return null;
+
+    console.log(`[Yahoo v7] ${ticker} exp=${expiryUnix}: ${Object.keys(calls).length} calls, ${Object.keys(puts).length} puts`);
+    return { calls, puts };
   } catch (error) {
-    console.error(`Error fetching ${occSymbol}:`, error);
+    console.error(`Error fetching chain for ${ticker}:`, error);
     return null;
   }
+}
+
+function getMidPrice(contract: { bid: number; ask: number; lastPrice: number } | undefined, occSymbol: string): number | null {
+  if (!contract) {
+    console.log(`[Match] No contract found for ${occSymbol}`);
+    return null;
+  }
+  if (contract.bid > 0 && contract.ask > 0) {
+    const mid = (contract.bid + contract.ask) / 2;
+    console.log(`[Price] ${occSymbol}: bid=${contract.bid}, ask=${contract.ask}, mid=${mid.toFixed(4)}`);
+    return mid;
+  }
+  if (contract.lastPrice > 0) {
+    console.log(`[Price] ${occSymbol}: fallback lastPrice=${contract.lastPrice}`);
+    return contract.lastPrice;
+  }
+  console.log(`[Price] ${occSymbol}: no valid price`);
+  return null;
 }
 
 serve(async (req) => {
@@ -106,19 +174,21 @@ serve(async (req) => {
   }
 
   const startTime = Date.now();
-  console.log("=== Update Option Prices Cron Job Started ===");
+  console.log("=== Update Option Prices Cron (v7/options) Started ===");
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error("Missing Supabase configuration");
-    }
-    
+    if (!supabaseUrl || !supabaseKey) throw new Error("Missing Supabase configuration");
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Step 1: Get all active derivative positions (not expired)
+    // Step 0: Get Yahoo crumb for authenticated requests
+    const auth = await getYahooCrumb();
+    if (!auth) {
+      throw new Error("Failed to obtain Yahoo Finance authentication crumb");
+    }
+
+    // Step 1: Get all active derivative positions
     const today = new Date().toISOString().split('T')[0];
     const { data: derivatives, error: derivError } = await supabase
       .from('positions')
@@ -129,10 +199,8 @@ serve(async (req) => {
       .not('strike_price', 'is', null)
       .not('expiry_date', 'is', null)
       .gte('expiry_date', today);
-    
-    if (derivError) {
-      throw new Error(`Error fetching derivatives: ${derivError.message}`);
-    }
+
+    if (derivError) throw new Error(`Error fetching derivatives: ${derivError.message}`);
 
     if (!derivatives || derivatives.length === 0) {
       console.log("No active derivatives found");
@@ -144,32 +212,21 @@ serve(async (req) => {
 
     console.log(`Found ${derivatives.length} active derivative positions`);
 
-    // Step 2: Get all underlying_mappings
+    // Step 2: Resolve underlying -> ticker mappings
     const uniqueUnderlyings = [...new Set(derivatives.map(d => d.underlying).filter(Boolean))];
     const { data: mappings, error: mapError } = await supabase
       .from('underlying_mappings')
       .select('underlying, ticker')
       .in('underlying', uniqueUnderlyings);
-    
-    if (mapError) {
-      console.error("Error fetching underlying_mappings:", mapError.message);
-    }
+
+    if (mapError) console.error("Error fetching underlying_mappings:", mapError.message);
 
     const underlyingToTicker: Record<string, string> = {};
-    mappings?.forEach(m => {
-      underlyingToTicker[m.underlying] = m.ticker;
-    });
-
+    mappings?.forEach(m => { underlyingToTicker[m.underlying] = m.ticker; });
     console.log(`Resolved ${Object.keys(underlyingToTicker).length} / ${uniqueUnderlyings.length} underlyings to tickers`);
 
-    // Step 3: Build OCC symbols and map to position IDs
-    interface OptionUpdate {
-      positionId: string;
-      occSymbol: string;
-      underlying: string;
-    }
-
-    const updates: OptionUpdate[] = [];
+    // Step 3: Group positions by ticker + expiry month
+    const groups: Record<string, GroupKey> = {};
     const skipped: string[] = [];
 
     for (const d of derivatives) {
@@ -179,10 +236,21 @@ serve(async (req) => {
         continue;
       }
 
+      const expDate = new Date(d.expiry_date);
+      const thirdFri = getThirdFriday(expDate.getFullYear(), expDate.getMonth());
+      const thirdFridayUnix = Math.floor(thirdFri.getTime() / 1000);
+      const groupKey = `${ticker}_${expDate.getFullYear()}-${(expDate.getMonth() + 1).toString().padStart(2, '0')}`;
+
       const occSymbol = buildOCCSymbol(ticker, d.expiry_date, d.option_type, d.strike_price);
-      updates.push({
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = { ticker, expiryDate: d.expiry_date, thirdFridayUnix, positions: [] };
+      }
+      groups[groupKey].positions.push({
         positionId: d.id,
         occSymbol,
+        optionType: d.option_type,
+        strikePrice: d.strike_price,
         underlying: d.underlying,
       });
     }
@@ -191,14 +259,15 @@ serve(async (req) => {
       console.log(`Skipped ${skipped.length} positions without ticker mapping: ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '...' : ''}`);
     }
 
-    console.log(`Will fetch prices for ${updates.length} options`);
+    const groupEntries = Object.entries(groups);
+    console.log(`Grouped into ${groupEntries.length} ticker+expiry groups (covering ${derivatives.length - skipped.length} positions)`);
 
-    // Step 4: Fetch prices in batches with rate limiting
-    const BATCH_SIZE = 50;
-    const DELAY_BETWEEN_CALLS = 200; // ms
-    const DELAY_BETWEEN_BATCHES = 2000; // ms
+    // Step 4: Fetch option chains in batches
+    const BATCH_SIZE = 20;
+    const DELAY_BETWEEN_CALLS = 300;
+    const DELAY_BETWEEN_BATCHES = 2000;
 
-    const batches = chunkArray(updates, BATCH_SIZE);
+    const batches = chunkArray(groupEntries, BATCH_SIZE);
     let updated = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -211,39 +280,54 @@ serve(async (req) => {
         await delay(DELAY_BETWEEN_BATCHES);
       }
 
-      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} options)`);
+      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} groups)`);
 
-      for (const item of batch) {
+      for (const [groupKey, group] of batch) {
         try {
-          const result = await fetchOptionPrice(item.occSymbol);
+          const chain = await fetchOptionChain(group.ticker, group.thirdFridayUnix, auth.crumb, auth.cookie);
 
-          if (result) {
-            const { error: updateError } = await supabase
-              .from('positions')
-              .update({
-                current_price: result.price,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', item.positionId);
-
-            if (updateError) {
-              console.error(`Failed to update position ${item.positionId}:`, updateError.message);
+          if (!chain) {
+            for (const pos of group.positions) {
               failed++;
-              errors.push(`${item.occSymbol}: update failed`);
-            } else {
-              updated++;
+              errors.push(`${pos.occSymbol}: no chain data`);
             }
-          } else {
-            failed++;
-            errors.push(`${item.occSymbol}: no price data`);
+            await delay(DELAY_BETWEEN_CALLS);
+            continue;
+          }
+
+          for (const pos of group.positions) {
+            const isCall = pos.optionType.toLowerCase() === 'call';
+            const contractMap = isCall ? chain.calls : chain.puts;
+            const contract = contractMap[pos.occSymbol];
+            const price = getMidPrice(contract, pos.occSymbol);
+
+            if (price !== null) {
+              const { error: updateError } = await supabase
+                .from('positions')
+                .update({ current_price: price, updated_at: new Date().toISOString() })
+                .eq('id', pos.positionId);
+
+              if (updateError) {
+                console.error(`Failed to update ${pos.positionId}:`, updateError.message);
+                failed++;
+                errors.push(`${pos.occSymbol}: update failed`);
+              } else {
+                updated++;
+              }
+            } else {
+              failed++;
+              errors.push(`${pos.occSymbol}: no price data`);
+            }
           }
 
           await delay(DELAY_BETWEEN_CALLS);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`Error processing ${item.occSymbol}:`, errorMsg);
-          failed++;
-          errors.push(`${item.occSymbol}: ${errorMsg}`);
+          console.error(`Error processing group ${groupKey}:`, errorMsg);
+          for (const pos of group.positions) {
+            failed++;
+            errors.push(`${pos.occSymbol}: ${errorMsg}`);
+          }
         }
       }
     }
@@ -258,16 +342,15 @@ serve(async (req) => {
         failed,
         skipped: skipped.length,
         total: derivatives.length,
+        groups: groupEntries.length,
         duration_ms: durationMs,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Cron job error:", errorMessage);
-    
     return new Response(
       JSON.stringify({ success: false, error: errorMessage, duration_ms: Date.now() - startTime }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
