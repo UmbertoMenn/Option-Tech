@@ -138,7 +138,7 @@ async function sendEmail(
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: ${severityColor}; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">🚨 Avviso Portafoglio</h2>
+            <h2 style="margin: 0;">🔔 Avviso Portafoglio</h2>
             <p style="margin: 8px 0 0 0; font-size: 14px;">${severityEmoji} ${severityLabel}</p>
           </div>
           <div style="padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
@@ -210,7 +210,7 @@ async function sendTelegram(
     const priceLabel = alertData.underlying_price ? 
       `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
-    let text = `🚨 *Avviso Portafoglio*
+    let text = `🔔 *Avviso Portafoglio*
 ${severityEmoji} *${severityLabel}*
 ${isAdmin && userName ? `\n👤 *Utente:* ${userName}` : ''}
 
