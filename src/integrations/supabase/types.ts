@@ -749,6 +749,8 @@ export type Database = {
       }
       profiles: {
         Row: {
+          admin_notify_email: boolean
+          admin_notify_telegram: boolean
           created_at: string
           email: string
           full_name: string | null
@@ -760,6 +762,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          admin_notify_email?: boolean
+          admin_notify_telegram?: boolean
           created_at?: string
           email: string
           full_name?: string | null
@@ -771,6 +775,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          admin_notify_email?: boolean
+          admin_notify_telegram?: boolean
           created_at?: string
           email?: string
           full_name?: string | null

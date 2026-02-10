@@ -358,13 +358,13 @@ serve(async (req: Request): Promise<Response> => {
       
       const { data: adminProfiles } = await supabase
         .from("profiles")
-        .select("email, notify_email, notify_telegram, telegram_chat_id, user_id")
+        .select("email, admin_notify_email, admin_notify_telegram, telegram_chat_id, user_id")
         .in("user_id", adminUserIds)
         .neq("user_id", alertData.user_id); // Don't double-notify if user is admin
 
       if (adminProfiles) {
         for (const admin of adminProfiles) {
-          if (admin.email) {
+          if (admin.admin_notify_email && admin.email) {
             const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
@@ -375,7 +375,7 @@ serve(async (req: Request): Promise<Response> => {
               emailResult.error
             );
           }
-          if (admin.telegram_chat_id) {
+          if (admin.admin_notify_telegram && admin.telegram_chat_id) {
             const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
