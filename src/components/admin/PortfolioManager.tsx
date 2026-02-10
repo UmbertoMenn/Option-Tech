@@ -125,7 +125,6 @@ export function PortfolioManager() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleCopyClick(portfolio)}
-                        disabled={otherUsers.length === 0}
                       >
                         <Copy className="w-4 h-4 mr-2" />
                         Copia su Utente
