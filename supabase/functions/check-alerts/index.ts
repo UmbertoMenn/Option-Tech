@@ -386,6 +386,8 @@ serve(async (req) => {
                     underlying_price: underlyingPrice,
                     message,
                     severity: 'critical',
+                    option_type: 'call',
+                    option_expiry: strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -495,6 +497,8 @@ serve(async (req) => {
                     underlying_price: underlyingPrice,
                     message,
                     severity: 'critical',
+                    option_type: 'put',
+                    option_expiry: strategy.sold_put_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -608,6 +612,8 @@ serve(async (req) => {
                     underlying_price: underlyingPrice,
                     message,
                     severity: 'critical',
+                    option_type: side === 'PUT' ? 'put' : 'call',
+                    option_expiry: side === 'PUT' ? strategy.sold_put_expiry : strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -778,6 +784,8 @@ serve(async (req) => {
                     underlying_price: underlyingPrice,
                     message,
                     severity: 'critical',
+                    option_type: side === 'PUT' ? 'put' : 'call',
+                    option_expiry: side === 'PUT' ? strategy.sold_put_expiry : strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   
@@ -948,6 +956,8 @@ serve(async (req) => {
                     underlying_price: underlyingPrice,
                     message,
                     severity: 'critical',
+                    option_type: side === 'PUT' ? 'put' : 'call',
+                    option_expiry: side === 'PUT' ? strategy.sold_put_expiry : strategy.sold_call_expiry,
                   });
                   totalAlertsCreated++;
                   

@@ -101,6 +101,11 @@ function formatOptionDisplay(
     ? strikePrice.toString() 
     : strikePrice.toFixed(2);
   
+  // Defensive fallback: if type is still undefined, show only strike
+  if (!type) {
+    return { label: 'Strike', value: `${strikeStr}${expiryStr}` };
+  }
+  
   return { 
     label: 'Opzione', 
     value: `${type} ${strikeStr}${expiryStr}` 
