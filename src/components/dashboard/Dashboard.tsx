@@ -12,7 +12,8 @@ import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
@@ -35,6 +36,7 @@ import { DepositEntry } from '@/types/deposits';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const { isAggregatedView } = usePortfolioContext();
   const { portfolio, positions, summary, isLoading } = usePortfolio();
@@ -226,6 +228,10 @@ export function Dashboard() {
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                      {theme === 'dark' ? <Sun className="w-4 h-4 mr-2" /> : <Moon className="w-4 h-4 mr-2" />}
+                      {theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={signOut}>
                       <LogOut className="w-4 h-4 mr-2" />
                       Esci
@@ -289,6 +295,9 @@ export function Dashboard() {
                     </Link>
                   </Button>
                 )}
+                <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'} className="shrink-0">
+                  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </Button>
                 <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
                   <LogOut className="w-4 h-4" />
                   <span className="ml-2">Esci</span>
