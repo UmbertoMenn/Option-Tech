@@ -65,8 +65,6 @@ export function AuthForm() {
       toast.error('Errore di login', {
         description: error.message,
       });
-    } else {
-      toast.success('Benvenuto!');
     }
     
     setLoading(false);

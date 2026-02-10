@@ -11,9 +11,10 @@ import {
 interface DisclaimerDialogProps {
   open: boolean;
   onAccept: () => void;
+  onDecline: () => void;
 }
 
-export function DisclaimerDialog({ open, onAccept }: DisclaimerDialogProps) {
+export function DisclaimerDialog({ open, onAccept, onDecline }: DisclaimerDialogProps) {
   return (
     <AlertDialog open={open}>
       <AlertDialogContent
@@ -22,7 +23,7 @@ export function DisclaimerDialog({ open, onAccept }: DisclaimerDialogProps) {
       >
         <AlertDialogHeader>
           <AlertDialogTitle className="text-xl font-bold text-center">
-            Informativa
+            Disclaimer
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
@@ -47,13 +48,20 @@ export function DisclaimerDialog({ open, onAccept }: DisclaimerDialogProps) {
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter className="mt-4 sm:justify-center">
+        <AlertDialogFooter className="mt-4 sm:justify-center flex-col gap-2">
           <AlertDialogAction
             onClick={onAccept}
             className="w-full text-base py-6 font-semibold"
           >
             Confermo ed accetto quanto sopra
           </AlertDialogAction>
+          <button
+            type="button"
+            onClick={onDecline}
+            className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
+          >
+            Non accetto e non voglio proseguire
+          </button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
