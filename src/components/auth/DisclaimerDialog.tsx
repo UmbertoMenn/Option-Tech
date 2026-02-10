@@ -49,12 +49,6 @@ export function DisclaimerDialog({ open, onAccept, onDecline }: DisclaimerDialog
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="mt-4 sm:justify-center flex-col gap-2">
-          <AlertDialogAction
-            onClick={onAccept}
-            className="w-full text-base py-6 font-semibold"
-          >
-            Confermo ed accetto quanto sopra
-          </AlertDialogAction>
           <button
             type="button"
             onClick={onDecline}
@@ -62,6 +56,12 @@ export function DisclaimerDialog({ open, onAccept, onDecline }: DisclaimerDialog
           >
             Non accetto e non voglio proseguire
           </button>
+          <AlertDialogAction
+            onClick={onAccept}
+            className="w-full text-base py-6 font-semibold"
+          >
+            Confermo ed accetto quanto sopra
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

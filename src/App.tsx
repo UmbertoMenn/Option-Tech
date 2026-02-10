@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -39,6 +39,13 @@ function AppRoutes() {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(
     () => sessionStorage.getItem('disclaimerAccepted') === 'true'
   );
+
+  useEffect(() => {
+    if (user) {
+      const accepted = sessionStorage.getItem('disclaimerAccepted') === 'true';
+      setDisclaimerAccepted(accepted);
+    }
+  }, [user]);
 
   const handleAcceptDisclaimer = () => {
     sessionStorage.setItem('disclaimerAccepted', 'true');
