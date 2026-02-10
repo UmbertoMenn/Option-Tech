@@ -1,66 +1,42 @@
 
 
-## Migrazione a Yahoo Finance v7/finance/options per bid/ask reali
+## Fallback a regularMarketPrice per opzioni senza bid/ask
 
-### Problema attuale
+### Problema
 
-L'endpoint `v8/finance/chart/{OCC_SYMBOL}` restituisce `bid=null, ask=null` per la maggior parte delle opzioni, facendo scattare il fallback su `regularMarketPrice` che non rappresenta il mid-price reale.
+Quando la option chain (`v7/finance/options`) non contiene il contratto cercato oppure restituisce bid/ask/lastPrice tutti a 0, l'opzione viene segnata come "failed" senza alcun prezzo.
 
 ### Soluzione
 
-Usare l'endpoint **`v7/finance/options/{TICKER}?date={UNIX_TIMESTAMP}`** che restituisce l'intera option chain per un ticker e una scadenza, con bid e ask reali per ogni contratto.
+Aggiungere un secondo tentativo: per ogni opzione che fallisce il pricing dalla option chain, chiamare l'endpoint `v8/finance/chart/{OCC_SYMBOL}` per ottenere almeno il `regularMarketPrice` come fallback.
 
-### Vantaggi
+### Modifiche al file `supabase/functions/update-option-prices-cron/index.ts`
 
-- **Bid/Ask reali** per ogni opzione nella chain
-- **Meno chiamate API**: invece di 234 chiamate individuali (una per OCC symbol), si raggruppano per ticker+scadenza. Se ci sono 30 ticker con 2-3 scadenze ciascuno, servono circa 60-80 chiamate totali invece di 234
-- **Stesso rate limiting** gia in uso (delay 200ms tra chiamate, 2s tra batch)
+1. **Nuova funzione `fetchFallbackPrice(occSymbol, crumb, cookie)`**:
+   - Chiama `https://query2.finance.yahoo.com/v8/finance/chart/{OCC_SYMBOL}?crumb=...` con autenticazione
+   - Estrae `regularMarketPrice` dalla risposta
+   - Ritorna il prezzo o `null`
 
-### Logica modificata
+2. **Modifica del loop principale** (righe 298-320):
+   - Quando `getMidPrice()` ritorna `null` (contratto non trovato o prezzi a 0), invece di segnare subito come "failed", chiama `fetchFallbackPrice()`
+   - Se il fallback restituisce un prezzo valido, aggiorna il database e logga come "fallback regularMarketPrice"
+   - Solo se anche il fallback fallisce, segna come "failed"
 
-**File: `supabase/functions/update-option-prices-cron/index.ts`**
+3. **Logging migliorato**:
+   - Log specifico per distinguere: `[Price] mid`, `[Price] lastPrice`, `[Price] fallback regularMarketPrice`, `[Price] FAILED`
 
-1. **Raggruppare** le posizioni per `ticker + mese di scadenza` (chiave: `TICKER_YYYY-MM`)
-2. Per ogni gruppo, chiamare `https://query1.finance.yahoo.com/v7/finance/options/{TICKER}?date={UNIX_3RD_FRIDAY}` 
-   - `date` e il timestamp Unix del 3o venerdi del mese
-3. La risposta contiene `optionChain.result[0].options[0].calls[]` e `.puts[]`
-4. Ogni elemento ha: `strike`, `bid`, `ask`, `lastPrice`, `contractSymbol`
-5. Per ogni posizione nel gruppo, cercare il contratto con lo strike corrispondente
-6. Calcolare `(bid + ask) / 2`, fallback su `lastPrice`
-7. Aggiornare `positions.current_price` e `updated_at`
-
-### Struttura risposta Yahoo v7
+### Flusso di priorita dei prezzi
 
 ```text
-optionChain.result[0]:
-  underlyingSymbol: "AAPL"
-  options[0]:
-    expirationDate: 1771027200  (Unix timestamp)
-    calls: [
-      { strike: 40, bid: 8.5, ask: 9.2, lastPrice: 8.85, contractSymbol: "AAPL260320C00040000" },
-      ...
-    ]
-    puts: [
-      { strike: 40, bid: 1.2, ask: 1.5, lastPrice: 1.35, contractSymbol: "AAPL260320P00040000" },
-      ...
-    ]
+1. (bid + ask) / 2    -- dalla option chain v7
+2. lastPrice           -- dalla option chain v7
+3. regularMarketPrice  -- dal chart endpoint v8 (NUOVO fallback)
+4. FAILED              -- nessun prezzo disponibile
 ```
 
-### Dettagli tecnici
+### Note tecniche
 
-- La funzione `buildOCCSymbol` e `getThirdFriday` restano invariate (servono per il matching del contratto)
-- Il batching cambia: invece di batch di 50 OCC symbols, batch di 20 chiamate ticker+expiry
-- Delay 300ms tra chiamate, 2s tra batch (piu conservativo perche ogni chiamata restituisce piu dati)
-- Se un ticker non ha dati per una scadenza, si logga e si salta
-
-### Riepilogo
-
-| Aspetto | Prima (v8/chart) | Dopo (v7/options) |
-|---------|-------------------|-------------------|
-| Endpoint | `/v8/finance/chart/{OCC}` | `/v7/finance/options/{TICKER}?date=` |
-| Chiamate API | ~234 (1 per opzione) | ~60-80 (1 per ticker+scadenza) |
-| Bid/Ask | Quasi sempre null | Reali dalla option chain |
-| Prezzo | Fallback su regularMarketPrice | `(bid+ask)/2`, fallback su lastPrice |
-
-Un solo file da modificare: `supabase/functions/update-option-prices-cron/index.ts`
+- Il fallback aggiunge chiamate API solo per le opzioni che falliscono (attualmente ~11 su 234), quindi l'impatto sul rate limiting e minimo
+- Delay di 300ms tra ogni chiamata di fallback per rispettare i limiti Yahoo
+- Le chiamate di fallback vengono fatte inline, subito dopo il fallimento del pricing dalla chain
 
