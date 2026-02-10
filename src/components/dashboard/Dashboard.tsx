@@ -152,24 +152,24 @@ export function Dashboard() {
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 shrink-0">
               <div className="p-2 rounded-lg bg-primary/10">
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
               <div>
                 <h1 className="text-lg font-bold">Portfolio Monitor</h1>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground hidden sm:block">
                   {portfolio?.last_updated && (
                     <span>Aggiornato {formatRelativeTime(portfolio.last_updated)}</span>
                   )}
                 </p>
               </div>
-              <div className="ml-4">
-                <PortfolioSelector />
-              </div>
             </div>
             
             <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+              <div className="shrink-0">
+                <PortfolioSelector />
+              </div>
               {!isAggregatedView && (
                 <Button 
                   variant="outline" 
