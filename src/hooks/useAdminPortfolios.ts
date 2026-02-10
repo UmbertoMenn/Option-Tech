@@ -41,13 +41,13 @@ export function useAdminPortfolios() {
         owner_name: profileMap.get(p.user_id)?.name || null,
       })) as PortfolioWithOwner[];
 
-      return portfoliosWithOwner;
+      return { portfolios: portfoliosWithOwner, profiles: profiles || [] };
     },
     enabled: isAdmin,
   });
 
   // Get portfolios grouped by user
-  const portfoliosByUser = allPortfoliosQuery.data?.reduce((acc, portfolio) => {
+  const portfoliosByUser = allPortfoliosQuery.data?.portfolios?.reduce((acc, portfolio) => {
     const key = portfolio.user_id;
     if (!acc[key]) {
       acc[key] = {
@@ -62,16 +62,24 @@ export function useAdminPortfolios() {
   }, {} as Record<string, { userId: string; email: string; name: string | null; portfolios: PortfolioWithOwner[] }>) || {};
 
   // Get admin's own portfolios (for copy feature)
-  const adminPortfolios = allPortfoliosQuery.data?.filter(p => p.user_id === user?.id) || [];
+  const adminPortfolios = allPortfoliosQuery.data?.portfolios?.filter(p => p.user_id === user?.id) || [];
 
   // Get other users (not including current admin)
   const otherUsers = Object.values(portfoliosByUser).filter(u => u.userId !== user?.id);
 
+  // All registered users (from profiles), for copy target dropdown
+  const allRegisteredUsers = (allPortfoliosQuery.data?.profiles || []).map(p => ({
+    userId: p.user_id,
+    email: p.email,
+    name: p.full_name,
+  }));
+
   return {
-    allPortfolios: allPortfoliosQuery.data || [],
+    allPortfolios: allPortfoliosQuery.data?.portfolios || [],
     portfoliosByUser,
     adminPortfolios,
     otherUsers,
+    allRegisteredUsers,
     isLoading: allPortfoliosQuery.isLoading,
     refetch: allPortfoliosQuery.refetch,
   };

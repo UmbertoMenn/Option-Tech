@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { Portfolio } from '@/types/portfolio';
 
 export function PortfolioManager() {
   const { user } = useAuth();
-  const { allPortfolios, adminPortfolios, otherUsers, portfoliosByUser, isLoading, refetch } = useAdminPortfolios();
+  const { allPortfolios, adminPortfolios, otherUsers, allRegisteredUsers, isLoading, refetch } = useAdminPortfolios();
   const { setAdminViewPortfolio } = usePortfolioContext();
   const navigate = useNavigate();
 
@@ -63,14 +63,6 @@ export function PortfolioManager() {
     }
   };
 
-  // Get all users for the copy dialog dropdown (including admin)
-  const allUsersForCopy = useMemo(() => {
-    return Object.values(portfoliosByUser).map(u => ({
-      userId: u.userId,
-      email: u.email,
-      name: u.name,
-    }));
-  }, [portfoliosByUser]);
 
   if (isLoading) {
     return (
@@ -267,7 +259,7 @@ export function PortfolioManager() {
         open={copyDialogOpen}
         onOpenChange={setCopyDialogOpen}
         sourcePortfolio={portfolioToCopy}
-        users={allUsersForCopy}
+        users={allRegisteredUsers}
         onSuccess={refetch}
       />
 
