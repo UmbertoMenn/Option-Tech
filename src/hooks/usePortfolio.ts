@@ -171,6 +171,8 @@ export function usePortfolio() {
         .insert(positions.map(p => ({
           ...p,
           portfolio_id: portfolioId,
+          snapshot_price: p.current_price,
+          snapshot_market_value: p.market_value,
         })))
         .select();
       
@@ -276,7 +278,7 @@ function calculateSummary(positions: Position[], cashValue: number): PortfolioSu
       return;
     }
 
-    const value = position.market_value || 0;
+    const value = position.snapshot_market_value ?? position.market_value ?? 0;
     const pl = position.profit_loss || 0;
 
     totalValue += value;

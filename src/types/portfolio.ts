@@ -21,6 +21,8 @@ export interface Position {
   strike_price: number | null;
   expiry_date: string | null;
   underlying: string | null;
+  snapshot_price: number | null;
+  snapshot_market_value: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -613,6 +613,8 @@ export type Database = {
           profit_loss: number | null
           profit_loss_pct: number | null
           quantity: number
+          snapshot_market_value: number | null
+          snapshot_price: number | null
           strike_price: number | null
           ticker: string | null
           underlying: string | null
@@ -636,6 +638,8 @@ export type Database = {
           profit_loss?: number | null
           profit_loss_pct?: number | null
           quantity: number
+          snapshot_market_value?: number | null
+          snapshot_price?: number | null
           strike_price?: number | null
           ticker?: string | null
           underlying?: string | null
@@ -659,6 +663,8 @@ export type Database = {
           profit_loss?: number | null
           profit_loss_pct?: number | null
           quantity?: number
+          snapshot_market_value?: number | null
+          snapshot_price?: number | null
           strike_price?: number | null
           ticker?: string | null
           underlying?: string | null

@@ -3,6 +3,7 @@ import { usePortfolio } from './usePortfolio';
 import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk } from '@/lib/riskCalculator';
+import { Position } from '@/types/portfolio';
 
 export interface UseEquityExposurePctOptions {
   /** Include Naked PUT exposure in calculation (default: true) */
@@ -63,14 +64,21 @@ export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}):
       };
     }
     
+    // Use snapshot prices for equity exposure (Excel values, not live cron prices)
+    const snapshotPositions: Position[] = positions.map(p => ({
+      ...p,
+      current_price: p.snapshot_price ?? p.current_price,
+      market_value: p.snapshot_market_value ?? p.market_value,
+    }));
+    
     // Filter derivatives
-    const derivatives = positions.filter(p => p.asset_type === 'derivative');
+    const derivatives = snapshotPositions.filter(p => p.asset_type === 'derivative');
     
     // Categorize derivatives using existing logic WITH overrides (same as Risk Analyzer)
-    const categories = categorizeDerivatives(derivatives, positions, overrides);
+    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides);
     
     // Calculate risk analysis (same as Risk Analyzer)
-    const analysis = analyzePortfolioRisk(positions, categories);
+    const analysis = analyzePortfolioRisk(snapshotPositions, categories);
     
     // Dynamic grandTotal based on options
     // Always include: ETF + Stocks (net of protections) + Commodities

@@ -630,6 +630,8 @@ function createDummyStock(description: string): Position {
     strike_price: null,
     expiry_date: null,
     underlying: null,
+    snapshot_price: null,
+    snapshot_market_value: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };

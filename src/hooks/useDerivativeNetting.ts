@@ -86,7 +86,7 @@ export function useDerivativeNetting(
     let nettingExCCAndNP = 0;
     
     for (const derivative of derivatives) {
-      const price = derivative.current_price ?? 0;
+      const price = derivative.snapshot_price ?? derivative.current_price ?? 0;
       const quantity = derivative.quantity;
       const multiplier = 100; // Standard option multiplier
       const exchangeRate = getEffectiveExchangeRate(derivative);
@@ -104,7 +104,7 @@ export function useDerivativeNetting(
       if (coveredCall) {
         // This is a covered call - check if ITM or OTM
         const strikePrice = derivative.strike_price ?? 0;
-        const underlyingPrice = coveredCall.underlying.current_price ?? 0;
+        const underlyingPrice = coveredCall.underlying.snapshot_price ?? coveredCall.underlying.current_price ?? 0;
         
         if (strikePrice < underlyingPrice) {
           // ITM covered call: subtract intrinsic value converted to EUR
@@ -118,7 +118,7 @@ export function useDerivativeNetting(
       } else if (nakedPut) {
         // This is a naked put - check if ITM/OTM for nettingExCCAndNP
         const strikePrice = derivative.strike_price ?? 0;
-        const underlyingPrice = nakedPut.underlying?.current_price ?? 0;
+        const underlyingPrice = nakedPut.underlying?.snapshot_price ?? nakedPut.underlying?.current_price ?? 0;
         
         // Include full netting value in nettingExCoveredCall (naked puts are always included)
         nettingExCoveredCall += nettingValue;

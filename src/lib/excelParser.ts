@@ -349,6 +349,8 @@ function parseDerivativeRow(
     expiry_date: expiryDate,
     underlying,
     exchange_rate: exchangeRate || undefined,
+    snapshot_price: currentPrice || undefined,
+    snapshot_market_value: Math.abs(marketValue) || undefined,
   };
 }
 
@@ -450,6 +452,8 @@ function parsePositionRow(
     expiry_date: expiryDate,
     underlying,
     exchange_rate: exchangeRate || undefined,
+    snapshot_price: currentPrice || undefined,
+    snapshot_market_value: Math.abs(marketValue) || undefined,
   };
 }
 
