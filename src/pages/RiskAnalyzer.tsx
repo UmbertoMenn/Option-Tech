@@ -12,8 +12,10 @@ import {
   Menu,
   Settings,
   Sun,
-  Moon
+  Moon,
+  Info
 } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -227,11 +229,27 @@ export function RiskAnalyzer() {
           </Card>
         ) : (
           <>
-            {/* Carousel View Mode Selector */}
+            {/* Info + Carousel View Mode Selector */}
+            <div className="relative flex items-center justify-center">
+              <div className="absolute left-0 flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground hidden sm:inline">Info aggiornamento dati</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+                      <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
+                      <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
             <RiskViewModeSelector 
               viewMode={viewMode} 
               onViewModeChange={setViewMode} 
             />
+            </div>
             
             {/* Dynamic Content Based on View Mode */}
             {viewMode === 'equity' ? (

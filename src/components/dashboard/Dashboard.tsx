@@ -322,7 +322,8 @@ export function Dashboard() {
 
         {/* Unified View Mode Selector */}
         <div className="relative flex items-center justify-center">
-          <div className="absolute left-0">
+          <div className="absolute left-0 flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground hidden sm:inline">Info aggiornamento dati</span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
