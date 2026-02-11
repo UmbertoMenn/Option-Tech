@@ -1,61 +1,31 @@
 
 
-## Gestione festivi USA nella data di scadenza opzioni
+## Aggiunta icona informativa (i) con tooltip sulla sorgente dati
 
-### Regola
+### Cosa cambia
+Viene aggiunta un'icona informativa (i) posizionata nell'angolo in alto a sinistra della sezione principale della dashboard (sotto l'header, a sinistra del selettore vista), come indicato dal rettangolo rosso nello screenshot.
 
-Quando il 3o venerdi del mese cade in un giorno festivo USA:
-- **Solo venerdi festivo** -> la scadenza si sposta al **giovedi** (giorno prima)
-- **Giovedi E venerdi festivi** -> la scadenza si sposta al **lunedi** (giorno dopo)
+Al passaggio del mouse (o tap su mobile), un tooltip spiega:
+- **Dashboard e Risk Analyzer**: dati aggiornati ai prezzi del file Excel caricato (snapshot statico)
+- **Strategie Derivati**: prezzi opzioni aggiornati con ritardo di 15 minuti, prezzi sottostanti aggiornati ogni 5 minuti
 
-### Modifica tecnica
+### Dettaglio tecnico
 
-**File: `src/lib/optionStratUrl.ts`**
+**File: `src/components/dashboard/Dashboard.tsx`**
 
-1. Aggiungere una lista di festivi USA che possono cadere di venerdi (o giovedi+venerdi), calcolati dinamicamente per anno. I festivi rilevanti del mercato azionario USA sono:
-   - New Year's Day (1 gennaio, o venerdi prima se cade di sabato)
-   - MLK Day (3o lunedi di gennaio) - mai di venerdi, irrilevante
-   - Presidents' Day (3o lunedi di febbraio) - mai di venerdi, irrilevante
-   - Good Friday (venerdi prima di Pasqua) - SEMPRE di venerdi
-   - Memorial Day (ultimo lunedi di maggio) - mai di venerdi, irrilevante
-   - Juneteenth (19 giugno)
-   - Independence Day (4 luglio)
-   - Labor Day (1o lunedi di settembre) - mai di venerdi, irrilevante
-   - Thanksgiving (4o giovedi di novembre) + Black Friday (giorno dopo, mercato chiude presto ma NON e' festivo pieno)
-   - Christmas (25 dicembre)
+1. Aggiungere l'import di `Info` da `lucide-react` e dei componenti `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` da `@/components/ui/tooltip`
+2. Nella sezione `<main>`, subito prima del `ViewModeSelector`, inserire un contenitore flex con:
+   - L'icona `Info` avvolta in un Tooltip Radix sulla sinistra
+   - Il `ViewModeSelector` centrato (come ora)
+3. Il tooltip contiene il testo informativo in italiano
 
-2. Creare funzione `isUSMarketHoliday(date: Date): boolean` che verifica se una data e' un giorno di chiusura del mercato USA.
+### Testo del tooltip
+```
+Dashboard e Risk Analyzer: dati aggiornati ai prezzi
+del file Excel caricato.
+Strategie Derivati: prezzi opzioni delayed 15 min,
+prezzi sottostanti aggiornati ogni 5 min.
+```
 
-3. Modificare `thirdFriday` (o creare `adjustForHolidays`) per applicare la logica:
-   ```typescript
-   function optionsExpirationDate(year: number, month: number): Date {
-     const tf = thirdFriday(year, month);
-     const thursday = new Date(tf);
-     thursday.setDate(tf.getDate() - 1);
-
-     if (isUSMarketHoliday(tf)) {
-       if (isUSMarketHoliday(thursday)) {
-         // Both Thu+Fri are holidays -> Monday after
-         const monday = new Date(tf);
-         monday.setDate(tf.getDate() + 3);
-         return monday;
-       }
-       // Only Friday is holiday -> Thursday before
-       return thursday;
-     }
-     return tf;
-   }
-   ```
-
-4. Aggiornare `formatExpiry` per usare `optionsExpirationDate` al posto di `thirdFriday`.
-
-### Festivi da includere (funzioni di calcolo)
-
-- **Good Friday**: calcolato dall'algoritmo di Pasqua (Computus), sottraendo 2 giorni dalla domenica di Pasqua
-- **Festivi a data fissa** (1 gen, 19 giu, 4 lug, 25 dic): se cadono di sabato si osservano il venerdi prima; se di domenica il lunedi dopo
-- **Thanksgiving**: 4o giovedi di novembre (il venerdi dopo NON e' festivo ufficiale del mercato, ma il mercato chiude alle 13:00 - le opzioni scadono comunque normalmente)
-
-### Note
-- Il caso piu' comune e' **Good Friday** che cade il 3o venerdi di aprile in alcuni anni
-- La lista dei festivi viene generata dinamicamente per qualsiasi anno, non hardcoded
-
+### Layout
+L'icona viene posizionata con `absolute left-0` rispetto a un wrapper `relative` che contiene anche il ViewModeSelector centrato, in modo da non spostare il selettore vista dalla sua posizione attuale.
