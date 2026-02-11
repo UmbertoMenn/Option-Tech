@@ -712,7 +712,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_2rem_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -935,7 +935,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1117,7 +1117,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_2rem_3rem_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1355,7 +1355,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_3rem_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1651,7 +1651,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(10rem,1fr)_auto_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_2rem_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
@@ -2020,7 +2020,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2173,7 +2173,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
