@@ -712,7 +712,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -727,7 +727,10 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             {/* Col 3: Descrizione */}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             
-            {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
+            {/* Col 4: OptionStrat */}
+            <OptionStratButton url={ticker ? buildCoveredCallUrl(ticker, option) : null} />
+            
+            {/* Col 5: Badges (P!, Override) - larghezza fissa per allineamento */}
             <div className="flex items-center gap-1 w-12 justify-end">
               {isPartialCoverage && (
                 <Tooltip>
@@ -747,7 +750,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               {hasOverride && <OverrideBadge />}
             </div>
             
-            {/* Col 5: ITM/OTM */}
+            {/* Col 6: ITM/OTM */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Badge 
@@ -763,35 +766,32 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 6: Menu */}
+            {/* Col 7: Menu */}
             <MoveOptionMenu 
               option={option} 
               availableStocks={stockPositions} 
               currentCategory="covered_call" 
             />
             
-            {/* Col 7: Calculator + OptionStrat buttons */}
-            <div className="flex items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowCalculator(true);
-                    }}
-                  >
-                    <Calculator className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Calcola premi CALL incassati</p>
+            {/* Col 8: Calculator */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola premi CALL incassati</p>
               </TooltipContent>
-              </Tooltip>
-              <OptionStratButton url={ticker ? buildCoveredCallUrl(ticker, option) : null} />
-            </div>
+            </Tooltip>
             
             {/* Col 8: UNIT (net per share from saved premium) */}
             <Tooltip>
@@ -935,7 +935,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -950,7 +950,10 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
+          {/* Col 4: OptionStrat */}
+          <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLongPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          
+          {/* Col 5: Badges (P!, Override) - larghezza fissa per allineamento */}
           <div className="flex items-center gap-1 w-12 justify-end">
             {isPartial && (
               <Tooltip>
@@ -970,7 +973,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
             {hasOverride && <OverrideBadge />}
           </div>
           
-          {/* Col 5: ITM/OTM */}
+          {/* Col 6: ITM/OTM */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Badge 
@@ -986,15 +989,12 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 6: Menu + OptionStrat */}
-          <div className="flex items-center gap-0.5">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="protection" 
-            />
-            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLongPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
-          </div>
+          {/* Col 7: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="protection" 
+          />
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
@@ -1117,7 +1117,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_auto_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1129,15 +1129,15 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           {/* Col 2: Underlying */}
           <span className="font-medium truncate">{underlying}</span>
           
-          {/* Col 3: Badge IC + OptionStrat */}
-          <div className="flex items-center gap-1">
-            <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
-              IC
-            </Badge>
-            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
-          </div>
+          {/* Col 3: Badge IC */}
+          <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
+            IC
+          </Badge>
           
-          {/* Col 4: IR/OOR */}
+          {/* Col 4: OptionStrat */}
+          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
+          
+          {/* Col 5: IR/OOR */}
           <div className="flex justify-center">
             {hasUnderlyingPrice ? (
               <Tooltip>
@@ -1355,9 +1355,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[auto_minmax(6rem,1fr)_auto_auto_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
-          {/* Grid: Chevron | Underlying | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
+          {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -1365,11 +1365,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           )}
           
-          {/* Col 2: Underlying + OptionStrat */}
-          <div className="flex items-center gap-1 min-w-0">
-            <span className="font-medium truncate">{underlying}</span>
-            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildDoubleDiagonalUrl(underlyingPrices[underlying].ticker, soldPut, boughtPut, soldCall, boughtCall) : null} />
-          </div>
+          {/* Col 2: Underlying */}
+          <span className="font-medium truncate">{underlying}</span>
+          
+          {/* Col 3: OptionStrat */}
+          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildDoubleDiagonalUrl(underlyingPrices[underlying].ticker, soldPut, boughtPut, soldCall, boughtCall) : null} />
           
           {/* Col 3: IR/OOR */}
           <div className="flex justify-center">
@@ -1651,7 +1651,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_minmax(10rem,1fr)_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[auto_minmax(10rem,1fr)_auto_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
@@ -1660,13 +1660,13 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
           )}
           
-          {/* Colonna 2: Underlying + OptionStrat */}
-          <div className="flex items-center gap-1 min-w-0">
-            <span className="font-medium truncate">{underlying}</span>
-            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildGroupedStrategyUrl(underlyingPrices[underlying].ticker, options.map(o => o.option), strategyName) : null} />
-          </div>
+          {/* Colonna 2: Underlying */}
+          <span className="font-medium truncate">{underlying}</span>
           
-          {/* Colonna 3: Badge Strategia */}
+          {/* Colonna 3: OptionStrat */}
+          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildGroupedStrategyUrl(underlyingPrices[underlying].ticker, options.map(o => o.option), strategyName) : null} />
+          
+          {/* Colonna 4: Badge Strategia */}
           <div className="flex justify-start">
             {strategyName ? (
               <Badge variant="outline" className="text-xs shrink-0 border-primary text-primary">
@@ -2020,7 +2020,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2035,7 +2035,10 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: ITM/OTM */}
+          {/* Col 4: OptionStrat */}
+          <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          
+          {/* Col 5: ITM/OTM */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Badge 
@@ -2051,20 +2054,17 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 5: Override Badge */}
+          {/* Col 6: Override Badge */}
           <div className="flex items-center">
             {hasOverride && <OverrideBadge />}
           </div>
           
-          {/* Col 6: Menu + OptionStrat */}
-          <div className="flex items-center gap-0.5">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="naked_put" 
-            />
-            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
-          </div>
+          {/* Col 7: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="naked_put" 
+          />
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
@@ -2173,7 +2173,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2188,7 +2188,10 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: Gain/Loss Badge (G green if price > avg cost, L red if price < avg cost) */}
+          {/* Col 4: OptionStrat */}
+          <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLeapCallUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+          
+          {/* Col 5: Gain/Loss Badge (G green if price > avg cost, L red if price < avg cost) */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Badge 
@@ -2204,21 +2207,17 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 5: Override Badge */}
+          {/* Col 6: Override Badge */}
           <div className="flex items-center">
             {hasOverride && <OverrideBadge />}
           </div>
           
-          {/* Col 6: Menu */}
-          {/* Col 6: Menu + OptionStrat */}
-          <div className="flex items-center gap-0.5">
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="leap_call" 
-            />
-            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLeapCallUrl(underlyingPrices[option.underlying].ticker, option) : null} />
-          </div>
+          {/* Col 7: Menu */}
+          <MoveOptionMenu 
+            option={option} 
+            availableStocks={stockPositions} 
+            currentCategory="leap_call" 
+          />
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
