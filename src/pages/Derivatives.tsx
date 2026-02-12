@@ -1117,7 +1117,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_2rem_3rem_3rem_5rem_6rem_6rem_4.5rem_6rem_6.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[930px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_2rem_3rem_3rem_5rem_6rem_7rem_4.5rem_6rem_6.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1355,7 +1355,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_3rem_3rem_auto_6rem_6rem_4.5rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_3rem_3rem_auto_6rem_6rem_7rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1437,7 +1437,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               <>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-sm text-muted-foreground cursor-help whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       PS: {formatCurrency(underlyingPrice, 'USD')}
                     </span>
                   </TooltipTrigger>
@@ -1453,9 +1453,8 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               <span className="text-sm text-muted-foreground">-</span>
             )}
           </div>
-          
-          
-          {/* Col 9: P/L */}
+           
+           {/* Col 10: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
