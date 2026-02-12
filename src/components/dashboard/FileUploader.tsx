@@ -9,6 +9,7 @@ import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 
 const EXCLUDED_CASH_ACCOUNTS: Record<string, string[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': ['0652278918440'], // MauroG
@@ -19,7 +20,9 @@ export function FileUploader() {
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const { portfolio, updatePositions } = usePortfolio();
   const { user } = useAuth();
+  const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
+  const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -39,7 +42,7 @@ export function FileUploader() {
     setUploadSuccess(false);
 
     try {
-      const excludedCashAccounts = EXCLUDED_CASH_ACCOUNTS[user?.id || ''] || [];
+      const excludedCashAccounts = EXCLUDED_CASH_ACCOUNTS[effectiveUserId || ''] || [];
       const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file, { excludedCashAccounts });
       
       console.log('[FileUploader] Parsed Excel result:', { 
