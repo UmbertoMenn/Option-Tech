@@ -168,7 +168,7 @@ async function sendEmail(
               </tr>
               ${optionInfo ? `
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">📋 ${optionInfo.label}:</td>
+                <td style="padding: 8px 0; color: #6b7280;">${optionInfo.label}:</td>
                 <td style="padding: 8px 0;">${optionInfo.value}</td>
               </tr>
               ` : ''}
@@ -217,14 +217,14 @@ async function sendTelegram(
     
     let text = `🔔 *Avviso Portafoglio*
 ${severityEmoji} *${severityLabel}*
-${isAdmin && userName ? `\n👤 *Utente:* ${userName}` : ''}
+${isAdmin && userName ? `\n*Utente:* ${userName}` : ''}
 
-📈 *Ticker:* ${alertData.ticker}
-📊 *Strategia:* ${strategyName}
-📝 *Messaggio:* ${alertData.message}`;
+*Ticker:* ${alertData.ticker}
+*Strategia:* ${strategyName}
+*Messaggio:* ${alertData.message}`;
 
     if (optionInfo) {
-      text += `\n📋 *${optionInfo.label}:* ${optionInfo.value}`;
+      text += `\n*${optionInfo.label}:* ${optionInfo.value}`;
     }
     
     if (priceLabel) {
