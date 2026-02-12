@@ -217,12 +217,48 @@ function isOutOfBreakeven(underlyingPrice: number, breakevens: number[]): boolea
   return underlyingPrice < minBE || underlyingPrice > maxBE;
 }
 
+function isUSMarketOpen(): boolean {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+
+  const year = now.getUTCFullYear();
+  // Second Sunday of March: DST starts at 2:00 AM ET = 7:00 UTC
+  const marchFirst = new Date(Date.UTC(year, 2, 1));
+  const marchSecondSunday = 14 - marchFirst.getUTCDay();
+  const dstStart = new Date(Date.UTC(year, 2, marchSecondSunday, 7));
+
+  // First Sunday of November: DST ends at 2:00 AM EDT = 6:00 UTC
+  const novFirst = new Date(Date.UTC(year, 10, 1));
+  const novFirstSunday = novFirst.getUTCDay() === 0 ? 1 : 8 - novFirst.getUTCDay();
+  const dstEnd = new Date(Date.UTC(year, 10, novFirstSunday, 6));
+
+  const isDST = now >= dstStart && now < dstEnd;
+  const etOffset = isDST ? -4 : -5;
+
+  // Current time in Eastern Time (minutes since midnight)
+  const etHour = now.getUTCHours() + etOffset;
+  const etMinutes = now.getUTCMinutes();
+  const etTime = etHour * 60 + etMinutes;
+
+  // NYSE: 9:30 - 16:00 ET → 570 - 960 minutes
+  return etTime >= 570 && etTime < 960;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Check if US market is currently open (exact ET hours with DST awareness)
+    if (!isUSMarketOpen()) {
+      console.log('US market is closed, skipping alert check');
+      return new Response(JSON.stringify({ skipped: true, reason: 'market_closed' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     
