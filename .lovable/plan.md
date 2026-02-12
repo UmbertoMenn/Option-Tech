@@ -1,84 +1,99 @@
 
 
-## Avvisi esattamente durante orario mercato USA
+## Briefing pre-apertura giornaliero alle 12:00
 
-### Approccio
+### Cosa fa
 
-`pg_cron` lavora in UTC e non supporta fusi orari dinamici, quindi non puo sapere se siamo in ora legale (EDT) o solare (EST). La soluzione intelligente: **aggiungere un controllo di orario preciso all'inizio della Edge Function `check-alerts`** che calcola se il mercato USA e realmente aperto, considerando il DST americano. Se il mercato e chiuso, la funzione esce immediatamente senza fare nulla.
+Ogni giorno lavorativo alle 12:00 ora italiana, una nuova Edge Function genera un riepilogo completo delle posizioni in derivati da monitorare per ogni utente con notifiche attive, basandosi sui prezzi di chiusura del giorno prima. Il briefing viene inviato via Telegram (e opzionalmente email) usando gli stessi canali gia configurati.
 
-Il cron job resta con un intervallo ampio (che copre entrambi i periodi DST), ma la funzione stessa fa da "guardiano" e si auto-regola con precisione al minuto.
+### Contenuto del briefing
 
-### Come funziona il DST americano
+Il messaggio replica la logica della card "Posizioni da monitorare" del frontend, includendo:
 
-- **EDT (estate):** seconda domenica di marzo - prima domenica di novembre, UTC-4
-- **EST (inverno):** prima domenica di novembre - seconda domenica di marzo, UTC-5
-- Mercato NYSE: 9:30-16:00 Eastern Time (fisso, non cambia con DST)
+1. **Call vendute non coperte (Naked Call)** -- ticker e contratti scoperti
+2. **Covered Call ITM** -- ticker, strike e contratti
+3. **Naked Put ITM** -- ticker, strike e contratti
+4. **Iron Condor OOR** -- ticker fuori range
+5. **Double Diagonal OOR** -- ticker fuori range
+6. **Altre Strategie OOR/OOB** -- ticker e nome strategia
+7. **Leap Call in Gain** -- ticker con gain significativo
+8. **Call da rivendere** -- ticker con azioni disponibili
+
+Ogni sezione viene mostrata solo se contiene elementi. Se non c'e nulla da segnalare, il briefing non viene inviato.
+
+### Esempio messaggio Telegram
+
+```text
+📋 Briefing Pre-Apertura
+📅 12 feb 2026
+
+🔴 Covered Call ITM
+  AAPL strike 220 (2 contratti)
+
+🔴 Iron Condor OOR
+  NVDA
+
+🟡 Altre Strategie OOR/OOB
+  MSFT - Put Spread (OOR)
+
+🟢 Leap Call in Gain
+  AMZN strike 180 (1 contratto)
+
+📈 Call da rivendere
+  META (200 azioni disponibili)
+```
 
 ### Dettaglio tecnico
 
-**1. Cron job (jobid 7):** cambiare schedule da `*/5 8-22 * * 1-5` a `*/5 13-21 * * 1-5`
+**1. Nuova Edge Function `daily-briefing/index.ts`**
 
-Questo copre l'unione dei due intervalli UTC possibili (13:30-20:00 EDT e 14:30-21:00 EST) con margine minimo, riducendo le chiamate inutili.
+- Legge tutti gli utenti con notifiche abilitate (`notify_telegram = true` o `notify_email = true`)
+- Per ogni utente, recupera i portfolio e la `strategy_cache`
+- Recupera i prezzi sottostanti da `underlying_prices`
+- Applica la stessa logica di `DerivativesSummaryCard` (ITM, OOR, OOB, Naked Call, Leap gain, Call da rivendere) lato server
+- Per le Call da rivendere: recupera anche le posizioni stock per calcolare le azioni disponibili
+- Compone il messaggio in formato Markdown (Telegram) e HTML (email)
+- Invia direttamente usando le API Telegram e Resend (stesse librerie di `send-notification`)
+- Se un utente non ha nulla da monitorare, salta l'invio
+- Invia anche agli admin se hanno le notifiche admin attive
 
-**2. Edge Function `check-alerts/index.ts`:** aggiungere all'inizio (dopo il check OPTIONS) una funzione `isUSMarketOpen()` che:
+**2. `supabase/config.toml`** -- aggiungere:
 
-```
-function isUSMarketOpen(): boolean {
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay();
-  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-
-  // Calcola offset Eastern Time (EDT o EST)
-  const year = now.getUTCFullYear();
-  // Seconda domenica di marzo
-  const marchFirst = new Date(Date.UTC(year, 2, 1));
-  const marchSecondSunday = 14 - marchFirst.getUTCDay();
-  const dstStart = new Date(Date.UTC(year, 2, marchSecondSunday, 7)); // 2:00 ET = 7:00 UTC
-
-  // Prima domenica di novembre
-  const novFirst = new Date(Date.UTC(year, 10, 1));
-  const novFirstSunday = novFirst.getUTCDay() === 0 ? 1 : 8 - novFirst.getUTCDay();
-  const dstEnd = new Date(Date.UTC(year, 10, novFirstSunday, 6)); // 2:00 ET = 6:00 UTC
-
-  const isDST = now >= dstStart && now < dstEnd;
-  const etOffset = isDST ? -4 : -5;
-
-  // Ora corrente in Eastern Time
-  const etHour = now.getUTCHours() + etOffset;
-  const etMinutes = now.getUTCMinutes();
-  const etTime = etHour * 60 + etMinutes;
-
-  // NYSE: 9:30 - 16:00 ET
-  return etTime >= 570 && etTime < 960; // 9*60+30=570, 16*60=960
-}
+```toml
+[functions.daily-briefing]
+verify_jwt = false
 ```
 
-Poi, subito dopo la creazione del client Supabase:
+**3. Cron job** -- nuovo job schedulato alle 11:00 UTC (= 12:00 CET inverno, 13:00 CEST estate)
 
-```
-if (!isUSMarketOpen()) {
-  console.log('US market is closed, skipping alert check');
-  return new Response(JSON.stringify({ skipped: true, reason: 'market_closed' }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-```
+Poiche l'ora italiana cambia con il DST (CET/CEST), la funzione usera lo stesso approccio "smart guard" di `check-alerts`: il cron copre entrambi gli orari possibili (10:00 e 11:00 UTC) e la funzione calcola dinamicamente se sono le 12:00 ora italiana.
 
-### Risultato
+Schedule: `0 10,11 * * 1-5` (gira alle 10:00 e 11:00 UTC, lun-ven)
 
-- Il cron gira ogni 5 minuti dalle 13 alle 21 UTC (copertura ampia)
-- La funzione verifica l'orario esatto del mercato USA considerando il DST e esce in millisecondi se il mercato e chiuso
-- Nessun avviso viene mai generato fuori orario di mercato
-- Zero impatto sulla logica degli avvisi esistente
-- Il cambio ora italiano (CET/CEST) e irrilevante perche tutto lavora in UTC ed Eastern Time
+All'interno della funzione, un guard verifica:
+- In inverno (CET, UTC+1): 11:00 UTC = 12:00 CET -- esegue
+- In estate (CEST, UTC+2): 10:00 UTC = 12:00 CEST -- esegue
+- L'altra esecuzione viene scartata con early return
+
+**4. Logica di calcolo (server-side)**
+
+La funzione replica i calcoli di `DerivativesSummaryCard`:
+- **Naked Call**: bilancio azioni possedute vs call vendute nette
+- **CC ITM**: `underlying_price > sold_call_strike` dalla strategy_cache
+- **NP ITM**: `underlying_price < sold_put_strike` dalla strategy_cache
+- **IC/DD OOR**: sottostante fuori dal range degli strike venduti
+- **Altre OOR/OOB**: strategie con `is_range_strategy` e check breakeven
+- **Leap Gain**: confronto `current_price` vs `avg_cost` dalle posizioni
+- **Call da rivendere**: azioni con contratti disponibili non coperti
 
 ### Cosa cambia
-- Schedule cron job 7: da `*/5 8-22` a `*/5 13-21`
-- `check-alerts/index.ts`: aggiunta funzione `isUSMarketOpen()` e early return
+- Nuova Edge Function `daily-briefing/index.ts`
+- Nuovo cron job (schedule `0 10,11 * * 1-5`)
+- Aggiornamento `supabase/config.toml`
 
 ### Cosa NON cambia
-- Frequenza: resta ogni 5 minuti
-- Logica avvisi: invariata
-- Solo giorni lavorativi (lun-ven)
-- Nessuna modifica ad altre Edge Function o al frontend
+- Nessuna modifica al frontend
+- Nessuna modifica a `check-alerts` o `send-notification`
+- Nessuna nuova tabella nel database
+- I canali di notifica usano le stesse preferenze utente esistenti
 
