@@ -48,6 +48,39 @@ function isItalianNoon(): boolean {
   return italianHour === 12 && now.getUTCMinutes() < 10; // allow small window
 }
 
+// ============ NORMALIZATION (mirrors frontend) ============
+
+function normalizeForMatching(str: string): string {
+  return str
+    .toUpperCase()
+    .replace(/^AZ\.\s*/i, '')
+    .replace(/\s*\(.*?\)\s*$/, '')  // remove trailing parentheses
+    .replace(/\s+(INC|CORP|CORPORATION|LTD|PLC|AG|SA|SPA|ADR|CLASS\s*[A-Z]?)\.?\s*$/gi, '')
+    .replace(/[.,]/g, '')
+    .trim();
+}
+
+function resolveStockTicker(
+  description: string,
+  mappings: { underlying: string; ticker: string }[],
+): string | null {
+  const normalized = normalizeForMatching(description);
+  // Direct match on normalized underlying
+  for (const m of mappings) {
+    if (normalizeForMatching(m.underlying) === normalized) {
+      return m.ticker.toUpperCase();
+    }
+  }
+  // Substring match: check if normalized description contains the mapping name or vice versa
+  for (const m of mappings) {
+    const normMapping = normalizeForMatching(m.underlying);
+    if (normalized.includes(normMapping) || normMapping.includes(normalized)) {
+      return m.ticker.toUpperCase();
+    }
+  }
+  return null;
+}
+
 // ============ INTERFACES ============
 
 interface StrategyCache {
@@ -72,59 +105,57 @@ interface BriefingSection {
   items: string[];
 }
 
-// ============ MONITORING LOGIC (replicates DerivativesSummaryCard) ============
+// ============ MONITORING LOGIC ============
 
 function buildBriefingSections(
   strategies: StrategyCache[],
   underlyingPrices: Record<string, number>,
   positions: any[],
+  underlyingMappings: { underlying: string; ticker: string }[],
 ): BriefingSection[] {
   const sections: BriefingSection[] = [];
 
-  // 1. Naked Call detection - balance sold vs owned shares
-  const underlyingBalance = new Map<string, { owned: number; soldCalls: number; boughtCalls: number }>();
+  // 1. Naked Call detection — resolve stock descriptions to tickers via underlying_mappings
+  const sharesPerTicker = new Map<string, number>(); // ticker -> total shares owned
 
-  // Count stock shares
   for (const pos of positions) {
-    if (pos.asset_type === 'stock' || pos.asset_type === 'equity') {
-      const ticker = (pos.ticker || '').toUpperCase();
-      if (!ticker) continue;
-      if (!underlyingBalance.has(ticker)) {
-        underlyingBalance.set(ticker, { owned: 0, soldCalls: 0, boughtCalls: 0 });
-      }
-      underlyingBalance.get(ticker)!.owned += pos.quantity;
+    if (pos.asset_type !== 'stock' && pos.asset_type !== 'equity') continue;
+    // Try position ticker first, then resolve from description
+    let ticker = pos.ticker ? pos.ticker.toUpperCase() : null;
+    if (!ticker && pos.description) {
+      ticker = resolveStockTicker(pos.description, underlyingMappings);
     }
+    if (!ticker) continue;
+    sharesPerTicker.set(ticker, (sharesPerTicker.get(ticker) || 0) + pos.quantity);
   }
 
-  // Count call contracts from strategies
+  // Count net sold calls per ticker from strategy_cache
+  const netSoldCallsPerTicker = new Map<string, number>();
+
   for (const s of strategies) {
     const ticker = (s.ticker || '').toUpperCase();
     if (!ticker) continue;
-    if (!underlyingBalance.has(ticker)) {
-      underlyingBalance.set(ticker, { owned: 0, soldCalls: 0, boughtCalls: 0 });
-    }
-    const entry = underlyingBalance.get(ticker)!;
 
     if (s.strategy_type === 'Covered Call') {
-      entry.soldCalls += 1;
-    } else if (s.strategy_type === 'Iron Condor' || s.strategy_type === 'Double Diagonal') {
-      entry.soldCalls += 1;
-      entry.boughtCalls += 1;
+      netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) + 1);
+    } else if (s.strategy_type === 'Iron Condor' || s.strategy_type === 'Double Diagonal' || s.strategy_type === 'Alternative Double Diagonal') {
+      // sold call + bought call = net 0
     } else if (s.strategy_type === 'LEAP Call') {
-      entry.boughtCalls += 1;
+      // bought call, no sold call
     } else {
-      // Other strategies: check position_ids for sold/bought calls
-      if (s.sold_call_strike) entry.soldCalls += 1;
-      if (s.bought_call_strike) entry.boughtCalls += 1;
+      // Other strategies: count sold minus bought
+      if (s.sold_call_strike) netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) + 1);
+      if (s.bought_call_strike) netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) - 1);
     }
   }
 
   const nakedCallItems: string[] = [];
-  for (const [ticker, data] of underlyingBalance) {
-    const coveredContracts = Math.floor(data.owned / 100);
-    const netSoldCalls = data.soldCalls - data.boughtCalls;
-    if (netSoldCalls > coveredContracts) {
-      const uncovered = netSoldCalls - coveredContracts;
+  for (const [ticker, netSold] of netSoldCallsPerTicker) {
+    if (netSold <= 0) continue;
+    const shares = sharesPerTicker.get(ticker) || 0;
+    const coveredContracts = Math.floor(shares / 100);
+    const uncovered = netSold - coveredContracts;
+    if (uncovered > 0) {
       nakedCallItems.push(`${ticker} (${uncovered} contratt${uncovered === 1 ? 'o' : 'i'} scopert${uncovered === 1 ? 'o' : 'i'})`);
     }
   }
@@ -176,7 +207,7 @@ function buildBriefingSections(
     sections.push({ title: 'Iron Condor OOR', emoji: '🔴', items: icOORItems });
   }
 
-  // 5. Double Diagonal OOR (includes Alternative DD)
+  // 5. Double Diagonal OOR
   const ddOORItems: string[] = [];
   for (const s of strategies) {
     if (s.strategy_type !== 'Double Diagonal' && s.strategy_type !== 'Alternative Double Diagonal') continue;
@@ -192,7 +223,7 @@ function buildBriefingSections(
     sections.push({ title: 'Double Diagonal OOR', emoji: '🔴', items: ddOORItems });
   }
 
-  // 6. Other Strategies OOR/OOB
+  // 6. Other Strategies OOR
   const rangeStrategies = [
     'Short Strangle', 'Bull Put Spread', 'Bear Put Spread',
     'Bull Call Spread', 'Bear Call Spread',
@@ -203,16 +234,11 @@ function buildBriefingSections(
     if (['Covered Call', 'Naked Put', 'Iron Condor', 'Double Diagonal', 'Alternative Double Diagonal', 'LEAP Call'].includes(s.strategy_type)) continue;
     const price = s.ticker ? underlyingPrices[s.ticker] : 0;
     if (!price) continue;
-
     const isRange = rangeStrategies.some(r => s.strategy_type.includes(r)) || s.is_range_strategy;
-
     if (isRange) {
-      // OOR check
       let isOOR = false;
       if (s.strategy_type.includes('Strangle')) {
-        if (s.sold_put_strike && s.sold_call_strike) {
-          isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
-        }
+        if (s.sold_put_strike && s.sold_call_strike) isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
       } else if (s.strategy_type.includes('Put')) {
         if (s.sold_put_strike) isOOR = price < s.sold_put_strike;
       } else if (s.strategy_type.includes('Call')) {
@@ -220,12 +246,8 @@ function buildBriefingSections(
       } else if (s.sold_put_strike && s.sold_call_strike) {
         isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
       }
-      if (isOOR) {
-        otherOORItems.push(`${s.ticker || s.underlying} - ${s.strategy_type} (OOR)`);
-      }
+      if (isOOR) otherOORItems.push(`${s.ticker || s.underlying} - ${s.strategy_type} (OOR)`);
     }
-    // For non-range strategies we'd need P/L data which isn't in strategy_cache,
-    // so we skip OOB check in the briefing (conservative approach)
   }
   if (otherOORItems.length > 0) {
     sections.push({ title: 'Altre Strategie OOR', emoji: '🟡', items: otherOORItems });
@@ -235,7 +257,6 @@ function buildBriefingSections(
   const leapGainItems: string[] = [];
   for (const s of strategies) {
     if (s.strategy_type !== 'LEAP Call') continue;
-    // Find position data for this LEAP
     const leapPositions = positions.filter(p => s.position_ids.includes(p.id));
     for (const lp of leapPositions) {
       const avgCost = lp.avg_cost || 0;
@@ -250,19 +271,17 @@ function buildBriefingSections(
     sections.push({ title: 'Leap Call in Gain', emoji: '🟢', items: leapGainItems });
   }
 
-  // 8. Call da rivendere (shares available for new covered calls)
-  const callToSellItems: string[] = [];
+  // 8. Call da rivendere — uses same resolved ticker logic
   const ccByTicker = new Map<string, number>();
   for (const s of strategies) {
     if (s.strategy_type !== 'Covered Call') continue;
     const t = (s.ticker || '').toUpperCase();
-    ccByTicker.set(t, (ccByTicker.get(t) || 0) + 1);
+    if (t) ccByTicker.set(t, (ccByTicker.get(t) || 0) + 1);
   }
-  for (const pos of positions) {
-    if (pos.asset_type !== 'stock' && pos.asset_type !== 'equity') continue;
-    const ticker = (pos.ticker || '').toUpperCase();
-    if (!ticker) continue;
-    const potentialContracts = Math.floor(pos.quantity / 100);
+
+  const callToSellItems: string[] = [];
+  for (const [ticker, shares] of sharesPerTicker) {
+    const potentialContracts = Math.floor(shares / 100);
     const soldContracts = ccByTicker.get(ticker) || 0;
     const available = potentialContracts - soldContracts;
     if (available >= 1) {
@@ -401,15 +420,17 @@ serve(async (req: Request): Promise<Response> => {
 
     console.log("Starting daily briefing...");
 
-    // 1. Get all underlying prices
-    const { data: pricesData } = await supabase
-      .from("underlying_prices")
-      .select("ticker, price");
+    // 1. Get all underlying prices + mappings
+    const [{ data: pricesData }, { data: mappingsData }] = await Promise.all([
+      supabase.from("underlying_prices").select("ticker, price"),
+      supabase.from("underlying_mappings").select("underlying, ticker"),
+    ]);
     
     const underlyingPrices: Record<string, number> = {};
     for (const p of pricesData || []) {
       underlyingPrices[p.ticker] = p.price;
     }
+    const underlyingMappings = (mappingsData || []) as { underlying: string; ticker: string }[];
 
     // 2. Get users with notifications enabled
     const { data: profiles } = await supabase
@@ -467,7 +488,8 @@ serve(async (req: Request): Promise<Response> => {
       const sections = buildBriefingSections(
         strategiesCache as StrategyCache[],
         underlyingPrices,
-        positions || []
+        positions || [],
+        underlyingMappings
       );
 
       if (sections.length === 0) {
