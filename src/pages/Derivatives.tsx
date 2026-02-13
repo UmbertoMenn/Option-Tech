@@ -675,7 +675,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   // Calculate ITM/OTM status for CALL options
   // ITM: strike < underlying price, OTM: strike >= underlying price
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying.current_price || 0;
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
   const isITM = strikePrice < underlyingPrice;
   
   // For sold options (quantity < 0), P/L is inverted:
@@ -908,7 +908,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
         underlying={option.underlying || underlying.description || ''}
         ticker={ticker}
         contractsInPortfolio={contractsCovered}
-        underlyingPrice={underlying.current_price || 0}
+        underlyingPrice={(option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0}
       />
     </>
   );
@@ -924,7 +924,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
   // PUT is ITM when strike > underlying price (you can sell at higher than market)
   // PUT is OTM when strike <= underlying price
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying?.current_price || 0;
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && strikePrice > underlyingPrice;
   
@@ -1555,10 +1555,8 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, options, totalProfitLoss, strategyName } = group;
   
-  // Get underlying price - try from portfolio first, then from Yahoo Finance
-  const portfolioPrice = options[0]?.underlying?.current_price || 0;
-  const yahooPrice = underlyingPrices[underlying]?.price || 0;
-  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
+  // Get underlying price from live Yahoo data (updated every 5 min by cron)
+  const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
@@ -1791,7 +1789,8 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
               key={idx} 
               otherStrategy={os} 
               stockPositions={stockPositions} 
-              getOverrideForPosition={getOverrideForPosition} 
+              getOverrideForPosition={getOverrideForPosition}
+              underlyingPrices={underlyingPrices}
             />
           ))}
         </div>
@@ -1800,7 +1799,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   );
 }
 
-function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosition }: { otherStrategy: OtherStrategyPosition } & RowProps) {
+function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosition, underlyingPrices }: { otherStrategy: OtherStrategyPosition, underlyingPrices: Record<string, { price: number; currency: string }> } & RowProps) {
   const { option, underlying } = otherStrategy;
   
   const hasOverride = !!getOverrideForPosition(option.id);
@@ -1811,7 +1810,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
   
   // Calculate ITM/OTM
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying?.current_price || 0;
+  const underlyingPrice = underlyingPrices[option.underlying || '']?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   let isITM = false;
@@ -2005,10 +2004,8 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   // PUT is ITM when underlying price < strike price (you can sell at higher than market)
   // PUT is OTM when underlying price > strike price
   const strikePrice = option.strike_price || 0;
-  // Get underlying price - try from portfolio first, then from Yahoo Finance
-  const portfolioPrice = underlying?.current_price || 0;
-  const yahooPrice = option.underlying ? underlyingPrices[option.underlying]?.price || 0 : 0;
-  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
+  // Get underlying price from live Yahoo data (updated every 5 min by cron)
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && underlyingPrice < strikePrice;
   
@@ -2159,10 +2156,8 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
   const isInGain = hasValidPrices && currentPrice > avgCost;
   const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
   
-  // Get underlying price for display
-  const portfolioPrice = underlying?.current_price || 0;
-  const yahooPrice = option.underlying ? underlyingPrices[option.underlying]?.price || 0 : 0;
-  const underlyingPrice = portfolioPrice > 0 ? portfolioPrice : yahooPrice;
+  // Get underlying price from live Yahoo data (updated every 5 min by cron)
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   return (
