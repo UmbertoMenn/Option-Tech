@@ -1,42 +1,24 @@
 
 
-## Allineare la card "Posizioni da monitorare" ai prezzi live
+## Fix: aggiungere `underlyingPrices` alle dipendenze dei `useMemo`
 
-### Problema
+### Causa del problema
 
-La card "Posizioni da monitorare" in `DerivativesSummaryCard.tsx` usa sorgenti prezzo diverse dalle righe di dettaglio in `Derivatives.tsx`:
-
-| Sezione nella card | Sorgente prezzo attuale | Dettaglio usa |
-|---|---|---|
-| Covered Call ITM | `cc.underlying.current_price` (Excel) | `underlyingPrices` (live) |
-| Naked Put ITM | `np.underlying?.current_price` (Excel) | `underlyingPrices` (live) |
-| Iron Condor OOR | `underlyingPrices` (live) | `underlyingPrices` (live) |
-| Double Diagonal OOR | `underlyingPrices` (live) | `underlyingPrices` (live) |
-| Altre Strategie OOR/OOB | `underlyingPrices` (live) | `underlyingPrices` (live) |
-
-Le prime due sezioni usano lo snapshot Excel, mentre le righe di dettaglio (dopo l'ultimo fix) usano i prezzi live. Questo causa discrepanze: una Covered Call puo risultare ITM nella card ma OTM nel dettaglio (o viceversa).
+Nella modifica precedente, le sezioni "Covered Call ITM" e "Naked Put ITM" sono state aggiornate per leggere da `underlyingPrices` (prezzi live), ma le dependency array dei rispettivi `useMemo` non sono state aggiornate. React non ricalcola mai quei valori quando i prezzi cambiano, quindi la card resta "congelata" sui valori iniziali.
 
 ### Fix
 
 **File: `src/components/derivatives/DerivativesSummaryCard.tsx`**
 
-Due modifiche puntuali:
+1. **Linea 237** - Covered Call ITM memo:
+   - Da: `}, [categories.coveredCalls]);`
+   - A: `}, [categories.coveredCalls, underlyingPrices]);`
 
-**1. Covered Call ITM (linea 225)**
-- Da: `const underlyingPrice = cc.underlying.current_price || 0;`
-- A: `const underlyingPrice = (cc.option.underlying ? underlyingPrices[cc.option.underlying]?.price : 0) || 0;`
-
-**2. Naked Put ITM (linea 313)**
-- Da: `const underlyingPrice = np.underlying?.current_price || 0;`
-- A: `const underlyingPrice = (np.option.underlying ? underlyingPrices[np.option.underlying]?.price : 0) || 0;`
+2. **Linea 326** - Naked Put ITM memo:
+   - Da: `}, [categories.nakedPuts]);`
+   - A: `}, [categories.nakedPuts, underlyingPrices]);`
 
 ### Risultato
 
-Tutte le sezioni della card useranno `underlyingPrices` (prezzi live Yahoo, aggiornati ogni 5 min), allineandosi perfettamente ai badge nelle righe di dettaglio.
-
-### Nessun impatto su
-
-- Dashboard e Risk Analyzer (continuano a usare snapshot Excel)
-- Edge Functions (usano `underlying_prices` dal DB)
-- Logica di classificazione delle strategie
+Le sezioni Covered Call ITM e Naked Put ITM si ricalcoleranno ogni volta che i prezzi live cambiano, allineandosi perfettamente ai badge nelle righe di dettaglio.
 
