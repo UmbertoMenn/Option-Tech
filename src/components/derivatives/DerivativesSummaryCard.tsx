@@ -234,7 +234,7 @@ export function DerivativesSummaryCard({
     });
     
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
-  }, [categories.coveredCalls]);
+  }, [categories.coveredCalls, underlyingPrices]);
   
   // ============ 3. Double Diagonal OOR ============
   const doubleDiagonalOOR = useMemo(() => {
@@ -323,7 +323,7 @@ export function DerivativesSummaryCard({
     });
     
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
-  }, [categories.nakedPuts]);
+  }, [categories.nakedPuts, underlyingPrices]);
   
   // ============ 6. Leap Call in Gain ============
   const leapCallsInGain = useMemo(() => {
