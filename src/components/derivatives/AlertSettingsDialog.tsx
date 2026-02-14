@@ -307,8 +307,16 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
         strategyKey: key,
         strategyType: gs.strategyName || 'Altre Strategie',
         label: `${ticker} ${strikesLabel} ${formatExpiryLabel(soldCallExpiry || soldPutExpiry)}`.trim(),
-        groupOrder: 6,
+        groupOrder: 6, // placeholder, will be reassigned below
       });
+    });
+
+    // Assign unique progressive groupOrder per distinct strategyName among "other" strategies
+    const otherNames = Array.from(new Set(items.filter(i => i.groupOrder === 6).map(i => i.strategyType)));
+    items.forEach(i => {
+      if (i.groupOrder === 6) {
+        i.groupOrder = 6 + otherNames.indexOf(i.strategyType);
+      }
     });
 
     return items.sort((a, b) => a.groupOrder - b.groupOrder || a.label.localeCompare(b.label));
@@ -1205,7 +1213,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     </div>
 
                     {/* Strategy list grouped by type */}
-                    <div className="space-y-1 max-h-[400px] overflow-y-auto">
+                    <div className="space-y-1">
                       {(() => {
                         let lastType = '';
                         return strategyItems.map((item) => {
