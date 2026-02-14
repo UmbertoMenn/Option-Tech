@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID, AGGREGATED_USER_PREFIX, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAdminPortfolios } from '@/hooks/useAdminPortfolios';
 import { Button } from '@/components/ui/button';
@@ -31,11 +31,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X, User } from 'lucide-react';
+import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X, User, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 
 export function PortfolioSelector() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const {
     portfolios,
     selectedPortfolio,
@@ -56,6 +56,10 @@ export function PortfolioSelector() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [targetPortfolio, setTargetPortfolio] = useState<{ id: string; name: string } | null>(null);
+
+  // Derived
+  const myAggregatedId = user ? `${AGGREGATED_USER_PREFIX}${user.id}` : null;
+  const showMyAggregate = portfolios.length > 1 && myAggregatedId;
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -101,7 +105,12 @@ export function PortfolioSelector() {
 
   // Get display name for selector
   const getDisplayName = () => {
-    if (isAggregatedView) return 'Aggregato - Tutti';
+    if (isAggregatedView) {
+      // Check if it's a per-user aggregate (own or client)
+      const selectedId = selectedPortfolio?.id || '';
+      if (selectedId === AGGREGATED_PORTFOLIO_ID) return 'Aggregato - Tutti';
+      return selectedPortfolio?.name || 'Il Mio Aggregato';
+    }
     if (isAdminMode && selectedPortfolio) return `👤 ${selectedPortfolio.name}`;
     return selectedPortfolio?.name || 'Seleziona Portfolio';
   };
@@ -131,7 +140,7 @@ export function PortfolioSelector() {
             >
               <span className="flex items-center gap-2 truncate">
                 {isAggregatedView ? (
-                  <Users className="w-4 h-4 shrink-0" />
+                  <Layers className="w-4 h-4 shrink-0" />
                 ) : (
                   <Briefcase className="w-4 h-4 shrink-0" />
                 )}
@@ -143,7 +152,7 @@ export function PortfolioSelector() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[280px] max-h-[400px] overflow-y-auto">
-            {/* Aggregated option for admin */}
+            {/* Global aggregated option for admin */}
             {isAdmin && (
               <>
                 <DropdownMenuItem
@@ -153,14 +162,34 @@ export function PortfolioSelector() {
                     selectPortfolio(AGGREGATED_PORTFOLIO_ID);
                   }}
                 >
-                  {isAggregatedView && <Check className="w-4 h-4 text-warning shrink-0" />}
-                  {!isAggregatedView && <div className="w-4 h-4 shrink-0" />}
+                  {selectedPortfolio?.id === AGGREGATED_PORTFOLIO_ID && <Check className="w-4 h-4 text-warning shrink-0" />}
+                  {selectedPortfolio?.id !== AGGREGATED_PORTFOLIO_ID && <div className="w-4 h-4 shrink-0" />}
                   <Users className="w-4 h-4 text-warning" />
                   <span className="font-medium text-warning">Aggregato - Tutti gli Utenti</span>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
               </>
             )}
+
+            {/* My aggregate (for any user with 2+ portfolios) */}
+            {showMyAggregate && (
+              <DropdownMenuItem
+                className="flex items-center gap-2 cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  selectPortfolio(myAggregatedId!);
+                }}
+              >
+                {selectedPortfolio?.id === myAggregatedId ? (
+                  <Check className="w-4 h-4 text-primary shrink-0" />
+                ) : (
+                  <div className="w-4 h-4 shrink-0" />
+                )}
+                <Layers className="w-4 h-4 text-primary" />
+                <span className="font-medium text-primary">Il Mio Aggregato</span>
+              </DropdownMenuItem>
+            )}
+
+            {(isAdmin || showMyAggregate) && <DropdownMenuSeparator />}
             
             {portfolios.map((portfolio) => (
               <DropdownMenuItem
@@ -172,10 +201,10 @@ export function PortfolioSelector() {
                 }}
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {portfolio.id === selectedPortfolio?.id && !isAggregatedView && (
+                  {portfolio.id === selectedPortfolio?.id && !isAggregatedView && !isAdminMode && (
                     <Check className="w-4 h-4 text-primary shrink-0" />
                   )}
-                  {(portfolio.id !== selectedPortfolio?.id || isAggregatedView) && (
+                  {(portfolio.id !== selectedPortfolio?.id || isAggregatedView || isAdminMode) && (
                     <div className="w-4 h-4 shrink-0" />
                   )}
                   <span className="truncate">{portfolio.name}</span>
@@ -231,40 +260,61 @@ export function PortfolioSelector() {
                 <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
                   Portafogli Clienti
                 </DropdownMenuLabel>
-                {otherUsers.map((client) => (
-                  <div key={client.userId}>
-                    <DropdownMenuLabel className="text-xs font-medium py-1">
-                      {client.name || client.email}
-                      {client.name && (
-                        <span className="text-muted-foreground font-normal ml-1">({client.email})</span>
-                      )}
-                    </DropdownMenuLabel>
-                    {client.portfolios.map((p) => (
-                      <DropdownMenuItem
-                        key={p.id}
-                        className="flex items-center justify-between cursor-pointer pl-6"
-                        onSelect={(e) => {
-                          e.preventDefault();
-                          setAdminViewPortfolio(p.id, client.userId);
-                        }}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          {p.id === selectedPortfolio?.id && isAdminMode ? (
+                {otherUsers.map((client) => {
+                  const clientAggId = `${AGGREGATED_USER_PREFIX}${client.userId}`;
+                  const hasMultiple = client.portfolios.length > 1;
+                  return (
+                    <div key={client.userId}>
+                      <DropdownMenuLabel className="text-xs font-medium py-1">
+                        {client.name || client.email}
+                        {client.name && (
+                          <span className="text-muted-foreground font-normal ml-1">({client.email})</span>
+                        )}
+                      </DropdownMenuLabel>
+                      {/* Per-client aggregate */}
+                      {hasMultiple && (
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 cursor-pointer pl-6"
+                          onSelect={(e) => {
+                            e.preventDefault();
+                            setAdminViewPortfolio(clientAggId, client.userId);
+                          }}
+                        >
+                          {selectedPortfolio?.id === clientAggId ? (
                             <Check className="w-4 h-4 text-warning shrink-0" />
                           ) : (
-                            <User className="w-3 h-3 text-muted-foreground shrink-0" />
+                            <Layers className="w-3 h-3 text-muted-foreground shrink-0" />
                           )}
-                          <span className="truncate">{p.name}</span>
-                        </div>
-                        {p.total_value && p.total_value > 0 && (
-                          <span className="text-xs text-muted-foreground ml-2">
-                            {formatCurrency(p.total_value)}
-                          </span>
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </div>
-                ))}
+                          <span className="font-medium">Aggregato</span>
+                        </DropdownMenuItem>
+                      )}
+                      {client.portfolios.map((p) => (
+                        <DropdownMenuItem
+                          key={p.id}
+                          className="flex items-center justify-between cursor-pointer pl-6"
+                          onSelect={(e) => {
+                            e.preventDefault();
+                            setAdminViewPortfolio(p.id, client.userId);
+                          }}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {p.id === selectedPortfolio?.id && isAdminMode ? (
+                              <Check className="w-4 h-4 text-warning shrink-0" />
+                            ) : (
+                              <User className="w-3 h-3 text-muted-foreground shrink-0" />
+                            )}
+                            <span className="truncate">{p.name}</span>
+                          </div>
+                          {p.total_value && p.total_value > 0 && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              {formatCurrency(p.total_value)}
+                            </span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </div>
+                  );
+                })}
               </>
             )}
           </DropdownMenuContent>

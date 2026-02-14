@@ -8,6 +8,19 @@ import { toast } from 'sonner';
 const SELECTED_PORTFOLIO_KEY = 'selectedPortfolioId';
 
 export const AGGREGATED_PORTFOLIO_ID = 'AGGREGATED';
+export const AGGREGATED_USER_PREFIX = 'AGGREGATED_USER:';
+
+export function isUserAggregatedId(id: string | null | undefined): boolean {
+  return !!id && id.startsWith(AGGREGATED_USER_PREFIX);
+}
+
+export function getUserIdFromAggregatedId(id: string): string {
+  return id.replace(AGGREGATED_USER_PREFIX, '');
+}
+
+export function isAnyAggregatedId(id: string | null | undefined): boolean {
+  return id === AGGREGATED_PORTFOLIO_ID || isUserAggregatedId(id);
+}
 
 interface PortfolioContextType {
   portfolios: Portfolio[];
@@ -38,7 +51,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   // Admin mode state
   const [adminViewUserId, setAdminViewUserId] = useState<string | null>(null);
   const isAdminMode = adminViewUserId !== null && adminViewUserId !== user?.id;
-  const isAggregatedView = selectedId === AGGREGATED_PORTFOLIO_ID;
+  const isAggregatedView = isAnyAggregatedId(selectedId);
 
   // Fetch user's own portfolios - ordered by last_updated DESC
   const portfoliosQuery = useQuery({
@@ -64,7 +77,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const adminPortfolioQuery = useQuery({
     queryKey: ['admin-view-portfolio', selectedId],
     queryFn: async () => {
-      if (!selectedId || selectedId === AGGREGATED_PORTFOLIO_ID) return null;
+      if (!selectedId || isAnyAggregatedId(selectedId)) return null;
       
       const { data, error } = await supabase
         .from('portfolios')
@@ -75,7 +88,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       return data as unknown as Portfolio;
     },
-    enabled: isAdminMode && !!selectedId && selectedId !== AGGREGATED_PORTFOLIO_ID,
+    enabled: isAdminMode && !!selectedId && !isAnyAggregatedId(selectedId),
   });
 
   const portfolios = portfoliosQuery.data || [];
@@ -99,8 +112,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       return;
     }
     
-    // Se è selezionato AGGREGATED, non resettare - è una selezione valida per admin
-    if (selectedId === AGGREGATED_PORTFOLIO_ID) {
+    // Se è selezionato un aggregato, non resettare - è una selezione valida
+    if (isAnyAggregatedId(selectedId)) {
       if (!hasInitialized) setHasInitialized(true);
       return;
     }

@@ -3,9 +3,10 @@ import { useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { HistoricalDataEntry, HistoricalDataInput, SyntheticDeposit, AggregatedHistoricalResult } from '@/types/historicalData';
-import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUserIdFromAggregatedId, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
+import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
 
 // Helper: interpola il valore tra due snapshot
 function interpolateValue(
@@ -179,53 +180,57 @@ function aggregateHistoricalWithInterpolation(
 export function useHistoricalData(portfolioId: string | undefined, viewMode: ViewMode = 'base') {
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
-  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
+  const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
+  const isAggregated = isAnyAggregatedId(portfolioId);
+  const { portfolioIds: userPortfolioIds, isUserAggregated } = useUserPortfolioIds(portfolioId);
 
   const historicalDataQuery = useQuery({
     queryKey: ['historical-data', portfolioId],
     queryFn: async (): Promise<AggregatedHistoricalResult> => {
       if (!portfolioId) return { entries: [], syntheticDeposits: [] };
       
-      // Vista aggregata: fetch tutti i dati e aggrega per data (use 'base' for initial aggregation)
-      if (isAggregated && isAdmin) {
+      // Global aggregated: fetch all
+      if (isGlobalAggregated && isAdmin) {
         const { data, error } = await supabase
           .from('historical_data')
           .select('*')
           .order('snapshot_date', { ascending: false });
-        
         if (error) throw error;
-        // Always use 'base' mode for initial aggregation - syntheticDeposits will be recalculated below
         return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'base');
       }
       
-      // Query normale per portfolio singolo
+      // Per-user aggregated: fetch for user's portfolios
+      if (isUserAggregated && userPortfolioIds.length > 0) {
+        const { data, error } = await supabase
+          .from('historical_data')
+          .select('*')
+          .in('portfolio_id', userPortfolioIds)
+          .order('snapshot_date', { ascending: false });
+        if (error) throw error;
+        // Only aggregate if multiple portfolios
+        if (userPortfolioIds.length > 1) {
+          return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'base');
+        }
+        return { entries: data as unknown as HistoricalDataEntry[], syntheticDeposits: [] };
+      }
+      
+      // Single portfolio
       const { data, error } = await supabase
         .from('historical_data')
         .select('*')
         .eq('portfolio_id', portfolioId)
         .order('snapshot_date', { ascending: false });
-      
       if (error) throw error;
-      return { 
-        entries: data as unknown as HistoricalDataEntry[], 
-        syntheticDeposits: [] 
-      };
+      return { entries: data as unknown as HistoricalDataEntry[], syntheticDeposits: [] };
     },
-    enabled: !!portfolioId && (!isAggregated || isAdmin),
+    enabled: !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
   });
 
-  // Recalculate syntheticDeposits based on current viewMode (without refetching data)
-  // Uses rawEntries (original data with real portfolio_id) instead of aggregated entries
+  // Recalculate syntheticDeposits based on current viewMode
   const syntheticDeposits = useMemo((): SyntheticDeposit[] => {
-    // Use rawEntries for aggregated view (they have original portfolio_id)
     const rawEntries = historicalDataQuery.data?.rawEntries;
+    if (!isAggregated || !rawEntries || rawEntries.length === 0) return [];
     
-    // For non-aggregated view or no raw data, no synthetic deposits
-    if (!isAggregated || !rawEntries || rawEntries.length === 0) {
-      return [];
-    }
-    
-    // Group entries by original portfolio_id
     const byPortfolio = new Map<string, HistoricalDataEntry[]>();
     rawEntries.forEach(entry => {
       const list = byPortfolio.get(entry.portfolio_id) || [];
@@ -233,55 +238,36 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
       byPortfolio.set(entry.portfolio_id, list);
     });
     
-    // Sort each portfolio by date ascending
     byPortfolio.forEach((entries, key) => {
       entries.sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
       byPortfolio.set(key, entries);
     });
     
-    // Calculate synthetic deposits based on current viewMode
     const deposits: SyntheticDeposit[] = [];
-    byPortfolio.forEach((entries, portfolioId) => {
+    byPortfolio.forEach((entries, pId) => {
       if (entries.length === 0) return;
       const firstEntry = entries[0];
       const firstValue = getValueForViewMode(firstEntry, viewMode);
-      deposits.push({
-        date: firstEntry.snapshot_date,
-        amount: firstValue,
-        portfolioId,
-      });
+      deposits.push({ date: firstEntry.snapshot_date, amount: firstValue, portfolioId: pId });
     });
-    
     return deposits;
   }, [historicalDataQuery.data?.rawEntries, viewMode, isAggregated]);
 
   const upsertMutation = useMutation({
     mutationFn: async (entry: HistoricalDataInput) => {
       if (!portfolioId) throw new Error('Portfolio non trovato');
-      
-      // Build upsert payload - use explicit type to satisfy TypeScript
       const upsertPayload = {
-        portfolio_id: portfolioId,
-        snapshot_date: entry.snapshot_date,
-        total_value: entry.total_value,
-        netting_total: entry.netting_total,
-        netting_ex_cc: entry.netting_ex_cc,
-        netting_ex_cc_np: entry.netting_ex_cc_np,
-        deposits: entry.deposits,
-        average_balance: entry.average_balance,
-        equity_exposure_pct: entry.equity_exposure_pct,
-        usd_exposure_pct: entry.usd_exposure_pct,
-        ...(entry.id && { id: entry.id }), // Include id only if provided
+        portfolio_id: portfolioId, snapshot_date: entry.snapshot_date,
+        total_value: entry.total_value, netting_total: entry.netting_total,
+        netting_ex_cc: entry.netting_ex_cc, netting_ex_cc_np: entry.netting_ex_cc_np,
+        deposits: entry.deposits, average_balance: entry.average_balance,
+        equity_exposure_pct: entry.equity_exposure_pct, usd_exposure_pct: entry.usd_exposure_pct,
+        ...(entry.id && { id: entry.id }),
       };
-      
       const { data, error } = await supabase
         .from('historical_data')
-        .upsert(upsertPayload, {
-          onConflict: entry.id ? 'id' : 'portfolio_id,snapshot_date'
-        })
-        .select()
-        .single();
-      
+        .upsert(upsertPayload, { onConflict: entry.id ? 'id' : 'portfolio_id,snapshot_date' })
+        .select().single();
       if (error) throw error;
       return data;
     },
@@ -289,53 +275,29 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
       queryClient.invalidateQueries({ queryKey: ['historical-data'] });
       toast.success('Dati storici salvati!');
     },
-    onError: (error) => {
-      toast.error('Errore nel salvataggio', {
-        description: error.message,
-      });
-    },
+    onError: (error) => { toast.error('Errore nel salvataggio', { description: error.message }); },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('historical_data')
-        .delete()
-        .eq('id', id);
-      
+      const { error } = await supabase.from('historical_data').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['historical-data'] });
       toast.success('Dato storico eliminato');
     },
-    onError: (error) => {
-      toast.error('Errore nell\'eliminazione', {
-        description: error.message,
-      });
-    },
+    onError: (error) => { toast.error('Errore nell\'eliminazione', { description: error.message }); },
   });
 
-  // Extract entries from the result
   const entries = historicalDataQuery.data?.entries || [];
-
-  // Get the earliest entry for initial value calculation
-  const earliestEntry = entries.length 
-    ? entries[entries.length - 1] 
-    : null;
-
-  // Get the latest entry for current comparison
+  const earliestEntry = entries.length ? entries[entries.length - 1] : null;
   const latestEntry = entries[0] || null;
 
   return {
-    historicalData: entries,
-    syntheticDeposits,
-    isLoading: historicalDataQuery.isLoading,
-    earliestEntry,
-    latestEntry,
-    upsertHistoricalData: upsertMutation.mutate,
-    deleteHistoricalData: deleteMutation.mutate,
-    isUpserting: upsertMutation.isPending,
-    isDeleting: deleteMutation.isPending,
+    historicalData: entries, syntheticDeposits,
+    isLoading: historicalDataQuery.isLoading, earliestEntry, latestEntry,
+    upsertHistoricalData: upsertMutation.mutate, deleteHistoricalData: deleteMutation.mutate,
+    isUpserting: upsertMutation.isPending, isDeleting: deleteMutation.isPending,
   };
 }

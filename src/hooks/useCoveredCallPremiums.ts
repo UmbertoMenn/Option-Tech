@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { ParsedOrder } from '@/lib/orderFileParser';
-import { AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
+import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
 
 export interface CoveredCallPremium {
   id: string;
@@ -33,46 +34,40 @@ interface UpsertPremiumData {
 export function useCoveredCallPremiums(portfolioId: string | undefined) {
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
-  const isAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
+  const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
+  const isAggregated = isAnyAggregatedId(portfolioId);
+  const { portfolioIds: userPortfolioIds, isUserAggregated } = useUserPortfolioIds(portfolioId);
   
-  // Query to fetch all premiums for the portfolio
   const { data: premiums = [], isLoading, refetch } = useQuery({
     queryKey: ['covered-call-premiums', portfolioId],
     queryFn: async () => {
       if (!portfolioId) return [];
       
-      // Vista aggregata: fetch tutti i premiums
-      if (isAggregated && isAdmin) {
-        const { data, error } = await supabase
-          .from('covered_call_premiums')
-          .select('*');
-        
+      // Global aggregated
+      if (isGlobalAggregated && isAdmin) {
+        const { data, error } = await supabase.from('covered_call_premiums').select('*');
         if (error) throw error;
-        
-        return (data || []).map(row => ({
-          ...row,
-          orders_json: (row.orders_json as unknown as ParsedOrder[]) || [],
-        })) as CoveredCallPremium[];
+        return (data || []).map(row => ({ ...row, orders_json: (row.orders_json as unknown as ParsedOrder[]) || [] })) as CoveredCallPremium[];
       }
       
-      // Query normale
+      // Per-user aggregated
+      if (isUserAggregated && userPortfolioIds.length > 0) {
+        const { data, error } = await supabase
+          .from('covered_call_premiums').select('*')
+          .in('portfolio_id', userPortfolioIds);
+        if (error) throw error;
+        return (data || []).map(row => ({ ...row, orders_json: (row.orders_json as unknown as ParsedOrder[]) || [] })) as CoveredCallPremium[];
+      }
+      
+      // Single portfolio
       const { data, error } = await supabase
-        .from('covered_call_premiums')
-        .select('*')
-        .eq('portfolio_id', portfolioId);
-      
+        .from('covered_call_premiums').select('*').eq('portfolio_id', portfolioId);
       if (error) throw error;
-      
-      // Parse orders_json from JSON to array
-      return (data || []).map(row => ({
-        ...row,
-        orders_json: (row.orders_json as unknown as ParsedOrder[]) || [],
-      })) as CoveredCallPremium[];
+      return (data || []).map(row => ({ ...row, orders_json: (row.orders_json as unknown as ParsedOrder[]) || [] })) as CoveredCallPremium[];
     },
-    enabled: !!portfolioId && (!isAggregated || isAdmin),
+    enabled: !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
   });
   
-  // Get premium by ticker
   const getPremiumByTicker = (ticker: string): CoveredCallPremium | undefined => {
     return premiums.find(p => p.ticker.toUpperCase() === ticker.toUpperCase());
   };
@@ -81,97 +76,53 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
   const upsertMutation = useMutation({
     mutationFn: async (data: UpsertPremiumData) => {
       if (!portfolioId) throw new Error('No portfolio selected');
-      
       const payload = {
-        portfolio_id: portfolioId,
-        ticker: data.ticker.toUpperCase(),
-        underlying: data.underlying,
+        portfolio_id: portfolioId, ticker: data.ticker.toUpperCase(), underlying: data.underlying,
         orders_json: JSON.parse(JSON.stringify(data.orders_json)),
-        transaction_cost: data.transaction_cost,
-        net_per_share: data.net_per_share,
-        first_operation_date: data.first_operation_date,
-        last_operation_date: data.last_operation_date,
+        transaction_cost: data.transaction_cost, net_per_share: data.net_per_share,
+        first_operation_date: data.first_operation_date, last_operation_date: data.last_operation_date,
         contracts_count: data.contracts_count,
       };
-      
       const { data: result, error } = await supabase
-        .from('covered_call_premiums')
-        .upsert([payload] as any, { onConflict: 'portfolio_id,ticker' })
-        .select()
-        .single();
-      
+        .from('covered_call_premiums').upsert([payload] as any, { onConflict: 'portfolio_id,ticker' }).select().single();
       if (error) throw error;
       return result;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] });
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
   });
   
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (ticker: string) => {
       if (!portfolioId) throw new Error('No portfolio selected');
-      
-      const { error } = await supabase
-        .from('covered_call_premiums')
-        .delete()
-        .eq('portfolio_id', portfolioId)
-        .eq('ticker', ticker.toUpperCase());
-      
+      const { error } = await supabase.from('covered_call_premiums').delete().eq('portfolio_id', portfolioId).eq('ticker', ticker.toUpperCase());
       if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] });
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
   });
   
   // Delete multiple tickers not in the active list
   const deleteOrphanedMutation = useMutation({
     mutationFn: async (activeTickers: string[]) => {
       if (!portfolioId) throw new Error('No portfolio selected');
-      
       const upperTickers = activeTickers.map(t => t.toUpperCase());
-      
-      // Get all premiums for this portfolio
       const { data: existing, error: fetchError } = await supabase
-        .from('covered_call_premiums')
-        .select('ticker')
-        .eq('portfolio_id', portfolioId);
-      
+        .from('covered_call_premiums').select('ticker').eq('portfolio_id', portfolioId);
       if (fetchError) throw fetchError;
-      
-      // Find tickers to delete
-      const tickersToDelete = (existing || [])
-        .map(row => row.ticker)
-        .filter(ticker => !upperTickers.includes(ticker.toUpperCase()));
-      
+      const tickersToDelete = (existing || []).map(row => row.ticker).filter(ticker => !upperTickers.includes(ticker.toUpperCase()));
       if (tickersToDelete.length === 0) return { deleted: 0 };
-      
       const { error: deleteError } = await supabase
-        .from('covered_call_premiums')
-        .delete()
-        .eq('portfolio_id', portfolioId)
-        .in('ticker', tickersToDelete);
-      
+        .from('covered_call_premiums').delete().eq('portfolio_id', portfolioId).in('ticker', tickersToDelete);
       if (deleteError) throw deleteError;
-      
       return { deleted: tickersToDelete.length };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] });
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
   });
   
   return {
-    premiums,
-    isLoading,
-    refetch,
-    getPremiumByTicker,
-    upsertPremium: upsertMutation.mutateAsync,
-    deletePremium: deleteMutation.mutateAsync,
+    premiums, isLoading, refetch, getPremiumByTicker,
+    upsertPremium: upsertMutation.mutateAsync, deletePremium: deleteMutation.mutateAsync,
     deleteOrphanedPremiums: deleteOrphanedMutation.mutateAsync,
-    isUpserting: upsertMutation.isPending,
-    isDeleting: deleteMutation.isPending,
+    isUpserting: upsertMutation.isPending, isDeleting: deleteMutation.isPending,
   };
 }
