@@ -1,30 +1,61 @@
 
 
-## Fix: Allineamento riga ENI nelle Covered Call
+## Fix: Vista aggregata per-utente completamente vuota
 
-### Problema
+### Causa
 
-Il componente `OptionStratButton` restituisce `null` quando non c'e' un URL valido (riga 10 di `OptionStratButton.tsx`). Nelle griglie CSS, se un elemento figlio non viene renderizzato, la cella corrispondente non viene occupata e tutti gli elementi successivi scalano di una posizione a sinistra. Per ENI, che non ha un mapping ticker per OptionStrat, i badge P!, OTM, il menu e tutte le colonne dati risultano disallineati rispetto alle altre righe.
+Catena di errori nell'accesso all'ID selezionato:
+
+1. `PortfolioContext` espone solo `selectedPortfolio` (l'oggetto Portfolio completo), ma per ID aggregati come `AGGREGATED_USER:xxx` non esiste un portfolio reale nel database, quindi `selectedPortfolio` e' sempre `null`
+2. `usePortfolio.ts` deriva l'ID dal portfolio: `selectedId = portfolio?.id` che diventa `undefined`
+3. Con `selectedId` undefined, tutti i flag (`isUserAgg`, `isGlobalAggregated`) sono falsi, tutte le query sono disabilitate, e la dashboard resta vuota
 
 ### Soluzione
 
-**File: `src/components/derivatives/OptionStratButton.tsx`**
+**File 1: `src/contexts/PortfolioContext.tsx`**
 
-Modificare il fallback da `return null` a `return <div />` (un div vuoto che occupa la cella della griglia senza mostrare nulla). Questo garantisce che la cella della colonna venga sempre occupata, mantenendo l'allineamento di tutte le colonne successive.
+- Aggiungere `selectedPortfolioId: string | null` al tipo `PortfolioContextType`
+- Esporre `selectedId` direttamente nel Provider value, cosi' gli hook possono accedere all'ID raw senza dipendere dall'oggetto portfolio
+
+**File 2: `src/hooks/usePortfolio.ts`**
+
+- Leggere `selectedPortfolioId` dal context invece di derivarlo da `selectedPortfolio?.id`
+- Cambiare: `const selectedId = portfolio?.id;` in `const selectedId = selectedPortfolioId;`
+- Aggiornare la condizione `enabled` di `positionsQuery` per usare il nuovo `selectedId`
+
+**File 3: `src/hooks/useHistoricalData.ts`** (verifica)
+
+- Questo hook riceve gia' `portfolioId` come parametro, quindi non ha il problema. Verificare che il chiamante (Dashboard) passi l'ID corretto.
+
+**File 4: `src/components/dashboard/Dashboard.tsx`** (verifica)
+
+- Verificare che la Dashboard passi `selectedPortfolioId` (e non `selectedPortfolio?.id`) a `useHistoricalData` e altri hook
+
+### Dettaglio tecnico
 
 ```text
-// Prima
-if (!url) return null;
+// PortfolioContext - aggiunta al tipo
+interface PortfolioContextType {
+  // ... existing fields
+  selectedPortfolioId: string | null;  // NUOVO
+}
 
-// Dopo
-if (!url) return <div />;
+// PortfolioContext - aggiunta al value
+<PortfolioContext.Provider value={{
+  // ... existing
+  selectedPortfolioId: selectedId,  // espone l'ID raw
+}}>
+
+// usePortfolio.ts - fix
+const { selectedPortfolio, isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+const selectedId = selectedPortfolioId;  // invece di portfolio?.id
 ```
 
-### Dettagli tecnici
+### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/components/derivatives/OptionStratButton.tsx` | Cambiare `return null` in `return <div />` per preservare la cella nella griglia CSS |
-
-Modifica minima (1 riga), nessun effetto collaterale su altre sezioni.
+| `PortfolioContext.tsx` | Aggiungere `selectedPortfolioId` al tipo e al Provider value |
+| `usePortfolio.ts` | Usare `selectedPortfolioId` dal context invece di derivarlo |
+| `Dashboard.tsx` | Verificare che passi l'ID corretto ai sotto-hook |
 
