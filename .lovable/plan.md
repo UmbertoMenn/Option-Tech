@@ -1,61 +1,124 @@
 
+## Fix: Benchmark non rispecchia i pesi storici
 
-## Fix: Vista aggregata per-utente completamente vuota
+### Problemi identificati
 
-### Causa
+**Bug 1: `equity_exposure_pct = 0` trattato come "non impostato"**
 
-Catena di errori nell'accesso all'ID selezionato:
+In `useBenchmarkData.ts`, linee 330 e 341:
+```text
+const equityPct = historicalEquityPct && historicalEquityPct > 0
+  ? historicalEquityPct
+  : (equityExposurePct ?? 0.6);
+```
+Siccome `0` e' falsy in JavaScript, un portafoglio con 0% equity (tutti bond) usa il fallback (esposizione live attuale) invece di 0%. Stesso problema per `usd_exposure_pct`.
 
-1. `PortfolioContext` espone solo `selectedPortfolio` (l'oggetto Portfolio completo), ma per ID aggregati come `AGGREGATED_USER:xxx` non esiste un portfolio reale nel database, quindi `selectedPortfolio` e' sempre `null`
-2. `usePortfolio.ts` deriva l'ID dal portfolio: `selectedId = portfolio?.id` che diventa `undefined`
-3. Con `selectedId` undefined, tutti i flag (`isUserAgg`, `isGlobalAggregated`) sono falsi, tutte le query sono disabilitate, e la dashboard resta vuota
+**Bug 2 (principale): Calcolo matematicamente scorretto dei rendimenti pesati**
+
+Il codice attuale calcola il rendimento cumulativo di equity e bond DAL PRIMO punto, poi applica il peso del punto corrente a quel rendimento cumulativo totale:
+
+```text
+equityReturn = (prezzo_attuale - prezzo_base) / prezzo_base  // cumulativo da inizio
+scaledReturn = peso_equity_punto_N × equityReturn_cumulativo  // SBAGLIATO
+```
+
+Questo significa che modificare il peso equity di un punto storico non produce l'effetto corretto, perche' lo stesso rendimento cumulativo viene semplicemente ri-pesato. Il benchmark non rispecchia la reale evoluzione dei pesi nel tempo.
+
+**Calcolo corretto** (composizione periodo per periodo):
+
+```text
+Per ogni periodo [N → N+1]:
+  rendimento_equity_periodo = (prezzo_equity_N+1 - prezzo_equity_N) / prezzo_equity_N
+  rendimento_bond_periodo = (prezzo_bond_N+1 - prezzo_bond_N) / prezzo_bond_N
+  rendimento_pesato_periodo = peso_equity_N × eq_periodo + (1-peso_N) × bond_periodo
+  (+ aggiustamento valutario per il periodo)
+
+Composizione:
+  valore_cumulativo = valore_cumulativo × (1 + rendimento_pesato_periodo)
+  rendimento_cumulativo% = (valore_cumulativo - 1) × 100
+```
 
 ### Soluzione
 
-**File 1: `src/contexts/PortfolioContext.tsx`**
+**File: `src/hooks/useBenchmarkData.ts`**
 
-- Aggiungere `selectedPortfolioId: string | null` al tipo `PortfolioContextType`
-- Esporre `selectedId` direttamente nel Provider value, cosi' gli hook possono accedere all'ID raw senza dipendere dall'oggetto portfolio
+1. Correggere i check per `equity_exposure_pct` e `usd_exposure_pct`:
+   - Sostituire `historicalEquityPct && historicalEquityPct > 0` con `historicalEquityPct != null && historicalEquityPct >= 0`
+   - Applicare in 4 punti: linee 330, 341, 419, 429
 
-**File 2: `src/hooks/usePortfolio.ts`**
+2. Riscrivere il calcolo dei rendimenti nella sezione `sortedHistory.forEach` (linee 266-367):
+   - Per ogni periodo tra due snapshot consecutivi, calcolare il rendimento di equity e bond per quel singolo periodo
+   - Usare `getClosestPrice` per ottenere i prezzi ad entrambe le estremita del periodo
+   - Applicare il peso equity del punto iniziale del periodo
+   - Comporre i rendimenti moltiplicativamente
+   - Applicare l'aggiustamento valutario per-periodo (variazione EUR/USD nel periodo, pesata per l'esposizione USD del periodo)
 
-- Leggere `selectedPortfolioId` dal context invece di derivarlo da `selectedPortfolio?.id`
-- Cambiare: `const selectedId = portfolio?.id;` in `const selectedId = selectedPortfolioId;`
-- Aggiornare la condizione `enabled` di `positionsQuery` per usare il nuovo `selectedId`
+3. Riscrivere la sezione del punto corrente (linee 370-454):
+   - Calcolare il rendimento del periodo dall'ultimo snapshot al punto corrente
+   - Comporre con il rendimento cumulativo calcolato fino all'ultimo snapshot
+   - Usare l'esposizione equity/USD dell'ultimo snapshot
 
-**File 3: `src/hooks/useHistoricalData.ts`** (verifica)
+4. Mantenere invariata l'interfaccia di ritorno (`equityReturn`, `bondReturn`, `scaledReturn`, `eurusdVariation`, `equityPctUsed`, `usdPctUsed`) per compatibilita con il tooltip del grafico.
 
-- Questo hook riceve gia' `portfolioId` come parametro, quindi non ha il problema. Verificare che il chiamante (Dashboard) passi l'ID corretto.
-
-**File 4: `src/components/dashboard/Dashboard.tsx`** (verifica)
-
-- Verificare che la Dashboard passi `selectedPortfolioId` (e non `selectedPortfolio?.id`) a `useHistoricalData` e altri hook
-
-### Dettaglio tecnico
+### Dettaglio tecnico della nuova logica
 
 ```text
-// PortfolioContext - aggiunta al tipo
-interface PortfolioContextType {
-  // ... existing fields
-  selectedPortfolioId: string | null;  // NUOVO
-}
+// Struttura del loop principale
+let cumulativeFactor = 1.0;  // Parte da 1 (= 0% rendimento)
 
-// PortfolioContext - aggiunta al value
-<PortfolioContext.Provider value={{
-  // ... existing
-  selectedPortfolioId: selectedId,  // espone l'ID raw
-}}>
+sortedHistory.forEach((entry, index) => {
+  if (index === 0) {
+    returns.push({ date, scaledReturn: 0, ... });
+    return;
+  }
 
-// usePortfolio.ts - fix
-const { selectedPortfolio, isAggregatedView, selectedPortfolioId } = usePortfolioContext();
-const selectedId = selectedPortfolioId;  // invece di portfolio?.id
+  const prevEntry = sortedHistory[index - 1];
+  const prevDate = prevEntry.snapshot_date;
+  const currDate = entry.snapshot_date;
+
+  // Rendimenti di PERIODO (non cumulativi)
+  const equityPeriodReturns = EQUITY_BENCHMARKS.map(ticker => {
+    const prevPrice = getClosestPrice(ticker, prevDate).price;
+    const currPrice = getClosestPrice(ticker, currDate).price;
+    return (currPrice - prevPrice) / prevPrice;
+  });
+  const avgEquityPeriodReturn = media(equityPeriodReturns);
+
+  const bondPrevPrice = getClosestPrice('AGG', prevDate).price;
+  const bondCurrPrice = getClosestPrice('AGG', currDate).price;
+  const bondPeriodReturn = (bondCurrPrice - bondPrevPrice) / bondPrevPrice;
+
+  // Peso dal punto PRECEDENTE
+  const equityPct = prevEntry.equity_exposure_pct (con fallback corretto);
+
+  // Rendimento pesato del periodo
+  let periodReturn = equityPct * avgEquityPeriodReturn + (1 - equityPct) * bondPeriodReturn;
+
+  // Aggiustamento valutario per-periodo
+  if (currencyAdjusted) {
+    const usdPct = prevEntry.usd_exposure_pct (con fallback corretto);
+    const eurusdPrev = getClosestPrice('EURUSD=X', prevDate).price;
+    const eurusdCurr = getClosestPrice('EURUSD=X', currDate).price;
+    const eurusdPeriodVariation = (eurusdCurr / eurusdPrev) - 1;
+    periodReturn = periodReturn - usdPct * eurusdPeriodVariation;
+  }
+
+  // Composizione moltiplicativa
+  cumulativeFactor *= (1 + periodReturn);
+  const scaledReturn = (cumulativeFactor - 1) * 100;
+
+  returns.push({ date: currDate, scaledReturn, equityPctUsed: equityPct, ... });
+});
 ```
+
+### Impatto
+
+- Il benchmark riflette correttamente l'evoluzione storica dei pesi equity/bond/USD
+- Modificare i pesi nello storico dati produce un aggiornamento immediato e visibile del benchmark
+- I tooltip continuano a mostrare la scomposizione trasparente (equity return, bond return, peso usato, variazione EUR/USD)
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `PortfolioContext.tsx` | Aggiungere `selectedPortfolioId` al tipo e al Provider value |
-| `usePortfolio.ts` | Usare `selectedPortfolioId` dal context invece di derivarlo |
-| `Dashboard.tsx` | Verificare che passi l'ID corretto ai sotto-hook |
-
+| `src/hooks/useBenchmarkData.ts` | Fix fallback `0`, riscrittura calcolo con composizione per-periodo |
