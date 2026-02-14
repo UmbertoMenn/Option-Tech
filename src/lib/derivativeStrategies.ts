@@ -1245,7 +1245,7 @@ export function formatOptionDescription(option: Position): string {
   }
   
   if (option.strike_price) {
-    parts.push(`$${option.strike_price}`);
+    parts.push(`${option.strike_price}`);
   }
   
   if (option.expiry_date) {

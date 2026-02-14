@@ -84,6 +84,11 @@ function formatExpiryMMY(date: string | null | undefined): string {
   return `${month}/${year}`;
 }
 
+// Helper: get the currency for a derivative position
+function getOptionCurrency(option: Position): string {
+  return option.currency || 'USD';
+}
+
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -808,7 +813,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 >
                   {netPerShare !== undefined 
                     ? <>
-                        UNIT: {formatNumber(netPerShare, 2)} $ {underlyingPrice > 0 && (
+                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
                             ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
@@ -828,7 +833,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -849,7 +854,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                  {formatCurrency(option.avg_cost || 0, 'USD')}
+                {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -860,7 +865,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             {/* Col 12: Prezzo + % */}
             <div className="flex items-center gap-1 justify-end whitespace-nowrap">
               <span className="font-semibold text-sm">
-                {formatCurrency(option.current_price || 0, 'USD')}
+                {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
               </span>
               {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
                 <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
@@ -882,7 +887,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Strike</p>
-                <p className="font-medium">${option.strike_price}</p>
+                <p className="font-medium">{option.strike_price}</p>
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Scadenza</p>
@@ -890,7 +895,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-                <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
               </div>
             </div>
             {adjustedProfitLossPct !== null && (
@@ -1003,7 +1008,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -1028,7 +1033,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                {formatCurrency(option.avg_cost || 0, 'USD')}
+              {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -1039,7 +1044,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
           {/* Col 10: Prezzo */}
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
+              {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
             </span>
             {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
               <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
@@ -1055,7 +1060,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${option.strike_price}</p>
+              <p className="font-medium">{option.strike_price}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
@@ -1063,7 +1068,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
@@ -1086,6 +1091,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   // Get underlying price from Yahoo Finance
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
+  const legCurrency = soldCall.currency || soldPut.currency || 'USD';
   
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
@@ -1176,7 +1182,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+              <p>Put Spread: Buy {boughtPut.strike_price} / Sell {soldPut.strike_price}</p>
             </TooltipContent>
           </Tooltip>
           
@@ -1188,7 +1194,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+              <p>Call Spread: Sell {soldCall.strike_price} / Buy {boughtCall.strike_price}</p>
             </TooltipContent>
           </Tooltip>
           
@@ -1199,7 +1205,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, legCurrency)}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -1225,7 +1231,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">GP:</span>
-                <span className="text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(gainPotenziale, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1238,7 +1244,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">ML:</span>
-                <span className="text-sm">{formatCurrency(maxLoss, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(maxLoss, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1255,24 +1261,24 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
+                  <Badge variant="outline" className="text-xs">Strike {soldPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
+                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, legCurrency)}</span>
                   <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
+                      PMC: {formatCurrency(soldPut.avg_cost || 0, legCurrency)}
                   </span>
                 </div>
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
+                  <Badge variant="outline" className="text-xs">Strike {boughtPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, legCurrency)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(boughtPut.avg_cost || 0, legCurrency)}
                   </span>
                 </div>
               </div>
@@ -1286,24 +1292,24 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
+                  <Badge variant="outline" className="text-xs">Strike {soldCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
+                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, legCurrency)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(soldCall.avg_cost || 0, legCurrency)}
                   </span>
                 </div>
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                  <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
+                  <Badge variant="outline" className="text-xs">Strike {boughtCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
-                  <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, legCurrency)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      PMC: {formatCurrency(boughtCall.avg_cost || 0, legCurrency)}
                   </span>
                 </div>
               </div>
@@ -1314,7 +1320,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
             <span className="text-muted-foreground">Gain Potenziale:</span>
             <span className={`font-semibold ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(gainPotenziale, 'USD')}
+              {formatCurrency(gainPotenziale, legCurrency)}
             </span>
           </div>
         </div>
@@ -1333,6 +1339,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   // Get underlying price from Yahoo Finance
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
+  const legCurrency = soldCall.currency || soldPut.currency || 'USD';
   
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
@@ -1410,7 +1417,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+              <p>Put Spread: Buy {boughtPut.strike_price} / Sell {soldPut.strike_price}</p>
             </TooltipContent>
           </Tooltip>
           
@@ -1422,7 +1429,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+              <p>Call Spread: Sell {soldCall.strike_price} / Buy {boughtCall.strike_price}</p>
             </TooltipContent>
           </Tooltip>
           
@@ -1438,7 +1445,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, legCurrency)}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -1459,7 +1466,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
             <TooltipTrigger asChild>
               <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
-                <span className="text-sm">{formatCurrency(totalPL, 'USD')}</span>
+                <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -1482,9 +1489,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     <Badge variant="outline" className="text-xs">{soldPut.strike_price} {formatExpiryMMY(soldPut.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
+                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, legCurrency)}</span>
                     <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
+                      PMC: {formatCurrency(soldPut.avg_cost || 0, legCurrency)}
                     </span>
                   </div>
                 </div>
@@ -1495,9 +1502,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     <Badge variant="outline" className="text-xs">{boughtPut.strike_price} {formatExpiryMMY(boughtPut.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, legCurrency)}</span>
                     <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
+                      PMC: {formatCurrency(boughtPut.avg_cost || 0, legCurrency)}
                     </span>
                   </div>
                 </div>
@@ -1515,9 +1522,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     <Badge variant="outline" className="text-xs">{soldCall.strike_price} {formatExpiryMMY(soldCall.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
+                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, legCurrency)}</span>
                     <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
+                      PMC: {formatCurrency(soldCall.avg_cost || 0, legCurrency)}
                     </span>
                   </div>
                 </div>
@@ -1528,9 +1535,9 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                     <Badge variant="outline" className="text-xs">{boughtCall.strike_price} {formatExpiryMMY(boughtCall.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
+                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, legCurrency)}</span>
                     <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
+                      PMC: {formatCurrency(boughtCall.avg_cost || 0, legCurrency)}
                     </span>
                   </div>
                 </div>
@@ -1542,7 +1549,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
             <span className="text-muted-foreground">Profit/Loss:</span>
             <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(totalPL, 'USD')}
+              {formatCurrency(totalPL, legCurrency)}
             </span>
           </div>
         </div>
@@ -1558,6 +1565,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   // Get underlying price from live Yahoo data (updated every 5 min by cron)
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
+  const legCurrency = options[0]?.option.currency || 'USD';
   
   // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
   // or single-sided spread strategies (Put Spread, Call Spread, Diagonal Put/Call Spread)
@@ -1759,7 +1767,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, legCurrency)}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -1778,7 +1786,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           {/* Colonna 9: P/L */}
           <div className="text-right">
             <span className={`text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(totalProfitLoss, 'USD')}
+              {formatCurrency(totalProfitLoss, legCurrency)}
             </span>
           </div>
       </div>
@@ -1834,7 +1842,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
           {isBought ? 'A' : 'V'}
         </Badge>
         <span className="text-sm">{optionTypeLabel}</span>
-        <span className="font-medium text-sm">${option.strike_price}</span>
+        <span className="font-medium text-sm">{option.strike_price}</span>
         <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1864,7 +1872,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-              PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+               PMC: {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
             </span>
           </TooltipTrigger>
           <TooltipContent>
@@ -1872,7 +1880,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
           </TooltipContent>
         </Tooltip>
         <span className="font-semibold text-sm">
-          {formatCurrency(option.current_price || 0, 'USD')}
+          {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
         </span>
       </div>
     </div>
@@ -1937,7 +1945,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -1951,7 +1959,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                  PMC: {formatCurrency(option.avg_cost || 0, 'USD')}
+                  PMC: {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -1959,7 +1967,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
               </TooltipContent>
             </Tooltip>
             <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
+              {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
             </span>
           </div>
         </div>
@@ -1972,7 +1980,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${option.strike_price}</p>
+              <p className="font-medium">{option.strike_price}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
@@ -1980,7 +1988,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
@@ -2069,7 +2077,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -2094,7 +2102,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                {formatCurrency(option.avg_cost || 0, 'USD')}
+                {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -2105,7 +2113,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           {/* Col 10: Prezzo */}
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, 'USD')}
+              {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
             </span>
             {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
               <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
@@ -2121,7 +2129,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${option.strike_price}</p>
+              <p className="font-medium">{option.strike_price}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
@@ -2129,7 +2137,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
+              <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
@@ -2220,7 +2228,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, 'USD')}
+                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -2245,7 +2253,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                {formatCurrency(avgCost, 'USD')}
+                {formatCurrency(avgCost, getOptionCurrency(option))}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -2256,7 +2264,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 10: Prezzo + % */}
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
             <span className="font-semibold text-sm">
-              {formatCurrency(currentPrice, 'USD')}
+              {formatCurrency(currentPrice, getOptionCurrency(option))}
             </span>
             {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
               <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
@@ -2277,7 +2285,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">${option.strike_price}</p>
+              <p className="font-medium">{option.strike_price}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
@@ -2285,7 +2293,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(currentPrice, 'USD')}</p>
+              <p className="font-medium">{formatCurrency(currentPrice, getOptionCurrency(option))}</p>
             </div>
           </div>
           {option.profit_loss_pct !== null && (
