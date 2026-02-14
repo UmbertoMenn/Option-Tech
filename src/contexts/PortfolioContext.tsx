@@ -36,6 +36,7 @@ interface PortfolioContextType {
   setAdminViewPortfolio: (portfolioId: string, ownerUserId: string) => void;
   exitAdminMode: () => void;
   isAggregatedView: boolean;
+  selectedPortfolioId: string | null;
 }
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
@@ -287,6 +288,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         setAdminViewPortfolio,
         exitAdminMode,
         isAggregatedView,
+        selectedPortfolioId: selectedId,
       }}
     >
       {children}

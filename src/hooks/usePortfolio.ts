@@ -9,12 +9,12 @@ import { remapOverridesAfterUpload } from '@/lib/overrideMatching';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
-  const { selectedPortfolio, isAggregatedView } = usePortfolioContext();
+  const { selectedPortfolio, isAggregatedView, selectedPortfolioId } = usePortfolioContext();
   const { isAdmin, user } = useAuth();
   const queryClient = useQueryClient();
 
   const portfolio = selectedPortfolio;
-  const selectedId = portfolio?.id;
+  const selectedId = selectedPortfolioId;
   const isGlobalAggregated = selectedId === AGGREGATED_PORTFOLIO_ID;
   const isUserAgg = isUserAggregatedId(selectedId);
   const targetUserId = isUserAgg && selectedId ? getUserIdFromAggregatedId(selectedId) : null;
