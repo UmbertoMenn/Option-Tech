@@ -7,7 +7,7 @@ interface OptionStratButtonProps {
 }
 
 export function OptionStratButton({ url }: OptionStratButtonProps) {
-  if (!url) return null;
+  if (!url) return <div />;
   
   return (
     <Tooltip>
