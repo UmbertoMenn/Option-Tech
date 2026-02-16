@@ -1,48 +1,76 @@
 
 
-## Semplificare il filtro LEAP: escludere tutte le CALL solo comprate
+## Premi Covered Call: separare per posizione, non per ticker
 
-### Logica attuale
+### Problema
 
-Il filtro LEAP esclude le CALL solo comprate (senza corrispondente vendita) **solo se** lo strike supera il 130% del prezzo del sottostante. Le CALL comprate con strike vicino al prezzo vengono mantenute nel calcolo dei premi.
+La tabella `covered_call_premiums` usa la chiave `(portfolio_id, ticker)`. Se hai due Covered Call AAPL (es. strike 220 e strike 230), il salvataggio del premio su una viene mostrato identico anche sull'altra, perche' entrambe le righe fanno `getPremiumByTicker("AAPL")` e ottengono lo stesso record.
 
-### Nuova logica
+### Soluzione
 
-Qualsiasi CALL che ha **solo operazioni di acquisto** (nessuna vendita per lo stesso simbolo) viene esclusa dal calcolo, indipendentemente dallo strike o dal prezzo del sottostante. Il parametro `underlyingPrice` non sara' piu' necessario per il filtro.
+Aggiungere un campo `option_symbol` alla tabella per distinguere i premi per singola posizione opzionaria. La chiave univoca diventa `(portfolio_id, ticker, option_symbol)`.
 
-### Modifiche
+### Struttura del messaggio
 
-**1. `src/lib/orderFileParser.ts`** -- Funzione `filterAndCalculateCallPremiums`
+Ogni riga Covered Call avra' il suo calcolo indipendente. La calcolatrice filtrera' gli ordini per lo specifico simbolo opzione (es. `AAPLG6C220`) oltre che per il ticker.
 
-Semplificare lo Step 3: invece di controllare strike vs prezzo, escludere tutte le CALL buy-only:
+### Dettaglio tecnico
 
-```text
-const filteredOrders = baseFiltered.filter(order => {
-  // Se il simbolo ha almeno una vendita → tieni tutto (Covered Call o rolling)
-  if (symbolsWithSells.has(order.symbol)) {
-    return true;
-  }
-  // Solo acquisti per questo simbolo → escludere (LEAP o Long Call)
-  return false;
-});
+**1. Migrazione database**
+
+```sql
+-- Aggiungere colonna option_symbol (nullable per retrocompatibilita')
+ALTER TABLE covered_call_premiums
+  ADD COLUMN option_symbol text;
+
+-- Popolare i record esistenti con un valore di default
+UPDATE covered_call_premiums SET option_symbol = '' WHERE option_symbol IS NULL;
+
+-- Rendere NOT NULL dopo il populate
+ALTER TABLE covered_call_premiums
+  ALTER COLUMN option_symbol SET NOT NULL,
+  ALTER COLUMN option_symbol SET DEFAULT '';
+
+-- Sostituire il vincolo univoco
+DROP INDEX IF EXISTS covered_call_premiums_portfolio_id_ticker_key;
+CREATE UNIQUE INDEX covered_call_premiums_portfolio_ticker_symbol_key
+  ON covered_call_premiums (portfolio_id, ticker, option_symbol);
 ```
 
-Rimuovere la costante `LEAP_THRESHOLD` e il controllo su `extractStrikeFromSymbol`. Il parametro `underlyingPrice` puo' restare nella firma per retrocompatibilita' ma non verra' piu' usato nel filtro.
+**2. `src/hooks/useCoveredCallPremiums.ts`**
 
-**2. `src/test/orderFileParserHtmlXls.test.ts`** -- Aggiornare i test
+- Aggiungere `option_symbol` all'interfaccia `CoveredCallPremium` e a `UpsertPremiumData`
+- Modificare `getPremiumByTicker` in `getPremiumByTickerAndSymbol(ticker, optionSymbol)` che cerca la corrispondenza su entrambi i campi
+- Aggiornare l'upsert per includere `option_symbol` nel payload e nel `onConflict: 'portfolio_id,ticker,option_symbol'`
+- Aggiornare `deleteOrphanedMutation` per lavorare con la nuova chiave composita
 
-| Test | Modifica |
+**3. `src/pages/Derivatives.tsx`**
+
+- In `CoveredCallRow`: ricavare il simbolo dell'opzione (es. `option.symbol` o dal campo descrizione) e passarlo alla calcolatrice e alla lookup del premio
+- Cambiare `getPremiumByTicker(ticker)` in `getPremiumByTickerAndSymbol(ticker, optionSymbol)`
+- Passare `optionSymbol` come prop al `CallPremiumCalculatorDialog`
+
+**4. `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
+
+- Aggiungere prop `optionSymbol: string`
+- Usare `optionSymbol` nel salvataggio e nel caricamento dei dati
+- Il filtro ordini nel file Excel puo' restare invariato (filtra gia' per ticker)
+
+**5. `src/lib/strategyCache.ts`**
+
+- Aggiornare la logica di cleanup `deleteOrphanedPremiums` per passare anche i simboli opzione attivi
+
+### File da modificare
+
+| Risorsa | Modifica |
 |---|---|
-| "should exclude buy-only CALL with high strike (LEAP)" | Rinominare in "should exclude buy-only CALL" e rimuovere il riferimento allo strike |
-| "should keep CALL with sell operation" | Nessuna modifica, rimane valido |
-| "should keep buy if same symbol has a sell (rolling)" | Nessuna modifica, rimane valido |
-| "should keep buy-only CALL with near-money strike" | **Invertire aspettativa**: ora `filteredOrders` deve avere length 0 (viene esclusa) |
-| "should filter multiple LEAPs while keeping valid CCs" | Nessuna modifica logica, gia' corretto |
-| "should not filter when underlyingPrice is not provided" | **Invertire aspettativa**: ora length 0 (viene esclusa anche senza prezzo) |
-| "should handle edge case at exactly 130% threshold" | **Invertire aspettativa**: ora length 0 |
-| "should correctly calculate metrics after LEAP filtering" | Nessuna modifica, gia' corretto |
+| Database (migrazione SQL) | Aggiungere `option_symbol`, aggiornare vincolo univoco |
+| `src/hooks/useCoveredCallPremiums.ts` | Aggiungere `option_symbol` a interfacce, upsert, lookup, delete |
+| `src/pages/Derivatives.tsx` | Passare `optionSymbol` alla calcolatrice e alla lookup |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Ricevere e usare `optionSymbol` |
+| `src/lib/strategyCache.ts` | Aggiornare cleanup orfani con chiave composita |
 
-### Risultato atteso
+### Retrocompatibilita'
 
-Tutte le CALL con sole operazioni di acquisto vengono escluse dal calcolo dei premi Covered Call, semplificando la logica e rendendo il filtro indipendente dal prezzo del sottostante.
+I record esistenti avranno `option_symbol = ''` e continueranno a funzionare. Alla prossima apertura della calcolatrice per una specifica CC, il sistema creera' un nuovo record con il simbolo opzione corretto. Il vecchio record con `option_symbol = ''` potra' essere rimosso dal cleanup automatico.
 
