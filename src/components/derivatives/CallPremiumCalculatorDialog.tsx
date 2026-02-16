@@ -198,7 +198,7 @@ export function CallPremiumCalculatorDialog({
         underlying,
         orders_json: filteredOrders,
         transaction_cost: transactionCost,
-        net_per_share: isIronCondor ? metrics.grossPremium : metrics.netPerShare,
+        net_per_share: isIronCondor ? metrics.netPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
         last_operation_date: lastOperationDate,
         contracts_count: contractsInPortfolio,
@@ -296,7 +296,7 @@ export function CallPremiumCalculatorDialog({
                    </p>
                   <p className="text-3xl font-bold text-primary">
                     {isIronCondor 
-                      ? formatCurrency(metrics.grossPremium, 'USD')
+                      ? formatCurrency(metrics.netPremium, 'USD')
                       : formatCurrency(metrics.netPerShare, 'USD')
                     }
                   </p>
