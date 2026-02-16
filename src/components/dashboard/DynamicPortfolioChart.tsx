@@ -6,7 +6,7 @@ import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode } from '@/
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { ViewMode } from './ViewModeSelector';
 import { Upload, ChevronDown, ChevronUp } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip, PieChart, Pie } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip } from 'recharts';
 import { formatEUR } from '@/lib/formatters';
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -82,21 +82,24 @@ function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalVa
   );
 }
 
-// ─── Pie Chart Breakdown ──────────────────────────────────────
-function NettingPieChart({ items, finalValue }: { items: NettingBreakdownItem[]; finalValue: number }) {
-  const pieData = useMemo(() => {
+// ─── Breakdown Bar Chart ──────────────────────────────────────
+function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownItem[]; finalValue: number }) {
+  const barData = useMemo(() => {
     return items
       .filter(item => Math.abs(item.value) > 0.01)
       .map(item => ({
         name: item.label,
-        value: Math.abs(item.value),
-        originalValue: item.value,
+        value: item.value,
         category: item.category,
         fill: PIE_COLORS[item.category] || 'hsl(var(--muted-foreground))',
+        details: item.details
+          .slice()
+          .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+          .slice(0, 3),
       }));
   }, [items]);
 
-  if (pieData.length === 0) {
+  if (barData.length === 0) {
     return (
       <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
         Nessun impatto derivati
@@ -104,59 +107,69 @@ function NettingPieChart({ items, finalValue }: { items: NettingBreakdownItem[];
     );
   }
 
+  const chartHeight = Math.max(120, barData.length * 36 + 30);
+
   return (
     <div className="flex flex-col items-center">
-      <div className="w-full h-[200px] relative">
+      <div className="w-full" style={{ height: chartHeight }}>
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="50%"
-              innerRadius={55}
-              outerRadius={85}
-              paddingAngle={2}
-              dataKey="value"
-            >
-              {pieData.map((entry, index) => (
-                <Cell key={index} fill={entry.fill} stroke="hsl(var(--background))" strokeWidth={2} />
-              ))}
-            </Pie>
+          <BarChart data={barData} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+            <XAxis
+              type="number"
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+              tickFormatter={(v: number) => {
+                const abs = Math.abs(v);
+                if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+                if (abs >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+                return v.toFixed(0);
+              }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              type="category"
+              dataKey="name"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
+              width={100}
+            />
             <RechartsTooltip
+              cursor={{ fill: 'hsl(var(--muted-foreground) / 0.08)' }}
               content={({ active, payload }) => {
                 if (!active || !payload?.[0]) return null;
                 const d = payload[0].payload;
-                const total = pieData.reduce((s, p) => s + p.value, 0);
-                const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : '0';
                 return (
-                  <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-sm max-w-xs">
-                    <p className="font-semibold text-foreground">{d.name}</p>
-                    <p className={d.originalValue < 0 ? 'text-red-400' : 'text-green-400'}>
-                      {formatEUR(d.originalValue)} ({pct}%)
+                  <div className="bg-popover border border-border rounded-lg shadow-lg p-2.5 text-sm max-w-xs">
+                    <p className="font-semibold text-foreground mb-1">{d.name}</p>
+                    <p className={`font-bold mb-1.5 ${d.value < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                      {formatEUR(d.value)}
                     </p>
+                    {d.details.length > 0 && (
+                      <div className="border-t border-border pt-1.5 space-y-0.5">
+                        {d.details.map((det: { ticker: string; value: number }, i: number) => (
+                          <div key={i} className="flex justify-between gap-3 text-xs">
+                            <span className="text-muted-foreground truncate">{det.ticker}</span>
+                            <span className={det.value < 0 ? 'text-red-400' : 'text-green-400'}>
+                              {formatEUR(det.value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               }}
             />
-          </PieChart>
+            <Bar dataKey="value" barSize={20} radius={[0, 4, 4, 0]}>
+              {barData.map((entry, index) => (
+                <Cell key={index} fill={entry.fill} />
+              ))}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
-        {/* Center label */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center">
-            <p className="text-xs text-muted-foreground">Nettato</p>
-            <p className="text-sm font-bold text-blue-500">{formatEUR(finalValue)}</p>
-          </div>
-        </div>
       </div>
-      {/* Legend */}
-      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-1 px-2">
-        {pieData.map((entry, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-xs">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.fill }} />
-            <span className="text-muted-foreground">{entry.name}</span>
-          </div>
-        ))}
-      </div>
+      <p className="text-2xl font-bold text-blue-500 mt-2">{formatEUR(finalValue)}</p>
     </div>
   );
 }
@@ -309,7 +322,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             </CarouselItem>
             {/* Slide 2: Pie chart breakdown */}
             <CarouselItem>
-              <NettingPieChart items={breakdownItems} finalValue={finalValue} />
+              <NettingBreakdownChart items={breakdownItems} finalValue={finalValue} />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
