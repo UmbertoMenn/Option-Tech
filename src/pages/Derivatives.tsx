@@ -95,7 +95,7 @@ export function Derivatives() {
   const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
-  const { premiums: ccPremiums, getPremiumByTicker } = useCoveredCallPremiums(portfolio?.id);
+  const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
@@ -410,7 +410,7 @@ export function Derivatives() {
                             cc.underlying.description || cc.option.underlying || ''
                           ] || cc.contractsCovered
                         }
-                        getPremiumByTicker={getPremiumByTicker}
+                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                       />
                     ))}
                   </div>
@@ -673,10 +673,10 @@ interface RowPropsWithPrices extends RowProps {
 interface CoveredCallRowProps extends RowPropsWithPrices {
   coveredCall: CoveredCallPosition;
   totalContractsForUnderlying: number;
-  getPremiumByTicker: (ticker: string) => CoveredCallPremium | undefined;
+  getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTicker }: CoveredCallRowProps) {
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTickerAndSymbol }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
@@ -711,8 +711,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   // Get ticker for calculator
   const ticker = option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined;
   
-  // Get saved premium data for this ticker
-  const savedPremium = ticker ? getPremiumByTicker(ticker) : undefined;
+  // Derive option_symbol from strike + expiry to uniquely identify this CC position
+  const optionSymbol = `C${option.strike_price || 0}_${option.expiry_date || 'noexp'}`;
+  
+  // Get saved premium data for this specific option position
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const netPerShare = savedPremium?.net_per_share;
   
   return (
@@ -918,6 +921,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
         onOpenChange={setShowCalculator}
         underlying={option.underlying || underlying.description || ''}
         ticker={ticker}
+        optionSymbol={optionSymbol}
         contractsInPortfolio={contractsCovered}
         underlyingPrice={(option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0}
       />

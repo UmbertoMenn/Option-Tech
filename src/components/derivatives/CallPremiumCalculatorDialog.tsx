@@ -30,6 +30,7 @@ interface CallPremiumCalculatorDialogProps {
   onOpenChange: (open: boolean) => void;
   underlying: string;
   ticker?: string;
+  optionSymbol: string;
   contractsInPortfolio: number;
   underlyingPrice: number;
 }
@@ -39,11 +40,12 @@ export function CallPremiumCalculatorDialog({
   onOpenChange,
   underlying,
   ticker,
+  optionSymbol,
   contractsInPortfolio,
   underlyingPrice,
 }: CallPremiumCalculatorDialogProps) {
   const { portfolio } = usePortfolio();
-  const { getPremiumByTicker, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
+  const { getPremiumByTickerAndSymbol, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
   
   const [transactionCost, setTransactionCost] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -57,7 +59,7 @@ export function CallPremiumCalculatorDialog({
   // Load saved data when dialog opens
   useEffect(() => {
     if (open && ticker && !isLoadingPremiums) {
-      const saved = getPremiumByTicker(ticker);
+      const saved = getPremiumByTickerAndSymbol(ticker, optionSymbol);
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
         setFilteredOrders(saved.orders_json);
@@ -66,7 +68,7 @@ export function CallPremiumCalculatorDialog({
         setHasUnsavedChanges(false);
       }
     }
-  }, [open, ticker, isLoadingPremiums]);
+  }, [open, ticker, optionSymbol, isLoadingPremiums]);
 
   // Recalculate metrics from current orders
   const recalculateMetrics = useCallback((orders: ParsedOrder[], txCost: number) => {
@@ -183,6 +185,7 @@ export function CallPremiumCalculatorDialog({
     try {
       await upsertPremium({
         ticker,
+        option_symbol: optionSymbol,
         underlying,
         orders_json: filteredOrders,
         transaction_cost: transactionCost,

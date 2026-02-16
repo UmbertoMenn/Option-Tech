@@ -197,6 +197,7 @@ export type Database = {
           id: string
           last_operation_date: string | null
           net_per_share: number
+          option_symbol: string
           orders_json: Json
           portfolio_id: string
           ticker: string
@@ -211,6 +212,7 @@ export type Database = {
           id?: string
           last_operation_date?: string | null
           net_per_share?: number
+          option_symbol?: string
           orders_json?: Json
           portfolio_id: string
           ticker: string
@@ -225,6 +227,7 @@ export type Database = {
           id?: string
           last_operation_date?: string | null
           net_per_share?: number
+          option_symbol?: string
           orders_json?: Json
           portfolio_id?: string
           ticker?: string

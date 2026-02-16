@@ -283,38 +283,45 @@ export async function saveStrategyCache(
   }
   
   // Cleanup orphaned covered call premiums
-  // Extract active tickers from Covered Calls
-  const activeCCTickers: string[] = [];
+  // Extract active (ticker, option_symbol) pairs from Covered Calls
+  const activeCCKeys: { ticker: string; option_symbol: string }[] = [];
   categories.coveredCalls.forEach((cc: CoveredCallPosition) => {
     const underlying = cc.option.underlying || cc.option.description || '';
     const ticker = resolveTicker(underlying, underlyingPrices);
     if (ticker) {
-      activeCCTickers.push(ticker.toUpperCase());
+      const optionSymbol = `C${cc.option.strike_price || 0}_${cc.option.expiry_date || 'noexp'}`;
+      activeCCKeys.push({ ticker: ticker.toUpperCase(), option_symbol: optionSymbol });
     }
   });
   
-  // Delete premiums for tickers that are no longer in active covered calls
-  if (activeCCTickers.length > 0) {
-    // Get all premiums for this portfolio and delete those not in active list
+  // Delete premiums for positions that are no longer in active covered calls
+  if (activeCCKeys.length > 0) {
     const { data: existingPremiums } = await supabase
       .from('covered_call_premiums')
-      .select('ticker')
+      .select('ticker, option_symbol')
       .eq('portfolio_id', portfolioId);
     
     if (existingPremiums && existingPremiums.length > 0) {
-      const tickersToDelete = existingPremiums
-        .map(row => row.ticker)
-        .filter(ticker => !activeCCTickers.includes(ticker.toUpperCase()));
+      const activeSet = new Set(activeCCKeys.map(k => `${k.ticker}|${k.option_symbol}`));
+      const idsToDelete: string[] = [];
       
-      if (tickersToDelete.length > 0) {
-        const { error: deleteError } = await supabase
-          .from('covered_call_premiums')
-          .delete()
-          .eq('portfolio_id', portfolioId)
-          .in('ticker', tickersToDelete);
-        
-        if (!deleteError) {
-          console.log(`[StrategyCache] Cleaned up ${tickersToDelete.length} orphaned premium records`);
+      for (const row of existingPremiums) {
+        const key = `${row.ticker.toUpperCase()}|${row.option_symbol}`;
+        if (!activeSet.has(key)) {
+          idsToDelete.push(row.ticker);
+        }
+      }
+      
+      // Delete orphans one by one using composite key
+      for (const row of existingPremiums) {
+        const key = `${row.ticker.toUpperCase()}|${row.option_symbol}`;
+        if (!activeSet.has(key)) {
+          await supabase
+            .from('covered_call_premiums')
+            .delete()
+            .eq('portfolio_id', portfolioId)
+            .eq('ticker', row.ticker)
+            .eq('option_symbol', row.option_symbol);
         }
       }
     }
