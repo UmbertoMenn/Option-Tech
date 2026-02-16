@@ -88,7 +88,6 @@ function calculateTimeWeightedAverage(
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
   base: { patrimonio: 'Valore Assets (ex. Derivatives)', pl: 'Profitto/Perdita' },
   netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
-  netting_ex_cc: { patrimonio: 'Patrimonio (Netting ex. Covered Call)', pl: 'P/L (Netting ex. Covered Call)' },
   netting_ex_cc_np: { patrimonio: 'Patrimonio (Netting ex. Covered Call e NP)', pl: 'P/L (Netting ex. Covered Call e NP)' },
 };
 
@@ -151,9 +150,6 @@ export function StatsCards({
       case 'netting_total':
         historicalValue = selectedHistoricalEntry.netting_total;
         break;
-      case 'netting_ex_cc':
-        historicalValue = selectedHistoricalEntry.netting_ex_cc;
-        break;
       case 'netting_ex_cc_np':
         historicalValue = selectedHistoricalEntry.netting_ex_cc_np ?? selectedHistoricalEntry.netting_ex_cc;
         break;
@@ -184,7 +180,6 @@ export function StatsCards({
   const getPatrimonioValue = () => {
     switch (viewMode) {
       case 'netting_total': return nettingTotal;
-      case 'netting_ex_cc': return nettingExCC;
       case 'netting_ex_cc_np': return nettingExCCAndNP;
       default: return summary.totalValue;
     }
@@ -205,10 +200,6 @@ export function StatsCards({
       case 'netting_total':
         currentValue = nettingTotal;
         historicalValue = historical.netting_total;
-        break;
-      case 'netting_ex_cc':
-        currentValue = nettingExCC;
-        historicalValue = historical.netting_ex_cc;
         break;
       case 'netting_ex_cc_np':
         currentValue = nettingExCCAndNP;
@@ -277,11 +268,9 @@ export function StatsCards({
         ? formatCurrency(
             viewMode === 'netting_total' 
               ? selectedHistoricalEntry!.netting_total 
-              : viewMode === 'netting_ex_cc' 
-                ? selectedHistoricalEntry!.netting_ex_cc 
-                : viewMode === 'netting_ex_cc_np'
-                  ? (selectedHistoricalEntry!.netting_ex_cc_np ?? selectedHistoricalEntry!.netting_ex_cc)
-                  : selectedHistoricalEntry!.total_value
+              : viewMode === 'netting_ex_cc_np'
+                ? (selectedHistoricalEntry!.netting_ex_cc_np ?? selectedHistoricalEntry!.netting_ex_cc)
+                : selectedHistoricalEntry!.total_value
           )
         : '—',
       icon: Target,

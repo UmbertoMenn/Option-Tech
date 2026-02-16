@@ -36,7 +36,6 @@ interface HistoricalChartsCarouselProps {
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   base: 'Base',
   netting_total: 'Netting Totale',
-  netting_ex_cc: 'Netting ex. CC',
   netting_ex_cc_np: 'Netting ex. CC e NP',
 };
 
@@ -121,7 +120,6 @@ export function HistoricalChartsCarousel({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="base">Base</SelectItem>
-                <SelectItem value="netting_ex_cc">Netting ex. CC</SelectItem>
                 <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
                 <SelectItem value="netting_total">Netting Totale</SelectItem>
               </SelectContent>
@@ -191,7 +189,6 @@ export function HistoricalChartsCarousel({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="base">Base</SelectItem>
-                <SelectItem value="netting_ex_cc">Netting ex. CC</SelectItem>
                 <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
                 <SelectItem value="netting_total">Netting Totale</SelectItem>
               </SelectContent>

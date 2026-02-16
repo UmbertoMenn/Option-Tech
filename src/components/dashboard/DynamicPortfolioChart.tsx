@@ -243,7 +243,6 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
 const CHART_TITLES: Record<ViewMode, string> = {
   base: 'Composizione Portafoglio (Derivati esclusi)',
   netting_total: 'Valore Portafoglio (Netting Totale Derivati)',
-  netting_ex_cc: 'Valore Portafoglio (Netting ex. Covered Call)',
   netting_ex_cc_np: 'Valore Portafoglio (Netting ex. Covered Call e Naked Put OTM)',
 };
 

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ViewMode = 'base' | 'netting_total' | 'netting_ex_cc' | 'netting_ex_cc_np';
+export type ViewMode = 'base' | 'netting_total' | 'netting_ex_cc_np';
 
 interface ViewModeSelectorProps {
   viewMode: ViewMode;
@@ -10,12 +10,11 @@ interface ViewModeSelectorProps {
 
 const VIEW_LABELS: Record<ViewMode, string> = {
   base: 'Base',
-  netting_ex_cc: 'Netting ex. Covered Call',
   netting_ex_cc_np: 'Netting ex. Covered Call e Naked Put OTM',
   netting_total: 'Netting Totale',
 };
 
-const VIEWS: ViewMode[] = ['base', 'netting_ex_cc', 'netting_ex_cc_np', 'netting_total'];
+const VIEWS: ViewMode[] = ['base', 'netting_ex_cc_np', 'netting_total'];
 
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   const currentIndex = VIEWS.indexOf(viewMode);

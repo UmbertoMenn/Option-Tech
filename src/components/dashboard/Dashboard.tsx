@@ -452,7 +452,6 @@ export function Dashboard() {
             currentValue={
               viewMode === 'base' ? summary?.totalValue ?? 0
               : viewMode === 'netting_total' ? netting.nettingTotal
-              : viewMode === 'netting_ex_cc' ? netting.nettingExCoveredCall
               : netting.nettingExCCAndNP
             }
             currentDate={portfolio?.snapshot_date ?? null}

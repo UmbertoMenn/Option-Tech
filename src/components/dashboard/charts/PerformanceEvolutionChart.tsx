@@ -60,8 +60,6 @@ function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): nu
       return entry.total_value;
     case 'netting_total':
       return entry.netting_total;
-    case 'netting_ex_cc':
-      return entry.netting_ex_cc;
     case 'netting_ex_cc_np':
       return entry.netting_ex_cc_np ?? entry.netting_ex_cc;
     default:
