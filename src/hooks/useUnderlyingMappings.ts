@@ -46,11 +46,29 @@ export function useUnderlyingMappings() {
           ?.map(d => d.underlying)
           .filter((u): u is string => Boolean(u))
       )];
-      
-      if (uniqueUnderlyings.length === 0) {
+
+      // Fetch stock positions without ticker
+      const { data: stocks, error: stocksError } = await supabase
+        .from('positions')
+        .select('description')
+        .eq('asset_type', 'stock')
+        .is('ticker', null);
+
+      if (stocksError) throw stocksError;
+
+      const stockNames = [...new Set(
+        stocks
+          ?.map(s => s.description?.replace(/^AZ\./i, '').trim())
+          .filter((d): d is string => Boolean(d))
+      )];
+
+      // Merge derivative underlyings + stock names
+      const allCandidates = [...new Set([...uniqueUnderlyings, ...stockNames])];
+
+      if (allCandidates.length === 0) {
         return [];
       }
-      
+
       // Fetch mapping esistenti
       const { data: mappings, error: mappingsError } = await supabase
         .from('underlying_mappings')
@@ -58,10 +76,12 @@ export function useUnderlyingMappings() {
       
       if (mappingsError) throw mappingsError;
       
-      const mappedUnderlyings = new Set(mappings?.map(m => m.underlying));
+      // Normalizza per confronto
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const mappedNormalized = new Set(mappings?.map(m => normalize(m.underlying)));
       
-      // Trova quelli non risolti
-      return uniqueUnderlyings.filter(u => !mappedUnderlyings.has(u)).sort();
+      // Trova quelli non risolti (confronto normalizzato)
+      return allCandidates.filter(u => !mappedNormalized.has(normalize(u))).sort();
     },
   });
 
