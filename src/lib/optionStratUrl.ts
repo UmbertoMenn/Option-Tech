@@ -1,4 +1,5 @@
 import { Position } from '@/types/portfolio';
+import { ParsedOrder, toIsoDateFromIT } from '@/lib/orderFileParser';
 
 /**
  * Build an OptionStrat URL for a strategy.
@@ -249,4 +250,86 @@ export function buildGroupedStrategyUrl(
     ticker,
     legs: options,
   });
+}
+
+// --- Advanced: build URL from parsed orders (calculator) ---
+
+/**
+ * Extract option type (C/P) and strike from symbol.
+ * E.g. "CLSG6P90" -> { type: 'P', strike: 90 }
+ * Pattern: TICKER + monthCode + yearDigit + C/P + strike
+ */
+function parseSymbolTypeAndStrike(symbol: string): { type: 'C' | 'P'; strike: number } | null {
+  // Match: any letters, then a letter (month), digit (year), then C or P, then strike number
+  const match = symbol.match(/[A-Z]+[A-Z]\d([CP])([\d.]+)$/i);
+  if (!match) return null;
+  return {
+    type: match[1].toUpperCase() as 'C' | 'P',
+    strike: parseFloat(match[2]),
+  };
+}
+
+/**
+ * Convert expiryDate (DD/MM/YYYY from Excel) to YYMMDD using optionsExpirationDate.
+ */
+function expiryDateToYYMMDD(expiryDate: string | undefined): string {
+  if (!expiryDate) return '000000';
+  const iso = toIsoDateFromIT(expiryDate);
+  if (!iso) return '000000';
+  const d = new Date(iso);
+  const exp = optionsExpirationDate(d.getFullYear(), d.getMonth());
+  const yy = String(exp.getFullYear()).slice(-2);
+  const mm = String(exp.getMonth() + 1).padStart(2, '0');
+  const dd = String(exp.getDate()).padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+/**
+ * Build an OptionStrat URL from parsed calculator orders.
+ * 
+ * Orders are in reverse chronological order (newest first).
+ * For each symbol group: last in array = opening trade, first = closing trade.
+ */
+export function buildOptionStratUrlFromOrders(
+  orders: ParsedOrder[],
+  ticker: string,
+  strategyName: string | null
+): string {
+  // Group orders by symbol
+  const groups = new Map<string, ParsedOrder[]>();
+  for (const order of orders) {
+    const key = order.symbol;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(order);
+  }
+
+  const legs: string[] = [];
+
+  for (const [, group] of groups) {
+    // Last in array = opening trade (oldest), first = closing trade (newest)
+    const openingTrade = group[group.length - 1];
+    const closingTrade = group.length > 1 ? group[0] : null;
+
+    const parsed = parseSymbolTypeAndStrike(openingTrade.symbol);
+    if (!parsed) continue;
+
+    const expiry = expiryDateToYYMMDD(openingTrade.expiryDate);
+    const isSold = openingTrade.operation === 'sell';
+    const prefix = isSold ? '-' : '';
+    const qty = openingTrade.quantity;
+    const qtyDisplay = isSold ? -qty : qty;
+    const openPrice = formatStrike(openingTrade.avgPrice);
+
+    let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}x${qtyDisplay}@${openPrice}`;
+
+    if (closingTrade) {
+      const closePrice = formatStrike(closingTrade.avgPrice);
+      leg += `@${closePrice}`;
+    }
+
+    legs.push(leg);
+  }
+
+  const slug = (strategyName && STRATEGY_SLUG_MAP[strategyName]) || 'custom';
+  return `https://optionstrat.com/build/${slug}/${ticker}/${legs.join(',')}`;
 }

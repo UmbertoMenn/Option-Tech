@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw } from 'lucide-react';
+import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   parseOrderFile, 
@@ -23,6 +23,7 @@ import {
   OrderParseResult
 } from '@/lib/orderFileParser';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
+import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
 import { useCoveredCallPremiums } from '@/hooks/useCoveredCallPremiums';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
@@ -497,6 +498,19 @@ export function CallPremiumCalculatorDialog({
                     <RefreshCw className="w-4 h-4 mr-1" />
                     Reset
                   </Button>
+                  {filteredOrders.length > 0 && ticker && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const url = buildOptionStratUrlFromOrders(filteredOrders, ticker, isIronCondor ? 'Iron Condor' : null);
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      <ExternalLink className="w-4 h-4 mr-1" />
+                      OptionStrat
+                    </Button>
+                  )}
                 </>
               )}
             </div>
