@@ -240,6 +240,11 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────
+const NETTING_DESCRIPTIONS: Record<string, string> = {
+  netting_total: 'Il valore netto include il valore di mercato di tutti i derivati (prezzo mercato × quantità × 100).',
+  netting_ex_cc_np: 'Per le Covered Call e Naked Put ITM viene sottratto solo il valore intrinseco. Le Naked Put OTM sono escluse.',
+};
+
 const CHART_TITLES: Record<ViewMode, string> = {
   base: 'Composizione Portafoglio (Derivati esclusi)',
   netting_total: 'Valore Portafoglio (Netting Totale Derivati)',
@@ -314,6 +319,11 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 <p className="text-2xl font-bold text-blue-500">
                   {formatEUR(finalValue)}
                 </p>
+                {NETTING_DESCRIPTIONS[viewMode] && (
+                  <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+                    {NETTING_DESCRIPTIONS[viewMode]}
+                  </p>
+                )}
               </div>
             </CarouselItem>
             {/* Slide 2: Pie chart breakdown */}
