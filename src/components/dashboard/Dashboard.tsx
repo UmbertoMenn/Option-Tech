@@ -386,6 +386,7 @@ export function Dashboard() {
             positions={positions} 
             netting={netting}
             viewMode={viewMode}
+            overrides={overrides}
           />
 
           {/* File Upload & Historical Data - Hidden in aggregated view */}
