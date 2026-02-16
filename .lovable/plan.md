@@ -1,54 +1,46 @@
 
 
-## Sostituire GP e ML con P/L nella riga Iron Condor
+## Allineare calcolatrice e P/L di Altre Strategie e Iron Condor al Double Diagonal
 
 ### Cosa cambia
-La riga Iron Condor mostrera' il P/L totale (come il Double Diagonal) al posto del Gain Potenziale e Max Loss. Il badge giallo "IC" verra' rimosso.
-
-### Impatto sul Risk Analyzer
-Nessuno. Il calcolo del rischio delle strategie avviene in `src/lib/riskCalculator.ts` tramite `calculateIronCondorMaxLoss` e `calculateStrategyRisk`, che operano sulla struttura dati `DerivativeCategories` e sono completamente indipendenti dalla UI della pagina Derivati. Questa modifica e' puramente visuale.
+1. Il tooltip della calcolatrice per Altre Strategie e Iron Condor cambiera' da "Calcola gain potenziale" a "Calcola flussi di cassa"
+2. Il titolo e l'etichetta del valore nella finestra calcolatrice mostreranno "Flussi di cassa" anche per Iron Condor e Altre Strategie (non solo per Double Diagonal)
+3. La colonna P/L delle Altre Strategie avra' un tooltip informativo e il prefisso "P/L:", identico al Double Diagonal
 
 ### Dettaglio tecnico
 
-**File: `src/pages/Derivatives.tsx` -- funzione `IronCondorRow`**
+**File: `src/pages/Derivatives.tsx`**
 
-1. **Sostituire il calcolo di GP e ML** (righe 1138-1151) con il calcolo P/L identico al Double Diagonal:
+1. **Riga 1198** -- Tooltip calcolatrice Iron Condor: cambiare "Calcola gain potenziale" in "Calcola flussi di cassa"
+
+2. **Riga 1825** -- Tooltip calcolatrice Altre Strategie: cambiare "Calcola gain potenziale" in "Calcola flussi di cassa"
+
+3. **Righe 1942-1947** -- Colonna P/L Altre Strategie: aggiungere Tooltip con testo "Profit/Loss: somma dei P/L delle N gambe + flussi di cassa calcolatrice" e aggiungere prefisso "P/L:" come nel Double Diagonal:
 ```typescript
-// P/L = saved GP + market value of open positions
-const marketValuePositions = 
-  ((boughtPut.current_price || 0) * Math.abs(boughtPut.quantity) * 100) +
-  ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
-  ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
-  ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
-const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
-const isPositivePL = totalPL >= 0;
-```
-
-2. **Rimuovere il badge IC** (righe 1176-1179): eliminare la colonna del badge giallo "IC" dal grid e dal template.
-
-3. **Aggiornare il grid template** (riga 1164): rimuovere la colonna `2rem` del badge IC e sostituire le ultime due colonne (GP `6rem` + ML `6.5rem`) con una sola colonna P/L (`7rem`), allineandosi al layout del Double Diagonal:
-```
-grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem_7rem]
-```
-
-4. **Sostituire Col GP e Col ML** (righe 1297-1321) con un singolo Col P/L identico al Double Diagonal:
-```typescript
-{/* Col: P/L */}
 <Tooltip>
   <TooltipTrigger asChild>
-    <div className={`... ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+    <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${combinedPL >= 0 ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
       <span className="text-xs text-muted-foreground">P/L:</span>
-      <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
+      <span className="text-sm">{formatCurrency(combinedPL, legCurrency)}</span>
     </div>
   </TooltipTrigger>
   <TooltipContent>
-    <p>Profit/Loss: somma dei P/L delle 4 gambe
-      {hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
+    <p>Profit/Loss: somma dei P/L delle {options.length} gambe{hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
   </TooltipContent>
 </Tooltip>
 ```
 
-5. **Aggiornare il Summary nel CollapsibleContent** (righe 1388-1393): cambiare da "Gain Potenziale" a "Profit/Loss" con il valore `totalPL`.
+**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-6. **Rimuovere variabili inutilizzate**: `gainPotenzialeFromPMC`, `gainPotenziale`, `isPositiveGP`, `maxLoss`, `putSpreadWidth`, `callSpreadWidth`, `maxSpreadWidth`.
+4. **Riga 247** -- Titolo dialog: estendere la condizione per includere `iron_condor` e `other_strategy`:
+```typescript
+{(strategyType === 'double_diagonal' || strategyType === 'iron_condor' || strategyType === 'other_strategy') ? 'Calcola Flussi di cassa' : isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
+```
 
+5. **Riga 297** -- Etichetta valore: stessa estensione della condizione:
+```typescript
+{(strategyType === 'double_diagonal' || strategyType === 'iron_condor' || strategyType === 'other_strategy') ? 'Flussi di cassa' : isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'}
+```
+
+### Nota sul calcolo P/L
+Il calcolo P/L delle Altre Strategie e' gia' equivalente a quello del Double Diagonal: somma `net_per_share` salvato + valore di mercato delle posizioni aperte. Nessuna modifica alla logica di calcolo.
