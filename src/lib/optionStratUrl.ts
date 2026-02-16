@@ -134,14 +134,19 @@ function formatStrike(strike: number | null | undefined): string {
 
 // Format a single leg
 function formatLeg(ticker: string, option: Position): string {
-  const isSold = option.quantity < 0;
+  const qty = option.quantity;
+  const absQty = Math.abs(qty);
   const type = option.option_type === 'call' ? 'C' : 'P';
   const expiry = formatExpiry(option.expiry_date);
   const strike = formatStrike(option.strike_price);
   const price = formatStrike(option.avg_cost || option.current_price);
-  
-  const prefix = isSold ? '-' : '';
-  return `${prefix}.${ticker}${expiry}${type}${strike}@${price}`;
+
+  if (absQty === 1) {
+    const prefix = qty < 0 ? '-' : '';
+    return `${prefix}.${ticker}${expiry}${type}${strike}@${price}`;
+  }
+  const qtySuffix = `x${qty}`;
+  return `.${ticker}${expiry}${type}${strike}${qtySuffix}@${price}`;
 }
 
 // Map internal strategy names to OptionStrat URL slugs
