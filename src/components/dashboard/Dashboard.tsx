@@ -102,11 +102,27 @@ export function Dashboard() {
     const currentDateExists = selectedHistoricalDate && 
       historicalData.some(h => h.snapshot_date === selectedHistoricalDate);
     
-    // If date doesn't exist in new data (or never set), use earliest entry
-    if (!currentDateExists && earliestEntry) {
-      setSelectedHistoricalDate(earliestEntry.snapshot_date);
+    // If date doesn't exist in new data (or never set), find the entry closest to 1 year before latest snapshot
+    if (!currentDateExists && latestEntry) {
+      const latestDate = new Date(latestEntry.snapshot_date);
+      const oneYearAgo = new Date(latestDate);
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      
+      // Find the entry with snapshot_date closest to oneYearAgo
+      let bestEntry = historicalData[0];
+      let bestDiff = Math.abs(new Date(bestEntry.snapshot_date).getTime() - oneYearAgo.getTime());
+      
+      for (const entry of historicalData) {
+        const diff = Math.abs(new Date(entry.snapshot_date).getTime() - oneYearAgo.getTime());
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestEntry = entry;
+        }
+      }
+      
+      setSelectedHistoricalDate(bestEntry.snapshot_date);
     }
-  }, [historicalData, earliestEntry, selectedHistoricalDate]);
+  }, [historicalData, latestEntry, selectedHistoricalDate]);
 
   // Combine real deposits with synthetic deposits for aggregated view
   const allDepositsForCharts = useMemo((): DepositEntry[] => {
