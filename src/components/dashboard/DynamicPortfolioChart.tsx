@@ -241,8 +241,8 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
 
 // ─── Main Component ───────────────────────────────────────────
 const NETTING_DESCRIPTIONS: Record<string, string> = {
-  netting_total: 'Il valore netto include il valore di mercato di tutti i derivati (prezzo mercato × quantità × 100).',
-  netting_ex_cc_np: 'Per le Covered Call e Naked Put ITM viene sottratto solo il valore intrinseco. Le Naked Put OTM sono escluse.',
+  netting_total: 'Valore portafoglio al quale abbiamo sottratto i costi di chiusura di tutte le posizioni in derivati, ai prezzi di mercato.',
+  netting_ex_cc_np: 'Valore del portafoglio al netto del costo di chiusura delle posizioni in derivati, ai prezzi di mercato. Non vengono sottratti i costi di chiusura di opzioni call OTM o Naked put OTM. Le covered call ITM e le naked put ITM vengono calcolate sottraendo il valore intrinseco (es. Covered CALL 300 GOOGL, il sottostante vale 320, sottraggo 20 × numero contratti).',
 };
 
 const CHART_TITLES: Record<ViewMode, string> = {
