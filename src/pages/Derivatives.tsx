@@ -1135,20 +1135,14 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
   const soldCallStrike = soldCall.strike_price || 0;
   const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
   
-  // Calculate Gain Potenziale = premi incassati - premi pagati (from portfolio PMC)
-  const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
-  const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
-  const gainPotenzialeFromPMC = premiumReceived - premiumPaid;
-  
-  // Use saved GP if available, otherwise use PMC-based calculation
-  const gainPotenziale = hasSavedGP ? savedPremium.net_per_share : gainPotenzialeFromPMC;
-  const isPositiveGP = gainPotenziale >= 0;
-  
-  // Calculate Max Loss = spread width * 100 * contracts - net premium received
-  const putSpreadWidth = soldPutStrike - (boughtPut.strike_price || 0);
-  const callSpreadWidth = (boughtCall.strike_price || 0) - soldCallStrike;
-  const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
-  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenzialeFromPMC;
+  // P/L = saved GP + market value of open positions
+  const marketValuePositions = 
+    ((boughtPut.current_price || 0) * Math.abs(boughtPut.quantity) * 100) +
+    ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
+    ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
+    ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
+  const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
+  const isPositivePL = totalPL >= 0;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
@@ -1161,7 +1155,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem_6rem_6.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1173,12 +1167,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           {/* Col 2: Underlying */}
           <span className="font-medium truncate">{underlying}</span>
           
-          {/* Col 3: Badge IC */}
-          <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/50">
-            IC
-          </Badge>
-          
-          {/* Col 4: OptionStrat + Calculator */}
+          {/* Col 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
             <OptionStratButton url={
               ticker
@@ -1294,29 +1283,17 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
             {contracts} × 100
           </span>
           
-          {/* Col 9: GP */}
+          {/* Col: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
-                <span className="text-xs text-muted-foreground">GP:</span>
-                <span className="text-sm">{formatCurrency(gainPotenziale, legCurrency)}</span>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
+                <span className="text-xs text-muted-foreground">P/L:</span>
+                <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>{hasSavedGP ? 'Gain Potenziale (da calcolatrice ordini)' : 'Gain Potenziale: premi incassati - premi pagati'}</p>
-            </TooltipContent>
-          </Tooltip>
-          
-          {/* Col 10: ML */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1 cursor-help justify-end text-red-500 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                <span className="text-xs text-muted-foreground">ML:</span>
-                <span className="text-sm">{formatCurrency(maxLoss, legCurrency)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Max Loss: perdita massima possibile</p>
+              <p>Profit/Loss: somma dei P/L delle 4 gambe
+                {hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
             </TooltipContent>
           </Tooltip>
       </div>
@@ -1386,9 +1363,9 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           
           {/* Summary */}
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
-            <span className="text-muted-foreground">Gain Potenziale:</span>
-            <span className={`font-semibold ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(gainPotenziale, legCurrency)}
+            <span className="text-muted-foreground">Profit/Loss:</span>
+            <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(totalPL, legCurrency)}
             </span>
           </div>
         </div>
