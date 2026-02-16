@@ -11,7 +11,7 @@ const corsHeaders = {
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 
-// ============ DST GUARD: exactly 12:00 Italian time ============
+// ============ DST GUARD: exactly 10:00 Italian time ============
 
 function getCETOffset(now: Date): number {
   const month = now.getUTCMonth();
@@ -38,14 +38,14 @@ function getCETOffset(now: Date): number {
   return 1; // Nov-Feb → CET
 }
 
-function isItalianNoon(): boolean {
+function isItalian10AM(): boolean {
   const now = new Date();
   const dayOfWeek = now.getUTCDay();
   if (dayOfWeek === 0 || dayOfWeek === 6) return false;
 
   const offset = getCETOffset(now);
   const italianHour = now.getUTCHours() + offset;
-  return italianHour === 12 && now.getUTCMinutes() < 10; // allow small window
+  return italianHour === 10 && now.getUTCMinutes() < 10; // allow small window
 }
 
 // ============ NORMALIZATION (mirrors frontend) ============
@@ -347,7 +347,7 @@ function buildEmailHTML(sections: BriefingSection[], userName?: string): string 
           ${rows}
         </table>
         <p style="font-size: 12px; color: #9ca3af; margin-top: 16px;">
-          Generato automaticamente alle 12:00.
+          Generato automaticamente alle 10:00.
         </p>
       </div>
     </div>
@@ -404,9 +404,9 @@ serve(async (req: Request): Promise<Response> => {
     const body = await req.json().catch(() => ({}));
     const force = body?.force === true;
 
-    // Smart guard: only run at exactly 12:00 Italian time
-    if (!force && !isItalianNoon()) {
-      console.log("Not 12:00 Italian time, skipping briefing");
+    // Smart guard: only run at exactly 10:00 Italian time
+    if (!force && !isItalian10AM()) {
+      console.log("Not 10:00 Italian time, skipping briefing");
       return new Response(
         JSON.stringify({ skipped: true, reason: "not_italian_noon" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
