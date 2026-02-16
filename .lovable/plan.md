@@ -1,23 +1,14 @@
 
 
-## Istogramma verticale e valore totale derivati
+## Allungare istogramma verticalmente e rimuovere descrizione
 
 ### Modifiche
 
-1. **Istogramma da orizzontale a verticale**: il `NettingBreakdownChart` passa da `layout="vertical"` (barre orizzontali) al layout standard (barre verticali). Le etichette delle categorie saranno sull'asse X (in basso), i valori sull'asse Y (a sinistra).
+**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**
 
-2. **Valore BLU = somma delle voci**: il valore evidenziato in blu sotto il grafico mostrera' la somma algebrica di tutte le voci del breakdown (il costo complessivo chiusura derivati), calcolato come `barData.reduce((sum, d) => sum + d.value, 0)`, invece del `finalValue` (che e' il valore nettato del portafoglio).
+1. **Aumentare altezza istogramma**: nel componente `NettingBreakdownChart`, cambiare l'altezza del contenitore da `220px` a `320px` (riga 112) per sfruttare lo spazio verticale disponibile nella card.
 
-### Dettaglio tecnico
+2. **Rimuovere la descrizione testuale**: eliminare il paragrafo con la descrizione sotto il carousel (righe 353-355), che risulta fuorviante. Il blocco `descriptions` e il relativo `<p>` verranno rimossi.
 
-**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**, componente `NettingBreakdownChart` (righe 86-175)
-
-- Rimuovere `layout="vertical"` dal `BarChart`
-- **XAxis**: tipo `category`, `dataKey="name"`, etichette ruotate a -35 gradi per leggibilita', fontSize 9
-- **YAxis**: tipo `number`, formattazione abbreviata (k/M), nascondere axis line e tick line
-- **Bar**: `radius={[4, 4, 0, 0]}` (arrotondamento in alto invece che a destra)
-- Altezza fissa del grafico: 220px
-- Margini: bottom aumentato a 60px per le etichette ruotate
-- **Valore blu**: calcolare `const totalDerivatives = barData.reduce((s, d) => s + d.value, 0)` e mostrare quello al posto di `finalValue`
-- Il prop `finalValue` puo' essere rimosso dal componente (non piu' usato)
+3. **Rimuovere l'oggetto `descriptions`**: eliminare la costante `descriptions` (righe 248-252) che non sara' piu' utilizzata.
 
