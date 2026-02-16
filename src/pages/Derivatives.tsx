@@ -529,7 +529,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
                     {categories.doubleDiagonals.map((dd, index) => (
-                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} />
+                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
                 )}
@@ -649,7 +649,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
                     {categories.groupedOtherStrategies.map((group, index) => (
-                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
                 )}
@@ -1391,8 +1391,9 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
   );
 }
 
-function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagonal: DoubleDiagonalPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
+function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTickerAndSymbol }: { doubleDiagonal: DoubleDiagonalPosition; underlyingPrices: Record<string, UnderlyingPrice>; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const { underlying, soldExpiryDate, boughtExpiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = doubleDiagonal;
   
   const soldExpiryFormatted = formatExpiryMMY(soldExpiryDate);
@@ -1403,14 +1404,21 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
   const hasUnderlyingPrice = underlyingPrice > 0;
   const legCurrency = soldCall.currency || soldPut.currency || 'USD';
   
+  // Check for saved GP from calculator
+  const ticker = underlyingPrices[underlying]?.ticker;
+  const optionSymbol = `DD_${soldExpiryDate || 'unknown'}`;
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
+  const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
+  
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
   const soldCallStrike = soldCall.strike_price || 0;
   const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
   
-  // Calculate P/L = sum of all 4 legs' P/L
-  const totalPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
+  // Calculate P/L = sum of all 4 legs' P/L + saved GP from calculator
+  const portfolioPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
                   (boughtPut.profit_loss || 0) + (boughtCall.profit_loss || 0);
+  const totalPL = portfolioPL + (hasSavedGP ? savedPremium.net_per_share : 0);
   const isPositivePL = totalPL >= 0;
   
   // Strikes summary
@@ -1424,7 +1432,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_3rem_3rem_auto_6rem_6rem_7rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_4rem_3rem_auto_6rem_6rem_7rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -1437,8 +1445,34 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           {/* Col 2: Underlying */}
           <span className="font-medium truncate">{underlying}</span>
           
-          {/* Col 3: OptionStrat */}
-          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildDoubleDiagonalUrl(underlyingPrices[underlying].ticker, soldPut, boughtPut, soldCall, boughtCall) : null} />
+          {/* Col 3: OptionStrat + Calculator */}
+          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <OptionStratButton url={
+              ticker
+                ? (savedPremium?.orders_json?.length
+                    ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, 'Double Diagonal')
+                    : buildDoubleDiagonalUrl(ticker, soldPut, boughtPut, soldCall, boughtCall))
+                : null
+            } />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola gain potenziale</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           
           {/* Col 3: IR/OOR */}
           <div className="flex justify-center">
@@ -1532,7 +1566,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Profit/Loss: somma dei P/L delle 4 gambe</p>
+              <p>Profit/Loss: somma dei P/L delle 4 gambe{hasSavedGP ? ' + GP calcolatrice' : ''}</p>
             </TooltipContent>
           </Tooltip>
       </div>
@@ -1616,18 +1650,36 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
           </div>
         </div>
       </CollapsibleContent>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={underlying}
+        ticker={underlyingPrices[underlying]?.ticker}
+        optionSymbol={`DD_${soldExpiryDate || 'unknown'}`}
+        contractsInPortfolio={contracts}
+        underlyingPrice={underlyingPrice}
+        strategyType="double_diagonal"
+      />
     </Collapsible>
   );
 }
 
-function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition, underlyingPrices }: { group: GroupedOtherStrategy } & RowPropsWithPrices) {
+function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition, underlyingPrices, getPremiumByTickerAndSymbol }: { group: GroupedOtherStrategy; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const { underlying, options, totalProfitLoss, strategyName } = group;
   
   // Get underlying price from live Yahoo data (updated every 5 min by cron)
   const underlyingPrice = underlyingPrices[underlying]?.price || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const legCurrency = options[0]?.option.currency || 'USD';
+  
+  // Check for saved GP from calculator
+  const ticker = underlyingPrices[underlying]?.ticker;
+  const optionSymbol = `OS_${underlying}`;
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
+  const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
   
   // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
   // or single-sided spread strategies (Put Spread, Call Spread, Diagonal Put/Call Spread)
@@ -1689,10 +1741,14 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
       option_type: o.option.option_type as OptionType,
     }));
     
-    // Calculate payoff and find breakevens
+    // Calculate payoff and find breakevens, including GP offset from calculator
     const priceRange = getPriceRangeForPositions(derivativePositions);
     const payoffPoints = calculateOptionPayoff(derivativePositions, underlyingPrice, priceRange);
-    breakevens = findBreakevenPoints(payoffPoints);
+    const gpOffset = hasSavedGP ? savedPremium.net_per_share : 0;
+    const adjustedPayoffPoints = gpOffset !== 0
+      ? payoffPoints.map(p => ({ ...p, payoff: p.payoff + gpOffset }))
+      : payoffPoints;
+    breakevens = findBreakevenPoints(adjustedPayoffPoints);
     
     // If there are at least 2 breakevens, check if price is in range
     if (breakevens.length >= 2) {
@@ -1702,7 +1758,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
     } else if (breakevens.length === 1) {
       // With a single breakeven, show IB if we are in profit at current price
       const stepSize = (priceRange.max - priceRange.min) / 100;
-      const currentPayoff = payoffPoints.find(p => Math.abs(p.price - underlyingPrice) < stepSize);
+      const currentPayoff = adjustedPayoffPoints.find(p => Math.abs(p.price - underlyingPrice) < stepSize);
       isInBreakeven = currentPayoff ? currentPayoff.payoff >= 0 : false;
     }
   }
@@ -1710,6 +1766,9 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   // Count calls and puts
   const callCount = options.filter(o => o.option.option_type === 'call').length;
   const putCount = options.filter(o => o.option.option_type === 'put').length;
+
+  // Combined P/L: portfolio P/L + saved GP from calculator
+  const combinedPL = totalProfitLoss + (hasSavedGP ? savedPremium.net_per_share : 0);
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -1718,7 +1777,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_2rem_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
@@ -1730,8 +1789,34 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           {/* Colonna 2: Underlying */}
           <span className="font-medium truncate">{underlying}</span>
           
-          {/* Colonna 3: OptionStrat */}
-          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildGroupedStrategyUrl(underlyingPrices[underlying].ticker, options.map(o => o.option), strategyName) : null} />
+          {/* Colonna 3: OptionStrat + Calculator */}
+          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <OptionStratButton url={
+              ticker
+                ? (savedPremium?.orders_json?.length
+                    ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, strategyName)
+                    : buildGroupedStrategyUrl(ticker, options.map(o => o.option), strategyName))
+                : null
+            } />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola gain potenziale</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           
           {/* Colonna 4: Badge Strategia */}
           <div className="flex justify-start">
@@ -1847,8 +1932,8 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           
           {/* Colonna 9: P/L */}
           <div className="text-right">
-            <span className={`text-sm ${totalProfitLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(totalProfitLoss, legCurrency)}
+            <span className={`text-sm ${combinedPL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(combinedPL, legCurrency)}
             </span>
           </div>
       </div>
@@ -1865,6 +1950,17 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           ))}
         </div>
       </CollapsibleContent>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={underlying}
+        ticker={underlyingPrices[underlying]?.ticker}
+        optionSymbol={`OS_${underlying}`}
+        contractsInPortfolio={options.reduce((sum, o) => sum + Math.abs(o.option.quantity), 0)}
+        underlyingPrice={underlyingPrice}
+        strategyType="other_strategy"
+      />
     </Collapsible>
   );
 }

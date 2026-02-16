@@ -28,7 +28,7 @@ import { useCoveredCallPremiums } from '@/hooks/useCoveredCallPremiums';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
 
-export type CalculatorStrategyType = 'covered_call' | 'iron_condor';
+export type CalculatorStrategyType = 'covered_call' | 'iron_condor' | 'double_diagonal' | 'other_strategy';
 
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
@@ -51,6 +51,7 @@ export function CallPremiumCalculatorDialog({
   underlyingPrice,
   strategyType = 'covered_call',
 }: CallPremiumCalculatorDialogProps) {
+  const isMultiLeg = strategyType === 'iron_condor' || strategyType === 'double_diagonal' || strategyType === 'other_strategy';
   const isIronCondor = strategyType === 'iron_condor';
   const { portfolio } = usePortfolio();
   const { getPremiumByTickerAndSymbol, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
@@ -126,7 +127,7 @@ export function CallPremiumCalculatorDialog({
     if (!file) return;
 
     if (!ticker) {
-      setError(isIronCondor ? 'Ticker non disponibile per questo Iron Condor' : 'Ticker non disponibile per questa Covered Call');
+      setError(isMultiLeg ? 'Ticker non disponibile per questa strategia' : 'Ticker non disponibile per questa Covered Call');
       return;
     }
 
@@ -135,7 +136,7 @@ export function CallPremiumCalculatorDialog({
 
     try {
       const orders = await parseOrderFile(file);
-      const result = isIronCondor
+      const result = isMultiLeg
         ? filterAndCalculateIronCondorPremiums(orders, ticker)
         : filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       
@@ -199,7 +200,7 @@ export function CallPremiumCalculatorDialog({
         underlying,
         orders_json: filteredOrders,
         transaction_cost: transactionCost,
-        net_per_share: isIronCondor ? metrics.netPremium : metrics.netPerShare,
+        net_per_share: isMultiLeg ? metrics.netPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
         last_operation_date: lastOperationDate,
         contracts_count: contractsInPortfolio,
@@ -243,7 +244,7 @@ export function CallPremiumCalculatorDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5" />
-            {isIronCondor ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
+            {isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
           </DialogTitle>
           <DialogDescription>
             Sottostante: <span className="font-semibold">{underlying}</span>
@@ -293,15 +294,15 @@ export function CallPremiumCalculatorDialog({
                 {/* Primary: Net per share */}
                  <div className="text-center pb-3 border-b border-border/50">
                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                     {isIronCondor ? 'Gain Potenziale' : 'Netto Unitario'}
+                     {isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'}
                    </p>
                   <p className="text-3xl font-bold text-primary">
-                    {isIronCondor 
+                     {isMultiLeg 
                       ? formatCurrency(metrics.netPremium, 'USD')
                       : formatCurrency(metrics.netPerShare, 'USD')
-                    }
+                     }
                   </p>
-                  {!isIronCondor && (
+                   {!isMultiLeg && (
                     <p className="text-xs text-muted-foreground mt-1">
                       su {contractsInPortfolio} contratti ({contractsInPortfolio * 100} azioni)
                     </p>
@@ -309,7 +310,7 @@ export function CallPremiumCalculatorDialog({
                 </div>
 
                 {/* Secondary: Yields (only for covered calls) */}
-                {!isIronCondor && (
+                {!isMultiLeg && (
                 <div className="grid grid-cols-2 gap-4 text-center">
                   <div>
                     <p className="text-xs text-muted-foreground">Rendimento</p>
@@ -503,7 +504,7 @@ export function CallPremiumCalculatorDialog({
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const url = buildOptionStratUrlFromOrders(filteredOrders, ticker, isIronCondor ? 'Iron Condor' : null);
+                        const url = buildOptionStratUrlFromOrders(filteredOrders, ticker, isMultiLeg ? (strategyType === 'iron_condor' ? 'Iron Condor' : strategyType === 'double_diagonal' ? 'Double Diagonal' : null) : null);
                         window.open(url, '_blank', 'noopener,noreferrer');
                       }}
                     >
