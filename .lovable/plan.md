@@ -1,65 +1,77 @@
 
 
-## Correzione: Link OptionStrat dalle righe strategia con dati storici Excel
+## Fix: Ogni ordine Excel diventa una gamba separata nel link OptionStrat
 
 ### Problema
 
-I pulsanti OptionStrat sulle righe delle strategie (Covered Call, Iron Condor, ecc.) nella pagina Derivatives usano solo le posizioni attuali in portafoglio tramite le funzioni `buildCoveredCallUrl`, `buildIronCondorUrl`, ecc. Non considerano lo storico delle operazioni caricate dall'Excel e salvate nel database.
+La funzione `buildOptionStratUrlFromOrders` raggruppa gli ordini per simbolo e prende solo un'operazione di apertura e una di chiusura per gruppo. Questo e' sbagliato perche':
 
-I dati storici sono gia' disponibili: ogni riga ha accesso a `savedPremium` (tramite `getPremiumByTickerAndSymbol`) che contiene il campo `orders_json` con tutte le operazioni Excel.
+1. Lo stesso simbolo puo' apparire molte volte con operazioni diverse (es. `CLSG6C350` appare 4 volte: sell, buy, sell, buy)
+2. Il raggruppamento perde le operazioni intermedie
+3. L'apertura/chiusura viene determinata dalla posizione nell'array, non dall'operazione effettiva
+
+Il risultato: tutte le gambe appaiono come comprate perche' l'ultimo ordine nell'array (usato come "opening") puo' essere un buy.
 
 ### Soluzione
 
-Per le righe **Covered Call** e **Iron Condor** (le uniche con calcolatrice), quando esistono ordini Excel salvati (`savedPremium?.orders_json.length > 0`), il pulsante OptionStrat deve usare `buildOptionStratUrlFromOrders` invece della funzione basata sulle posizioni attuali.
+Eliminare il raggruppamento per simbolo. Ogni ordine nel `orders_json` diventa una gamba separata nel link OptionStrat.
 
-### Modifiche
+### Modifica
 
-**1. `src/pages/Derivatives.tsx` -- Riga Covered Call (circa riga 745)**
+**File: `src/lib/optionStratUrl.ts`** -- funzione `buildOptionStratUrlFromOrders`
 
-Attualmente:
+Logica corretta:
+
 ```
-<OptionStratButton url={ticker ? buildCoveredCallUrl(ticker, option) : null} />
-```
-
-Diventa:
-```
-<OptionStratButton url={
-  ticker
-    ? (savedPremium?.orders_json?.length
-        ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, null)
-        : buildCoveredCallUrl(ticker, option))
-    : null
-} />
+Per ogni ordine in orders:
+  1. Estrarre tipo (C/P) e strike dal simbolo
+  2. Estrarre scadenza da expiryDate (campo Excel "Data Scadenza")
+  3. Se operation === 'sell' -> prefisso '-', quantita' negativa (-N)
+  4. Se operation === 'buy' -> nessun prefisso, quantita' positiva (N)
+  5. Formattare: {prefix}.{TICKER}{YYMMDD}{C/P}{STRIKE}x{+/-qty}@{price}
 ```
 
-**2. `src/pages/Derivatives.tsx` -- Riga Iron Condor (circa riga 1163)**
+Esempio con dati reali dal database:
 
-Attualmente:
-```
-<OptionStratButton url={...buildIronCondorUrl(ticker, boughtPut, soldPut, soldCall, boughtCall)...} />
-```
+```text
+Ordine: CLSH6C350, sell, qty=1, price=18.6, expiryDate=20/03/2026
+Gamba: -.CLS260320C350x-1@18.6
 
-Diventa:
-```
-<OptionStratButton url={
-  ticker
-    ? (savedPremium?.orders_json?.length
-        ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, 'Iron Condor')
-        : buildIronCondorUrl(ticker, boughtPut, soldPut, soldCall, boughtCall))
-    : null
-} />
+Ordine: CLSG6C330, buy, qty=1, price=11.8, expiryDate=20/02/2026
+Gamba: .CLS260220C330x1@11.8
 ```
 
-**3. `src/pages/Derivatives.tsx` -- Import**
+### Dettaglio tecnico
 
-Aggiungere `buildOptionStratUrlFromOrders` all'import esistente da `@/lib/optionStratUrl`.
+Sostituire il corpo della funzione `buildOptionStratUrlFromOrders` (righe 298-334):
 
-### Comportamento
+```typescript
+export function buildOptionStratUrlFromOrders(
+  orders: ParsedOrder[],
+  ticker: string,
+  strategyName: string | null
+): string {
+  const legs: string[] = [];
 
-- Se ci sono ordini Excel salvati per quella strategia/ticker: il link include tutto lo storico (operazioni aperte e chiuse, con quantita' e prezzi)
-- Se non ci sono ordini salvati: fallback al link basato sulle posizioni attuali in portafoglio (comportamento attuale)
-- Il pulsante nel dialog della calcolatrice resta invariato (gia' funzionante)
+  for (const order of orders) {
+    const parsed = parseSymbolTypeAndStrike(order.symbol);
+    if (!parsed) continue;
 
-### Note
+    const expiry = expiryDateToYYMMDD(order.expiryDate);
+    const isSold = order.operation === 'sell';
+    const prefix = isSold ? '-' : '';
+    const qty = isSold ? -order.quantity : order.quantity;
+    const price = formatStrike(order.avgPrice);
 
-Le altre strategie (Naked Put, LEAP, Long Put, Double Diagonal, Grouped) non hanno la calcolatrice quindi continuano a usare il link basato sulle posizioni attuali.
+    legs.push(
+      `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}x${qty}@${price}`
+    );
+  }
+
+  const slug = (strategyName && STRATEGY_SLUG_MAP[strategyName]) || 'custom';
+  return `https://optionstrat.com/build/${slug}/${ticker}/${legs.join(',')}`;
+}
+```
+
+Nessuna modifica necessaria agli altri file. La correzione e' interamente in `buildOptionStratUrlFromOrders`.
+
