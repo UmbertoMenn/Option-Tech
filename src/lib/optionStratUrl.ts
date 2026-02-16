@@ -309,8 +309,16 @@ export function buildOptionStratUrlFromOrders(
   const legs: string[] = [];
 
   for (const [, group] of groups) {
-    // FIFO matching: pair opening with next opposite-direction trade
-    const remaining = [...group];
+    // Expand qty > 1 into individual unit orders for correct 1:1 FIFO matching
+    const expanded: ParsedOrder[] = [];
+    for (const order of group) {
+      for (let i = 0; i < order.quantity; i++) {
+        expanded.push({ ...order, quantity: 1 });
+      }
+    }
+
+    // FIFO matching on expanded (all qty=1)
+    const remaining = [...expanded];
 
     while (remaining.length > 0) {
       const opening = remaining.shift()!;
@@ -322,17 +330,11 @@ export function buildOptionStratUrlFromOrders(
       const prefix = isSold ? '-' : '';
       const openPrice = formatStrike(opening.avgPrice);
 
-      // Quantity: only include if > 1
-      let qtyPart = '';
-      if (opening.quantity > 1) {
-        qtyPart = isSold ? `x-${opening.quantity}` : `x${opening.quantity}`;
-      }
-
       // Look for closing trade (opposite direction)
       const oppositeOp = isSold ? 'buy' : 'sell';
       const closeIdx = remaining.findIndex(o => o.operation === oppositeOp);
 
-      let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}${qtyPart}@${openPrice}`;
+      let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}@${openPrice}`;
 
       if (closeIdx !== -1) {
         const closing = remaining.splice(closeIdx, 1)[0];
@@ -344,6 +346,34 @@ export function buildOptionStratUrlFromOrders(
     }
   }
 
+  // Re-aggregate identical consecutive open legs (same text) into xN suffix
+  const aggregated: string[] = [];
+  for (const leg of legs) {
+    if (aggregated.length > 0) {
+      const prev = aggregated[aggregated.length - 1];
+      // Extract base (without xN) for comparison
+      const prevBase = prev.replace(/x-?\d+(@)/, '$1');
+      const curBase = leg;
+      if (prevBase === curBase && !leg.includes('@', leg.indexOf('@') + 1)) {
+        // Same open leg — merge by adding/incrementing xN
+        const xMatch = prev.match(/x(-?\d+)@/);
+        if (xMatch) {
+          const count = parseInt(xMatch[1]);
+          const newCount = count < 0 ? count - 1 : count + 1;
+          aggregated[aggregated.length - 1] = prev.replace(/x-?\d+@/, `x${newCount}@`);
+        } else {
+          // First duplication: insert x2 or x-2
+          const isSoldLeg = prev.startsWith('-');
+          const qty = isSoldLeg ? 'x-2' : 'x2';
+          const atIdx = prev.indexOf('@');
+          aggregated[aggregated.length - 1] = prev.slice(0, atIdx) + qty + prev.slice(atIdx);
+        }
+        continue;
+      }
+    }
+    aggregated.push(leg);
+  }
+
   const slug = (strategyName && STRATEGY_SLUG_MAP[strategyName]) || 'custom';
-  return `https://optionstrat.com/build/${slug}/${ticker}/${legs.join(',')}`;
+  return `https://optionstrat.com/build/${slug}/${ticker}/${aggregated.join(',')}`;
 }
