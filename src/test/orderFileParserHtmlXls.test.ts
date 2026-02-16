@@ -211,12 +211,11 @@ describe('orderFileParser - LEAP Call filtering', () => {
   });
 
   describe('filterAndCalculateCallPremiums - LEAP filtering', () => {
-    it('should exclude buy-only CALL with high strike (LEAP)', () => {
-      // BABA at $100, strike 150 = 150% of price (> 130%) → LEAP
+    it('should exclude buy-only CALL', () => {
       const orders: ParsedOrder[] = [
         createOrder('BABAG6C150', 'buy', 14.95),
       ];
-      const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
+      const result = filterAndCalculateCallPremiums(orders, 'BABA');
       expect(result.filteredOrders).toHaveLength(0);
     });
 
@@ -239,13 +238,13 @@ describe('orderFileParser - LEAP Call filtering', () => {
       expect(result.filteredOrders).toHaveLength(2);
     });
 
-    it('should keep buy-only CALL with near-money strike', () => {
-      // BABA at $100, strike 105 = 105% of price (< 130%) → NOT a LEAP
+    it('should exclude buy-only CALL even with near-money strike', () => {
+      // Any buy-only CALL is excluded regardless of strike
       const orders: ParsedOrder[] = [
         createOrder('BABAM6C105', 'buy', 5.0),
       ];
       const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
-      expect(result.filteredOrders).toHaveLength(1);
+      expect(result.filteredOrders).toHaveLength(0);
     });
 
     it('should filter multiple LEAPs while keeping valid Covered Calls', () => {
@@ -260,22 +259,21 @@ describe('orderFileParser - LEAP Call filtering', () => {
       expect(result.filteredOrders[0].symbol).toBe('BABAH6C165');
     });
 
-    it('should not filter when underlyingPrice is not provided', () => {
-      // Without underlying price, cannot determine LEAP → keep all
+    it('should exclude buy-only CALL even without underlyingPrice', () => {
       const orders: ParsedOrder[] = [
         createOrder('BABAG6C150', 'buy', 14.95),
       ];
       const result = filterAndCalculateCallPremiums(orders, 'BABA');
-      expect(result.filteredOrders).toHaveLength(1);
+      expect(result.filteredOrders).toHaveLength(0);
     });
 
-    it('should handle edge case at exactly 130% threshold', () => {
-      // BABA at $100, strike 130 = exactly 130% → NOT excluded (need > 130%)
+    it('should exclude buy-only CALL at any threshold', () => {
+      // Buy-only → excluded regardless of strike distance
       const orders: ParsedOrder[] = [
         createOrder('BABAM6C130', 'buy', 8.0),
       ];
       const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
-      expect(result.filteredOrders).toHaveLength(1);
+      expect(result.filteredOrders).toHaveLength(0);
     });
 
     it('should correctly calculate metrics after LEAP filtering', () => {

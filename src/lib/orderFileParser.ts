@@ -537,29 +537,18 @@ export function filterAndCalculateCallPremiums(
     }
   }
   
-  // Step 3: Filter out potential LEAP calls
-  // LEAP = buy-only + strike > 130% of underlying price
-  const LEAP_THRESHOLD = 1.3;
-  
+  // Step 3: Filter out buy-only CALLs (LEAP / Long Call)
+  // Any CALL symbol without at least one sell operation is excluded
   const filteredOrders = baseFiltered.filter(order => {
-    // If the symbol has at least one sell → keep everything (it's Covered Call or rolling)
+    // If the symbol has at least one sell → keep everything (Covered Call or rolling)
     if (symbolsWithSells.has(order.symbol)) {
       return true;
     }
-    
-    // Only buys for this symbol → check if it's a LEAP
-    if (order.operation === 'buy' && underlyingPrice && underlyingPrice > 0) {
-      const strike = extractStrikeFromSymbol(order.symbol);
-      if (strike !== null && strike > underlyingPrice * LEAP_THRESHOLD) {
-        // Strike too high → LEAP → exclude
-        if (import.meta.env.DEV) {
-          console.log(`[LEAP filter] Excluded ${order.symbol} (strike ${strike} > ${(underlyingPrice * LEAP_THRESHOLD).toFixed(0)})`);
-        }
-        return false;
-      }
+    // Only buys for this symbol → exclude (LEAP or Long Call)
+    if (import.meta.env.DEV) {
+      console.log(`[LEAP filter] Excluded buy-only CALL ${order.symbol}`);
     }
-    
-    return true;
+    return false;
   });
   
   let totalBuys = 0;
