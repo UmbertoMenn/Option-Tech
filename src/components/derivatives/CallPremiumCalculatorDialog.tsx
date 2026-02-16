@@ -16,6 +16,7 @@ import {
   findFirstOperationDate,
   findLastOperationDate,
   mergeOrders,
+  extractExpiryFromSymbol,
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult
@@ -415,6 +416,7 @@ export function CallPremiumCalculatorDialog({
                             <TableRow>
                               <TableHead className="text-xs w-8">Op.</TableHead>
                               <TableHead className="text-xs">Simbolo</TableHead>
+                              <TableHead className="text-xs">Scad.</TableHead>
                               <TableHead className="text-xs text-right">Qtà</TableHead>
                               <TableHead className="text-xs text-right">Prezzo</TableHead>
                               <TableHead className="text-xs text-right">Valore</TableHead>
@@ -428,6 +430,7 @@ export function CallPremiumCalculatorDialog({
                                   {order.operation === 'sell' ? 'V' : 'A'}
                                 </TableCell>
                                 <TableCell className="text-xs font-mono">{order.symbol}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">{extractExpiryFromSymbol(order.symbol) ?? '—'}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
                                 <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
                                 <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>

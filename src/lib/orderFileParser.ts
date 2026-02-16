@@ -507,6 +507,27 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
  * BABAH6C165 → 165
  * TSLAG6P350 → 350
  */
+/**
+ * Extract expiry date from option symbol in MMM/YY format
+ * BABAH6C165 → "Aug/26" (H=Aug, 6=2026)
+ * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
+ */
+export function extractExpiryFromSymbol(symbol: string): string | null {
+  if (!symbol) return null;
+  const monthMap: Record<string, string> = {
+    A: 'Jan', B: 'Feb', C: 'Mar', D: 'Apr', E: 'May', F: 'Jun',
+    G: 'Jul', H: 'Aug', I: 'Sep', J: 'Oct', K: 'Nov', L: 'Dec',
+  };
+  // Pattern: TICKER(1-5 letters) + MONTH(letter) + YEAR(digit) + TYPE(C/P) + STRIKE
+  const match = symbol.match(/^[A-Z]{1,5}([A-L])(\d)[CP]\d+$/i);
+  if (!match) return null;
+  const monthLetter = match[1].toUpperCase();
+  const yearDigit = match[2];
+  const month = monthMap[monthLetter];
+  if (!month) return null;
+  return `${month}/2${yearDigit}`;
+}
+
 export function extractStrikeFromSymbol(symbol: string): number | null {
   const match = symbol.match(/(\d+)$/);
   return match ? parseInt(match[1], 10) : null;
