@@ -111,7 +111,7 @@ function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="w-full" style={{ height: 220 }}>
+      <div className="w-full" style={{ height: 320 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={barData} margin={{ left: 10, right: 10, top: 5, bottom: 60 }}>
             <XAxis
@@ -252,11 +252,6 @@ const nettingSlides = [
   { id: 'pie', title: 'Breakdown Netting' },
 ];
 
-const descriptions: Record<string, string> = {
-  netting_total: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio.',
-  netting_ex_cc: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. Per le Covered Call ITM si sottrae il valore intrinseco.',
-  netting_ex_cc_np: 'Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM. Per le Naked Put ITM si sottrae il valore intrinseco.',
-};
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, overrides = [] }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
@@ -349,10 +344,6 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
         </Carousel>
 
         <TopCostlyPositions items={breakdownItems} />
-
-        <p className="text-xs text-muted-foreground px-4 mt-2 leading-relaxed">
-          {descriptions[viewMode] ?? ''}
-        </p>
       </div>
     );
   };
