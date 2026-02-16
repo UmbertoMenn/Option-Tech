@@ -95,7 +95,7 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
         details: item.details
           .slice()
           .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-          .slice(0, 3),
+          .slice(0, 8),
       }));
   }, [items]);
 
