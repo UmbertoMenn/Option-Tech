@@ -217,7 +217,7 @@ export function CallPremiumCalculatorDialog({
   const handleReset = async () => {
     if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker?')) {
       try {
-        await deletePremium(ticker);
+        await deletePremium({ ticker, optionSymbol });
         setMetrics(null);
         setFilteredOrders([]);
         setParseResult(null);

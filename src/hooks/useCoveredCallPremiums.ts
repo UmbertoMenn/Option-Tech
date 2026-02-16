@@ -100,9 +100,9 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
   
   // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: async (ticker: string) => {
+    mutationFn: async ({ ticker, optionSymbol }: { ticker: string; optionSymbol: string }) => {
       if (!portfolioId) throw new Error('No portfolio selected');
-      const { error } = await supabase.from('covered_call_premiums').delete().eq('portfolio_id', portfolioId).eq('ticker', ticker.toUpperCase());
+      const { error } = await supabase.from('covered_call_premiums').delete().eq('portfolio_id', portfolioId).eq('ticker', ticker.toUpperCase()).eq('option_symbol', optionSymbol);
       if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
