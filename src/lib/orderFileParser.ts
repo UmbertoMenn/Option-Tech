@@ -31,7 +31,7 @@ const COLUMN_MAPPINGS = {
   quantity: ['Qtà Eseguita', 'qta eseguita', 'QTA ESEGUITA', 'Quantità Eseguita', 'quantità eseguita'],
   callPut: ['Call/Put', 'call/put', 'CALL/PUT', 'CallPut', 'callput'],
   validityDate: ['Data Validità', 'data validità', 'DATA VALIDITÀ', 'Data Validita', 'data validita', 'DATA VALIDITA'],
-  expiryDate: ['Scadenza', 'scadenza', 'SCADENZA'],
+  expiryDate: ['Scadenza', 'scadenza', 'SCADENZA', 'Data Scadenza', 'data scadenza', 'DATA SCADENZA'],
 };
 
 function findColumnIndex(headers: string[], possibleNames: string[]): number {
