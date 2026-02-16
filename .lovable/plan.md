@@ -1,34 +1,30 @@
 
+## Aggiungere P/L percentuale alle Protezioni (Long Put)
 
-## Rinominare "Gain Potenziale" in "Flussi di cassa" per il Double Diagonal
+### Cosa cambia
+Accanto al prezzo dell'opzione nella riga Long Put verra' mostrata la variazione percentuale rispetto al PMC, come gia' avviene per le Covered Call.
 
-### Contesto
-Per il Double Diagonal, i termini "Gain Potenziale" e "Calcola gain potenziale" non sono appropriati: il valore rappresenta i flussi di cassa storici, non un guadagno potenziale. Occorre aggiornare tooltip e titoli.
-
-### Modifiche
+### Dettaglio tecnico
 
 **File: `src/pages/Derivatives.tsx`**
 
-1. **Riga 1487** - Tooltip del pulsante calcolatrice nella riga Double Diagonal:
-   - Da: `"Calcola gain potenziale"`
-   - A: `"Calcola flussi di cassa"`
+1. **Aggiungere il calcolo** nella funzione `LongPutRow` (dopo riga 955):
+```typescript
+const currentPrice = option.current_price || 0;
+const avgCost = option.avg_cost || 0;
+const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+```
 
-2. **Riga 1584** - Tooltip del P/L sulla riga Double Diagonal:
-   - Da: `"...+ GP calcolatrice"`
-   - A: `"...+ flussi di cassa calcolatrice"`
+2. **Allargare la colonna del prezzo** nel grid template (riga 964): cambiare l'ultima colonna da `7rem` a `8rem` per fare spazio alla percentuale.
 
-**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
+3. **Aggiungere la percentuale nel Col 10 (Prezzo)** dopo l'indicatore stale price (riga 1072), con colori normali per opzioni comprate (verde se il prezzo sale, rosso se scende):
+```typescript
+{priceChangePct !== null && (
+  <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+    {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+  </span>
+)}
+```
 
-Il componente riceve gia' `strategyType` come prop, quindi possiamo distinguere il Double Diagonal.
-
-3. **Riga 247** - Titolo del dialog:
-   - Da: `isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'`
-   - A: logica a 3 vie: `strategyType === 'double_diagonal' ? 'Calcola Flussi di cassa' : isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'`
-
-4. **Riga 297** - Etichetta del valore principale nel dialog:
-   - Da: `isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'`
-   - A: `strategyType === 'double_diagonal' ? 'Flussi di cassa' : isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'`
-
-### Note
-- Iron Condor e Altre Strategie mantengono "Gain Potenziale" invariato
-- Nessuna modifica alla logica di calcolo, solo testi e tooltip
+### Nota sui colori
+Le Long Put sono opzioni **comprate**, quindi la logica dei colori e' quella standard: verde se il prezzo sale (guadagno), rosso se scende (perdita). Questo e' opposto alle Covered Call/Naked Put che sono vendute.
