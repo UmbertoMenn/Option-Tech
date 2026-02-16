@@ -1,86 +1,52 @@
 
 
-## Estensione Calcolatrice + OptionStrat + P/L a Double Diagonal e Altre Strategie
+## Fix: Quantita' mancante nel link OptionStrat da posizioni
 
-### Panoramica
+### Problema
 
-Portare la stessa logica gia' implementata per gli Iron Condor (calcolatrice premi con ordini Excel, link OptionStrat storico, P/L che include operazioni chiuse) anche a **Double Diagonal** e **Altre Strategie (Grouped)**.
+`formatLeg()` usa `quantity` solo per determinare il prefisso `-` (vendita), ma ignora completamente il valore assoluto della quantita'. Quando ci sono 2 contratti venduti (qty = -2), genera `-.KLAC...P1660@78.5` invece del corretto `.KLAC...P1660x-2@78.5`.
 
-### Modifiche necessarie
+### Formato corretto OptionStrat
 
----
+- 1 contratto comprato: `.TICKER...C100@5` (nessun suffisso)
+- 1 contratto venduto: `-.TICKER...C100@5` (prefisso `-`, nessun suffisso)
+- 2+ contratti comprati: `.TICKER...C100x2@5` (suffisso `x2`, nessun prefisso)
+- 2+ contratti venduti: `.TICKER...C100x-2@5` (suffisso `x-2`, nessun prefisso)
 
-### 1. `CallPremiumCalculatorDialog.tsx` — Supporto nuovi strategy type
+Il prefisso `-` si usa solo per qty = -1. Per qty multipli, il segno va dentro il suffisso `xN`.
 
-Il tipo `CalculatorStrategyType` passa da `'covered_call' | 'iron_condor'` a includere anche `'double_diagonal' | 'other_strategy'`.
+### Soluzione
 
-- Aggiungere `'double_diagonal' | 'other_strategy'` al tipo
-- Double Diagonal e Other Strategy usano la stessa logica di Iron Condor per il filtro ordini (`filterAndCalculateIronCondorPremiums` — filtra tutti gli ordini eseguiti per ticker, CALL+PUT)
-- Il dialog per DD e OS mostra "Gain Potenziale" come per IC (non "Netto Unitario")
-- In pratica, basta ampliare il check `isIronCondor` a un check piu' generico `isMultiLeg` che si attiva per `iron_condor`, `double_diagonal` e `other_strategy`
+**File: `src/lib/optionStratUrl.ts`** -- funzione `formatLeg`
 
----
+Modificare per includere la quantita' quando `|qty| > 1`:
 
-### 2. `DoubleDiagonalRow` — Aggiungere calcolatrice, link storico, P/L da ordini
+```typescript
+function formatLeg(ticker: string, option: Position): string {
+  const qty = option.quantity;
+  const absQty = Math.abs(qty);
+  const type = option.option_type === 'call' ? 'C' : 'P';
+  const expiry = formatExpiry(option.expiry_date);
+  const strike = formatStrike(option.strike_price);
+  const price = formatStrike(option.avg_cost || option.current_price);
 
-Modifiche al componente `DoubleDiagonalRow` in `Derivatives.tsx`:
+  if (absQty === 1) {
+    const prefix = qty < 0 ? '-' : '';
+    return `${prefix}.${ticker}${expiry}${type}${strike}@${price}`;
+  }
+  // qty > 1: use xN (positive) or x-N (negative), no prefix
+  const qtySuffix = `x${qty}`;
+  return `.${ticker}${expiry}${type}${strike}${qtySuffix}@${price}`;
+}
+```
 
-- **Props**: aggiungere `getPremiumByTickerAndSymbol` (come gia' fatto per `IronCondorRow`)
-- **Option Symbol**: generare come `DD_{soldExpiryDate}` (analogo a `IC_{expiryDate}`)
-- **Link OptionStrat**: se ci sono ordini salvati, usare `buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, 'Double Diagonal')`, altrimenti il link attuale da posizioni
-- **Pulsante Calcolatrice**: aggiungere il bottone Calculator accanto al pulsante OptionStrat (stessa UI dell'Iron Condor, colonna allargata a 4rem)
-- **P/L sulla riga**: se ci sono ordini salvati nella calcolatrice, il P/L deve sommare:
-  - Il P/L delle posizioni ancora aperte in portafoglio (come ora)
-  - Il guadagno/perdita realizzato dalle operazioni chiuse (ordini nell'orders_json che hanno un match FIFO completo)
-  
-  Per calcolare il P/L realizzato dagli ordini storici: `savedPremium.net_per_share` rappresenta il GP totale (somma netta di tutte le operazioni). Il P/L combinato sara':
-  - Valore attuale mark-to-market delle 4 gambe aperte: `(current_price * qty * 100)` per ogni gamba
-  - Piu' il GP salvato dalla calcolatrice (che include i premi incassati/pagati storici)
+### Risultato atteso
 
-  Formula semplificata: **P/L = GP calcolatrice + MtM posizioni aperte**
+KLA Corp con 2 put vendute a strike 1660:
+- Prima: `-.KLAC260220P1660@78.5`
+- Dopo: `.KLAC260220P1660x-2@78.5`
 
-  Dove MtM posizioni aperte = somma di `(current_price - avg_cost) * quantity * 100` per ogni gamba.
+### Nessuna modifica ad altri file
 
-  In pratica: P/L portfolio attuale + GP calcolatrice.
-
-- **Grid layout**: allargare la colonna OptionStrat da 2rem a 4rem per ospitare i due pulsanti
-
----
-
-### 3. `GroupedOtherStrategyRow` — Stesse modifiche
-
-Modifiche al componente `GroupedOtherStrategyRow` in `Derivatives.tsx`:
-
-- **Props**: aggiungere `getPremiumByTickerAndSymbol`
-- **Option Symbol**: generare come `OS_{underlying}` (chiave univoca per strategia)
-- **Link OptionStrat**: se ordini salvati, usare `buildOptionStratUrlFromOrders`, altrimenti link da posizioni attuali
-- **Pulsante Calcolatrice**: aggiungere accanto al pulsante OptionStrat (allargare colonna da 2rem a 4rem)
-- **P/L sulla riga**: stessa logica DD — P/L portfolio + GP calcolatrice
-- **Breakeven**: ricalcolare includendo il P/L realizzato dagli ordini storici. Attualmente il breakeven usa solo le posizioni attuali e il loro `avg_cost`. Con la calcolatrice, il breakeven deve shiftare in base al guadagno/perdita gia' realizzato:
-  - Il sistema attuale calcola il payoff basandosi su `avg_cost` come premio pagato/incassato
-  - Con ordini storici, il "premio effettivo netto" per ogni gamba cambia. Il modo piu' semplice: aggiungere il GP realizzato (dalla calcolatrice) come offset al payoff totale. Questo shifta le curve di breakeven correttamente
-  - Il calcolo diventa: `payoff_originale + GP_calcolatrice` per ogni punto del grafico
-
----
-
-### 4. Chiamate dalle sezioni padre
-
-Nelle sezioni che rendono `DoubleDiagonalRow` e `GroupedOtherStrategyRow` (linee ~530-653), passare la prop `getPremiumByTickerAndSymbol` (gia' disponibile dal hook `useCoveredCallPremiums`).
-
----
-
-### Dettaglio tecnico dei file modificati
-
-| File | Modifica |
-|---|---|
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Tipo `CalculatorStrategyType` esteso; logica `isMultiLeg` per DD/OS |
-| `src/pages/Derivatives.tsx` (DoubleDiagonalRow) | Props + calcolatrice + link storico + P/L combinato + grid layout |
-| `src/pages/Derivatives.tsx` (GroupedOtherStrategyRow) | Props + calcolatrice + link storico + P/L combinato + breakeven con offset + grid layout |
-| `src/pages/Derivatives.tsx` (sezioni padre) | Passare `getPremiumByTickerAndSymbol` a DD e OS rows |
-
-### Nessuna modifica a
-
-- `optionStratUrl.ts` — `buildOptionStratUrlFromOrders` gia' supporta qualsiasi strategy name tramite `STRATEGY_SLUG_MAP`
-- `orderFileParser.ts` — `filterAndCalculateIronCondorPremiums` gia' filtra per ticker senza distinzione CALL/PUT, perfetto anche per DD e OS
-- Database/tabelle — `covered_call_premiums` gia' supporta qualsiasi `option_symbol` come chiave
+La funzione `formatLeg` e' usata da `buildOptionStratUrl`, `buildCoveredCallUrl`, e tutte le funzioni di costruzione URL da posizioni. Il fix si applica automaticamente ovunque.
 
