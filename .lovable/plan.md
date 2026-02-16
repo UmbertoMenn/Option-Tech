@@ -1,28 +1,33 @@
 
 
-## Rimuovere la doppia barra di scorrimento nel dialog dei premi
+## Aggiungere colonna Scadenza nella tabella operazioni del calcolatore premi
 
 ### Problema
 
-Il `DialogContent` ha `max-h-[85vh] overflow-y-auto` (scrollbar esterna) e la tabella operazioni ha un wrapper con `max-h-[250px] overflow-y-auto` (scrollbar interna). Questo crea due barre di scorrimento visibili contemporaneamente.
+Nella tabella "Operazioni" del dialog premi Covered Call, non e' visibile la scadenza dell'opzione. L'utente deve dedurla manualmente dal simbolo (es. `BABAH6C165` = Agosto 2026).
 
 ### Soluzione
 
-Rimuovere il contenitore con scroll interno sulla tabella operazioni (`max-h-[250px] overflow-y-auto`), lasciando solo lo scroll del dialog esterno. La tabella si espandera' naturalmente all'interno del dialog scrollabile.
+Estrarre mese e anno di scadenza dal simbolo dell'opzione e mostrarlo in una colonna dedicata con formato compatto `MMM/YY` (es. "Aug/26"), coerente con il formato gia' usato nel resto dell'app per le scadenze derivati.
 
-### Modifica
+### Dettaglio tecnico
 
-**`src/components/derivatives/CallPremiumCalculatorDialog.tsx`** -- linea 412
+**1. `src/lib/orderFileParser.ts`**
 
-Sostituire:
-```html
-<div className="max-h-[250px] overflow-y-auto">
-```
+Aggiungere una funzione `extractExpiryFromSymbol(symbol: string): string | null` che:
+- Analizza il simbolo con pattern `TICKER + MESE(lettera) + ANNO(cifra) + TIPO + STRIKE`
+- Mappa la lettera del mese: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
+- Restituisce la scadenza in formato `MMM/YY` (es. "Aug/26") o `null` se non riconosciuto
 
-Con:
-```html
-<div>
-```
+**2. `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-Nessun'altra modifica necessaria. Il dialog esterno gestira' lo scroll di tutto il contenuto come prima.
+- Importare `extractExpiryFromSymbol`
+- Aggiungere una colonna "Scad." nell'header della tabella operazioni (tra "Simbolo" e "Qta'")
+- Mostrare il valore estratto nella cella corrispondente con stile `text-xs text-muted-foreground`
 
+### File da modificare
+
+| File | Modifica |
+|---|---|
+| `src/lib/orderFileParser.ts` | Nuova funzione `extractExpiryFromSymbol` |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Colonna "Scad." nella tabella operazioni |
