@@ -1,31 +1,28 @@
 
 
-## Semplificare la Calcolatrice Iron Condor e Mostrare GP Salvato nella Riga
+## Mostrare il Gain Potenziale Netto Totale per Iron Condor
 
 ### Problema
 
-La calcolatrice Iron Condor mostra rendimenti percentuali e valore unitario (per azione) che non hanno senso per questa strategia. Serve solo il **gain potenziale lordo** (grossPremium). Inoltre il valore salvato deve apparire nella riga Iron Condor accanto al GP calcolato dal portafoglio.
+Attualmente la calcolatrice e la riga Iron Condor mostrano il **gain potenziale lordo** (`grossPremium` = valore assoluto, senza commissioni). Il valore corretto da mostrare e' il **gain potenziale netto totale** (`netPremium` = lordo - commissioni), cioe' 4.220 USD nell'esempio.
 
 ### Modifiche
 
 **1. `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-Per Iron Condor:
-- Il valore principale diventa `metrics.grossPremium` (lordo, non unitario) al posto di `metrics.netPerShare`
-- Rimuovere la sezione "Rendimento" e "Annualizzato" (nascondere il grid con le percentuali)
-- Rimuovere la riga "su N contratti (N azioni)"
-- Nel `handleSave`, salvare `net_per_share` = `metrics.grossPremium` (riuso del campo DB per conservare il gain potenziale lordo)
+- Valore principale per Iron Condor: cambiare da `metrics.grossPremium` a `metrics.netPremium`
+- Label: "Gain Potenziale" (invariata)
+- Salvataggio: cambiare `net_per_share: metrics.grossPremium` in `net_per_share: metrics.netPremium`
 
-**2. `src/pages/Derivatives.tsx` -- IronCondorRow**
+**2. `src/pages/Derivatives.tsx`**
 
-- Passare `getPremiumByTickerAndSymbol` come prop a `IronCondorRow`
-- Leggere il valore salvato con `getPremiumByTickerAndSymbol(ticker, optionSymbol)`
-- Nella colonna GP esistente (Col 9), se esiste un valore salvato dalla calcolatrice, mostrare quello al posto del GP calcolato dal portafoglio (PMC). Il tooltip indichera' "Gain Potenziale (da calcolatrice ordini)"
+Nessuna modifica necessaria: la riga gia' legge `savedPremium.net_per_share`, che ora conterra' il valore netto corretto.
 
-### Dettaglio tecnico
+### Riepilogo
 
-| File | Modifica |
-|---|---|
-| `CallPremiumCalculatorDialog.tsx` | Per `iron_condor`: mostrare `grossPremium` come valore principale, nascondere percentuali e "su N contratti", salvare `grossPremium` nel campo `net_per_share` |
-| `Derivatives.tsx` | Passare `getPremiumByTickerAndSymbol` a `IronCondorRow`, leggere il GP salvato e mostrarlo nella colonna GP se presente |
+| Dove | Prima | Dopo |
+|---|---|---|
+| Calcolatrice (valore grande) | `grossPremium` (lordo) | `netPremium` (netto commissioni) |
+| Salvataggio DB | `grossPremium` | `netPremium` |
+| Riga IC (GP) | Legge `net_per_share` (invariato) | Legge `net_per_share` (invariato) |
 
