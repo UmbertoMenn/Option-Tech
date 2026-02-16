@@ -6,10 +6,19 @@ import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode } from '@/
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { ViewMode } from './ViewModeSelector';
 import { Upload, ChevronDown, ChevronUp } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip, PieChart, Pie } from 'recharts';
 import { formatEUR } from '@/lib/formatters';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselPrevious,
+  CarouselNext,
+  type CarouselApi,
+} from '@/components/ui/carousel';
+import { cn } from '@/lib/utils';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -20,139 +29,28 @@ interface DynamicPortfolioChartProps {
   overrides?: DerivativeOverride[];
 }
 
-// ─── Waterfall helpers ────────────────────────────────────────
-interface WaterfallBar {
-  name: string;
-  base: number;     // invisible base
-  value: number;     // visible bar height
-  total: number;     // running total (for tooltip)
-  fill: string;
-  isTotal: boolean;
-  details?: { ticker: string; value: number; strike?: number; expiry?: string }[];
-}
+// ─── Colors ───────────────────────────────────────────────────
+const PIE_COLORS: Record<string, string> = {
+  cc_itm: 'hsl(0, 72%, 51%)',
+  cc_otm: 'hsl(15, 80%, 55%)',
+  np_itm: 'hsl(330, 70%, 50%)',
+  np_otm: 'hsl(350, 65%, 60%)',
+  long_put: 'hsl(142, 71%, 45%)',
+  leap_call: 'hsl(160, 60%, 45%)',
+  other: 'hsl(45, 80%, 55%)',
+};
 
-const COLOR_BASE = 'hsl(var(--muted-foreground))';
-const COLOR_COST = 'hsl(0, 72%, 51%)';      // red
-const COLOR_GAIN = 'hsl(142, 71%, 45%)';     // green
-const COLOR_TOTAL = 'hsl(217, 91%, 60%)';    // blue
-
-function buildWaterfallData(
-  baseValue: number,
-  items: NettingBreakdownItem[],
-  finalValue: number,
-): WaterfallBar[] {
-  const bars: WaterfallBar[] = [];
-
-  // Start with assets bar (from 0)
-  bars.push({
-    name: 'Valore Assets',
-    base: 0,
-    value: baseValue,
-    total: baseValue,
-    fill: COLOR_BASE,
-    isTotal: false,
-  });
-
-  let running = baseValue;
-
-  for (const item of items) {
-    const absValue = Math.abs(item.value);
-    const isNegative = item.value < 0;
-    const barBase = isNegative ? running - absValue : running;
-
-    bars.push({
-      name: item.label,
-      base: barBase,
-      value: absValue,
-      total: running + item.value,
-      fill: isNegative ? COLOR_COST : COLOR_GAIN,
-      isTotal: false,
-      details: item.details.map(d => ({
-        ticker: d.ticker,
-        value: d.value,
-        strike: d.strike,
-        expiry: d.expiry,
-      })),
-    });
-
-    running += item.value;
-  }
-
-  // Final total bar
-  bars.push({
-    name: 'Valore Nettato',
-    base: 0,
-    value: finalValue,
-    total: finalValue,
-    fill: COLOR_TOTAL,
-    isTotal: true,
-  });
-
-  return bars;
-}
-
-// ─── Custom Tooltip ───────────────────────────────────────────
-function WaterfallTooltip({ active, payload }: any) {
-  if (!active || !payload || payload.length === 0) return null;
-  const bar: WaterfallBar = payload[0]?.payload;
-  if (!bar) return null;
+// ─── Simple Bars Chart ────────────────────────────────────────
+function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalValue: number }) {
+  const data = [
+    { name: 'Valore Assets', value: baseValue, fill: 'hsl(var(--muted-foreground))' },
+    { name: 'Valore Nettato', value: finalValue, fill: 'hsl(217, 91%, 60%)' },
+  ];
 
   return (
-    <div className="bg-popover border border-border rounded-lg shadow-lg p-3 max-w-xs">
-      <p className="font-semibold text-sm text-foreground mb-1">{bar.name}</p>
-      <p className="text-sm text-foreground">
-        {bar.isTotal ? 'Totale: ' : 'Impatto: '}
-        <span className={bar.fill === COLOR_COST ? 'text-red-400' : bar.fill === COLOR_GAIN ? 'text-green-400' : 'text-blue-400'}>
-          {formatEUR(bar.isTotal ? bar.total : (bar.fill === COLOR_COST ? -bar.value : bar.value))}
-        </span>
-      </p>
-      {bar.details && bar.details.length > 0 && (
-        <div className="mt-2 border-t border-border pt-2 space-y-0.5">
-          {bar.details
-            .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-            .slice(0, 5)
-            .map((d, i) => (
-              <div key={i} className="flex justify-between text-xs gap-3">
-                <span className="text-muted-foreground truncate">
-                  {d.ticker}
-                  {d.strike ? ` @${d.strike}` : ''}
-                </span>
-                <span className={d.value < 0 ? 'text-red-400' : 'text-green-400'}>
-                  {formatEUR(d.value)}
-                </span>
-              </div>
-            ))}
-          {bar.details.length > 5 && (
-            <p className="text-xs text-muted-foreground italic">+{bar.details.length - 5} altre...</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Waterfall Chart ──────────────────────────────────────────
-function NettingWaterfallChart({
-  baseValue,
-  items,
-  finalValue,
-}: {
-  baseValue: number;
-  items: NettingBreakdownItem[];
-  finalValue: number;
-}) {
-  const data = useMemo(() => buildWaterfallData(baseValue, items, finalValue), [baseValue, items, finalValue]);
-  const chartHeight = Math.max(200, data.length * 40 + 20);
-
-  return (
-    <div className="w-full" style={{ height: chartHeight }}>
+    <div className="w-full h-[160px]">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ left: 10, right: 70, top: 5, bottom: 5 }}
-          barCategoryGap="20%"
-        >
+        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 70, top: 5, bottom: 5 }} barCategoryGap="30%">
           <XAxis type="number" hide domain={[0, 'dataMax']} />
           <YAxis
             type="category"
@@ -160,19 +58,105 @@ function NettingWaterfallChart({
             axisLine={false}
             tickLine={false}
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-            width={150}
+            width={120}
           />
-          <RechartsTooltip content={<WaterfallTooltip />} cursor={false} />
-          {/* Invisible base bar */}
-          <Bar dataKey="base" stackId="waterfall" fill="transparent" barSize={24} isAnimationActive={false} />
-          {/* Visible value bar */}
-          <Bar dataKey="value" stackId="waterfall" barSize={24} radius={[0, 3, 3, 0]}>
+          <RechartsTooltip
+            cursor={false}
+            content={({ active, payload }) => {
+              if (!active || !payload?.[0]) return null;
+              return (
+                <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-sm">
+                  <span className="text-foreground">{formatEUR(payload[0].value as number)}</span>
+                </div>
+              );
+            }}
+          />
+          <Bar dataKey="value" barSize={28} radius={[0, 4, 4, 0]}>
             {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.fill} />
+              <Cell key={index} fill={entry.fill} />
             ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── Pie Chart Breakdown ──────────────────────────────────────
+function NettingPieChart({ items, finalValue }: { items: NettingBreakdownItem[]; finalValue: number }) {
+  const pieData = useMemo(() => {
+    return items
+      .filter(item => Math.abs(item.value) > 0.01)
+      .map(item => ({
+        name: item.label,
+        value: Math.abs(item.value),
+        originalValue: item.value,
+        category: item.category,
+        fill: PIE_COLORS[item.category] || 'hsl(var(--muted-foreground))',
+      }));
+  }, [items]);
+
+  if (pieData.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
+        Nessun impatto derivati
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center">
+      <div className="w-full h-[200px] relative">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="50%"
+              innerRadius={55}
+              outerRadius={85}
+              paddingAngle={2}
+              dataKey="value"
+            >
+              {pieData.map((entry, index) => (
+                <Cell key={index} fill={entry.fill} stroke="hsl(var(--background))" strokeWidth={2} />
+              ))}
+            </Pie>
+            <RechartsTooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.[0]) return null;
+                const d = payload[0].payload;
+                const total = pieData.reduce((s, p) => s + p.value, 0);
+                const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : '0';
+                return (
+                  <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-sm max-w-xs">
+                    <p className="font-semibold text-foreground">{d.name}</p>
+                    <p className={d.originalValue < 0 ? 'text-red-400' : 'text-green-400'}>
+                      {formatEUR(d.originalValue)} ({pct}%)
+                    </p>
+                  </div>
+                );
+              }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        {/* Center label */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-center">
+            <p className="text-xs text-muted-foreground">Nettato</p>
+            <p className="text-sm font-bold text-blue-500">{formatEUR(finalValue)}</p>
+          </div>
+        </div>
+      </div>
+      {/* Legend */}
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-1 px-2">
+        {pieData.map((entry, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: entry.fill }} />
+            <span className="text-muted-foreground">{entry.name}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -182,13 +166,26 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const topPositions = useMemo(() => {
-    const all = items.flatMap(item =>
+    // First collect all details, then aggregate by ticker
+    const allDetails = items.flatMap(item =>
       item.details.map(d => ({
         ...d,
         category: item.label,
       }))
     );
-    return all
+    // Aggregate by ticker
+    const byTicker = new Map<string, typeof allDetails[0]>();
+    for (const d of allDetails) {
+      const existing = byTicker.get(d.ticker);
+      if (existing) {
+        existing.value += d.value;
+        existing.strike = undefined;
+        existing.expiry = undefined;
+      } else {
+        byTicker.set(d.ticker, { ...d });
+      }
+    }
+    return [...byTicker.values()]
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
       .slice(0, 5);
   }, [items]);
@@ -235,7 +232,34 @@ const CHART_TITLES: Record<ViewMode, string> = {
   netting_ex_cc_np: 'Valore Portafoglio (Netting ex. Covered Call e Naked Put OTM)',
 };
 
+const nettingSlides = [
+  { id: 'bars', title: 'Confronto Valori' },
+  { id: 'pie', title: 'Breakdown Netting' },
+];
+
+const descriptions: Record<string, string> = {
+  netting_total: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio.',
+  netting_ex_cc: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. Per le Covered Call ITM si sottrae il valore intrinseco.',
+  netting_ex_cc_np: 'Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM. Per le Naked Put ITM si sottrae il valore intrinseco.',
+};
+
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, overrides = [] }: DynamicPortfolioChartProps) {
+  const [api, setApi] = useState<CarouselApi>();
+  const [current, setCurrent] = useState(0);
+
+  const onSelect = useCallback(() => {
+    if (!api) return;
+    setCurrent(api.selectedScrollSnap());
+  }, [api]);
+
+  useEffect(() => {
+    if (!api) return;
+    onSelect();
+    api.on('select', onSelect);
+    return () => { api.off('select', onSelect); };
+  }, [api, onSelect]);
+
+  const scrollTo = useCallback((index: number) => { api?.scrollTo(index); }, [api]);
 
   const { items: breakdownItems, finalValue } = useMemo(() => {
     if (viewMode === 'base' || !summary) return { items: [], finalValue: 0 };
@@ -267,26 +291,47 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       );
     }
 
-    // Netting views — waterfall
-    const descriptions: Record<string, string> = {
-      netting_total: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio.',
-      netting_ex_cc: 'Valorizzazione del portafoglio complessivo, al quale abbiamo sommato e sottratto il valore di rivendita e riacquisto di tutte le posizioni in derivati in portafoglio, escluse le covered call OTM. Per le Covered Call ITM si sottrae il valore intrinseco.',
-      netting_ex_cc_np: 'Come il Netting ex. Covered Call, ma esclude anche il costo di riacquisto delle Naked PUT OTM. Per le Naked Put ITM si sottrae il valore intrinseco.',
-    };
+    // Netting views — carousel with bars + pie
+    const baseValue = summary?.totalValue ?? 0;
 
     return (
       <div className="flex flex-col">
-        <NettingWaterfallChart
-          baseValue={summary?.totalValue ?? 0}
-          items={breakdownItems}
-          finalValue={finalValue}
-        />
-
-        <div className="mt-1 text-center">
-          <p className="text-2xl font-bold text-blue-500">
-            {formatEUR(finalValue)}
-          </p>
-        </div>
+        <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
+          <CarouselContent>
+            {/* Slide 1: Simple bars */}
+            <CarouselItem>
+              <SimpleBarsChart baseValue={baseValue} finalValue={finalValue} />
+              <div className="mt-1 text-center">
+                <p className="text-2xl font-bold text-blue-500">
+                  {formatEUR(finalValue)}
+                </p>
+              </div>
+            </CarouselItem>
+            {/* Slide 2: Pie chart breakdown */}
+            <CarouselItem>
+              <NettingPieChart items={breakdownItems} finalValue={finalValue} />
+            </CarouselItem>
+          </CarouselContent>
+          <div className="flex items-center justify-center gap-4 mt-2">
+            <CarouselPrevious className="static translate-y-0" />
+            <div className="flex gap-2">
+              {nettingSlides.map((_, index) => (
+                <button
+                  key={index}
+                  onClick={() => scrollTo(index)}
+                  className={cn(
+                    'w-2 h-2 rounded-full transition-all duration-200',
+                    current === index
+                      ? 'bg-primary w-4'
+                      : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
+                  )}
+                  aria-label={`Go to slide ${index + 1}`}
+                />
+              ))}
+            </div>
+            <CarouselNext className="static translate-y-0" />
+          </div>
+        </Carousel>
 
         <TopCostlyPositions items={breakdownItems} />
 

@@ -162,9 +162,22 @@ export function useDerivativeNetting(
         nettingExCoveredCall += nettingValue;
         nettingExCCAndNP += nettingValue;
         acc.other.value += nettingValue;
-        acc.other.details.push({ ...detail, value: nettingValue });
+      acc.other.details.push({ ...detail, value: nettingValue });
       }
     }
+
+    // Aggregate other details by ticker (multi-leg strategies show one row per underlying)
+    const otherByTicker = new Map<string, NettingBreakdownDetail>();
+    for (const d of acc.other.details) {
+      const key = d.ticker;
+      const existing = otherByTicker.get(key);
+      if (existing) {
+        existing.value += d.value;
+      } else {
+        otherByTicker.set(key, { ...d, strike: undefined, expiry: undefined });
+      }
+    }
+    acc.other.details = [...otherByTicker.values()];
 
     // Build breakdown array (all categories, filter zeros later per view)
     const breakdown: NettingBreakdownItem[] = [];
