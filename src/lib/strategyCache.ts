@@ -283,13 +283,44 @@ export async function saveStrategyCache(
   }
   
   // Cleanup orphaned covered call premiums
-  // Extract active (ticker, option_symbol) pairs from Covered Calls
+  // Extract active (ticker, option_symbol) pairs from ALL strategy types
   const activeCCKeys: { ticker: string; option_symbol: string }[] = [];
+  
+  // 1. Covered Calls
   categories.coveredCalls.forEach((cc: CoveredCallPosition) => {
     const underlying = cc.option.underlying || cc.option.description || '';
     const ticker = resolveTicker(underlying, underlyingPrices);
     if (ticker) {
       const optionSymbol = `C${cc.option.strike_price || 0}_${cc.option.expiry_date || 'noexp'}`;
+      activeCCKeys.push({ ticker: ticker.toUpperCase(), option_symbol: optionSymbol });
+    }
+  });
+  
+  // 2. Iron Condors
+  categories.ironCondors.forEach((ic: IronCondorPosition) => {
+    const ticker = resolveTicker(ic.underlying, underlyingPrices);
+    if (ticker) {
+      const expiryDate = ic.soldCall.expiry_date || ic.soldPut.expiry_date || null;
+      const optionSymbol = `IC_${expiryDate || 'unknown'}`;
+      activeCCKeys.push({ ticker: ticker.toUpperCase(), option_symbol: optionSymbol });
+    }
+  });
+  
+  // 3. Double Diagonals
+  categories.doubleDiagonals.forEach((dd: DoubleDiagonalPosition) => {
+    const ticker = resolveTicker(dd.underlying, underlyingPrices);
+    if (ticker) {
+      const soldExpiryDate = dd.soldCall.expiry_date || dd.soldPut.expiry_date || null;
+      const optionSymbol = `DD_${soldExpiryDate || 'unknown'}`;
+      activeCCKeys.push({ ticker: ticker.toUpperCase(), option_symbol: optionSymbol });
+    }
+  });
+  
+  // 4. Grouped Other Strategies
+  categories.groupedOtherStrategies.forEach((gs: GroupedOtherStrategy) => {
+    const ticker = resolveTicker(gs.underlying, underlyingPrices);
+    if (ticker) {
+      const optionSymbol = `OS_${gs.underlying}`;
       activeCCKeys.push({ ticker: ticker.toUpperCase(), option_symbol: optionSymbol });
     }
   });
