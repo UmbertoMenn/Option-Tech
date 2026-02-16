@@ -1,52 +1,48 @@
 
 
-## Fix: Errore salvataggio cooldown (e qualsiasi altra impostazione avvisi)
+## Semplificare il filtro LEAP: escludere tutte le CALL solo comprate
 
-### Problema identificato
+### Logica attuale
 
-L'errore nei log del database e':
-```
-there is no unique or exclusion constraint matching the ON CONFLICT specification
-```
+Il filtro LEAP esclude le CALL solo comprate (senza corrispondente vendita) **solo se** lo strike supera il 130% del prezzo del sottostante. Le CALL comprate con strike vicino al prezzo vengono mantenute nel calcolo dei premi.
 
-L'indice univoco sulla tabella `alert_configs` usa `COALESCE(ticker, '')`:
-```sql
-CREATE UNIQUE INDEX ... ON alert_configs (user_id, COALESCE(ticker, ''), alert_type)
-```
+### Nuova logica
 
-Ma il codice JS fa upsert con:
-```typescript
-onConflict: 'user_id,ticker,alert_type'
-```
+Qualsiasi CALL che ha **solo operazioni di acquisto** (nessuna vendita per lo stesso simbolo) viene esclusa dal calcolo, indipendentemente dallo strike o dal prezzo del sottostante. Il parametro `underlyingPrice` non sara' piu' necessario per il filtro.
 
-PostgreSQL non riesce a far corrispondere `ON CONFLICT (user_id, ticker, alert_type)` con un indice che usa `COALESCE(ticker, '')`. Questo errore si verifica per **tutti gli utenti** (non solo admin), ogni volta che si salvano impostazioni con ticker NULL (cioe' le impostazioni globali, che sono la maggioranza).
+### Modifiche
 
-### Soluzione
+**1. `src/lib/orderFileParser.ts`** -- Funzione `filterAndCalculateCallPremiums`
 
-Sostituire l'indice COALESCE con un indice univoco standard che gestisce i NULL tramite `NULLS NOT DISTINCT` (disponibile in PostgreSQL 15+, usato da Supabase).
+Semplificare lo Step 3: invece di controllare strike vs prezzo, escludere tutte le CALL buy-only:
 
-**1. Migrazione database:**
-
-```sql
--- Rimuovere il vecchio indice con COALESCE
-DROP INDEX IF EXISTS alert_configs_user_id_ticker_alert_type_key;
-
--- Creare il nuovo indice univoco che tratta NULL come uguale
-CREATE UNIQUE INDEX alert_configs_user_ticker_type_uq
-  ON alert_configs (user_id, ticker, alert_type)
-  NULLS NOT DISTINCT;
+```text
+const filteredOrders = baseFiltered.filter(order => {
+  // Se il simbolo ha almeno una vendita → tieni tutto (Covered Call o rolling)
+  if (symbolsWithSells.has(order.symbol)) {
+    return true;
+  }
+  // Solo acquisti per questo simbolo → escludere (LEAP o Long Call)
+  return false;
+});
 ```
 
-Nessuna modifica al codice TypeScript — il `onConflict: 'user_id,ticker,alert_type'` funzionera' correttamente con il nuovo indice.
+Rimuovere la costante `LEAP_THRESHOLD` e il controllo su `extractStrikeFromSymbol`. Il parametro `underlyingPrice` puo' restare nella firma per retrocompatibilita' ma non verra' piu' usato nel filtro.
 
-### File/risorse da modificare
+**2. `src/test/orderFileParserHtmlXls.test.ts`** -- Aggiornare i test
 
-| Risorsa | Modifica |
+| Test | Modifica |
 |---|---|
-| Database (migrazione SQL) | Sostituire l'indice COALESCE con `NULLS NOT DISTINCT` |
+| "should exclude buy-only CALL with high strike (LEAP)" | Rinominare in "should exclude buy-only CALL" e rimuovere il riferimento allo strike |
+| "should keep CALL with sell operation" | Nessuna modifica, rimane valido |
+| "should keep buy if same symbol has a sell (rolling)" | Nessuna modifica, rimane valido |
+| "should keep buy-only CALL with near-money strike" | **Invertire aspettativa**: ora `filteredOrders` deve avere length 0 (viene esclusa) |
+| "should filter multiple LEAPs while keeping valid CCs" | Nessuna modifica logica, gia' corretto |
+| "should not filter when underlyingPrice is not provided" | **Invertire aspettativa**: ora length 0 (viene esclusa anche senza prezzo) |
+| "should handle edge case at exactly 130% threshold" | **Invertire aspettativa**: ora length 0 |
+| "should correctly calculate metrics after LEAP filtering" | Nessuna modifica, gia' corretto |
 
 ### Risultato atteso
 
-- Il salvataggio del cooldown (e di qualsiasi impostazione) funziona correttamente sia per l'utente proprietario che per l'admin in modalita' impersonificazione
-- Le impostazioni globali (ticker NULL) vengono aggiornate correttamente tramite upsert senza errori
+Tutte le CALL con sole operazioni di acquisto vengono escluse dal calcolo dei premi Covered Call, semplificando la logica e rendendo il filtro indipendente dal prezzo del sottostante.
 
