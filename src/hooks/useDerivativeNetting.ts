@@ -4,6 +4,7 @@ import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 
 export interface NettingBreakdownDetail {
+  positionId: string;
   ticker: string;
   description: string;
   value: number;
@@ -94,6 +95,7 @@ export function useDerivativeNetting(
 
       const ticker = derivative.ticker || derivative.underlying || derivative.description || '?';
       const detail: NettingBreakdownDetail = {
+        positionId: derivative.id,
         ticker,
         description: derivative.description,
         value: 0, // will be set per category
@@ -246,10 +248,7 @@ export function getBreakdownForViewMode(
 
       for (const det of item.details) {
         // Find the derivative and its covered call data
-        const ccEntry = [...coveredCallMap.values()].find(cc => {
-          const t = cc.option.ticker || cc.option.underlying || cc.option.description || '';
-          return t === det.ticker;
-        });
+        const ccEntry = coveredCallMap.get(det.positionId);
 
         if (ccEntry) {
           const strike = ccEntry.option.strike_price ?? 0;
@@ -289,10 +288,7 @@ export function getBreakdownForViewMode(
       const intrinsicDetails: NettingBreakdownDetail[] = [];
 
       for (const det of item.details) {
-        const npEntry = [...nakedPutMap.values()].find(np => {
-          const t = np.option.ticker || np.option.underlying || np.option.description || '';
-          return t === det.ticker;
-        });
+        const npEntry = nakedPutMap.get(det.positionId);
 
         if (npEntry) {
           const strike = npEntry.option.strike_price ?? 0;
