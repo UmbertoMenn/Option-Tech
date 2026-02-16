@@ -1,39 +1,65 @@
 
 
-## Cambiare il briefing giornaliero alle 10:00 italiane
+## Briefing giornaliero suddiviso per portafoglio
 
-### Modifiche necessarie
+### Situazione attuale
 
-**1. Edge Function `supabase/functions/daily-briefing/index.ts`**
+Il briefing raggruppa tutte le sezioni (Naked Call, CC ITM, ecc.) di tutti i portafogli dell'utente in un unico blocco, senza distinzione. Un utente con piu' portafogli (es. "Portfolio Principale" e "CASB") riceve un messaggio piatto dove non si capisce quale posizione appartiene a quale portafoglio.
 
-- Rinominare la funzione guard da `isItalianNoon` a `isItalian10AM`
-- Cambiare il controllo da `italianHour === 12` a `italianHour === 10`
-- Aggiornare i commenti e il messaggio di log
-- Aggiornare il testo nell'email da "Generato automaticamente alle 12:00" a "Generato automaticamente alle 10:00"
+### Soluzione
 
-**2. Cron job nel database**
+Modificare il flusso nel main handler per iterare **per portafoglio** anziche' aggregare tutto. Ogni portafoglio produce le sue sezioni, e il messaggio finale e' organizzato con intestazioni per portafoglio.
 
-Il cron attuale e' `0 10,11 * * 1-5` (10:00 e 11:00 UTC per coprire CET/CEST quando l'ora italiana era 12).
+### Struttura del messaggio risultante
 
-Per le 10:00 italiane:
-- CET (inverno): 10:00 IT = 09:00 UTC
-- CEST (estate): 10:00 IT = 08:00 UTC
-
-Nuovo schedule: `0 8,9 * * 1-5` (08:00 e 09:00 UTC, la guard nella Edge Function filtra l'esecuzione corretta)
-
-Aggiornamento via SQL:
+**Telegram:**
 ```text
-SELECT cron.alter_job(11, schedule := '0 8,9 * * 1-5');
+📋 Briefing Pre-Apertura
+📅 16 feb 2026
+
+📁 Portfolio Principale
+
+🔴 Covered Call ITM
+  AAPL strike 220
+
+🟢 Leap Call in Gain
+  MSFT strike 300 (+15%)
+
+📁 CASB
+
+🔴 Iron Condor OOR
+  TSLA
 ```
+
+**Email:** stessa struttura con header visivo per ogni portafoglio.
 
 ### Dettaglio tecnico
 
-| File/Risorsa | Modifica |
+**File: `supabase/functions/daily-briefing/index.ts`**
+
+1. **Nuova interfaccia** `PortfolioBriefing`:
+```text
+interface PortfolioBriefing {
+  portfolioName: string;
+  sections: BriefingSection[];
+}
+```
+
+2. **Main handler** — nel loop utente, iterare per portafoglio:
+   - Selezionare `portfolios` con `id, name` (aggiungere `name`)
+   - Per ogni portafoglio, filtrare `strategiesCache` e `positions` per `portfolio_id`
+   - Chiamare `buildBriefingSections` per ogni portafoglio
+   - Raccogliere i risultati in un array `PortfolioBriefing[]`
+   - Saltare l'utente solo se tutti i portafogli hanno 0 sezioni
+
+3. **Funzioni di formattazione** — aggiornare per accettare `PortfolioBriefing[]`:
+   - `buildTelegramMessage(portfolioBriefings, userName?)` — aggiunge `📁 *NomePortafoglio*` come separatore
+   - `buildEmailHTML(portfolioBriefings, userName?)` — aggiunge header colorato per ogni portafoglio
+   - Per utenti con un solo portafoglio, il nome viene comunque mostrato per coerenza
+
+### File da modificare
+
+| File | Modifica |
 |---|---|
-| `supabase/functions/daily-briefing/index.ts` | Guard: `italianHour === 10`, label email aggiornata |
-| Cron job (ID 11) | Schedule da `0 10,11 * * 1-5` a `0 8,9 * * 1-5` |
-
-### Risultato atteso
-
-Il briefing arriva ogni giorno lavorativo alle 10:00 ora italiana, sia in orario CET che CEST.
+| `supabase/functions/daily-briefing/index.ts` | Aggiungere interfaccia `PortfolioBriefing`, iterare per portafoglio nel main handler, aggiornare `buildTelegramMessage` e `buildEmailHTML` per accettare array di briefing per portafoglio |
 
