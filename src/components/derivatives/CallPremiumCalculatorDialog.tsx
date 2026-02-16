@@ -244,7 +244,7 @@ export function CallPremiumCalculatorDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5" />
-            {isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
+            {strategyType === 'double_diagonal' ? 'Calcola Flussi di cassa' : isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
           </DialogTitle>
           <DialogDescription>
             Sottostante: <span className="font-semibold">{underlying}</span>
@@ -294,7 +294,7 @@ export function CallPremiumCalculatorDialog({
                 {/* Primary: Net per share */}
                  <div className="text-center pb-3 border-b border-border/50">
                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                     {isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'}
+                     {strategyType === 'double_diagonal' ? 'Flussi di cassa' : isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'}
                    </p>
                   <p className="text-3xl font-bold text-primary">
                      {isMultiLeg 

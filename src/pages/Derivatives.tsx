@@ -1484,7 +1484,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Calcola gain potenziale</p>
+                <p>Calcola flussi di cassa</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1581,7 +1581,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Profit/Loss: somma dei P/L delle 4 gambe{hasSavedGP ? ' + GP calcolatrice' : ''}</p>
+              <p>Profit/Loss: somma dei P/L delle 4 gambe{hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
             </TooltipContent>
           </Tooltip>
       </div>
