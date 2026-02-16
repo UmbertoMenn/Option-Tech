@@ -9,6 +9,7 @@ export interface CoveredCallPremium {
   id: string;
   portfolio_id: string;
   ticker: string;
+  option_symbol: string;
   underlying: string;
   orders_json: ParsedOrder[];
   transaction_cost: number;
@@ -22,6 +23,7 @@ export interface CoveredCallPremium {
 
 interface UpsertPremiumData {
   ticker: string;
+  option_symbol: string;
   underlying: string;
   orders_json: ParsedOrder[];
   transaction_cost: number;
@@ -72,19 +74,24 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
     return premiums.find(p => p.ticker.toUpperCase() === ticker.toUpperCase());
   };
   
+  const getPremiumByTickerAndSymbol = (ticker: string, optionSymbol: string): CoveredCallPremium | undefined => {
+    return premiums.find(p => p.ticker.toUpperCase() === ticker.toUpperCase() && p.option_symbol === optionSymbol);
+  };
+  
   // Upsert mutation (insert or update)
   const upsertMutation = useMutation({
     mutationFn: async (data: UpsertPremiumData) => {
       if (!portfolioId) throw new Error('No portfolio selected');
       const payload = {
-        portfolio_id: portfolioId, ticker: data.ticker.toUpperCase(), underlying: data.underlying,
+        portfolio_id: portfolioId, ticker: data.ticker.toUpperCase(), option_symbol: data.option_symbol,
+        underlying: data.underlying,
         orders_json: JSON.parse(JSON.stringify(data.orders_json)),
         transaction_cost: data.transaction_cost, net_per_share: data.net_per_share,
         first_operation_date: data.first_operation_date, last_operation_date: data.last_operation_date,
         contracts_count: data.contracts_count,
       };
       const { data: result, error } = await supabase
-        .from('covered_call_premiums').upsert([payload] as any, { onConflict: 'portfolio_id,ticker' }).select().single();
+        .from('covered_call_premiums').upsert([payload] as any, { onConflict: 'portfolio_id,ticker,option_symbol' }).select().single();
       if (error) throw error;
       return result;
     },
@@ -120,7 +127,7 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
   });
   
   return {
-    premiums, isLoading, refetch, getPremiumByTicker,
+    premiums, isLoading, refetch, getPremiumByTicker, getPremiumByTickerAndSymbol,
     upsertPremium: upsertMutation.mutateAsync, deletePremium: deleteMutation.mutateAsync,
     deleteOrphanedPremiums: deleteOrphanedMutation.mutateAsync,
     isUpserting: upsertMutation.isPending, isDeleting: deleteMutation.isPending,
