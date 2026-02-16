@@ -800,7 +800,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7"
+                  className={`h-7 w-7 ${
+                    savedPremium && savedPremium.orders_json.length > 0
+                      ? 'text-primary hover:text-primary hover:bg-primary/20'
+                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowCalculator(true);
@@ -1179,7 +1183,11 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
+                  className={`h-7 w-7 shrink-0 ${
+                    hasSavedGP
+                      ? 'text-primary hover:text-primary hover:bg-primary/20'
+                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowCalculator(true);
@@ -1459,7 +1467,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
+                  className={`h-7 w-7 shrink-0 ${
+                    hasSavedGP
+                      ? 'text-primary hover:text-primary hover:bg-primary/20'
+                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowCalculator(true);
@@ -1803,7 +1815,11 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
+                  className={`h-7 w-7 shrink-0 ${
+                    hasSavedGP
+                      ? 'text-primary hover:text-primary hover:bg-primary/20'
+                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowCalculator(true);
