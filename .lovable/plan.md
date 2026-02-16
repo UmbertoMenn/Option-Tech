@@ -1,31 +1,28 @@
 
 
-## Fix: Errore salvataggio premi Covered Call
+## Rimuovere la doppia barra di scorrimento nel dialog dei premi
 
 ### Problema
 
-La migrazione precedente ha tentato di rimuovere il vecchio vincolo univoco con:
-```sql
-DROP INDEX IF EXISTS covered_call_premiums_portfolio_id_ticker_key;
-```
-
-Ma il nome reale dell'indice nel database e' `covered_call_premiums_portfolio_ticker_key` (senza `_id_`). Di conseguenza, entrambi gli indici coesistono:
-
-- `covered_call_premiums_portfolio_ticker_key` (portfolio_id, ticker) -- il vecchio, ancora attivo
-- `covered_call_premiums_portfolio_ticker_symbol_key` (portfolio_id, ticker, option_symbol) -- il nuovo
-
-L'upsert fallisce perche' il vecchio vincolo a 2 colonne viene violato prima che il nuovo a 3 colonne possa essere usato.
+Il `DialogContent` ha `max-h-[85vh] overflow-y-auto` (scrollbar esterna) e la tabella operazioni ha un wrapper con `max-h-[250px] overflow-y-auto` (scrollbar interna). Questo crea due barre di scorrimento visibili contemporaneamente.
 
 ### Soluzione
 
-Una singola migrazione SQL per eliminare il vecchio indice con il nome corretto.
+Rimuovere il contenitore con scroll interno sulla tabella operazioni (`max-h-[250px] overflow-y-auto`), lasciando solo lo scroll del dialog esterno. La tabella si espandera' naturalmente all'interno del dialog scrollabile.
 
-### Dettaglio tecnico
+### Modifica
 
-**Migrazione database:**
+**`src/components/derivatives/CallPremiumCalculatorDialog.tsx`** -- linea 412
 
-```sql
-DROP INDEX IF EXISTS covered_call_premiums_portfolio_ticker_key;
+Sostituire:
+```html
+<div className="max-h-[250px] overflow-y-auto">
 ```
 
-Nessuna modifica al codice TypeScript. Il vincolo corretto `covered_call_premiums_portfolio_ticker_symbol_key` e' gia' presente e funzionante.
+Con:
+```html
+<div>
+```
+
+Nessun'altra modifica necessaria. Il dialog esterno gestira' lo scroll di tutto il contenuto come prima.
+
