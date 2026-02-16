@@ -9,6 +9,7 @@ export interface ParsedOrder {
   optionType: 'CALL' | 'PUT' | null;
   orderValue: number; // quantity * avgPrice * 100
   validityDate?: string; // Data Validità in formato DD/MM/YYYY
+  expiryDate?: string; // Scadenza dal file Excel
 }
 
 export interface OrderParseResult {
@@ -30,6 +31,7 @@ const COLUMN_MAPPINGS = {
   quantity: ['Qtà Eseguita', 'qta eseguita', 'QTA ESEGUITA', 'Quantità Eseguita', 'quantità eseguita'],
   callPut: ['Call/Put', 'call/put', 'CALL/PUT', 'CallPut', 'callput'],
   validityDate: ['Data Validità', 'data validità', 'DATA VALIDITÀ', 'Data Validita', 'data validita', 'DATA VALIDITA'],
+  expiryDate: ['Scadenza', 'scadenza', 'SCADENZA'],
 };
 
 function findColumnIndex(headers: string[], possibleNames: string[]): number {
@@ -368,6 +370,7 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
     quantity: findColumnIndex(headers, COLUMN_MAPPINGS.quantity),
     callPut: findColumnIndex(headers, COLUMN_MAPPINGS.callPut),
     validityDate: findColumnIndex(headers, COLUMN_MAPPINGS.validityDate),
+    expiryDate: findColumnIndex(headers, COLUMN_MAPPINGS.expiryDate),
   };
   
   // Validate required columns
@@ -395,6 +398,9 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
     const validityDateRaw = colIndices.validityDate !== -1
       ? String(row[colIndices.validityDate] || '').trim()
       : undefined;
+    const expiryDateRaw = colIndices.expiryDate !== -1
+      ? String(row[colIndices.expiryDate] || '').trim().replace(/^'+/, '') || undefined
+      : undefined;
     
     // Skip rows with no symbol or quantity
     if (!symbol || quantity === 0) continue;
@@ -411,6 +417,7 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       optionType,
       orderValue,
       validityDate: validityDateRaw,
+      expiryDate: expiryDateRaw,
     });
   }
   
@@ -507,27 +514,6 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
  * BABAH6C165 → 165
  * TSLAG6P350 → 350
  */
-/**
- * Extract expiry date from option symbol in MMM/YY format
- * BABAH6C165 → "Aug/26" (H=Aug, 6=2026)
- * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
- */
-export function extractExpiryFromSymbol(symbol: string): string | null {
-  if (!symbol) return null;
-  const monthMap: Record<string, string> = {
-    A: 'Jan', B: 'Feb', C: 'Mar', D: 'Apr', E: 'May', F: 'Jun',
-    G: 'Jul', H: 'Aug', I: 'Sep', J: 'Oct', K: 'Nov', L: 'Dec',
-  };
-  // Pattern: TICKER(1-5 letters) + MONTH(letter) + YEAR(digit) + TYPE(C/P) + STRIKE
-  const match = symbol.match(/^[A-Z]{1,5}([A-L])(\d)[CP]\d+$/i);
-  if (!match) return null;
-  const monthLetter = match[1].toUpperCase();
-  const yearDigit = match[2];
-  const month = monthMap[monthLetter];
-  if (!month) return null;
-  return `${month}/2${yearDigit}`;
-}
-
 export function extractStrikeFromSymbol(symbol: string): number | null {
   const match = symbol.match(/(\d+)$/);
   return match ? parseInt(match[1], 10) : null;
