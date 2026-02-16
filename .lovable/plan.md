@@ -1,50 +1,63 @@
 
 
-## Colorazione condizionale del bottone Calcolatrice
+## Fix: Delete dei premi Covered Call cancella tutti i record dello stesso ticker
 
-### Obiettivo
+### Problema identificato
 
-Quando ci sono dati salvati nella calcolatrice (ordini caricati), il bottone deve essere blu/azzurro. Quando non ci sono dati, deve rimanere grigio con trasparenza e highlight on hover.
-
-### Modifiche
-
-**File: `src/pages/Derivatives.tsx`** -- 4 punti dove appare il bottone Calculator
-
-Per ogni bottone, la classe CSS del `Button` cambia in base alla presenza di dati salvati:
-
-1. **Covered Call (riga ~800-803)**: condizione su `savedPremium && savedPremium.orders_json.length > 0`
-2. **Iron Condor (riga ~1179-1182)**: condizione su `hasSavedGP`
-3. **Double Diagonal (riga ~1459-1462)**: condizione su `hasSavedGP`
-4. **Altre Strategie (riga ~1803-1806)**: condizione su `hasSavedGP`
-
-Per ciascuno, il className del Button diventa:
-
-- **Con dati**: `"h-7 w-7 shrink-0 text-primary hover:text-primary hover:bg-primary/20"` (blu/azzurro)
-- **Senza dati**: `"h-7 w-7 shrink-0 text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted"` (grigio con trasparenza, highlight on hover)
-
-Esempio di codice per ogni bottone:
+Il database contiene **un solo record** per GOOGL (`C320_2026-04-21`), nonostante l'utente dichiari di avere salvato dati per entrambe le Covered Call. La causa piu' probabile e' nel metodo `deletePremium` in `useCoveredCallPremiums.ts`:
 
 ```typescript
-<Button
-  variant="ghost"
-  size="icon"
-  className={`h-7 w-7 shrink-0 ${
-    hasSavedGP
-      ? 'text-primary hover:text-primary hover:bg-primary/20'
-      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
-  }`}
-  onClick={...}
->
-  <Calculator className="w-3.5 h-3.5" />
-</Button>
+// Riga 105 - BUG: cancella TUTTI i record con lo stesso ticker
+.delete().eq('portfolio_id', portfolioId).eq('ticker', ticker.toUpperCase())
 ```
 
-Per la Covered Call (dove non esiste `hasSavedGP` ma esiste `savedPremium`), la condizione sara':
+Quando l'utente clicca "Cancella dati" su una Covered Call GOOGL, il sistema cancella **tutti** i record GOOGL, non solo quello specifico (es. strike 320 Apr/26). Questo spiega perche' il secondo record non e' presente: e' stato cancellato dalla reset del primo, o viceversa.
+
+### Soluzione
+
+**File: `src/hooks/useCoveredCallPremiums.ts`**
+
+1. Modificare `deleteMutation` per accettare sia `ticker` che `optionSymbol` e filtrare su entrambi:
+
 ```typescript
-const hasCalcData = savedPremium && savedPremium.orders_json.length > 0;
+const deleteMutation = useMutation({
+  mutationFn: async ({ ticker, optionSymbol }: { ticker: string; optionSymbol: string }) => {
+    if (!portfolioId) throw new Error('No portfolio selected');
+    const { error } = await supabase
+      .from('covered_call_premiums')
+      .delete()
+      .eq('portfolio_id', portfolioId)
+      .eq('ticker', ticker.toUpperCase())
+      .eq('option_symbol', optionSymbol);
+    if (error) throw error;
+  },
+  ...
+});
 ```
 
-### Nessuna modifica ad altri file
+2. Aggiornare il return per esporre il nuovo tipo:
 
-Solo `Derivatives.tsx` necessita aggiornamenti.
+```typescript
+deletePremium: deleteMutation.mutateAsync,
+// Firma cambia da (ticker: string) a ({ ticker, optionSymbol })
+```
+
+**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
+
+3. Aggiornare `handleReset` per passare anche `optionSymbol`:
+
+```typescript
+const handleReset = async () => {
+  if (ticker && confirm('Cancellare tutti i dati salvati?')) {
+    await deletePremium({ ticker, optionSymbol });
+    // ...reset state
+  }
+};
+```
+
+### Impatto
+
+- Il fix preserva i dati di ogni Covered Call individuale durante le operazioni di reset
+- Nessun impatto su Iron Condor, Double Diagonal o Altre Strategie (usano `optionSymbol` distinti per tipo)
+- L'utente dovra' ri-salvare i dati per la seconda Covered Call GOOGL dopo il fix
 
