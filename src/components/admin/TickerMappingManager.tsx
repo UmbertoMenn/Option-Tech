@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { AlertTriangle, RefreshCw, Trash2, Loader2, Plus, Search, Link2 } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Trash2, Loader2, Plus, Search, Link2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { supabase } from '@/integrations/supabase/client';
 
 export function TickerMappingManager() {
   const { allMappings, unresolvedQuery, upsertMapping, deleteMapping, refetch } = useUnderlyingMappings();
@@ -24,7 +25,7 @@ export function TickerMappingManager() {
   
   // State for delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
-
+  const [isAutoResolving, setIsAutoResolving] = useState(false);
   const unresolvedUnderlyings = unresolvedQuery.data || [];
   const mappings = allMappings.data || [];
   
@@ -95,6 +96,26 @@ export function TickerMappingManager() {
     }
   };
 
+  // Handle auto-resolve all unresolved tickers
+  const handleAutoResolve = async () => {
+    if (unresolvedUnderlyings.length === 0) return;
+    setIsAutoResolving(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-underlying-prices', {
+        body: { underlyings: unresolvedUnderlyings }
+      });
+      if (error) throw error;
+      const resolvedCount = Object.keys(data?.prices || {}).length;
+      toast.success(`Risolti automaticamente ${resolvedCount} su ${unresolvedUnderlyings.length} ticker`);
+      refetch();
+    } catch (err) {
+      console.error('Auto-resolve error:', err);
+      toast.error('Errore nella risoluzione automatica');
+    } finally {
+      setIsAutoResolving(false);
+    }
+  };
+
   // Get source display name
   const getSourceLabel = (source: string | null) => {
     switch (source) {
@@ -137,11 +158,25 @@ export function TickerMappingManager() {
       {unresolvedUnderlyings.length > 0 && (
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              <CardTitle className="text-base">
-                Ticker Non Risolti ({unresolvedUnderlyings.length})
-              </CardTitle>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <CardTitle className="text-base">
+                  Ticker Non Risolti ({unresolvedUnderlyings.length})
+                </CardTitle>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleAutoResolve}
+                disabled={isAutoResolving}
+              >
+                {isAutoResolving ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Wand2 className="w-4 h-4 mr-2" />
+                )}
+                Risolvi Automaticamente
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
