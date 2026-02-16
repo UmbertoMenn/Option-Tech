@@ -20,7 +20,8 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw } from 'lucide-react';
+import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw, Link2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { NotificationSettings } from '@/components/settings/NotificationSettings';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -143,7 +144,7 @@ function extractUniqueTickers(
       }
     });
   
-  // 4. Find unresolved underlyings
+  // 4. Find unresolved underlyings (derivatives)
   const resolvedUnderlyings = new Set(Object.keys(underlyingPrices));
   const unresolved: string[] = [];
   
@@ -165,6 +166,19 @@ function extractUniqueTickers(
     }
   }
   
+  // 5. Track unresolved stocks (no direct ticker AND no mapping)
+  positions
+    .filter(p => p.asset_type === 'stock')
+    .forEach(p => {
+      if (p.ticker) return; // already resolved above
+      const descCleaned = p.description.replace(/^AZ\./i, '').trim();
+      const descNormalized = normalizeName(descCleaned);
+      const hasMapping = allMappings.some(m => normalizeName(m.underlying) === descNormalized);
+      if (!hasMapping && !unresolved.includes(descCleaned)) {
+        unresolved.push(descCleaned);
+      }
+    });
+  
   return { 
     resolved: resolved.sort((a, b) => a.ticker.localeCompare(b.ticker)),
     unresolved: [...new Set(unresolved)].sort()
@@ -173,6 +187,7 @@ function extractUniqueTickers(
 
 export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
   const { isAdminMode } = usePortfolioContext();
+  const navigate = useNavigate();
   const { positions } = usePortfolio();
   const { allMappings: allMappingsQuery } = useUnderlyingMappings();
   const mappings = allMappingsQuery.data ?? [];
@@ -857,7 +872,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     I seguenti sottostanti non hanno un ticker associato e non possono essere usati per gli avvisi di distanza. 
                     Contatta un amministratore per risolvere questi mapping.
                   </p>
-                  <div className="flex flex-wrap gap-2">
+                   <div className="flex flex-wrap gap-2">
                     {unresolvedUnderlyings.map(underlying => (
                       <Badge 
                         key={underlying} 
@@ -868,6 +883,12 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                       </Badge>
                     ))}
                   </div>
+                  {isAdminMode && (
+                    <Button variant="outline" size="sm" onClick={() => { onOpenChange(false); navigate('/admin?tab=tickers'); }}>
+                      <Link2 className="w-4 h-4 mr-2" />
+                      Gestisci Mapping Ticker
+                    </Button>
+                  )}
                 </div>
               )}
               
@@ -968,6 +989,36 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                   <p className="text-xs text-muted-foreground mt-1">
                     Clicca su un ticker per compilarlo automaticamente
                   </p>
+                </div>
+              )}
+              
+              {/* Unresolved underlyings in Price tab */}
+              {unresolvedUnderlyings.length > 0 && (
+                <div className="space-y-3 p-4 border rounded-lg border-amber-500/30 bg-amber-500/5">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    <p className="text-sm font-medium">Ticker non risolti:</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    I seguenti strumenti non hanno un ticker associato e non sono disponibili per gli avvisi di prezzo.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {unresolvedUnderlyings.map(underlying => (
+                      <Badge 
+                        key={underlying} 
+                        variant="outline" 
+                        className="text-amber-500 border-amber-500/30"
+                      >
+                        {underlying}
+                      </Badge>
+                    ))}
+                  </div>
+                  {isAdminMode && (
+                    <Button variant="outline" size="sm" onClick={() => { onOpenChange(false); navigate('/admin?tab=tickers'); }}>
+                      <Link2 className="w-4 h-4 mr-2" />
+                      Gestisci Mapping Ticker
+                    </Button>
+                  )}
                 </div>
               )}
               
