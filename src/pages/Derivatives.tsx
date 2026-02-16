@@ -2207,6 +2207,10 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && underlyingPrice < strikePrice;
   
+  const currentPrice = option.current_price || 0;
+  const avgCost = option.avg_cost || 0;
+  const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+  
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <div 
@@ -2214,7 +2218,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2307,6 +2311,11 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </span>
             {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
               <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+            )}
+            {priceChangePct !== null && (
+              <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+              </span>
             )}
           </div>
       </div>
