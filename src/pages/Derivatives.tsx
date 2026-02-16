@@ -1423,10 +1423,13 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
   const soldCallStrike = soldCall.strike_price || 0;
   const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
   
-  // Calculate P/L = sum of all 4 legs' P/L + saved GP from calculator
-  const portfolioPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
-                  (boughtPut.profit_loss || 0) + (boughtCall.profit_loss || 0);
-  const totalPL = portfolioPL + (hasSavedGP ? savedPremium.net_per_share : 0);
+  // Calculate P/L = saved GP from calculator + market value of open positions
+  const marketValuePositions = 
+    ((boughtPut.current_price || 0) * Math.abs(boughtPut.quantity) * 100) +
+    ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
+    ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
+    ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
+  const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
   const isPositivePL = totalPL >= 0;
   
   // Strikes summary
@@ -1779,8 +1782,12 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const callCount = options.filter(o => o.option.option_type === 'call').length;
   const putCount = options.filter(o => o.option.option_type === 'put').length;
 
-  // Combined P/L: portfolio P/L + saved GP from calculator
-  const combinedPL = totalProfitLoss + (hasSavedGP ? savedPremium.net_per_share : 0);
+  // Combined P/L: saved GP from calculator + market value of open positions
+  const marketValuePositions = options.reduce((sum, o) => {
+    const mv = (o.option.current_price || 0) * o.option.quantity * 100;
+    return sum + mv;
+  }, 0);
+  const combinedPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
