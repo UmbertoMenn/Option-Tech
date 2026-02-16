@@ -83,7 +83,7 @@ function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalVa
 }
 
 // ─── Breakdown Bar Chart ──────────────────────────────────────
-function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownItem[]; finalValue: number }) {
+function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
   const barData = useMemo(() => {
     return items
       .filter(item => Math.abs(item.value) > 0.01)
@@ -99,6 +99,8 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
       }));
   }, [items]);
 
+  const totalDerivatives = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
+
   if (barData.length === 0) {
     return (
       <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
@@ -107,15 +109,25 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
     );
   }
 
-  const chartHeight = Math.max(120, barData.length * 36 + 30);
-
   return (
     <div className="flex flex-col items-center">
-      <div className="w-full" style={{ height: chartHeight }}>
+      <div className="w-full" style={{ height: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={barData} layout="vertical" margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+          <BarChart data={barData} margin={{ left: 10, right: 10, top: 5, bottom: 60 }}>
             <XAxis
+              type="category"
+              dataKey="name"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }}
+              angle={-35}
+              textAnchor="end"
+              interval={0}
+            />
+            <YAxis
               type="number"
+              axisLine={false}
+              tickLine={false}
               tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
               tickFormatter={(v: number) => {
                 const abs = Math.abs(v);
@@ -123,16 +135,6 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
                 if (abs >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
                 return v.toFixed(0);
               }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              type="category"
-              dataKey="name"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
-              width={100}
             />
             <RechartsTooltip
               cursor={{ fill: 'hsl(var(--muted-foreground) / 0.08)' }}
@@ -161,7 +163,7 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
                 );
               }}
             />
-            <Bar dataKey="value" barSize={20} radius={[0, 4, 4, 0]}>
+            <Bar dataKey="value" barSize={20} radius={[4, 4, 0, 0]}>
               {barData.map((entry, index) => (
                 <Cell key={index} fill={entry.fill} />
               ))}
@@ -169,7 +171,7 @@ function NettingBreakdownChart({ items, finalValue }: { items: NettingBreakdownI
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-2xl font-bold text-blue-500 mt-2">{formatEUR(finalValue)}</p>
+      <p className="text-2xl font-bold text-blue-500 mt-2">{formatEUR(totalDerivatives)}</p>
     </div>
   );
 }
@@ -322,7 +324,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             </CarouselItem>
             {/* Slide 2: Pie chart breakdown */}
             <CarouselItem>
-              <NettingBreakdownChart items={breakdownItems} finalValue={finalValue} />
+              <NettingBreakdownChart items={breakdownItems} />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
