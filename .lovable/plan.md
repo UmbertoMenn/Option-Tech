@@ -1,34 +1,31 @@
 
 
-## Fix: la colonna "Scadenza" non viene trovata nel file Excel
+## Eliminare la barra di scorrimento orizzontale allargando la finestra del calcolatore premi
 
 ### Problema
 
-Il file Excel degli ordini ha la colonna chiamata **"Data Scadenza"** (non "Scadenza"). Il mapping attuale cerca solo `Scadenza`, `scadenza`, `SCADENZA` e quindi non trova mai la colonna -- risultato: tutti i valori restano `undefined` e la tabella mostra "---".
+La finestra del dialog "Calcolatrice Premi" utilizza `max-w-lg` (32rem / 512px), insufficiente per contenere la tabella operazioni con la nuova colonna "Scad." senza overflow orizzontale.
 
 ### Soluzione
 
-Aggiungere le varianti "Data Scadenza" al mapping della colonna `expiryDate`.
+Aumentare la larghezza massima del dialog a `max-w-2xl` (42rem / 672px), sufficiente per mostrare tutte le colonne senza barra di scorrimento orizzontale.
 
 ### Dettaglio tecnico
 
-**`src/lib/orderFileParser.ts`** -- linea 34
+**`src/components/derivatives/CallPremiumCalculatorDialog.tsx`** -- linea 233
 
 Sostituire:
-```typescript
-expiryDate: ['Scadenza', 'scadenza', 'SCADENZA'],
 ```
-
+max-w-lg
+```
 Con:
-```typescript
-expiryDate: ['Scadenza', 'scadenza', 'SCADENZA', 'Data Scadenza', 'data scadenza', 'DATA SCADENZA'],
 ```
-
-Nessun'altra modifica necessaria. Il parser trovera' l'indice corretto e il valore verra' letto e mostrato nella colonna "Scad." della tabella operazioni.
+max-w-2xl
+```
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/lib/orderFileParser.ts` | Aggiungere varianti "Data Scadenza" nel mapping `expiryDate` |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Cambiare `max-w-lg` in `max-w-2xl` nella classe di `DialogContent` |
 
