@@ -1,53 +1,39 @@
 
 
-## Fix: Allineare la normalizzazione tra hook e Edge Function
+## Cambiare il briefing giornaliero alle 10:00 italiane
 
-### Problema
+### Modifiche necessarie
 
-La Edge Function `fetch-underlying-prices` salva i mapping con nomi normalizzati che rimuovono suffissi corporate (`INC`, `CORP`, `LTD`, `LLC`, `PLC`, `CO`, `THE`). Ma l'hook `useUnderlyingMappings` usa una normalizzazione diversa (solo lowercase + rimuove caratteri speciali) per confrontare i candidati con i mapping esistenti.
+**1. Edge Function `supabase/functions/daily-briefing/index.ts`**
 
-Esempio concreto dai log:
-- Posizione nel DB: `"SOFI TECHNOLOGIES INC"`
-- Mapping salvato dalla Edge Function: `"SOFI TECHNOLOGIES"` (senza INC)
-- Normalizzazione hook: `"sofitechnologiesinc"` vs `"sofitechnologies"` -- **non corrispondono**
+- Rinominare la funzione guard da `isItalianNoon` a `isItalian10AM`
+- Cambiare il controllo da `italianHour === 12` a `italianHour === 10`
+- Aggiornare i commenti e il messaggio di log
+- Aggiornare il testo nell'email da "Generato automaticamente alle 12:00" a "Generato automaticamente alle 10:00"
 
-Questo succede per tutti i 10 ticker risolti: la Edge Function li salva correttamente, ma l'hook non li riconosce come risolti perche' la funzione di normalizzazione e' diversa.
+**2. Cron job nel database**
 
-### Soluzione
+Il cron attuale e' `0 10,11 * * 1-5` (10:00 e 11:00 UTC per coprire CET/CEST quando l'ora italiana era 12).
 
-**File: `src/hooks/useUnderlyingMappings.ts`**
+Per le 10:00 italiane:
+- CET (inverno): 10:00 IT = 09:00 UTC
+- CEST (estate): 10:00 IT = 08:00 UTC
 
-Aggiornare la funzione `normalize` nella `unresolvedQuery` per replicare la stessa logica della Edge Function:
+Nuovo schedule: `0 8,9 * * 1-5` (08:00 e 09:00 UTC, la guard nella Edge Function filtra l'esecuzione corretta)
 
+Aggiornamento via SQL:
 ```text
-// PRIMA (attuale):
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-// DOPO (allineata con Edge Function):
-const normalize = (s: string) =>
-  s.toUpperCase()
-    .replace(/[.,]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\bINC\b/g, '')
-    .replace(/\bCORP\b/g, '')
-    .replace(/\bLTD\b/g, '')
-    .replace(/\bLLC\b/g, '')
-    .replace(/\bPLC\b/g, '')
-    .replace(/\bCO\b/g, '')
-    .replace(/\bTHE\b/g, '')
-    .replace(/[^A-Z0-9]/g, '')
-    .trim();
+SELECT cron.alter_job(11, schedule := '0 8,9 * * 1-5');
 ```
 
-Questo assicura che `"SOFI TECHNOLOGIES INC"` e `"SOFI TECHNOLOGIES"` producano lo stesso valore normalizzato (`"SOFITECHNOLOGIES"`), permettendo al confronto di funzionare correttamente.
+### Dettaglio tecnico
 
-### File da modificare
-
-| File | Modifica |
+| File/Risorsa | Modifica |
 |---|---|
-| `src/hooks/useUnderlyingMappings.ts` | Aggiornare la funzione `normalize` (riga 80) per rimuovere anche i suffissi corporate (INC, CORP, LTD, LLC, PLC, CO, THE) prima del confronto |
+| `supabase/functions/daily-briefing/index.ts` | Guard: `italianHour === 10`, label email aggiornata |
+| Cron job (ID 11) | Schedule da `0 10,11 * * 1-5` a `0 8,9 * * 1-5` |
 
 ### Risultato atteso
 
-- Dopo aver cliccato "Risolvi Automaticamente", i ticker risolti scompaiono dalla lista "Non Risolti"
-- I mapping salvati dalla Edge Function vengono riconosciuti correttamente anche se il nome nel DB contiene suffissi come INC, CORP, ecc.
+Il briefing arriva ogni giorno lavorativo alle 10:00 ora italiana, sia in orario CET che CEST.
+
