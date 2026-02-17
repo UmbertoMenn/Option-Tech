@@ -19,7 +19,6 @@ export interface HistoricalDataInput {
   snapshot_date: string;
   total_value: number;
   netting_total: number;
-  netting_ex_cc: number;
   netting_ex_cc_np: number;
   deposits: number;
   average_balance: number;
