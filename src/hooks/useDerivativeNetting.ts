@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Position, PortfolioSummary } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
+import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 
 export interface NettingBreakdownDetail {
   positionId: string;
@@ -37,7 +38,8 @@ function getEffectiveExchangeRate(position: Position): number {
 export function useDerivativeNetting(
   positions: Position[],
   summary: PortfolioSummary | null,
-  overrides: DerivativeOverride[] = []
+  overrides: DerivativeOverride[] = [],
+  underlyingPrices?: Record<string, UnderlyingPrice>
 ): NettingResult {
   return useMemo(() => {
     const emptyResult: NettingResult = {
@@ -105,6 +107,16 @@ export function useDerivativeNetting(
 
       totalNetting += nettingValue;
 
+      // Helper: resolve underlying price with fallback to underlyingPrices
+      const resolveUnderlyingPrice = (stock: Position | null | undefined): number => {
+        let price = stock?.snapshot_price ?? stock?.current_price ?? 0;
+        if (price <= 0 && underlyingPrices) {
+          const key = derivative.underlying || derivative.description || '';
+          price = underlyingPrices[key]?.price ?? 0;
+        }
+        return price;
+      };
+
       const coveredCall = coveredCallMap.get(derivative.id);
       const nakedPut = nakedPutMap.get(derivative.id);
 
@@ -129,7 +141,7 @@ export function useDerivativeNetting(
         }
       } else if (nakedPut) {
         const strikePrice = derivative.strike_price ?? 0;
-        const underlyingPrice = nakedPut.underlying?.snapshot_price ?? nakedPut.underlying?.current_price ?? 0;
+        const underlyingPrice = resolveUnderlyingPrice(nakedPut.underlying);
 
         nettingExCoveredCall += nettingValue;
 
@@ -204,7 +216,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary.totalValue + nettingExCCAndNP,
       breakdown,
     };
-  }, [positions, summary, overrides]);
+  }, [positions, summary, overrides, underlyingPrices]);
 }
 
 /**
@@ -216,7 +228,8 @@ export function getBreakdownForViewMode(
   viewMode: 'netting_total' | 'netting_ex_cc' | 'netting_ex_cc_np',
   positions: Position[],
   summary: PortfolioSummary | null,
-  overrides: DerivativeOverride[] = []
+  overrides: DerivativeOverride[] = [],
+  underlyingPrices?: Record<string, UnderlyingPrice>
 ): { items: NettingBreakdownItem[]; finalValue: number } {
   const baseValue = summary?.totalValue ?? 0;
 
@@ -292,7 +305,11 @@ export function getBreakdownForViewMode(
 
         if (npEntry) {
           const strike = npEntry.option.strike_price ?? 0;
-          const underlyingPrice = npEntry.underlying?.snapshot_price ?? npEntry.underlying?.current_price ?? 0;
+          let underlyingPrice = npEntry.underlying?.snapshot_price ?? npEntry.underlying?.current_price ?? 0;
+          if (underlyingPrice <= 0 && underlyingPrices) {
+            const key = npEntry.option.underlying || npEntry.option.description || '';
+            underlyingPrice = underlyingPrices[key]?.price ?? 0;
+          }
           const exchangeRate = getEffectiveExchangeRate(npEntry.option);
           if (underlyingPrice > 0 && strike >= underlyingPrice) {
             const contracts = Math.abs(npEntry.option.quantity);
