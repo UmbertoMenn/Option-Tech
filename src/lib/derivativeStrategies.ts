@@ -1069,6 +1069,7 @@ export const SPECIAL_ALIASES: Record<string, string[]> = {
   ENI: ['ENI', 'ENI SPA', 'ENI STOCK', 'ENI - STOCK'],
   APPLE: ['APPLE', 'AAPL', 'APPLE INC', 'APPLE COMPUTER', 'APPLE COMPUTER INC'],
   JPMORGAN: ['JPMORGAN', 'JP MORGAN', 'J.P. MORGAN', 'JPMORGAN CHASE', 'JP MORGAN CHASE', 'J.P. MORGAN CHASE', 'JPM'],
+  AMAZON: ['AMAZON', 'AMZN', 'AMAZON COM', 'AMAZON.COM', 'AMAZON.COM.INC', 'AMAZON COM INC'],
 };
 
 /**
@@ -1079,7 +1080,9 @@ export function normalizeForMatching(text: string): string {
     .toUpperCase()
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
     .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
-    .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // Collapse dotted abbreviations: "J.P." -> "JP"
+    .replace(/([A-Z]{3,})\.([A-Z])/g, '$1 $2')  // Dots between long words become spaces: "AMAZON.COM" -> "AMAZON COM"
+    .replace(/([A-Z])\.([A-Z]{3,})/g, '$1 $2')  // Dots before long words become spaces: "X.AMAZON" -> "X AMAZON"
+    .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // Collapse short dotted abbreviations: "J.P." -> "JP"
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
     .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '') // Remove common suffixes including ADR, SPA
     .replace(/\s+/g, ' ')  // Normalize spaces AFTER suffix removal to avoid multiple spaces
