@@ -120,17 +120,12 @@ export function AdminPanel() {
     e.preventDefault();
     
     try {
-      const { error } = await supabase.auth.signUp({
-        email: newUserEmail,
-        password: newUserPassword,
-        options: {
-          data: {
-            full_name: newUserName,
-          },
-        },
+      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+        body: { email: newUserEmail, password: newUserPassword, full_name: newUserName },
       });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       toast.success('Utente creato!');
       setShowAddDialog(false);

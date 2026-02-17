@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.update-option-prices-cron]
 verify_jwt = false
+
+[functions.admin-create-user]
+verify_jwt = false
