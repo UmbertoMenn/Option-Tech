@@ -225,7 +225,6 @@ export function Dashboard() {
                             snapshot_date: portfolio.snapshot_date,
                             total_value: summary?.totalValue ?? 0,
                             netting_total: netting.nettingTotal,
-                            netting_ex_cc: netting.nettingExCoveredCall,
                             netting_ex_cc_np: netting.nettingExCCAndNP,
                             deposits: 0,
                             average_balance: 0,
@@ -286,7 +285,6 @@ export function Dashboard() {
                         snapshot_date: portfolio.snapshot_date,
                         total_value: summary?.totalValue ?? 0,
                         netting_total: netting.nettingTotal,
-                        netting_ex_cc: netting.nettingExCoveredCall,
                         netting_ex_cc_np: netting.nettingExCCAndNP,
                         deposits: 0,
                         average_balance: 0,
@@ -414,7 +412,6 @@ export function Dashboard() {
                     isLoading={isUpserting}
                     currentTotalValue={summary?.totalValue ?? 0}
                     currentNettingTotal={netting.nettingTotal}
-                    currentNettingExCC={netting.nettingExCoveredCall}
                     currentNettingExCCNP={netting.nettingExCCAndNP}
                     currentEquityExposurePct={equityExposurePct}
                     currentUsdExposurePct={usdExposurePct}

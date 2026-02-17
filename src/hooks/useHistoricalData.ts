@@ -257,7 +257,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
       const upsertPayload = {
         portfolio_id: portfolioId, snapshot_date: entry.snapshot_date,
         total_value: entry.total_value, netting_total: entry.netting_total,
-        netting_ex_cc: entry.netting_ex_cc, netting_ex_cc_np: entry.netting_ex_cc_np,
+        netting_ex_cc: entry.netting_ex_cc_np, netting_ex_cc_np: entry.netting_ex_cc_np,
         deposits: entry.deposits, average_balance: entry.average_balance,
         equity_exposure_pct: entry.equity_exposure_pct, usd_exposure_pct: entry.usd_exposure_pct,
         ...(entry.id && { id: entry.id }),
