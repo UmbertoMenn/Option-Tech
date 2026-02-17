@@ -108,28 +108,9 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
   });
   
-  // Delete multiple tickers not in the active list
-  const deleteOrphanedMutation = useMutation({
-    mutationFn: async (activeTickers: string[]) => {
-      if (!portfolioId) throw new Error('No portfolio selected');
-      const upperTickers = activeTickers.map(t => t.toUpperCase());
-      const { data: existing, error: fetchError } = await supabase
-        .from('covered_call_premiums').select('ticker').eq('portfolio_id', portfolioId);
-      if (fetchError) throw fetchError;
-      const tickersToDelete = (existing || []).map(row => row.ticker).filter(ticker => !upperTickers.includes(ticker.toUpperCase()));
-      if (tickersToDelete.length === 0) return { deleted: 0 };
-      const { error: deleteError } = await supabase
-        .from('covered_call_premiums').delete().eq('portfolio_id', portfolioId).in('ticker', tickersToDelete);
-      if (deleteError) throw deleteError;
-      return { deleted: tickersToDelete.length };
-    },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['covered-call-premiums', portfolioId] }); },
-  });
-  
   return {
     premiums, isLoading, refetch, getPremiumByTicker, getPremiumByTickerAndSymbol,
     upsertPremium: upsertMutation.mutateAsync, deletePremium: deleteMutation.mutateAsync,
-    deleteOrphanedPremiums: deleteOrphanedMutation.mutateAsync,
     isUpserting: upsertMutation.isPending, isDeleting: deleteMutation.isPending,
   };
 }
