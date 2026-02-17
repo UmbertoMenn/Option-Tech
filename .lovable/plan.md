@@ -1,38 +1,45 @@
 
-## Fix Calcolo Call Non Coperte nella Vista Aggregata
 
-### Problema Identificato
+## Fix 7 Call ALPHABET Non Coperte -- Usare getCanonicalKey
 
-La card "Posizioni da monitorare" nella pagina Strategie Derivati usa una funzione `normalizeForMatching` locale e semplificata (in `DerivativesSummaryCard.tsx`, riga 26) diversa da quella completa usata nel motore di classificazione (`derivativeStrategies.ts`, riga 1078).
+### Problema
 
-Quando si aggregano posizioni di piu utenti, lo stesso titolo ha descrizioni diverse tra broker:
-- `"ALIBABA GROUP HOLDING LTD SPON ADS EACH REP 8 ORD SHS"` (utente A)
-- `"AZ.ALIBABA GROUP HOLDING LTD"` (utente B)
+La funzione `normalizeForMatching` produce chiavi diverse per lo stesso sottostante:
 
-Il normalizzatore semplice produce chiavi diverse per lo stesso titolo, causando:
-- Azioni conteggiate in bucket separati
-- Call vendute assegnate a un terzo bucket
-- Risultato: false "call non coperte" (7 invece di 1)
-- Adobe non appare come non coperta perche le sue chiavi cadono in un bucket con azioni sufficienti
+| Posizione | Normalizzata | Chiave |
+|-----------|-------------|--------|
+| `ALPHABET INC` (stock) | `ALPHABET` | ALPHABET |
+| `AZ.ALPHABET INC-CL A` (stock) | `ALPHABET CL A` | ALPHABET CL A |
+| `AZ.ALPHABET INC-CL C` (stock) | `ALPHABET CL C` | ALPHABET CL C |
+| `GOOGLE INC. (A)` (opzione) | `GOOGLE` | GOOGLE |
+| `GOOGLE INC. (C)` (opzione) | `GOOGLE` | GOOGLE |
+
+Risultato: le azioni finiscono in 3 bucket separati ("ALPHABET", "ALPHABET CL A", "ALPHABET CL C"), le call vendute in un quarto ("GOOGLE"). Nessun bucket ha sia azioni che call, quindi tutte le call risultano "non coperte".
+
+Il sistema `SPECIAL_ALIASES` in `derivativeStrategies.ts` gia gestisce GOOGLE = ALPHABET, ma la card **non lo usa**.
+
+Un secondo problema: "CL A" e "CL C" non vengono rimossi (la regex rimuove solo "CLASS A", non "CL A"), frammentando ulteriormente le azioni.
 
 ### Soluzione
 
-Sostituire la funzione `normalizeForMatching` locale in `DerivativesSummaryCard.tsx` con l'import della funzione completa da `derivativeStrategies.ts`, gia esportata e usata dal motore di classificazione. Questo garantisce che le chiavi di aggregazione siano identiche tra classificazione e riepilogo.
+Due modifiche:
+
+1. **Nella card** (`DerivativesSummaryCard.tsx`): sostituire ogni chiamata a `normalizeForMatching(...)` con una nuova funzione helper locale che prima prova `getCanonicalKey(text)` e, se non trova un alias, ricade su `normalizeForMatching(text)`. Questo unifica GOOGLE e ALPHABET in un unico bucket.
+
+2. **Nella funzione `normalizeForMatching`** (`derivativeStrategies.ts`): aggiungere `CL` alla lista dei suffissi rimossi nel regex, cosi "ALPHABET CL A" e "ALPHABET CL C" diventano entrambi "ALPHABET".
 
 ### File modificati
 
 | File | Modifica |
 |------|----------|
-| `src/components/derivatives/DerivativesSummaryCard.tsx` | Rimuovere la funzione `normalizeForMatching` locale (righe 26-32) e importarla da `@/lib/derivativeStrategies` |
+| `src/lib/derivativeStrategies.ts` | Aggiungere `CL` alla regex dei suffissi in `normalizeForMatching` |
+| `src/components/derivatives/DerivativesSummaryCard.tsx` | Importare `getCanonicalKey` e creare una funzione helper `getMatchingKey(text)` che usa `getCanonicalKey` con fallback su `normalizeForMatching`. Usarla al posto di `normalizeForMatching` in tutto il calcolo uncovered calls |
 
-### Dettaglio Tecnico
+### Risultato atteso
 
-La funzione completa in `derivativeStrategies.ts` gestisce:
-- Rimozione prefisso `AZ.`
-- Punti tra parole lunghe trattati come spazi (`AMAZON.COM` -> `AMAZON COM`)
-- Abbreviazioni con punto collassate (`J.P.` -> `JP`)
-- Parentesi rimosse (`(OHIO)`)
-- Suffissi corporativi rimossi ovunque nel testo, non solo in coda (`INC`, `CORP`, `LTD`, `PLC`, `ADR`, `SPA`, ecc.)
-- Normalizzazione spazi multipli
+Dopo la modifica:
+- Tutte le azioni ALPHABET (900 totali) finiscono nel bucket "ALPHABET" (9 contratti coperti)
+- Tutte le call vendute GOOGLE finiscono nello stesso bucket "ALPHABET"
+- Le 9 call vendute sono tutte coperte dalle 900 azioni
+- Il conteggio call non coperte per ALPHABET/GOOGLE passa da 7 a 0
 
-Dopo la modifica, tutte le varianti di "ALIBABA" produrranno la stessa chiave normalizzata, e il conteggio azioni/call sara corretto. Il risultato atteso sara 1 sola call non coperta (Adobe dell'utente senza azioni ADBE).
