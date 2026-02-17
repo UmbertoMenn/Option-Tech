@@ -5,15 +5,17 @@ interface ExcelRow {
   [key: string]: string | number | null | undefined;
 }
 
-// Pattern per riconoscere ETF dai principali emittenti
-const ETF_ISSUER_PATTERNS = [
-  'ETF', 'UCITS',
+// Short patterns that require word boundary matching (to avoid false positives like "NETFLIX" matching "ETF")
+const ETF_WORD_BOUNDARY_PATTERNS = ['ETF', 'UCITS', 'VNG', 'SSG', 'WTR'];
+
+// Longer patterns safe for substring matching
+const ETF_SUBSTRING_PATTERNS = [
   // iShares (BlackRock)
   'ISHARES', 'ISHSIII', 'ISHSIV', 'ISHSV', 'ISHSVII',
   // Vanguard
-  'VANGUARD', 'VNG',
+  'VANGUARD',
   // State Street (SPDR)
-  'SPDR', 'SSG',
+  'SPDR',
   // Lyxor (Amundi)
   'LYXOR', 'AMUNDI',
   // Xtrackers (DWS)
@@ -23,7 +25,7 @@ const ETF_ISSUER_PATTERNS = [
   // VanEck
   'VANECK',
   // WisdomTree
-  'WISDOMTREE', 'WTR',
+  'WISDOMTREE',
   // UBS
   'UBS ETF',
   // HSBC
@@ -46,12 +48,21 @@ function isLikelyETFByISIN(isin: string | undefined): boolean {
 
 /**
  * Advanced ETF detection based on description and ISIN
+ * Uses word boundary for short patterns to avoid false positives (e.g. NETFLIX)
  */
 function isETF(description: string, isin?: string): boolean {
   const descUpper = description.toUpperCase();
   
-  // Check emitter patterns
-  for (const pattern of ETF_ISSUER_PATTERNS) {
+  // Check short patterns with word boundary
+  for (const pattern of ETF_WORD_BOUNDARY_PATTERNS) {
+    const regex = new RegExp(`\\b${pattern}\\b`);
+    if (regex.test(descUpper)) {
+      return true;
+    }
+  }
+  
+  // Check longer emitter patterns with substring
+  for (const pattern of ETF_SUBSTRING_PATTERNS) {
     if (descUpper.includes(pattern)) {
       return true;
     }
