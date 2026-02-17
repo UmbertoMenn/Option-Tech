@@ -1127,16 +1127,35 @@ export function getCanonicalKey(text: string): string | null {
 export function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined {
   const stocksOnly = stocks.filter(s => s.asset_type === 'stock');
 
+  const result = matchOptionToStocks(option, stocksOnly);
+  if (result) return result;
+
+  // Fallback: try ETF positions with US ISIN (likely misclassified stocks)
+  const usEtfs = stocks.filter(s => s.asset_type === 'etf' && s.isin?.startsWith('US'));
+  if (usEtfs.length > 0) {
+    const fallback = matchOptionToStocks(option, usEtfs);
+    if (fallback) {
+      console.log(`[findUnderlyingStock] Fallback match on US ETF: ${fallback.description} (ISIN: ${fallback.isin})`);
+      return fallback;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Core matching logic extracted for reuse between stocks and ETF fallback
+ */
+function matchOptionToStocks(option: Position, candidates: Position[]): Position | undefined {
   const optionText = `${option.underlying ?? ''} ${option.description ?? ''} ${option.ticker ?? ''}`;
   const optionNormalized = normalizeForMatching(optionText);
 
   // 0) Hard rule: GOOGLE/GOOG/GOOGL must always map to ALPHABET.
-  // This must override any broker mis-parsing of the `underlying` field.
   const googleSignalText = `${option.description ?? ''} ${option.ticker ?? ''} ${option.underlying ?? ''}`;
   const googleSignal = normalizeForMatching(googleSignalText);
   const isGoogleLike = /\b(GOOGLE|GOOG|GOOGL)\b/.test(googleSignal);
   if (isGoogleLike) {
-    const alphabetStock = stocksOnly.find(stock => {
+    const alphabetStock = candidates.find(stock => {
       const stockText = `${stock.description ?? ''} ${stock.ticker ?? ''}`;
       const stockNorm = normalizeForMatching(stockText);
       return /\bALPHABET\b/.test(stockNorm) || /\b(GOOG|GOOGL|GOOGLE)\b/.test(stockNorm);
@@ -1147,7 +1166,7 @@ export function findUnderlyingStock(option: Position, stocks: Position[]): Posit
   // 1) Special-case GOOGLE/ALPHABET equivalence
   const optionCanonical = getCanonicalKey(optionText);
   if (optionCanonical) {
-    const canonicalMatch = stocksOnly.find(stock => {
+    const canonicalMatch = candidates.find(stock => {
       const stockCanonical = getCanonicalKey(stock.description) || getCanonicalKey(stock.ticker || '');
       return stockCanonical === optionCanonical;
     });
@@ -1160,7 +1179,7 @@ export function findUnderlyingStock(option: Position, stocks: Position[]): Posit
   // Also try collapsed version for cases like "JP MORGAN" -> "JPMORGAN"
   const optionCollapsed = collapseShortTokens(optionNormalized);
 
-  for (const stock of stocksOnly) {
+  for (const stock of candidates) {
     const stockName = normalizeForMatching(stock.description);
     const stockTokens = stockName.split(' ').filter(w => w.length > 2);
     const stockCollapsed = collapseShortTokens(stockName);
@@ -1177,14 +1196,12 @@ export function findUnderlyingStock(option: Position, stocks: Position[]): Posit
     // Collapsed name matching (for "JP MORGAN" vs "JPMORGAN")
     if (stockCollapsed && optionCollapsed.includes(stockCollapsed)) return stock;
     if (optionCollapsed && stockCollapsed && stockCollapsed.includes(optionCollapsed.split(' ')[0])) {
-      // Check if primary token matches
       const optionPrimaryToken = optionCollapsed.split(' ')[0];
       if (optionPrimaryToken.length >= 5 && stockCollapsed.startsWith(optionPrimaryToken)) return stock;
     }
 
     if (stockTokens.length > 0) {
       const shared = stockTokens.filter(t => optionTokens.includes(t)).length;
-      // For single-word stock names (e.g. NETEASE), require only 1 match
       const required = stockTokens.length === 1 ? 1 : Math.min(2, stockTokens.length);
       if (shared >= required) return stock;
     }
