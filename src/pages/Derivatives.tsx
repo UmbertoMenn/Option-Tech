@@ -1141,8 +1141,14 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
     ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
     ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
     ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
-  const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
-  const isPositivePL = totalPL >= 0;
+  const avgCostValue = 
+    ((soldPut.avg_cost || 0) * Math.abs(soldPut.quantity) * 100) +
+    ((soldCall.avg_cost || 0) * Math.abs(soldCall.quantity) * 100) +
+    ((boughtPut.avg_cost || 0) * Math.abs(boughtPut.quantity) * 100) +
+    ((boughtCall.avg_cost || 0) * Math.abs(boughtCall.quantity) * 100);
+  const totalPL = hasSavedGP
+    ? savedPremium.net_per_share + marketValuePositions
+    : avgCostValue + marketValuePositions;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
@@ -1286,14 +1292,13 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           {/* Col: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
                 <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Profit/Loss: somma dei P/L delle 4 gambe
-                {hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
+              <p>{hasSavedGP ? 'Profit/Loss: flussi di cassa + valore di mercato' : 'P/L calcolato senza operazioni storiche caricate'}</p>
             </TooltipContent>
           </Tooltip>
       </div>
@@ -1364,7 +1369,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           {/* Summary */}
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
             <span className="text-muted-foreground">Profit/Loss:</span>
-            <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+            <span className={`font-semibold ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`}>
               {formatCurrency(totalPL, legCurrency)}
             </span>
           </div>
@@ -1415,8 +1420,14 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
     ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
     ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
     ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
-  const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
-  const isPositivePL = totalPL >= 0;
+  const avgCostValue = 
+    ((soldPut.avg_cost || 0) * Math.abs(soldPut.quantity) * 100) +
+    ((soldCall.avg_cost || 0) * Math.abs(soldCall.quantity) * 100) +
+    ((boughtPut.avg_cost || 0) * Math.abs(boughtPut.quantity) * 100) +
+    ((boughtCall.avg_cost || 0) * Math.abs(boughtCall.quantity) * 100);
+  const totalPL = hasSavedGP
+    ? savedPremium.net_per_share + marketValuePositions
+    : avgCostValue + marketValuePositions;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
@@ -1561,13 +1572,13 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
            {/* Col 10: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${isPositivePL ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
                 <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Profit/Loss: somma dei P/L delle 4 gambe{hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
+              <p>{hasSavedGP ? 'Profit/Loss: flussi di cassa + valore di mercato' : 'P/L calcolato senza operazioni storiche caricate'}</p>
             </TooltipContent>
           </Tooltip>
       </div>
@@ -1645,7 +1656,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
           {/* Summary */}
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
             <span className="text-muted-foreground">Profit/Loss:</span>
-            <span className={`font-semibold ${isPositivePL ? 'text-green-500' : 'text-red-500'}`}>
+            <span className={`font-semibold ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`}>
               {formatCurrency(totalPL, legCurrency)}
             </span>
           </div>
