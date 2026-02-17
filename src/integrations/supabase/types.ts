@@ -381,6 +381,38 @@ export type Database = {
           },
         ]
       }
+      dismissed_unresolved_tickers: {
+        Row: {
+          created_at: string | null
+          id: string
+          portfolio_id: string
+          underlying: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          portfolio_id: string
+          underlying: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          portfolio_id?: string
+          underlying?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dismissed_unresolved_tickers_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       etf_allocations: {
         Row: {
           country_allocations: Json

@@ -20,7 +20,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw, Link2 } from 'lucide-react';
+import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw, Link2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { NotificationSettings } from '@/components/settings/NotificationSettings';
 import { toast } from 'sonner';
@@ -55,6 +55,7 @@ import { usePortfolio } from '@/hooks/usePortfolio';
 import { Position } from '@/types/portfolio';
 import { useUnderlyingMappings, UnderlyingMapping } from '@/hooks/useUnderlyingMappings';
 import { useStrategyAlertToggles, useUpsertStrategyAlertToggle, useBatchUpsertStrategyAlertToggles } from '@/hooks/useStrategyAlertToggles';
+import { useDismissedUnresolvedTickers, useDismissUnresolvedTicker } from '@/hooks/useDismissedUnresolvedTickers';
 
 // Normalize name for matching (same logic as useUnderlyingPrices)
 function normalizeName(name: string): string {
@@ -186,7 +187,7 @@ function extractUniqueTickers(
 }
 
 export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
-  const { isAdminMode } = usePortfolioContext();
+  const { isAdminMode, selectedPortfolioId } = usePortfolioContext();
   const navigate = useNavigate();
   const { positions } = usePortfolio();
   const { allMappings: allMappingsQuery } = useUnderlyingMappings();
@@ -207,6 +208,10 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const createPriceAlertMutation = useCreatePriceAlert();
   const deletePriceAlertMutation = useDeletePriceAlert();
   const togglePriceAlertMutation = useTogglePriceAlert();
+  
+  // Dismissed unresolved tickers
+  const { data: dismissedTickers = [] } = useDismissedUnresolvedTickers(selectedPortfolioId);
+  const dismissTickerMutation = useDismissUnresolvedTicker();
   
   // State for reset confirmation dialog
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -230,10 +235,21 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [tickerValidation, setTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
   
   // Extract available tickers from strategies + stock positions
-  const { resolved: availableTickers, unresolved: unresolvedUnderlyings } = useMemo(() => 
+  const { resolved: availableTickers, unresolved: unresolvedUnderlyingsRaw } = useMemo(() => 
     extractUniqueTickers(categories, underlyingPrices, positions, mappings),
     [categories, underlyingPrices, positions, mappings]
   );
+  
+  // Filter out dismissed tickers
+  const unresolvedUnderlyings = useMemo(() => 
+    unresolvedUnderlyingsRaw.filter(u => !dismissedTickers.includes(u)),
+    [unresolvedUnderlyingsRaw, dismissedTickers]
+  );
+
+  const handleDismissTicker = useCallback((underlying: string) => {
+    if (!selectedPortfolioId) return;
+    dismissTickerMutation.mutate({ portfolioId: selectedPortfolioId, underlying });
+  }, [selectedPortfolioId, dismissTickerMutation]);
 
   // Build strategy items for "Per Strategia" tab using same key logic as strategyCache.ts
   const strategyItems = useMemo(() => {
@@ -877,9 +893,16 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                       <Badge 
                         key={underlying} 
                         variant="outline" 
-                        className="text-amber-500 border-amber-500/30"
+                        className="text-amber-500 border-amber-500/30 flex items-center gap-1 pr-1"
                       >
                         {underlying}
+                        <button
+                          onClick={() => handleDismissTicker(underlying)}
+                          className="ml-1 rounded-full hover:bg-amber-500/20 p-0.5"
+                          title="Nascondi permanentemente"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </Badge>
                     ))}
                   </div>
@@ -1007,9 +1030,16 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                       <Badge 
                         key={underlying} 
                         variant="outline" 
-                        className="text-amber-500 border-amber-500/30"
+                        className="text-amber-500 border-amber-500/30 flex items-center gap-1 pr-1"
                       >
                         {underlying}
+                        <button
+                          onClick={() => handleDismissTicker(underlying)}
+                          className="ml-1 rounded-full hover:bg-amber-500/20 p-0.5"
+                          title="Nascondi permanentemente"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </Badge>
                     ))}
                   </div>
