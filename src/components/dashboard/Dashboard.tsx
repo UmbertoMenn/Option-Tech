@@ -4,6 +4,7 @@ import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
@@ -42,7 +43,17 @@ export function Dashboard() {
   const { isAggregatedView } = usePortfolioContext();
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
-  const netting = useDerivativeNetting(positions, summary, overrides);
+  
+  // Fetch underlying prices for derivatives without stock in portfolio
+  const derivativeUnderlyings = useMemo(() => 
+    positions.filter(p => p.asset_type === 'derivative')
+      .map(p => p.underlying || p.description)
+      .filter((u): u is string => !!u),
+    [positions]
+  );
+  const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
+  
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices);
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,
@@ -387,6 +398,7 @@ export function Dashboard() {
             netting={netting}
             viewMode={viewMode}
             overrides={overrides}
+            underlyingPrices={underlyingPrices}
           />
 
           {/* File Upload & Historical Data - Hidden in aggregated view */}

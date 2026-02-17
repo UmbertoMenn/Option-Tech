@@ -4,6 +4,7 @@ import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLeg
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
 import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode } from '@/hooks/useDerivativeNetting';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
+import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { ViewMode } from './ViewModeSelector';
 import { Upload, ChevronDown, ChevronUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip } from 'recharts';
@@ -27,6 +28,7 @@ interface DynamicPortfolioChartProps {
   netting: NettingResult;
   viewMode: ViewMode;
   overrides?: DerivativeOverride[];
+  underlyingPrices?: Record<string, UnderlyingPrice>;
 }
 
 // ─── Colors ───────────────────────────────────────────────────
@@ -257,7 +259,7 @@ const nettingSlides = [
 ];
 
 
-export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, overrides = [] }: DynamicPortfolioChartProps) {
+export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, overrides = [], underlyingPrices }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
@@ -283,8 +285,9 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       positions,
       summary,
       overrides,
+      underlyingPrices,
     );
-  }, [viewMode, netting.breakdown, positions, summary, overrides]);
+  }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices]);
 
   const renderChart = () => {
     if (viewMode === 'base') {
