@@ -1,26 +1,41 @@
 
 
-## Ripristinare la descrizione sotto il grafico a due barre
+## Modifica logica P/L per "Altre Strategie" senza operazioni in calcolatrice
 
-### Problema
-La descrizione testuale e' stata rimossa da entrambe le slide del carousel netting, ma andava eliminata solo dalla seconda slide (istogramma split netting). La prima slide (grafico con le due barre orizzontali "Valore Assets" vs "Valore Nettato") deve mantenere la descrizione che spiega la logica di calcolo della vista corrente.
+### Cosa cambia
 
-### Modifiche
+Quando **non** ci sono operazioni salvate nella calcolatrice, il P/L viene calcolato come:
 
-**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**
+**P/L = Valore ai PMC + Valore al prezzo di mercato**
 
-1. Ripristinare l'oggetto `descriptions` con le descrizioni per ciascuna vista netting:
-   - `netting_total`: spiega che il valore include tutti i derivati (prezzo mercato x quantita' x 100)
-   - `netting_ex_cc_np`: spiega che per le CC e NP ITM viene sottratto il valore intrinseco, e le NP OTM sono escluse
+- Valore ai PMC = somma di (avg_cost x quantita x 100) per ogni gamba
+- Valore al prezzo di mercato = somma di (current_price x quantita x 100) per ogni gamba
+- La somma dei due da il P/L (il PMC e' positivo se venduta, il prezzo mercato e' negativo se da ricomprare)
 
-2. Aggiungere il paragrafo descrittivo sotto il valore nel primo `CarouselItem` (slide delle due barre), subito dopo il `<p>` con `formatEUR(finalValue)`:
+Il P/L senza operazioni storiche viene mostrato in **giallo oro** (invece di verde/rosso) con un tooltip che indica "P/L calcolato senza operazioni storiche caricate".
+
+Quando ci sono operazioni nella calcolatrice, la logica resta invariata (flussi di cassa + valore mercato, colori verde/rosso).
+
+### Dettaglio tecnico
+
+**File: `src/pages/Derivatives.tsx`** -- funzione `GroupedOtherStrategyRow` (intorno a riga 1771-1776 e 1942-1953)
+
+1. **Calcolo P/L senza calcolatrice** (riga ~1776): quando `!hasSavedGP`, calcolare il P/L come somma del valore ai PMC e del valore di mercato:
    ```
-   {descriptions[viewMode] && (
-     <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-       {descriptions[viewMode]}
-     </p>
-   )}
+   const avgCostValue = options.reduce((sum, o) => {
+     const acv = (o.option.avg_cost || 0) * o.option.quantity * 100;
+     return sum + acv;
+   }, 0);
+   const combinedPL = hasSavedGP
+     ? savedPremium.net_per_share + marketValuePositions
+     : avgCostValue + marketValuePositions;
    ```
 
-3. La seconda slide (`NettingBreakdownChart`) resta invariata, senza descrizione.
+2. **Colore giallo oro** (riga ~1945): condizionare la classe CSS:
+   - Se `hasSavedGP`: verde/rosso come attuale (`text-green-500` / `text-red-500`)
+   - Se `!hasSavedGP`: giallo oro (`text-yellow-500`)
+
+3. **Tooltip differenziato** (riga ~1951): aggiornare il testo del tooltip per indicare la fonte del calcolo:
+   - Con calcolatrice: testo attuale (flussi di cassa + valore mercato)
+   - Senza calcolatrice: "P/L calcolato senza operazioni storiche caricate"
 
