@@ -1788,7 +1788,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_7rem_5rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
