@@ -111,7 +111,35 @@ const SPECIAL_MAPPINGS: Record<string, string> = {
   'RAYTHEON': 'RTX',
   'COSTCO': 'COST',
   'COREWEAVE': 'CRWV',
+  // European tickers
+  'MERCEDES-BENZ GROUP': 'MBG.DE',
+  'MERCEDES-BENZ': 'MBG.DE',
+  'MERCEDES BENZ': 'MBG.DE',
+  'MERCEDES-BENZ GROUP AG': 'MBG.DE',
+  'DEUTSCHE POST': 'DHL.DE',
+  'DEUTSCHE POST AG': 'DHL.DE',
+  'DHL GROUP': 'DHL.DE',
+  'DHL': 'DHL.DE',
 };
+
+// Detect if underlying comes from a European exchange
+function detectExchange(name: string): 'EU' | null {
+  const upper = name.toUpperCase();
+  if (upper.startsWith('EUREX') || upper.includes('EUREX')) return 'EU';
+  if (upper.startsWith('IDEM') || upper.includes('IDEM')) return 'EU';
+  return null;
+}
+
+// Extract clean company name from EUREX-style underlying string
+// Input: "EUREX, MERCEDES-BENZ GROUP, DEC26, 58, CALL, PHYSICAL, AMER, SINGLE STOCK"
+// Output: "MERCEDES-BENZ GROUP"
+function cleanEurexUnderlying(name: string): string {
+  const parts = name.split(',').map(p => p.trim());
+  if (parts.length > 1 && (parts[0]?.toUpperCase() === 'EUREX' || parts[0]?.toUpperCase() === 'IDEM')) {
+    return parts[1]; // Company name is always the second element
+  }
+  return name;
+}
 
 // Normalize name for matching
 function normalizeName(name: string): string {
@@ -156,7 +184,7 @@ function resolveTickerFromName(name: string): string | null {
 }
 
 // Use AI to infer ticker from company name
-async function inferTickerWithAI(companyName: string): Promise<string | null> {
+async function inferTickerWithAI(companyName: string, exchangeHint: 'EU' | null = null): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   
   if (!LOVABLE_API_KEY) {
@@ -177,7 +205,11 @@ async function inferTickerWithAI(companyName: string): Promise<string | null> {
         model: "google/gemini-3-flash-preview",
         messages: [{
           role: "user",
-          content: `What is the US stock ticker symbol for the company "${companyName}"? 
+          content: exchangeHint === 'EU'
+            ? `What is the Yahoo Finance ticker symbol for the European company "${companyName}" on its primary European exchange? 
+Include the exchange suffix (e.g., MBG.DE, DHL.DE, ENI.MI, TTE.PA, ASML.AS, SHEL.L).
+Reply with ONLY the ticker symbol. If unsure, reply "UNKNOWN".`
+            : `What is the US stock ticker symbol for the company "${companyName}"? 
 Reply with ONLY the ticker symbol (e.g., AAPL, MSFT, GOOGL, AMZN).
 If this is not a publicly traded US company or you're unsure, reply "UNKNOWN".
 Do not include any other text or explanation.`
@@ -194,10 +226,11 @@ Do not include any other text or explanation.`
     const data = await response.json();
     const tickerRaw = data.choices?.[0]?.message?.content?.trim().toUpperCase();
     
-    // Clean up the response
-    const ticker = tickerRaw?.split(/[\s,.\n]/)[0];
+    // Clean up the response - split on whitespace/newline but preserve dots for EU tickers
+    const ticker = tickerRaw?.split(/[\s,\n]/)[0];
     
-    if (ticker && ticker !== 'UNKNOWN' && ticker.length >= 1 && ticker.length <= 5 && /^[A-Z-]+$/.test(ticker)) {
+    // Accept US tickers (1-5 letters, optional hyphen) and EU tickers (LETTERS.SUFFIX)
+    if (ticker && ticker !== 'UNKNOWN' && ticker.length >= 1 && ticker.length <= 10 && /^[A-Z][A-Z0-9-]*(\.[A-Z]{1,4})?$/.test(ticker)) {
       console.log(`AI inferred ticker for "${companyName}": ${ticker}`);
       return ticker;
     }
@@ -362,10 +395,18 @@ serve(async (req) => {
       
       let ticker: string | null = null;
       
-      // Step 0: Check if input looks like a ticker (1-5 uppercase letters, optional hyphen suffix)
+      // Detect exchange and clean underlying name for EU options
+      const exchange = detectExchange(underlying);
+      const cleanedUnderlying = exchange === 'EU' ? cleanEurexUnderlying(underlying) : underlying;
+      
+      if (exchange === 'EU') {
+        console.log(`Detected EU exchange for "${underlying}", cleaned to: "${cleanedUnderlying}"`);
+      }
+      
+      // Step 0: Check if input looks like a ticker (1-5 uppercase letters, optional hyphen/dot suffix)
       // If so, validate directly on Yahoo Finance before other lookups
-      const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?$/;
-      const upperInput = underlying.toUpperCase().trim();
+      const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?(\.[A-Z]{1,4})?$/;
+      const upperInput = cleanedUnderlying.toUpperCase().trim();
       if (tickerPattern.test(upperInput)) {
         console.log(`Input "${underlying}" looks like a ticker, validating directly...`);
         const isValid = await validateTicker(upperInput);
@@ -377,22 +418,25 @@ serve(async (req) => {
         }
       }
       
-      // Step 1: Check underlying_mappings cache
+      // Step 1: Check underlying_mappings cache (try cleaned name first, then original)
       if (!ticker) {
-        ticker = await checkUnderlyingMappingsCache(supabase, underlying);
-      }
-      
-      // Step 2: Try static mappings
-      if (!ticker) {
-        ticker = resolveTickerFromName(underlying);
-        if (ticker) {
-          console.log(`Resolved "${underlying}" via static mapping: ${ticker}`);
+        ticker = await checkUnderlyingMappingsCache(supabase, cleanedUnderlying);
+        if (!ticker && cleanedUnderlying !== underlying) {
+          ticker = await checkUnderlyingMappingsCache(supabase, underlying);
         }
       }
       
-      // Step 3: Try AI inference with validation
+      // Step 2: Try static mappings (use cleaned name for EU)
       if (!ticker) {
-        const aiTicker = await inferTickerWithAI(underlying);
+        ticker = resolveTickerFromName(cleanedUnderlying);
+        if (ticker) {
+          console.log(`Resolved "${cleanedUnderlying}" via static mapping: ${ticker}`);
+        }
+      }
+      
+      // Step 3: Try AI inference with validation (pass exchange hint)
+      if (!ticker) {
+        const aiTicker = await inferTickerWithAI(cleanedUnderlying, exchange);
         
         if (aiTicker) {
           // Validate AI-inferred ticker before accepting it
@@ -411,8 +455,8 @@ serve(async (req) => {
         continue;
       }
       
-      // Save to cache using NORMALIZED underlying for consistency
-      const normalizedUnderlying = normalizeName(underlying);
+      // Save to cache using NORMALIZED underlying for consistency (use cleaned name for EU)
+      const normalizedUnderlying = normalizeName(cleanedUnderlying);
       await saveToUnderlyingMappingsCache(supabase, normalizedUnderlying, ticker);
       
       // Step 4: Fetch price from Yahoo Finance
