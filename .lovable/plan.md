@@ -1,65 +1,64 @@
 
+## Feedback di Caricamento Derivati + Diagnostica Admin
 
-## Ottimizzazione Velocita "Posizioni da Monitorare"
+### Parte 1: Indicatore di caricamento nella pagina Strategie Derivati
 
-### Problema identificato
+Aggiungere un feedback visivo inline nella card "Posizioni da monitorare" che mostri lo stato di risoluzione dei prezzi, identico allo stile del Risk Analyzer:
 
-L'hook `useUnderlyingPrices` ha due problemi principali:
+- **Durante il caricamento**: Badge blu con spinner "Risoluzione prezzi in corso (N strumenti)..."
+- **Completato**: Badge verde con check "Prezzi aggiornati"
 
-1. **Nessuna cache cross-navigazione**: usa `useState`/`useEffect` manuali invece di React Query. Ogni volta che si naviga dalla Dashboard a Strategie Derivati, i prezzi vengono ricalcolati da zero.
+Per implementarlo serve separare il fetch in due fasi nell'hook `useUnderlyingPrices`:
+1. **Fase locale** (veloce): restituisce subito i prezzi gia presenti in DB
+2. **Fase edge function** (lenta): lancia in background per i missing, con contatore esposto
 
-2. **Query sequenziali (waterfall)**: il flusso attuale esegue fino a 4 step in serie:
-   - Query 1: `underlying_mappings` con `.in(underlyings)`
-   - Query 2: Se non tutti trovati, scarica TUTTI i mapping per matching normalizzato
-   - Query 3: `underlying_prices` con `.in(tickers)`
-   - Query 4: Edge function per i prezzi mancanti
+L'hook esporra due nuovi campi:
+- `missingCount`: numero di underlying per cui serve la edge function
+- `isFetchingMissing`: booleano per lo stato di caricamento background
 
-### Soluzione
+La card `DerivativesSummaryCard` ricevera questi campi e mostrera il feedback inline sotto il titolo.
 
-#### 1. Migrare `useUnderlyingPrices` a React Query (`src/hooks/useUnderlyingPrices.ts`)
+### Parte 2: Sezione diagnostica nel pannello Admin
 
-- Sostituire `useState`/`useEffect` con `useQuery` di TanStack
-- `queryKey: ['underlying-prices', underlyingsKey]` con `staleTime: 5 * 60 * 1000` (5 min, allineato al cron)
-- I prezzi gia caricati dalla Dashboard restano in cache e vengono riutilizzati immediatamente nella pagina Derivati
-- Mantenere la funzione `refetch` per il refresh manuale
+Aggiungere un nuovo tab "Diagnostica" nel pannello Admin con una card che mostra gli strumenti problematici, suddivisi per tipo di rallentamento:
 
-#### 2. Parallelizzare le query DB
+| Sezione | Cosa mostra | Fonte dati |
+|---------|-------------|------------|
+| Ticker senza mapping | Underlying senza entry in `underlying_mappings` (causano chiamata edge function lenta) | Confronto posizioni vs mappings |
+| Ticker senza prezzo | Underlying con mapping ma senza prezzo in `underlying_prices` | Confronto mappings vs prices |
+| Settori non risolti | ISIN senza settore in `isin_mappings` | Confronto posizioni vs isin_mappings |
 
-Invece di 4 step sequenziali, ridurre a 2 step:
-
-- **Step 1 (parallelo)**: Lanciare contemporaneamente:
-  - `underlying_mappings` (fetch tutti, la tabella e piccola) 
-  - `underlying_prices` (fetch tutti)
-- **Step 2**: Matching locale in memoria (istantaneo)
-- **Step 3 (solo se necessario)**: Edge function per i prezzi mancanti (raro dopo il primo caricamento)
-
-#### 3. Risultato atteso
-
-| Scenario | Prima | Dopo |
-|----------|-------|------|
-| Prima navigazione Dashboard -> Derivati | ~2-3s (4 query sequenziali) | ~0.5s (2 query parallele) |
-| Navigazione successiva (cache calda) | ~2-3s (stessi step) | Istantaneo (cache React Query) |
+Ogni sezione indica quanti strumenti rallentano il sistema e quali sono, con possibilita di risolvere direttamente.
 
 ### File modificati
 
 | File | Modifica |
 |------|----------|
-| `src/hooks/useUnderlyingPrices.ts` | Riscrittura con `useQuery`, parallelizzazione query, `staleTime` 5 min |
+| `src/hooks/useUnderlyingPrices.ts` | Separare in due query React Query: locale (veloce) + edge function (background). Esporre `missingCount` e `isFetchingMissing` |
+| `src/components/derivatives/DerivativesSummaryCard.tsx` | Aggiungere badge di stato caricamento sotto il titolo della card |
+| `src/pages/Derivatives.tsx` | Passare i nuovi campi `missingCount` e `isFetchingMissing` alla summary card |
+| `src/components/admin/AdminPanel.tsx` | Aggiungere tab "Diagnostica" con icona |
+| `src/components/admin/ResolutionDiagnostics.tsx` | **Nuovo file**: componente diagnostica che mostra gli strumenti problematici per prezzo, settore ed esposizione valutaria |
 
 ### Dettagli tecnici
 
-```text
-PRIMA (waterfall):
-  underlying_mappings.in() ──> [wait] ──> all_mappings ──> [wait] ──> underlying_prices ──> [wait] ──> edge_fn
-  |_______________|              |___________|              |______________|              |________|
-       ~200ms                       ~300ms                      ~200ms                     ~500ms+
+**Hook `useUnderlyingPrices` - due fasi:**
 
-DOPO (parallelo + cache):
-  Promise.all([all_mappings, all_prices]) ──> [match locale] ──> edge_fn (solo se serve)
-  |__________________________________|         |___|              |________|
-              ~300ms                           ~0ms             solo prima volta
+```text
+Query 1: ['underlying-prices-local', key]
+  -> Promise.all(mappings, prices) -> match locale -> return immediato
+  -> calcola missingUnderlyings
+
+Query 2: ['underlying-prices-missing', key]  
+  -> enabled: missingCount > 0
+  -> chiama edge function solo per i missing
+  -> aggiorna i risultati in background
+
+useMemo: merge risultati Query 1 + Query 2
 ```
 
-- La tabella `underlying_mappings` e `underlying_prices` sono piccole (decine/centinaia di righe), quindi scaricarle interamente e un'ottimizzazione netta rispetto a query `.in()` multiple
-- Il `staleTime` di 5 minuti si allinea al cron di aggiornamento prezzi
-
+**Componente diagnostica Admin:**
+- Esegue 3 query parallele (positions, underlying_mappings, underlying_prices, isin_mappings)
+- Calcola le differenze per identificare i "buchi"
+- Mostra i risultati in cards con contatore e lista espandibile
+- Include un pulsante "Risolvi" che rimanda ai tab Ticker/Settori esistenti
