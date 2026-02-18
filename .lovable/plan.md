@@ -1,78 +1,58 @@
 
 
-## Fix Opzioni Europee (EUREX/IDEM): Strike, Expiry e Prezzo Sottostante
+## Fix Prezzi Sottostanti SAP e Ferrari: Mappature DB Errate
 
-### Problemi Identificati
+### Causa del Problema
 
-Ci sono 3 problemi distinti ma correlati per le opzioni europee:
+I prezzi sono sbagliati perche nel database ci sono mappature vecchie e sbagliate che hanno la priorita sulle mappature statiche corrette aggiunte nella Edge Function:
 
-#### Problema 1: SAP e tutte le opzioni EUREX -- Strike e Expiry mancanti
-Le opzioni EUREX hanno un formato diverso dalle americane. La descrizione e:
+| underlying (DB) | ticker attuale (SBAGLIATO) | ticker corretto |
+|---|---|---|
+| `SAP` | `SAP` (US, $201 USD) | `SAP.DE` (EUR, 171 EUR) |
+| `SAP SE` | `SAP` (US) | `SAP.DE` (EUR) |
+| `FERRARI` | `RACE` (US, $375 USD) | `RACE.MI` (EUR, 312 EUR) |
+| `Ferrari - Stock` | `RACE` (US) | `RACE.MI` (EUR) |
+| `FERRARI - STOCK` | `RACE` (US) | `RACE.MI` (EUR) |
 
-```
-EUREX, SAP, MAR26, 182, CALL, PHYSICAL, AMER, SINGLE STOCK OPTIONS
-```
+Il flusso e: hook `useUnderlyingPrices` -> query DB `underlying_mappings` -> trova `SAP -> SAP` (US) -> usa quel ticker senza mai arrivare alle mappature statiche corrette nella Edge Function.
 
-Ma il parser cerca il pattern `OPTION CALL 200` (formato americano). Risultato: `strike_price = null`, `expiry_date = null`, e `underlying` contiene l'intera stringa grezza.
+### Soluzione in 2 passi
 
-#### Problema 2: Ferrari -- Prezzo sottostante sbagliato (NYSE vs Milan)
-L'underlying "Ferrari - Stock" e mappato al ticker `RACE` (NYSE, ~375 USD) invece di `RACE.MI` (Milano, ~312 EUR). Poiche le opzioni sono in EUR (Euronext Derivatives Milan / IDEM), il prezzo deve essere quello italiano.
+#### Passo 1: Correggere le mappature errate nel DB
 
-#### Problema 3: Underlying non pulito
-Per EUREX, il campo `underlying` contiene l'intera stringa `"EUREX, SAP, MAR26, 182, CALL..."` invece del semplice `"SAP"`. Questo rompe il matching con le azioni in portafoglio.
+Aggiornare le righe nella tabella `underlying_mappings` per puntare ai ticker europei corretti:
 
----
+- `SAP` -> `SAP.DE`
+- `SAP SE` -> `SAP.DE`  
+- `FERRARI` -> `RACE.MI`
+- `Ferrari - Stock` -> `RACE.MI`
+- `FERRARI - STOCK` -> `RACE.MI`
 
-### Soluzione
+#### Passo 2: Proteggere la Edge Function dal ri-creare mappature errate
 
-#### 1. Excel Parser: Riconoscere il formato EUREX/IDEM (`src/lib/excelParser.ts`)
+Nel file `supabase/functions/fetch-underlying-prices/index.ts`, le mappature statiche (`SPECIAL_MAPPINGS`) devono essere controllate **PRIMA** della cache DB, non dopo. In questo modo, se un underlying ha una mappatura statica nota (es. `SAP` -> `SAP.DE`), viene usata quella senza consultare il DB (che potrebbe avere dati obsoleti o errati).
 
-Aggiungere nella funzione `parseDerivativeRow` (e `parsePositionRow` per i derivati) una logica per riconoscere il formato comma-separated europeo:
+Ordine attuale (sbagliato):
+1. Check se input sembra un ticker -> valida su Yahoo
+2. Check cache DB (`underlying_mappings`)
+3. Check mappature statiche
+4. AI inference
 
-```text
-Pattern EUREX: "EUREX, COMPANY, MMMyy, STRIKE, CALL/PUT, ..."
-Pattern IDEM:  "IDEM, COMPANY, MMMyy, STRIKE, CALL/PUT, ..."
-
-Estrazione:
-- underlying = secondo campo (es. "SAP", "MERCEDES-BENZ GROUP")
-- expiry = terzo campo (es. "MAR26" -> 2026-03-20)
-- strike = quarto campo (es. "182")
-- option_type = quinto campo (es. "CALL" o "PUT")
-```
-
-Se il primo campo (dopo split per virgola) e "EUREX" o "IDEM", applicare il parsing specifico INVECE della regex americana.
-
-Per il formato "Ferrari - Stock Option PUT 300 20/03/2026":
-- Il parser attuale gestisce gia `OPTION PUT 300` (strike OK)
-- Manca il parsing della data nel formato `DD/MM/YYYY` per `expiry_date`
-- L'underlying "Ferrari - Stock" va pulito togliendo " - Stock"
-
-#### 2. Prezzo sottostante europeo: Priorita ticker europeo (`supabase/functions/fetch-underlying-prices/index.ts`)
-
-Quando il sistema risolve un ticker per un'opzione europea (currency EUR), deve prioritizzare il ticker europeo. Due approcci combinati:
-
-- Aggiungere mapping statici per le aziende italiane/europee note:
-  - `FERRARI` -> `RACE.MI`
-  - `FERRARI - STOCK` -> `RACE.MI`
-  - `SAP` -> `SAP.DE` (gia presente, ma solo per EUREX prefix)
-  
-- Nel hook `useUnderlyingPrices`, quando l'underlying proviene da un'opzione con currency EUR, passare un hint all'edge function per prioritizzare il ticker europeo
-
-#### 3. Cleanup underlying nelle posizioni gia salvate
-
-Per i dati gia in DB con underlying sporco, il fix al parser impedira nuovi upload errati. Per i dati esistenti, la pulizia avverra al prossimo upload Excel.
-
----
+Nuovo ordine (corretto):
+1. Check se input sembra un ticker -> valida su Yahoo
+2. **Check mappature statiche PRIMA** (SPECIAL_MAPPINGS)
+3. Check cache DB (`underlying_mappings`)
+4. AI inference
 
 ### File modificati
 
 | File | Modifica |
-|------|----------|
-| `src/lib/excelParser.ts` | In `parseDerivativeRow`: aggiungere parsing formato EUREX/IDEM (comma-separated) per strike, expiry, underlying, option_type. Aggiungere parsing data DD/MM/YYYY per expiry. Pulire underlying togliendo suffissi come " - Stock" |
-| `supabase/functions/fetch-underlying-prices/index.ts` | Aggiungere mapping statici: FERRARI -> RACE.MI, e gestire hint di exchange per opzioni EUR |
+|---|---|
+| Migrazione SQL | UPDATE `underlying_mappings` per correggere i 5 ticker errati |
+| `supabase/functions/fetch-underlying-prices/index.ts` | Spostare il check delle mappature statiche (Step 2) PRIMA della cache DB (Step 1), invertendo l'ordine attuale |
 
 ### Risultato atteso
 
-- Opzioni SAP/Mercedes/DHL su EUREX: strike, expiry e underlying correttamente estratti
-- Opzioni Ferrari su IDEM: prezzo sottostante in EUR (RACE.MI, ~312 EUR) invece di USD (RACE, ~375 USD)
-- Matching con le azioni in portafoglio funzionante grazie all'underlying pulito
+- SAP mostrera il prezzo di SAP.DE (~171 EUR) invece di SAP US (~201 USD)
+- Ferrari mostrera il prezzo di RACE.MI (~312 EUR) invece di RACE US (~375 USD)
+- Nuovi upload non potranno sovrascrivere le mappature statiche con ticker errati
