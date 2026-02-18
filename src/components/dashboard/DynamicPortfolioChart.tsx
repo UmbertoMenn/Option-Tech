@@ -20,6 +20,7 @@ import {
   type CarouselApi,
 } from '@/components/ui/carousel';
 import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -27,6 +28,7 @@ interface DynamicPortfolioChartProps {
   positions: Position[];
   netting: NettingResult;
   viewMode: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
   overrides?: DerivativeOverride[];
   underlyingPrices?: Record<string, UnderlyingPrice>;
 }
@@ -259,7 +261,7 @@ const nettingSlides = [
 ];
 
 
-export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, overrides = [], underlyingPrices }: DynamicPortfolioChartProps) {
+export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
@@ -363,7 +365,21 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
   return (
     <Card className="lg:col-span-2 border-border bg-card">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg text-center">{CHART_TITLES[viewMode]}</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-lg">{CHART_TITLES[viewMode]}</CardTitle>
+          {onViewModeChange && (
+            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="base">Base</SelectItem>
+                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
+                <SelectItem value="netting_total">Netting Totale</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {renderChart()}

@@ -396,6 +396,7 @@ export function Dashboard() {
             positions={positions} 
             netting={netting}
             viewMode={viewMode}
+            onViewModeChange={setViewMode}
             overrides={overrides}
             underlyingPrices={underlyingPrices}
           />
