@@ -451,19 +451,20 @@ serve(async (req) => {
         }
       }
       
-      // Step 1: Check underlying_mappings cache (try cleaned name first, then original)
-      if (!ticker) {
-        ticker = await checkUnderlyingMappingsCache(supabase, cleanedUnderlying);
-        if (!ticker && cleanedUnderlying !== underlying) {
-          ticker = await checkUnderlyingMappingsCache(supabase, underlying);
-        }
-      }
-      
-      // Step 2: Try static mappings (use cleaned name for EU)
+      // Step 1: Try static mappings FIRST (use cleaned name for EU)
+      // These take priority over DB cache to prevent stale/wrong mappings
       if (!ticker) {
         ticker = resolveTickerFromName(cleanedUnderlying);
         if (ticker) {
           console.log(`Resolved "${cleanedUnderlying}" via static mapping: ${ticker}`);
+        }
+      }
+      
+      // Step 2: Check underlying_mappings cache (try cleaned name first, then original)
+      if (!ticker) {
+        ticker = await checkUnderlyingMappingsCache(supabase, cleanedUnderlying);
+        if (!ticker && cleanedUnderlying !== underlying) {
+          ticker = await checkUnderlyingMappingsCache(supabase, underlying);
         }
       }
       
