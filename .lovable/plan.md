@@ -1,57 +1,66 @@
 
 
-## Nuova Architettura Vista Aggregata Admin
+## Fix Opzioni Europee (EUREX/IDEM): Strike, Expiry e Prezzo Sottostante
 
-### Principio Guida
+### Problemi Identificati
 
-Nella vista "Aggregato - Tutti gli Utenti", ogni pagina deve mostrare esclusivamente la **SOMMA dei risultati gia calcolati per i singoli utenti**. Nessun ricalcolo, nessun re-matching, nessuna ri-categorizzazione.
+Ci sono 3 problemi distinti ma correlati per le opzioni europee:
 
----
+#### Problema 1: SAP e tutte le opzioni EUREX -- Strike e Expiry mancanti
+Le opzioni EUREX hanno un formato diverso dalle americane. La descrizione e:
 
-### 1. Strategie Derivati: NASCONDERE la pagina
-
-Quando l'admin seleziona l'aggregato globale (`AGGREGATED`), la pagina Strategie Derivati mostra un messaggio informativo che invita a selezionare un singolo portafoglio o un aggregato per-utente.
-
-**File: `src/pages/Derivatives.tsx`**
-- All'inizio del render, se `selectedPortfolioId === AGGREGATED_PORTFOLIO_ID`, mostrare una card con messaggio: "La vista Strategie Derivati non e disponibile per l'aggregato globale. Seleziona un singolo portafoglio o l'aggregato di un utente."
-- Tutto il resto della pagina non viene renderizzato
-
----
-
-### 2. Risk Analyzer: Somma per-portfolio
-
-Invece di chiamare `categorizeDerivatives` + `analyzePortfolioRisk` su tutte le posizioni mescolate, eseguire `analyzePortfolioRisk` separatamente per ogni portfolio e sommare i risultati numerici.
-
-**File: `src/hooks/useRiskAnalysis.ts`**
-
-Nuova logica quando `isAggregatedView` e true:
-
-```text
-1. Raggruppa positions per portfolio_id
-2. Raggruppa overrides per portfolio_id  
-3. Per ogni portfolio:
-   a. Applica toSnapshotPositions
-   b. categorizeDerivatives(derivati_portfolio, posizioni_portfolio, overrides_portfolio)
-   c. analyzePortfolioRisk(posizioni_portfolio, categories_portfolio)
-4. Somma tutti i totali (totalStockRisk, totalCommodityRisk, ecc.)
-5. Concatena tutti i detail arrays (stockDetails, strategyDetails, ecc.)
+```
+EUREX, SAP, MAR26, 182, CALL, PHYSICAL, AMER, SINGLE STOCK OPTIONS
 ```
 
-Questo richiede che `useRiskAnalysis` sappia se siamo in vista aggregata. Importare `usePortfolioContext` e leggere `isAggregatedView`.
+Ma il parser cerca il pattern `OPTION CALL 200` (formato americano). Risultato: `strike_price = null`, `expiry_date = null`, e `underlying` contiene l'intera stringa grezza.
 
-I detail arrays concatenati permettono alle viste (Equity, Currency, Sector) di funzionare correttamente con i dati per-holding gia calcolati.
+#### Problema 2: Ferrari -- Prezzo sottostante sbagliato (NYSE vs Milan)
+L'underlying "Ferrari - Stock" e mappato al ticker `RACE` (NYSE, ~375 USD) invece di `RACE.MI` (Milano, ~312 EUR). Poiche le opzioni sono in EUR (Euronext Derivatives Milan / IDEM), il prezzo deve essere quello italiano.
+
+#### Problema 3: Underlying non pulito
+Per EUREX, il campo `underlying` contiene l'intera stringa `"EUREX, SAP, MAR26, 182, CALL..."` invece del semplice `"SAP"`. Questo rompe il matching con le azioni in portafoglio.
 
 ---
 
-### 3. Dashboard: Verifiche
+### Soluzione
 
-La Dashboard gia funziona prevalentemente con somme tramite `usePortfolio` che aggrega `cash_value` e `total_value`. I calcoli di netting e equity exposure utilizzano pero `useDerivativeNetting` e `useEquityExposurePct` che soffrono dello stesso problema (categorizzazione su posizioni mescolate).
+#### 1. Excel Parser: Riconoscere il formato EUREX/IDEM (`src/lib/excelParser.ts`)
 
-**File: `src/hooks/useEquityExposurePct.ts`**
-- Stessa logica del Risk Analyzer: se aggregato, eseguire per-portfolio e sommare
+Aggiungere nella funzione `parseDerivativeRow` (e `parsePositionRow` per i derivati) una logica per riconoscere il formato comma-separated europeo:
 
-**File: `src/hooks/useDerivativeNetting.ts`** (da verificare)
-- Se usa `categorizeDerivatives`, applicare la stessa logica per-portfolio
+```text
+Pattern EUREX: "EUREX, COMPANY, MMMyy, STRIKE, CALL/PUT, ..."
+Pattern IDEM:  "IDEM, COMPANY, MMMyy, STRIKE, CALL/PUT, ..."
+
+Estrazione:
+- underlying = secondo campo (es. "SAP", "MERCEDES-BENZ GROUP")
+- expiry = terzo campo (es. "MAR26" -> 2026-03-20)
+- strike = quarto campo (es. "182")
+- option_type = quinto campo (es. "CALL" o "PUT")
+```
+
+Se il primo campo (dopo split per virgola) e "EUREX" o "IDEM", applicare il parsing specifico INVECE della regex americana.
+
+Per il formato "Ferrari - Stock Option PUT 300 20/03/2026":
+- Il parser attuale gestisce gia `OPTION PUT 300` (strike OK)
+- Manca il parsing della data nel formato `DD/MM/YYYY` per `expiry_date`
+- L'underlying "Ferrari - Stock" va pulito togliendo " - Stock"
+
+#### 2. Prezzo sottostante europeo: Priorita ticker europeo (`supabase/functions/fetch-underlying-prices/index.ts`)
+
+Quando il sistema risolve un ticker per un'opzione europea (currency EUR), deve prioritizzare il ticker europeo. Due approcci combinati:
+
+- Aggiungere mapping statici per le aziende italiane/europee note:
+  - `FERRARI` -> `RACE.MI`
+  - `FERRARI - STOCK` -> `RACE.MI`
+  - `SAP` -> `SAP.DE` (gia presente, ma solo per EUREX prefix)
+  
+- Nel hook `useUnderlyingPrices`, quando l'underlying proviene da un'opzione con currency EUR, passare un hint all'edge function per prioritizzare il ticker europeo
+
+#### 3. Cleanup underlying nelle posizioni gia salvate
+
+Per i dati gia in DB con underlying sporco, il fix al parser impedira nuovi upload errati. Per i dati esistenti, la pulizia avverra al prossimo upload Excel.
 
 ---
 
@@ -59,14 +68,11 @@ La Dashboard gia funziona prevalentemente con somme tramite `usePortfolio` che a
 
 | File | Modifica |
 |------|----------|
-| `src/pages/Derivatives.tsx` | Early return con messaggio informativo se `AGGREGATED_PORTFOLIO_ID` |
-| `src/hooks/useRiskAnalysis.ts` | Importare `usePortfolioContext`; se aggregato, eseguire `categorizeDerivatives` + `analyzePortfolioRisk` per-portfolio e sommare risultati |
-| `src/hooks/useEquityExposurePct.ts` | Stessa logica per-portfolio se aggregato |
-| `src/hooks/useDerivativeNetting.ts` | Verificare e applicare logica per-portfolio se necessario |
+| `src/lib/excelParser.ts` | In `parseDerivativeRow`: aggiungere parsing formato EUREX/IDEM (comma-separated) per strike, expiry, underlying, option_type. Aggiungere parsing data DD/MM/YYYY per expiry. Pulire underlying togliendo suffissi come " - Stock" |
+| `supabase/functions/fetch-underlying-prices/index.ts` | Aggiungere mapping statici: FERRARI -> RACE.MI, e gestire hint di exchange per opzioni EUR |
 
 ### Risultato atteso
 
-- **Strategie Derivati**: pagina oscurata nell'aggregato globale, nessun errore possibile
-- **Risk Analyzer**: holdings consolidate, strategie e tutti i dettagli sono la somma esatta dei singoli portafogli
-- **Dashboard**: netting e equity exposure calcolati correttamente per-portfolio e sommati
-
+- Opzioni SAP/Mercedes/DHL su EUREX: strike, expiry e underlying correttamente estratti
+- Opzioni Ferrari su IDEM: prezzo sottostante in EUR (RACE.MI, ~312 EUR) invece di USD (RACE, ~375 USD)
+- Matching con le azioni in portafoglio funzionante grazie all'underlying pulito
