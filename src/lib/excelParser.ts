@@ -260,9 +260,10 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
     
     // Special handling for derivatives - description might be in column 2 (index 2) without ISIN
     if (isDerivativeSection) {
-      // Check if this row contains an option (look for OPTION CALL/PUT pattern in any cell)
+      // Check if this row contains an option (look for OPTION CALL/PUT or EUREX/IDEM pattern in any cell)
       const rowStr = row.map(cell => String(cell || '')).join(' ').toUpperCase();
-      if (rowStr.includes('OPTION CALL') || rowStr.includes('OPTION PUT')) {
+      if (rowStr.includes('OPTION CALL') || rowStr.includes('OPTION PUT') ||
+          rowStr.includes('EUREX,') || rowStr.includes('IDEM,')) {
         const position = parseDerivativeRow(row, headerRow);
         if (position && position.description) {
           positions.push(position);
@@ -281,15 +282,79 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
   return { positions, cashValue };
 }
 
+// Parse EUREX/IDEM expiry format like "MAR26", "DEC25", "JUN27"
+function parseEurexExpiry(expiryStr: string): string | undefined {
+  const months: Record<string, string> = {
+    JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+    JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+  };
+  const match = expiryStr.trim().toUpperCase().match(/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})$/);
+  if (match && months[match[1]]) {
+    const year = parseInt(match[2]) + 2000;
+    return `${year}-${months[match[1]]}-20`; // Third Friday approximation
+  }
+  return undefined;
+}
+
+// Parse DD/MM/YYYY date format
+function parseDDMMYYYY(str: string): string | undefined {
+  const match = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (match) {
+    return `${match[3]}-${match[2]}-${match[1]}`;
+  }
+  return undefined;
+}
+
+// Clean underlying name by removing suffixes like " - Stock", " - STOCK"
+function cleanUnderlying(underlying: string): string {
+  return underlying
+    .replace(/\s*-\s*Stock\b/i, '')
+    .replace(/\s*-\s*Azione\b/i, '')
+    .trim();
+}
+
+// Try to parse a EUREX/IDEM comma-separated description
+// Format: "EUREX, SAP, MAR26, 182, CALL, PHYSICAL, AMER, SINGLE STOCK OPTIONS"
+// or:     "IDEM, FERRARI, JUN26, 300, PUT, ..."
+function parseEurexIdemDescription(description: string): {
+  underlying: string;
+  optionType: 'call' | 'put' | undefined;
+  strikePrice: number | undefined;
+  expiryDate: string | undefined;
+} | null {
+  const parts = description.split(',').map(p => p.trim());
+  if (parts.length < 5) return null;
+  
+  const exchange = parts[0].toUpperCase();
+  if (exchange !== 'EUREX' && exchange !== 'IDEM') return null;
+  
+  const underlying = parts[1].trim();
+  const expiryDate = parseEurexExpiry(parts[2]);
+  const strikePrice = parseFloat(parts[3]);
+  const optionTypeStr = parts[4].toUpperCase().trim();
+  
+  let optionType: 'call' | 'put' | undefined;
+  if (optionTypeStr === 'CALL') optionType = 'call';
+  else if (optionTypeStr === 'PUT') optionType = 'put';
+  
+  return {
+    underlying,
+    optionType,
+    strikePrice: isNaN(strikePrice) ? undefined : strikePrice,
+    expiryDate,
+  };
+}
+
 function parseDerivativeRow(
   row: any[],
   headers: string[]
 ): Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'> | null {
-  // Find the description - it's usually in column 2 (index 2) for derivatives
+  // Find the description - check for EUREX/IDEM format first, then US-style OPTION CALL/PUT
   let description = '';
   for (let i = 0; i < row.length; i++) {
     const cell = String(row[i] || '').toUpperCase();
-    if (cell.includes('OPTION CALL') || cell.includes('OPTION PUT')) {
+    if (cell.includes('OPTION CALL') || cell.includes('OPTION PUT') ||
+        cell.startsWith('EUREX,') || cell.startsWith('IDEM,')) {
       description = String(row[i] || '');
       break;
     }
@@ -311,41 +376,55 @@ function parseDerivativeRow(
   const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
   const weightPct = parseExcelNumber(findColumnValue(row, headers, ['% PATR', 'PESO %']));
   
-  // Get quantity - for derivatives it might be in QUANTITA column
+  // Get quantity
   let quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
   
-  // Parse option type
   let optionType: 'call' | 'put' | undefined;
-  if (descUpper.includes('OPTION CALL') || descUpper.includes('CALL')) {
-    optionType = 'call';
-  } else if (descUpper.includes('OPTION PUT') || descUpper.includes('PUT')) {
-    optionType = 'put';
-  }
-  
-  // Parse strike price (e.g., "OPTION CALL 200", "OPTION PUT 125")
   let strikePrice: number | undefined;
-  const strikeMatch = descUpper.match(/OPTION\s+(?:CALL|PUT)\s+(\d+(?:\.\d+)?)/);
-  if (strikeMatch) {
-    strikePrice = parseFloat(strikeMatch[1]);
-  }
-  
-  // Parse expiry (e.g., "DEC/25", "JUN/26", "DEC/27")
   let expiryDate: string | undefined;
-  const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
-  if (expiryMatch) {
-    const months: Record<string, string> = {
-      JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-      JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
-    };
-    const year = parseInt(expiryMatch[2]) + 2000;
-    expiryDate = `${year}-${months[expiryMatch[1]]}-21`; // Third Friday approximation
-  }
-  
-  // Parse underlying (everything before "OPTION")
   let underlying: string | undefined;
-  const underlyingMatch = description.match(/^(.+?)\s+OPTION/i);
-  if (underlyingMatch) {
-    underlying = underlyingMatch[1].trim();
+  
+  // Try EUREX/IDEM comma-separated format first
+  const eurexParsed = parseEurexIdemDescription(description);
+  if (eurexParsed) {
+    optionType = eurexParsed.optionType;
+    strikePrice = eurexParsed.strikePrice;
+    expiryDate = eurexParsed.expiryDate;
+    underlying = eurexParsed.underlying;
+    console.log(`[ExcelParser] EUREX/IDEM parsed: underlying="${underlying}", strike=${strikePrice}, expiry=${expiryDate}, type=${optionType}`);
+  } else {
+    // US-style: "NVIDIA CORP OPTION CALL 200 DEC/25"
+    if (descUpper.includes('OPTION CALL') || descUpper.includes('CALL')) {
+      optionType = 'call';
+    } else if (descUpper.includes('OPTION PUT') || descUpper.includes('PUT')) {
+      optionType = 'put';
+    }
+    
+    // Parse strike price
+    const strikeMatch = descUpper.match(/OPTION\s+(?:CALL|PUT)\s+(\d+(?:\.\d+)?)/);
+    if (strikeMatch) {
+      strikePrice = parseFloat(strikeMatch[1]);
+    }
+    
+    // Parse expiry - try MMM/YY first, then DD/MM/YYYY
+    const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
+    if (expiryMatch) {
+      const months: Record<string, string> = {
+        JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+        JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+      };
+      const year = parseInt(expiryMatch[2]) + 2000;
+      expiryDate = `${year}-${months[expiryMatch[1]]}-21`;
+    } else {
+      // Try DD/MM/YYYY format (e.g., "20/03/2026")
+      expiryDate = parseDDMMYYYY(description);
+    }
+    
+    // Parse underlying (everything before "OPTION")
+    const underlyingMatch = description.match(/^(.+?)\s+OPTION/i);
+    if (underlyingMatch) {
+      underlying = cleanUnderlying(underlyingMatch[1].trim());
+    }
   }
   
   return {
@@ -418,36 +497,47 @@ function parsePositionRow(
   let underlying: string | undefined;
   
   if (assetType === 'derivative' && description) {
-    const descUpper = description.toUpperCase();
-    
-    // Parse option type
-    if (descUpper.includes('CALL')) {
-      optionType = 'call';
-    } else if (descUpper.includes('PUT')) {
-      optionType = 'put';
-    }
-    
-    // Parse strike price (e.g., "OPTION CALL 200")
-    const strikeMatch = descUpper.match(/(?:CALL|PUT)\s+(\d+(?:\.\d+)?)/);
-    if (strikeMatch) {
-      strikePrice = parseFloat(strikeMatch[1]);
-    }
-    
-    // Parse expiry (e.g., "DEC/25", "JUN/26")
-    const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
-    if (expiryMatch) {
-      const months: Record<string, string> = {
-        JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-        JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
-      };
-      const year = parseInt(expiryMatch[2]) + 2000;
-      expiryDate = `${year}-${months[expiryMatch[1]]}-21`; // Third Friday approximation
-    }
-    
-    // Parse underlying (everything before "OPTION")
-    const underlyingMatch = description.match(/^(.+?)\s+OPTION/i);
-    if (underlyingMatch) {
-      underlying = underlyingMatch[1].trim();
+    // Try EUREX/IDEM comma-separated format first
+    const eurexParsed = parseEurexIdemDescription(description);
+    if (eurexParsed) {
+      optionType = eurexParsed.optionType;
+      strikePrice = eurexParsed.strikePrice;
+      expiryDate = eurexParsed.expiryDate;
+      underlying = eurexParsed.underlying;
+    } else {
+      const descUpper = description.toUpperCase();
+      
+      // Parse option type
+      if (descUpper.includes('CALL')) {
+        optionType = 'call';
+      } else if (descUpper.includes('PUT')) {
+        optionType = 'put';
+      }
+      
+      // Parse strike price (e.g., "OPTION CALL 200")
+      const strikeMatch = descUpper.match(/(?:CALL|PUT)\s+(\d+(?:\.\d+)?)/);
+      if (strikeMatch) {
+        strikePrice = parseFloat(strikeMatch[1]);
+      }
+      
+      // Parse expiry - try MMM/YY first, then DD/MM/YYYY
+      const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
+      if (expiryMatch) {
+        const months: Record<string, string> = {
+          JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+          JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+        };
+        const year = parseInt(expiryMatch[2]) + 2000;
+        expiryDate = `${year}-${months[expiryMatch[1]]}-21`;
+      } else {
+        expiryDate = parseDDMMYYYY(description);
+      }
+      
+      // Parse underlying (everything before "OPTION")
+      const underlyingMatch = description.match(/^(.+?)\s+OPTION/i);
+      if (underlyingMatch) {
+        underlying = cleanUnderlying(underlyingMatch[1].trim());
+      }
     }
   }
   
