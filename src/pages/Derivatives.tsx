@@ -48,7 +48,8 @@ import {
   NakedPutPosition,
   LeapCallPosition,
   OtherStrategyPosition,
-  GroupedOtherStrategy
+  GroupedOtherStrategy,
+  DerivativeCategories,
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
@@ -72,6 +73,7 @@ import {
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
+import { usePortfolioContext, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
 
@@ -115,17 +117,58 @@ export function Derivatives() {
     [positions]
   );
 
+  const { isAggregatedView } = usePortfolioContext();
+
   const categories = useMemo(() => {
-    const raw = categorizeDerivatives(derivatives, positions, overrides);
-    
     // Sort functions for different types
-    // For types where underlying is a Position object, use option.underlying field
     const sortByOptionUnderlying = <T extends { option: Position }>(arr: T[]): T[] =>
       [...arr].sort((a, b) => (a.option.underlying || '').localeCompare(b.option.underlying || ''));
-    
-    // For types where underlying is a string
     const sortByUnderlyingString = <T extends { underlying: string }>(arr: T[]): T[] =>
       [...arr].sort((a, b) => a.underlying.localeCompare(b.underlying));
+
+    let raw: DerivativeCategories;
+
+    if (isAggregatedView) {
+      // Per-portfolio categorization: run categorizeDerivatives separately for each portfolio
+      const positionsByPortfolio = new Map<string, Position[]>();
+      positions.forEach(p => {
+        const pid = p.portfolio_id;
+        if (!positionsByPortfolio.has(pid)) positionsByPortfolio.set(pid, []);
+        positionsByPortfolio.get(pid)!.push(p);
+      });
+
+      const overridesByPortfolio = new Map<string, typeof overrides>();
+      overrides.forEach(o => {
+        const pid = o.portfolio_id;
+        if (!overridesByPortfolio.has(pid)) overridesByPortfolio.set(pid, []);
+        overridesByPortfolio.get(pid)!.push(o);
+      });
+
+      // Initialize empty merged result
+      const merged: DerivativeCategories = {
+        coveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
+        nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [],
+      };
+
+      for (const [pid, portfolioPositions] of positionsByPortfolio) {
+        const portfolioDerivatives = portfolioPositions.filter(p => p.asset_type === 'derivative');
+        const portfolioOverrides = overridesByPortfolio.get(pid) || [];
+        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides);
+
+        merged.coveredCalls.push(...result.coveredCalls);
+        merged.longPuts.push(...result.longPuts);
+        merged.ironCondors.push(...result.ironCondors);
+        merged.doubleDiagonals.push(...result.doubleDiagonals);
+        merged.nakedPuts.push(...result.nakedPuts);
+        merged.leapCalls.push(...result.leapCalls);
+        merged.otherStrategies.push(...result.otherStrategies);
+        merged.groupedOtherStrategies.push(...result.groupedOtherStrategies);
+      }
+
+      raw = merged;
+    } else {
+      raw = categorizeDerivatives(derivatives, positions, overrides);
+    }
     
     return {
       ...raw,
@@ -137,7 +180,7 @@ export function Derivatives() {
       leapCalls: sortByOptionUnderlying(raw.leapCalls),
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
-  }, [derivatives, positions, overrides]);
+  }, [derivatives, positions, overrides, isAggregatedView]);
 
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
