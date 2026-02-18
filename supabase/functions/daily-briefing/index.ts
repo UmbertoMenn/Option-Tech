@@ -46,6 +46,16 @@ function isItalian10AM(): boolean {
   return italianHour === 10 && now.getUTCMinutes() < 10;
 }
 
+// ============ EXPIRY FORMATTING ============
+
+function formatExpiry(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const months = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  return ` (${d.getUTCDate()} ${months[d.getUTCMonth()]})`;
+}
+
 // ============ NORMALIZATION (mirrors frontend) ============
 
 function normalizeForMatching(str: string): string {
@@ -165,7 +175,7 @@ function buildBriefingSections(
     const price = s.ticker ? underlyingPrices[s.ticker] : 0;
     const strike = s.sold_call_strike || 0;
     if (price && strike > 0 && price > strike) {
-      ccITMItems.push(`${s.ticker || s.underlying} strike ${strike}`);
+      ccITMItems.push(`${s.ticker || s.underlying} strike ${strike}${formatExpiry(s.sold_call_expiry)}`);
     }
   }
   if (ccITMItems.length > 0) {
@@ -179,7 +189,7 @@ function buildBriefingSections(
     const price = s.ticker ? underlyingPrices[s.ticker] : 0;
     const strike = s.sold_put_strike || 0;
     if (price && strike > 0 && price < strike) {
-      npITMItems.push(`${s.ticker || s.underlying} strike ${strike}`);
+      npITMItems.push(`${s.ticker || s.underlying} strike ${strike}${formatExpiry(s.sold_put_expiry)}`);
     }
   }
   if (npITMItems.length > 0) {
@@ -195,7 +205,7 @@ function buildBriefingSections(
     const putStrike = s.sold_put_strike || 0;
     const callStrike = s.sold_call_strike || 0;
     if (putStrike > 0 && callStrike > 0 && (price < putStrike || price > callStrike)) {
-      icOORItems.push(s.ticker || s.underlying);
+      icOORItems.push(`${s.ticker || s.underlying} P${putStrike}/C${callStrike}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)}`);
     }
   }
   if (icOORItems.length > 0) {
@@ -211,7 +221,7 @@ function buildBriefingSections(
     const putStrike = s.sold_put_strike || 0;
     const callStrike = s.sold_call_strike || 0;
     if (putStrike > 0 && callStrike > 0 && (price < putStrike || price > callStrike)) {
-      ddOORItems.push(s.ticker || s.underlying);
+      ddOORItems.push(`${s.ticker || s.underlying} P${putStrike}/C${callStrike}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)}`);
     }
   }
   if (ddOORItems.length > 0) {
@@ -241,7 +251,7 @@ function buildBriefingSections(
       } else if (s.sold_put_strike && s.sold_call_strike) {
         isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
       }
-      if (isOOR) otherOORItems.push(`${s.ticker || s.underlying} - ${s.strategy_type} (OOR)`);
+      if (isOOR) otherOORItems.push(`${s.ticker || s.underlying} - ${s.strategy_type}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)} (OOR)`);
     }
   }
   if (otherOORItems.length > 0) {
@@ -258,7 +268,7 @@ function buildBriefingSections(
       const currentPrice = lp.current_price || 0;
       if (avgCost > 0 && currentPrice > avgCost) {
         const gainPct = ((currentPrice - avgCost) / avgCost * 100).toFixed(0);
-        leapGainItems.push(`${s.ticker || s.underlying} strike ${s.bought_call_strike || '?'} (+${gainPct}%)`);
+        leapGainItems.push(`${s.ticker || s.underlying} strike ${s.bought_call_strike || '?'}${formatExpiry(s.sold_call_expiry || lp.expiry_date)} (+${gainPct}%)`);
       }
     }
   }
