@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
@@ -40,7 +40,8 @@ export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const { isAggregatedView } = usePortfolioContext();
+  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+  const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   
@@ -53,7 +54,7 @@ export function Dashboard() {
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
   
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices);
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate);
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,

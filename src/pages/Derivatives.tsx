@@ -73,7 +73,7 @@ import {
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
-import { usePortfolioContext, isAnyAggregatedId } from '@/contexts/PortfolioContext';
+import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
 
@@ -117,7 +117,10 @@ export function Derivatives() {
     [positions]
   );
 
-  const { isAggregatedView } = usePortfolioContext();
+  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+
+  // Early return for global aggregate - page is hidden
+  const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
 
   const categories = useMemo(() => {
     // Sort functions for different types
@@ -388,6 +391,18 @@ export function Derivatives() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-6">
+        {isGlobalAggregate ? (
+          <Card className="p-8 text-center">
+            <CardContent className="space-y-3">
+              <Info className="w-10 h-10 mx-auto text-muted-foreground" />
+              <h2 className="text-lg font-semibold">Vista non disponibile</h2>
+              <p className="text-muted-foreground">
+                La vista Strategie Derivati non è disponibile per l'aggregato globale.
+                Seleziona un singolo portafoglio o l'aggregato di un utente per visualizzare i dettagli.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (<>
         {/* Info aggiornamento dati */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">Info aggiornamento dati</span>
@@ -702,6 +717,7 @@ export function Derivatives() {
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        </>)}
       </main>
     </div>
   );

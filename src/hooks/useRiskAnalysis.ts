@@ -4,6 +4,7 @@ import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk, RiskAnalysis } from '@/lib/riskCalculator';
 import { Position } from '@/types/portfolio';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 
 /** Replace live prices with Excel snapshot values for Dashboard/Risk Analyzer */
 function toSnapshotPositions(positions: Position[]): Position[] {
@@ -17,40 +18,71 @@ function toSnapshotPositions(positions: Position[]): Position[] {
 export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
   const { positions, isLoading } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
+  const { selectedPortfolioId } = usePortfolioContext();
+  
+  const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   
   const analysis = useMemo(() => {
-    if (!positions || positions.length === 0) {
-      return {
-        totalStockRisk: 0,
-        totalETFRisk: 0,
-        totalPureStockRisk: 0,
-        totalCommodityRisk: 0,
-        totalBondRisk: 0,
-        totalNakedPutRisk: 0,
-        totalLeapCallRisk: 0,
-        totalStrategyRisk: 0,
-        grandTotal: 0,
-        stockDetails: [],
-        commodityDetails: [],
-        bondDetails: [],
-        nakedPutDetails: [],
-        leapCallDetails: [],
-        strategyDetails: []
-      };
+    const empty: RiskAnalysis = {
+      totalStockRisk: 0, totalETFRisk: 0, totalPureStockRisk: 0,
+      totalCommodityRisk: 0, totalBondRisk: 0, totalNakedPutRisk: 0,
+      totalLeapCallRisk: 0, totalStrategyRisk: 0, grandTotal: 0,
+      stockDetails: [], commodityDetails: [], bondDetails: [],
+      nakedPutDetails: [], leapCallDetails: [], strategyDetails: []
+    };
+
+    if (!positions || positions.length === 0) return empty;
+    
+    if (isGlobalAggregate) {
+      // Per-portfolio: group positions and overrides by portfolio_id, 
+      // run analysis separately, then sum totals and concat details
+      const byPortfolio = new Map<string, Position[]>();
+      positions.forEach(p => {
+        if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
+        byPortfolio.get(p.portfolio_id)!.push(p);
+      });
+
+      const overridesByPortfolio = new Map<string, typeof overrides>();
+      overrides.forEach(o => {
+        if (!overridesByPortfolio.has(o.portfolio_id)) overridesByPortfolio.set(o.portfolio_id, []);
+        overridesByPortfolio.get(o.portfolio_id)!.push(o);
+      });
+
+      const merged = { ...empty };
+
+      for (const [pid, pPositions] of byPortfolio) {
+        const snap = toSnapshotPositions(pPositions);
+        const derivs = snap.filter(p => p.asset_type === 'derivative');
+        const pOverrides = overridesByPortfolio.get(pid) || [];
+        const cats = categorizeDerivatives(derivs, snap, pOverrides);
+        const result = analyzePortfolioRisk(snap, cats);
+
+        merged.totalStockRisk += result.totalStockRisk;
+        merged.totalETFRisk += result.totalETFRisk;
+        merged.totalPureStockRisk += result.totalPureStockRisk;
+        merged.totalCommodityRisk += result.totalCommodityRisk;
+        merged.totalBondRisk += result.totalBondRisk;
+        merged.totalNakedPutRisk += result.totalNakedPutRisk;
+        merged.totalLeapCallRisk += result.totalLeapCallRisk;
+        merged.totalStrategyRisk += result.totalStrategyRisk;
+        merged.grandTotal += result.grandTotal;
+        merged.stockDetails.push(...result.stockDetails);
+        merged.commodityDetails.push(...result.commodityDetails);
+        merged.bondDetails.push(...result.bondDetails);
+        merged.nakedPutDetails.push(...result.nakedPutDetails);
+        merged.leapCallDetails.push(...result.leapCallDetails);
+        merged.strategyDetails.push(...result.strategyDetails);
+      }
+
+      return merged;
     }
     
-    // Use snapshot prices for risk analysis (Excel values, not live cron prices)
+    // Single portfolio / user aggregate: standard logic
     const snapshotPositions = toSnapshotPositions(positions);
-    
-    // Filter derivatives
     const derivatives = snapshotPositions.filter(p => p.asset_type === 'derivative');
-    
-    // Categorize derivatives using existing logic WITH overrides
     const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides);
-    
-    // Calculate risk analysis
     return analyzePortfolioRisk(snapshotPositions, categories);
-  }, [positions, overrides]);
+  }, [positions, overrides, isGlobalAggregate]);
   
   return {
     ...analysis,

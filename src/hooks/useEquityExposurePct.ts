@@ -4,6 +4,7 @@ import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk } from '@/lib/riskCalculator';
 import { Position } from '@/types/portfolio';
+import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 
 export interface UseEquityExposurePctOptions {
   /** Include Naked PUT exposure in calculation (default: true) */
@@ -29,16 +30,6 @@ export interface EquityExposureResult {
 
 /**
  * Hook that calculates equity exposure percentage using the same logic as Risk Analyzer.
- * 
- * Formula: equityExposurePct = grandTotal / totalValue (capped at 100%)
- * 
- * Where grandTotal can include:
- * - ETF + Stocks (net of protections) + Commodities (always included)
- * - Naked PUT (optional, default: true)
- * - Leap CALL (optional, default: true)
- * - Strategies Max Loss (optional, default: true)
- * 
- * For benchmark comparison, use with all flags set to false to get direct equity exposure only.
  */
 export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}): EquityExposureResult {
   const {
@@ -49,53 +40,81 @@ export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}):
   
   const { positions, summary, isLoading: isLoadingPortfolio } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
+  const { selectedPortfolioId } = usePortfolioContext();
+  
+  const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   
   const result = useMemo(() => {
     const isLoading = isLoadingPortfolio || isLoadingOverrides;
     
-    // Default fallback when data is not available
     if (!positions || positions.length === 0 || !summary || summary.totalValue <= 0) {
       return {
-        equityExposurePct: 0.6, // Conservative fallback
+        equityExposurePct: 0.6,
         equityExposureEUR: 0,
         assetsTotalEUR: 0,
         isLoading,
         hasData: false
       };
     }
+
+    let totalStockRisk = 0;
+    let totalCommodityRisk = 0;
+    let totalNakedPutRisk = 0;
+    let totalLeapCallRisk = 0;
+    let totalStrategyRisk = 0;
+
+    const analyzePositions = (posArr: Position[], ovr: typeof overrides) => {
+      const snap = posArr.map(p => ({
+        ...p,
+        current_price: p.snapshot_price ?? p.current_price,
+        market_value: p.snapshot_market_value ?? p.market_value,
+      }));
+      const derivs = snap.filter(p => p.asset_type === 'derivative');
+      const cats = categorizeDerivatives(derivs, snap, ovr);
+      return analyzePortfolioRisk(snap, cats);
+    };
+
+    if (isGlobalAggregate) {
+      // Per-portfolio analysis and sum
+      const byPortfolio = new Map<string, Position[]>();
+      positions.forEach(p => {
+        if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
+        byPortfolio.get(p.portfolio_id)!.push(p);
+      });
+
+      const overridesByPortfolio = new Map<string, typeof overrides>();
+      overrides.forEach(o => {
+        if (!overridesByPortfolio.has(o.portfolio_id)) overridesByPortfolio.set(o.portfolio_id, []);
+        overridesByPortfolio.get(o.portfolio_id)!.push(o);
+      });
+
+      for (const [pid, pPositions] of byPortfolio) {
+        const pOverrides = overridesByPortfolio.get(pid) || [];
+        const analysis = analyzePositions(pPositions, pOverrides);
+        totalStockRisk += analysis.totalStockRisk;
+        totalCommodityRisk += analysis.totalCommodityRisk;
+        totalNakedPutRisk += analysis.totalNakedPutRisk;
+        totalLeapCallRisk += analysis.totalLeapCallRisk;
+        totalStrategyRisk += analysis.totalStrategyRisk;
+      }
+    } else {
+      const analysis = analyzePositions(positions, overrides);
+      totalStockRisk = analysis.totalStockRisk;
+      totalCommodityRisk = analysis.totalCommodityRisk;
+      totalNakedPutRisk = analysis.totalNakedPutRisk;
+      totalLeapCallRisk = analysis.totalLeapCallRisk;
+      totalStrategyRisk = analysis.totalStrategyRisk;
+    }
     
-    // Use snapshot prices for equity exposure (Excel values, not live cron prices)
-    const snapshotPositions: Position[] = positions.map(p => ({
-      ...p,
-      current_price: p.snapshot_price ?? p.current_price,
-      market_value: p.snapshot_market_value ?? p.market_value,
-    }));
-    
-    // Filter derivatives
-    const derivatives = snapshotPositions.filter(p => p.asset_type === 'derivative');
-    
-    // Categorize derivatives using existing logic WITH overrides (same as Risk Analyzer)
-    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides);
-    
-    // Calculate risk analysis (same as Risk Analyzer)
-    const analysis = analyzePortfolioRisk(snapshotPositions, categories);
-    
-    // Dynamic grandTotal based on options
-    // Always include: ETF + Stocks (net of protections) + Commodities
-    // Conditionally include: Naked PUT, Leap CALL, Strategies
     const grandTotal = 
-      analysis.totalStockRisk +        // Stocks (already net of protections)
-      analysis.totalCommodityRisk +    // Commodities
-      (includeNakedPut ? analysis.totalNakedPutRisk : 0) +
-      (includeLeapCall ? analysis.totalLeapCallRisk : 0) +
-      (includeStrategies ? analysis.totalStrategyRisk : 0);
+      totalStockRisk +
+      totalCommodityRisk +
+      (includeNakedPut ? totalNakedPutRisk : 0) +
+      (includeLeapCall ? totalLeapCallRisk : 0) +
+      (includeStrategies ? totalStrategyRisk : 0);
     
     const assetsTotalEUR = summary.totalValue;
-    
-    // Calculate percentage with safety clamp
     let equityExposurePct = grandTotal / assetsTotalEUR;
-    
-    // Clamp between 0 and 1 to avoid unrealistic values
     equityExposurePct = Math.max(0, Math.min(1, equityExposurePct));
     
     return {
@@ -105,7 +124,7 @@ export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}):
       isLoading,
       hasData: true
     };
-  }, [positions, summary, overrides, isLoadingPortfolio, isLoadingOverrides, includeNakedPut, includeStrategies, includeLeapCall]);
+  }, [positions, summary, overrides, isLoadingPortfolio, isLoadingOverrides, includeNakedPut, includeStrategies, includeLeapCall, isGlobalAggregate]);
   
   return result;
 }
