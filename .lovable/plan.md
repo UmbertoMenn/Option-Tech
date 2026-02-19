@@ -1,81 +1,69 @@
 
 
-## Snapshot affidabile per il briefing: gestione del caricamento progressivo
+## Recupero dati storici nella calcolatrice premi
 
-### Problema evidenziato
-La card "Posizioni da monitorare" si popola in due fasi:
-1. Prima fase: dati immediati (strategie con ticker gia risolti)
-2. Seconda fase: risoluzione AI dei ticker mancanti (indicata dal badge "Risoluzione AI in corso per N strumenti...")
+### Contesto
+Quando una gamba cambia (roll, cambio strike/scadenza), la chiave `option_symbol` cambia e la calcolatrice si apre vuota. I dati vecchi restano nel database ma non sono piu visibili.
 
-Se lo snapshot viene salvato subito, conterrebbe solo i dati della prima fase -- mancherebbero le posizioni con ticker non ancora risolti.
+### Modifica
 
-### Soluzione: salvare lo snapshot solo quando i dati sono completi
+**File: `src/hooks/useCoveredCallPremiums.ts`**
 
-**1. Nuova tabella `monitoring_snapshot`**
+Aggiungere una funzione helper `getPremiumsByTicker(ticker: string)` che restituisce **tutti** i record per quel ticker (indipendentemente dall'`option_symbol`), ordinati per `updated_at` decrescente. Questa funzione e gia parzialmente presente come `getPremiumByTicker` ma restituisce solo il primo match -- servira una versione che restituisca un array.
 
-- `portfolio_id` (uuid, PK)
-- `sections` (jsonb) -- array di sezioni con titolo, emoji, badge e items
-- `updated_at` (timestamptz)
+**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-RLS: utente puo leggere/scrivere i propri, admin e service_role possono leggere tutti.
+1. Nel `useEffect` che carica i dati salvati (righe 69-80), se non viene trovato un match esatto per `(ticker, optionSymbol)`, cercare tutti i record storici per lo stesso ticker usando `getPremiumsByTicker`.
 
-**2. File: `src/components/derivatives/DerivativesSummaryCard.tsx`**
+2. Se esistono record storici (ma nessuno corrisponde all'`optionSymbol` corrente), mostrare un **banner informativo** sopra la zona di upload con:
+   - Messaggio: "Trovati dati storici per questo ticker"
+   - Un **Select dropdown** con le opzioni disponibili, ciascuna identificata dal proprio `option_symbol` e data dell'ultima modifica
+   - Il formato di ogni opzione sara: `"{option_symbol} — aggiornato il {data}"` (es. `"C200_2025-03-21 — aggiornato il 15/02/2025"`)
 
-Aggiungere un `useEffect` che salva lo snapshot SOLO quando:
-- `isFetchingMissing === false` (la risoluzione AI e terminata)
-- I dati calcolati (`coveredCallsITM`, `nakedPutsITM`, ecc.) sono stabili
+3. Quando l'utente seleziona un vecchio record:
+   - Caricare gli ordini (`orders_json`), il costo transazione e le metriche dal record selezionato
+   - Marcare i dati come "unsaved changes" (`hasUnsavedChanges = true`) in modo che il salvataggio li associ alla **nuova** chiave `optionSymbol` corrente
+   - Mostrare un toast di conferma: "Dati importati da {vecchio option_symbol}"
 
-La condizione `isFetchingMissing` e gia disponibile come prop del componente -- e il segnale perfetto per sapere quando tutti i dati sono pronti.
+4. Il banner scompare una volta che ci sono dati caricati (sia da selezione storica che da upload file).
 
+### Dettaglio tecnico
+
+**`useCoveredCallPremiums.ts`** -- nuova funzione esposta:
 ```text
-useEffect:
-  SE isFetchingMissing === false:
-    costruisci array sezioni dai dati calcolati
-    upsert in monitoring_snapshot(portfolio_id, sections, updated_at)
+getPremiumsByTicker(ticker: string): CoveredCallPremium[]
+  -> filtra premiums per ticker (case-insensitive)
+  -> ordina per updated_at DESC
 ```
 
-Ogni sezione verra salvata come:
-```json
-{
-  "title": "Covered Call",
-  "emoji": "amber",
-  "badge": "ITM",
-  "items": ["AAPL $200 x1", "MSFT $420 x2"]
-}
-```
-
-Le stringhe degli items saranno identiche a quelle renderizzate nei Badge della card.
-
-**3. File: `supabase/functions/daily-briefing/index.ts`**
-
-Rimuovere completamente `buildBriefingSections` e tutta la logica di calcolo (circa 150 righe). La funzione:
-1. Legge gli utenti con notifiche attive
-2. Per ogni utente, legge `monitoring_snapshot` dei suoi portfolio
-3. Mappa l'emoji dal nome colore all'emoji Unicode (amber -> giallo, red -> rosso, green -> verde)
-4. Formatta e invia il messaggio
-
-Non servono piu le query a `underlying_prices`, `underlying_mappings` o `positions`.
-
-**4. Gestione edge case: snapshot vecchio**
-
-Il briefing verifichera che l'`updated_at` dello snapshot non sia piu vecchio di 48 ore. Se lo e, salta quel portfolio con un log di warning -- significa che l'utente non ha aperto la pagina derivati di recente e i dati potrebbero essere obsoleti.
-
-### Flusso completo
-
+**`CallPremiumCalculatorDialog.tsx`** -- nuove variabili di stato:
 ```text
-Utente apre pagina Derivati
-  -> Frontend calcola sezioni (fase 1: immediata)
-  -> Frontend risolve ticker mancanti (fase 2: AI)
-  -> isFetchingMissing diventa false
-  -> useEffect salva snapshot in DB
-  
-Cron alle 11:00
-  -> Edge function legge snapshot dal DB
-  -> Formatta e invia messaggio
+historicalPremiums: CoveredCallPremium[]  -- record storici disponibili per il ticker
+showHistoricalPicker: boolean             -- true se la calcolatrice e vuota ma ci sono dati storici
 ```
 
-### Vantaggi
-- Il briefing mostra esattamente cio che l'utente vede nella pagina
-- Nessun calcolo duplicato nell'edge function
-- Lo snapshot viene salvato solo quando i dati sono completi
-- Logica molto piu semplice e manutenibile
+**Logica nel useEffect (righe 69-80)**:
+```text
+SE match esatto (ticker, optionSymbol) trovato:
+  -> carica normalmente (comportamento attuale)
+ALTRIMENTI:
+  -> cerca tutti i record per ticker
+  -> SE ce ne sono > 0:
+    -> popola historicalPremiums
+    -> showHistoricalPicker = true
+```
+
+**UI del banner** (posizionato tra l'header del dialog e la zona upload):
+```text
+Alert (variant info):
+  icona: History
+  testo: "Dati storici disponibili per {ticker}"
+  Select con le opzioni
+  Bottone "Importa" per confermare la selezione
+```
+
+### Comportamento dopo l'importazione
+- I dati importati vengono trattati come "nuovi" rispetto alla chiave corrente
+- Il salvataggio (bottone "Salva") li salvera con il nuovo `option_symbol`
+- Il vecchio record nel DB **non viene cancellato** (l'utente puo decidere di farlo manualmente con Reset se vuole)
+
