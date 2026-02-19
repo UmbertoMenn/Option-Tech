@@ -148,6 +148,44 @@ function getMatchingKey(text: string): string {
   return getCanonicalKey(text) || normalizeForMatching(text);
 }
 
+// ============ TICKER RESOLUTION VIA underlying_mappings ============
+
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    .replace(/\bLTD\b/g, '')
+    .replace(/\bLLC\b/g, '')
+    .replace(/\bPLC\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .replace(/\bTHE\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveStockTicker(
+  description: string,
+  mappings: Map<string, string>,       // direct: underlying -> ticker
+  normalizedMappings: Map<string, string> // normalized underlying -> ticker
+): string | null {
+  // Remove AZ. prefix
+  const cleaned = description.replace(/^AZ\./i, '').trim();
+
+  // Direct match
+  const direct = mappings.get(cleaned);
+  if (direct) return direct;
+
+  // Normalized match
+  const norm = normalizeName(cleaned);
+  const normalized = normalizedMappings.get(norm);
+  if (normalized) return normalized;
+
+  return null;
+}
+
 // ============ SERVER-SIDE COMPUTATION FROM strategy_cache ============
 
 async function computeSectionsFromCache(
@@ -184,7 +222,7 @@ async function computeSectionsFromCache(
     prices[p.ticker] = p.price;
   }
 
-  // 4. Load positions for this portfolio (stocks for uncovered calls, options for LEAP/OOB)
+  // 4. Load positions for this portfolio
   const { data: positionRows } = await supabase
     .from("positions")
     .select("id, portfolio_id, ticker, description, asset_type, quantity, current_price, avg_cost, market_value, option_type, strike_price, underlying")
@@ -192,6 +230,19 @@ async function computeSectionsFromCache(
 
   const positions = (positionRows || []) as PositionRow[];
   const stockPositions = positions.filter(p => p.asset_type === "stock");
+
+  // 5. Load underlying_mappings for ticker-based matching
+  const { data: mappingRows } = await supabase
+    .from("underlying_mappings")
+    .select("underlying, ticker");
+
+  const directMappings = new Map<string, string>();
+  const normalizedMappings = new Map<string, string>();
+  for (const m of (mappingRows || [])) {
+    directMappings.set(m.underlying, m.ticker);
+    const norm = normalizeName(m.underlying);
+    if (!normalizedMappings.has(norm)) normalizedMappings.set(norm, m.ticker);
+  }
 
   // Helper to get price for a strategy
   const getPrice = (s: StrategyRow): number => {
@@ -217,18 +268,19 @@ async function computeSectionsFromCache(
     strategies: Set<string>;
   }>();
 
-  // Count stock shares
+  // Count stock shares - use ticker-based matching
   for (const stock of stockPositions) {
-    const key = getMatchingKey(stock.description);
+    const key = resolveStockTicker(stock.description, directMappings, normalizedMappings)
+      || getMatchingKey(stock.description);
     if (!underlyingBalance.has(key)) {
       underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
     }
     underlyingBalance.get(key)!.owned += stock.quantity;
   }
 
-  // Count calls from strategies
+  // Count calls from strategies - use ticker from strategy_cache
   for (const s of typedStrategies) {
-    const key = getMatchingKey(s.underlying);
+    const key = s.ticker || getMatchingKey(s.underlying);
 
     if (!underlyingBalance.has(key)) {
       underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
@@ -524,12 +576,13 @@ async function computeSectionsFromCache(
     const potentialContracts = Math.floor(stock.quantity / 100);
     if (potentialContracts < 1) continue;
 
-    const stockKey = getMatchingKey(stock.description);
+    const stockKey = resolveStockTicker(stock.description, directMappings, normalizedMappings)
+      || getMatchingKey(stock.description);
 
     // Count covered calls already sold on this underlying
     let soldCallContracts = 0;
     for (const s of typedStrategies.filter(s => s.strategy_type === "Covered Call")) {
-      const sKey = getMatchingKey(s.underlying);
+      const sKey = s.ticker || getMatchingKey(s.underlying);
       if (sKey === stockKey) {
         const posId = s.position_ids?.[0];
         const pos = posId ? positions.find(p => p.id === posId) : null;
