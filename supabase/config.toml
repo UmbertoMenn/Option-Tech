@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.admin-create-user]
 verify_jwt = false
+
+[functions.auto-snapshot]
+verify_jwt = false

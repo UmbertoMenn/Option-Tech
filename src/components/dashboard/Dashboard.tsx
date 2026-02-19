@@ -35,6 +35,7 @@ import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link, useNavigate } from 'react-router-dom';
 import { DepositEntry } from '@/types/deposits';
+import { supabase } from '@/integrations/supabase/client';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
@@ -101,6 +102,24 @@ export function Dashboard() {
     setAverageBalance(0);
     setIsManualAverageBalance(false);
   }, [portfolio?.id]);
+
+  // Stage latest calculated values for auto-snapshot cron
+  useEffect(() => {
+    if (!portfolio?.id || !portfolio?.snapshot_date || !summary || isAggregatedView) return;
+    supabase
+      .from('portfolio_latest_values')
+      .upsert({
+        portfolio_id: portfolio.id,
+        total_value: summary.totalValue,
+        netting_total: netting.nettingTotal,
+        netting_ex_cc_np: netting.nettingExCCAndNP,
+        equity_exposure_pct: equityExposurePct,
+        usd_exposure_pct: usdExposurePct,
+      }, { onConflict: 'portfolio_id' })
+      .then(({ error }) => {
+        if (error) console.warn('Failed to stage latest values:', error.message);
+      });
+  }, [portfolio?.id, portfolio?.snapshot_date, summary?.totalValue, netting.nettingTotal, netting.nettingExCCAndNP, equityExposurePct, usdExposurePct, isAggregatedView]);
 
   // Validate and initialize selectedHistoricalDate when historical data changes
   useEffect(() => {

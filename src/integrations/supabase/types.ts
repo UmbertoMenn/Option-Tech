@@ -608,6 +608,44 @@ export type Database = {
           },
         ]
       }
+      portfolio_latest_values: {
+        Row: {
+          equity_exposure_pct: number
+          netting_ex_cc_np: number
+          netting_total: number
+          portfolio_id: string
+          total_value: number
+          updated_at: string
+          usd_exposure_pct: number
+        }
+        Insert: {
+          equity_exposure_pct?: number
+          netting_ex_cc_np?: number
+          netting_total?: number
+          portfolio_id: string
+          total_value?: number
+          updated_at?: string
+          usd_exposure_pct?: number
+        }
+        Update: {
+          equity_exposure_pct?: number
+          netting_ex_cc_np?: number
+          netting_total?: number
+          portfolio_id?: string
+          total_value?: number
+          updated_at?: string
+          usd_exposure_pct?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_latest_values_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: true
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       portfolios: {
         Row: {
           average_balance: number | null
