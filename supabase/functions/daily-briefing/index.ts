@@ -103,6 +103,51 @@ interface PositionRow {
   underlying: string | null;
 }
 
+// ============ MATCHING FUNCTIONS (replicated from frontend derivativeStrategies.ts) ============
+
+const SPECIAL_ALIASES: Record<string, string[]> = {
+  ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
+  PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
+  NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],
+  ENI: ['ENI', 'ENI SPA', 'ENI STOCK', 'ENI - STOCK'],
+  APPLE: ['APPLE', 'AAPL', 'APPLE INC', 'APPLE COMPUTER', 'APPLE COMPUTER INC'],
+  JPMORGAN: ['JPMORGAN', 'JP MORGAN', 'J.P. MORGAN', 'JPMORGAN CHASE', 'JP MORGAN CHASE', 'J.P. MORGAN CHASE', 'JPM'],
+  AMAZON: ['AMAZON', 'AMZN', 'AMAZON COM', 'AMAZON.COM', 'AMAZON.COM.INC', 'AMAZON COM INC'],
+};
+
+function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/^AZ\./i, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/([A-Z]{3,})\.([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])\.([A-Z]{3,})/g, '$1 $2')
+    .replace(/([A-Z])\.([A-Z])/g, '$1$2')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|CL\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getCanonicalKey(text: string): string | null {
+  const normalized = normalizeForMatching(text);
+  for (const [canonical, aliases] of Object.entries(SPECIAL_ALIASES)) {
+    for (const alias of aliases) {
+      const normalizedAlias = normalizeForMatching(alias);
+      if (normalized === normalizedAlias ||
+          normalized.includes(normalizedAlias) ||
+          normalizedAlias.includes(normalized)) {
+        return canonical;
+      }
+    }
+  }
+  return null;
+}
+
+function getMatchingKey(text: string): string {
+  return getCanonicalKey(text) || normalizeForMatching(text);
+}
+
 // ============ SERVER-SIDE COMPUTATION FROM strategy_cache ============
 
 async function computeSectionsFromCache(
@@ -174,7 +219,7 @@ async function computeSectionsFromCache(
 
   // Count stock shares
   for (const stock of stockPositions) {
-    const key = stock.ticker || stock.description.split(" ")[0];
+    const key = getMatchingKey(stock.description);
     if (!underlyingBalance.has(key)) {
       underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
     }
@@ -183,7 +228,7 @@ async function computeSectionsFromCache(
 
   // Count calls from strategies
   for (const s of typedStrategies) {
-    const key = displayTicker(s);
+    const key = getMatchingKey(s.underlying);
 
     if (!underlyingBalance.has(key)) {
       underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
@@ -479,12 +524,12 @@ async function computeSectionsFromCache(
     const potentialContracts = Math.floor(stock.quantity / 100);
     if (potentialContracts < 1) continue;
 
-    const stockKey = stock.ticker || stock.description.split(" ")[0];
+    const stockKey = getMatchingKey(stock.description);
 
     // Count covered calls already sold on this underlying
     let soldCallContracts = 0;
     for (const s of typedStrategies.filter(s => s.strategy_type === "Covered Call")) {
-      const sKey = displayTicker(s);
+      const sKey = getMatchingKey(s.underlying);
       if (sKey === stockKey) {
         const posId = s.position_ids?.[0];
         const pos = posId ? positions.find(p => p.id === posId) : null;
