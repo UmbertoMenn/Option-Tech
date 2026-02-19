@@ -71,6 +71,444 @@ interface PortfolioBriefing {
   sections: SnapshotSection[];
 }
 
+interface StrategyRow {
+  id: string;
+  portfolio_id: string;
+  strategy_type: string;
+  strategy_key: string;
+  underlying: string;
+  ticker: string | null;
+  sold_call_strike: number | null;
+  sold_put_strike: number | null;
+  bought_call_strike: number | null;
+  bought_put_strike: number | null;
+  sold_call_expiry: string | null;
+  sold_put_expiry: string | null;
+  position_ids: string[];
+  is_range_strategy: boolean | null;
+}
+
+interface PositionRow {
+  id: string;
+  portfolio_id: string;
+  ticker: string | null;
+  description: string;
+  asset_type: string;
+  quantity: number;
+  current_price: number | null;
+  avg_cost: number | null;
+  market_value: number | null;
+  option_type: string | null;
+  strike_price: number | null;
+  underlying: string | null;
+}
+
+// ============ SERVER-SIDE COMPUTATION FROM strategy_cache ============
+
+async function computeSectionsFromCache(
+  supabase: any,
+  portfolioId: string
+): Promise<SnapshotSection[]> {
+  // 1. Load strategy_cache for this portfolio
+  const { data: strategies } = await supabase
+    .from("strategy_cache")
+    .select("*")
+    .eq("portfolio_id", portfolioId);
+
+  if (!strategies || strategies.length === 0) {
+    return [];
+  }
+
+  const typedStrategies = strategies as StrategyRow[];
+
+  // 2. Collect all tickers from strategies to fetch prices
+  const tickers = new Set<string>();
+  for (const s of typedStrategies) {
+    if (s.ticker) tickers.add(s.ticker);
+    if (s.underlying) tickers.add(s.underlying);
+  }
+
+  // 3. Load underlying_prices
+  const { data: priceRows } = await supabase
+    .from("underlying_prices")
+    .select("ticker, price")
+    .in("ticker", Array.from(tickers));
+
+  const prices: Record<string, number> = {};
+  for (const p of (priceRows || [])) {
+    prices[p.ticker] = p.price;
+  }
+
+  // 4. Load positions for this portfolio (stocks for uncovered calls, options for LEAP/OOB)
+  const { data: positionRows } = await supabase
+    .from("positions")
+    .select("id, portfolio_id, ticker, description, asset_type, quantity, current_price, avg_cost, market_value, option_type, strike_price, underlying")
+    .eq("portfolio_id", portfolioId);
+
+  const positions = (positionRows || []) as PositionRow[];
+  const stockPositions = positions.filter(p => p.asset_type === "stock");
+
+  // Helper to get price for a strategy
+  const getPrice = (s: StrategyRow): number => {
+    // Try ticker first, then underlying
+    if (s.ticker && prices[s.ticker]) return prices[s.ticker];
+    if (s.underlying && prices[s.underlying]) return prices[s.underlying];
+    return 0;
+  };
+
+  // Helper to get display ticker
+  const displayTicker = (s: StrategyRow): string => {
+    return (s.ticker || s.underlying || "N/A").split(" ")[0];
+  };
+
+  const sections: SnapshotSection[] = [];
+
+  // ============ 1. Call non coperte ============
+  // Replicate frontend logic: for each underlying, sum sold/bought calls from ALL strategies
+  const underlyingBalance = new Map<string, {
+    owned: number;
+    soldCalls: number;
+    boughtCalls: number;
+    strategies: Set<string>;
+  }>();
+
+  // Count stock shares
+  for (const stock of stockPositions) {
+    const key = stock.ticker || stock.description.split(" ")[0];
+    if (!underlyingBalance.has(key)) {
+      underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
+    }
+    underlyingBalance.get(key)!.owned += stock.quantity;
+  }
+
+  // Count calls from strategies
+  for (const s of typedStrategies) {
+    const key = displayTicker(s);
+
+    if (!underlyingBalance.has(key)) {
+      underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
+    }
+    const bal = underlyingBalance.get(key)!;
+
+    if (s.strategy_type === "Covered Call") {
+      // Covered Call: each has 1 sold call per strategy_cache row
+      // Count contracts from position_ids (each position = 1+ contracts)
+      const posId = s.position_ids?.[0]; // first is the option
+      const pos = posId ? positions.find(p => p.id === posId) : null;
+      const contracts = pos ? Math.abs(pos.quantity) : 1;
+      bal.soldCalls += contracts;
+      bal.strategies.add("Covered Call");
+    } else if (s.strategy_type === "Iron Condor") {
+      // IC has both sold and bought calls (net = 0 for call exposure)
+      // But sold call count matters for uncovered check
+      // Each IC = 1 contract sold call + 1 bought call
+      const posIds = s.position_ids || [];
+      // Find sold call position to get contract count
+      let contracts = 1;
+      for (const pid of posIds) {
+        const pos = positions.find(p => p.id === pid);
+        if (pos && pos.option_type === "call" && pos.quantity < 0) {
+          contracts = Math.abs(pos.quantity);
+          break;
+        }
+      }
+      bal.soldCalls += contracts;
+      bal.boughtCalls += contracts;
+      bal.strategies.add("Iron Condor");
+    } else if (s.strategy_type === "Double Diagonal") {
+      const posIds = s.position_ids || [];
+      let contracts = 1;
+      for (const pid of posIds) {
+        const pos = positions.find(p => p.id === pid);
+        if (pos && pos.option_type === "call" && pos.quantity < 0) {
+          contracts = Math.abs(pos.quantity);
+          break;
+        }
+      }
+      bal.soldCalls += contracts;
+      bal.boughtCalls += contracts;
+      bal.strategies.add("Double Diagonal");
+    } else if (s.strategy_type === "LEAP Call") {
+      const posIds = s.position_ids || [];
+      let contracts = 1;
+      for (const pid of posIds) {
+        const pos = positions.find(p => p.id === pid);
+        if (pos && pos.option_type === "call" && pos.quantity > 0) {
+          contracts = pos.quantity;
+          break;
+        }
+      }
+      bal.boughtCalls += contracts;
+      bal.strategies.add("Leap Call");
+    } else {
+      // Other strategies: check position_ids for any call positions
+      const posIds = s.position_ids || [];
+      for (const pid of posIds) {
+        const pos = positions.find(p => p.id === pid);
+        if (pos && pos.option_type === "call") {
+          if (pos.quantity < 0) {
+            bal.soldCalls += Math.abs(pos.quantity);
+          } else {
+            bal.boughtCalls += pos.quantity;
+          }
+        }
+      }
+      if (s.strategy_type) bal.strategies.add(s.strategy_type);
+    }
+  }
+
+  const uncoveredCalls: { ticker: string; uncoveredContracts: number }[] = [];
+  for (const [key, data] of underlyingBalance) {
+    const coveredContracts = Math.floor(data.owned / 100);
+    const netSoldCalls = data.soldCalls - data.boughtCalls;
+    if (netSoldCalls > coveredContracts) {
+      uncoveredCalls.push({
+        ticker: key,
+        uncoveredContracts: netSoldCalls - coveredContracts,
+      });
+    }
+  }
+  if (uncoveredCalls.length > 0) {
+    uncoveredCalls.sort((a, b) => b.uncoveredContracts - a.uncoveredContracts);
+    sections.push({
+      title: "Call non coperte",
+      emoji: "red",
+      items: uncoveredCalls.map(uc => `${uc.ticker}: ${uc.uncoveredContracts}NC`),
+    });
+  }
+
+  // ============ 2. Covered Call ITM ============
+  const coveredCallsITM: { ticker: string; strike: number; contracts: number }[] = [];
+  for (const s of typedStrategies.filter(s => s.strategy_type === "Covered Call")) {
+    const price = getPrice(s);
+    const strike = s.sold_call_strike || 0;
+    if (price > 0 && strike > 0 && price > strike) {
+      // Get contracts from position
+      const posId = s.position_ids?.[0];
+      const pos = posId ? positions.find(p => p.id === posId) : null;
+      const contracts = pos ? Math.abs(pos.quantity) : 1;
+      coveredCallsITM.push({ ticker: displayTicker(s), strike, contracts });
+    }
+  }
+  if (coveredCallsITM.length > 0) {
+    coveredCallsITM.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    sections.push({
+      title: "Covered Call",
+      emoji: "amber",
+      badge: "ITM",
+      items: coveredCallsITM.map(cc => `${cc.ticker} $${cc.strike} ×${cc.contracts}`),
+    });
+  }
+
+  // ============ 3. Double Diagonal OOR ============
+  const doubleDiagonalOOR: { ticker: string; isAlternative: boolean }[] = [];
+  for (const s of typedStrategies.filter(s => s.strategy_type === "Double Diagonal")) {
+    const price = getPrice(s);
+    if (price > 0) {
+      const soldPut = s.sold_put_strike || 0;
+      const soldCall = s.sold_call_strike || 0;
+      if (!(price >= soldPut && price <= soldCall)) {
+        doubleDiagonalOOR.push({ ticker: displayTicker(s), isAlternative: false });
+      }
+    }
+  }
+  // Alternative Double Diagonal (stored in strategy_cache with that type)
+  for (const s of typedStrategies.filter(s => s.strategy_type === "Alternative Double Diagonal")) {
+    const price = getPrice(s);
+    if (price > 0) {
+      const soldPut = s.sold_put_strike || 0;
+      const soldCall = s.sold_call_strike || 0;
+      if (!(price >= soldPut && price <= soldCall)) {
+        doubleDiagonalOOR.push({ ticker: displayTicker(s), isAlternative: true });
+      }
+    }
+  }
+  if (doubleDiagonalOOR.length > 0) {
+    doubleDiagonalOOR.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    sections.push({
+      title: "Double Diagonal",
+      emoji: "purple",
+      badge: "OOR",
+      items: doubleDiagonalOOR.map(dd => `${dd.ticker}${dd.isAlternative ? " (Alt)" : ""}`),
+    });
+  }
+
+  // ============ 4. Iron Condor OOR ============
+  const ironCondorOOR: string[] = [];
+  for (const s of typedStrategies.filter(s => s.strategy_type === "Iron Condor")) {
+    const price = getPrice(s);
+    if (price > 0) {
+      const soldPut = s.sold_put_strike || 0;
+      const soldCall = s.sold_call_strike || 0;
+      if (!(price >= soldPut && price <= soldCall)) {
+        ironCondorOOR.push(displayTicker(s));
+      }
+    }
+  }
+  if (ironCondorOOR.length > 0) {
+    ironCondorOOR.sort();
+    sections.push({
+      title: "Iron Condor",
+      emoji: "amber",
+      badge: "OOR",
+      items: ironCondorOOR,
+    });
+  }
+
+  // ============ 5. Naked Put ITM ============
+  const nakedPutsITM: { ticker: string; strike: number; contracts: number }[] = [];
+  for (const s of typedStrategies.filter(s => s.strategy_type === "Naked Put")) {
+    const price = getPrice(s);
+    const strike = s.sold_put_strike || 0;
+    if (price > 0 && strike > 0 && strike > price) {
+      const posId = s.position_ids?.[0];
+      const pos = posId ? positions.find(p => p.id === posId) : null;
+      const contracts = pos ? Math.abs(pos.quantity) : 1;
+      nakedPutsITM.push({ ticker: displayTicker(s), strike, contracts });
+    }
+  }
+  if (nakedPutsITM.length > 0) {
+    nakedPutsITM.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    sections.push({
+      title: "Naked Put",
+      emoji: "orange",
+      badge: "ITM",
+      items: nakedPutsITM.map(np => `${np.ticker} $${np.strike} ×${np.contracts}`),
+    });
+  }
+
+  // ============ 6. LEAP Call in Gain ============
+  const leapInGain: { ticker: string; strike: number; contracts: number }[] = [];
+  for (const s of typedStrategies.filter(s => s.strategy_type === "LEAP Call")) {
+    // Read position data for current_price and avg_cost
+    const posId = s.position_ids?.[0];
+    const pos = posId ? positions.find(p => p.id === posId) : null;
+    if (pos) {
+      const currentPrice = pos.current_price || 0;
+      const avgCost = pos.avg_cost || 0;
+      if (avgCost > 0 && currentPrice > avgCost) {
+        leapInGain.push({
+          ticker: displayTicker(s),
+          strike: pos.strike_price || 0,
+          contracts: pos.quantity || 1,
+        });
+      }
+    }
+  }
+  if (leapInGain.length > 0) {
+    leapInGain.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    sections.push({
+      title: "Leap Call",
+      emoji: "green",
+      badge: "G",
+      items: leapInGain.map(lc => `${lc.ticker} $${lc.strike} ×${lc.contracts}`),
+    });
+  }
+
+  // ============ 7. Altre Strategie OOR/OOB ============
+  const otherOOROOB: { ticker: string; strategyName: string; status: string }[] = [];
+  const handledTypes = new Set([
+    "Covered Call", "Iron Condor", "Double Diagonal",
+    "Naked Put", "LEAP Call", "Protezione", "Alternative Double Diagonal",
+  ]);
+  const rangeBasedNames = ["Short Strangle", "Put Spread", "Call Spread", "Diagonal Put Spread", "Diagonal Call Spread"];
+
+  for (const s of typedStrategies.filter(s => !handledTypes.has(s.strategy_type))) {
+    const price = getPrice(s);
+    if (price <= 0) continue;
+
+    const stratName = s.strategy_type || "Strategia";
+    const isRangeBased = rangeBasedNames.some(n => stratName.includes(n));
+
+    let isInBadState = false;
+    let status: string;
+
+    if (isRangeBased) {
+      status = "OOR";
+      if (stratName.includes("Short Strangle")) {
+        const soldPut = s.sold_put_strike || 0;
+        const soldCall = s.sold_call_strike || 0;
+        if (soldPut && soldCall) {
+          isInBadState = !(price >= soldPut && price <= soldCall);
+        }
+      } else if (stratName.includes("Put Spread") || stratName.includes("Diagonal Put Spread")) {
+        const soldPut = s.sold_put_strike || 0;
+        if (soldPut) {
+          isInBadState = price < soldPut;
+        }
+      } else if (stratName.includes("Call Spread") || stratName.includes("Diagonal Call Spread")) {
+        const soldCall = s.sold_call_strike || 0;
+        if (soldCall) {
+          isInBadState = price > soldCall;
+        }
+      }
+    } else {
+      status = "OOB";
+      // Calculate total P/L from positions
+      let totalPL = 0;
+      for (const pid of (s.position_ids || [])) {
+        const pos = positions.find(p => p.id === pid);
+        if (pos && pos.market_value != null) {
+          totalPL += pos.market_value;
+        }
+      }
+      isInBadState = totalPL < 0;
+    }
+
+    if (isInBadState) {
+      otherOOROOB.push({
+        ticker: displayTicker(s),
+        strategyName: stratName.replace("Alternative ", "").replace("Diagonal ", "Diag. "),
+        status,
+      });
+    }
+  }
+  if (otherOOROOB.length > 0) {
+    otherOOROOB.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    sections.push({
+      title: "Altre Strategie",
+      emoji: "cyan",
+      badge: "OOR/OOB",
+      items: otherOOROOB.map(os => `${os.ticker} ${os.strategyName} ${os.status}`),
+    });
+  }
+
+  // ============ 8. Call da rivendere ============
+  const callsToSell: { ticker: string; availableShares: number }[] = [];
+  for (const stock of stockPositions) {
+    const potentialContracts = Math.floor(stock.quantity / 100);
+    if (potentialContracts < 1) continue;
+
+    const stockKey = stock.ticker || stock.description.split(" ")[0];
+
+    // Count covered calls already sold on this underlying
+    let soldCallContracts = 0;
+    for (const s of typedStrategies.filter(s => s.strategy_type === "Covered Call")) {
+      const sKey = displayTicker(s);
+      if (sKey === stockKey) {
+        const posId = s.position_ids?.[0];
+        const pos = posId ? positions.find(p => p.id === posId) : null;
+        soldCallContracts += pos ? Math.abs(pos.quantity) : 1;
+      }
+    }
+
+    const available = potentialContracts - soldCallContracts;
+    if (available >= 1) {
+      callsToSell.push({ ticker: stockKey, availableShares: available * 100 });
+    }
+  }
+  if (callsToSell.length > 0) {
+    callsToSell.sort((a, b) => b.availableShares - a.availableShares);
+    sections.push({
+      title: "Call da rivendere",
+      emoji: "green",
+      items: callsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
+    });
+  }
+
+  return sections;
+}
+
 // ============ MESSAGE FORMATTING ============
 
 function formatDateIT(): string {
@@ -254,28 +692,43 @@ serve(async (req: Request): Promise<Response> => {
         .select("portfolio_id, sections, updated_at")
         .in("portfolio_id", portfolioIds);
 
-      if (!snapshots || snapshots.length === 0) {
-        console.log(`No snapshots for user ${user.email}, skipping`);
-        continue;
-      }
-
       // Build briefing per portfolio
       const portfolioBriefings: PortfolioBriefing[] = [];
       const now = Date.now();
 
       for (const portfolio of portfolios) {
-        const snapshot = (snapshots as any[]).find((s: any) => s.portfolio_id === portfolio.id);
-        if (!snapshot) continue;
+        let sections: SnapshotSection[] | null = null;
 
-        // Check staleness
-        const snapshotAge = now - new Date(snapshot.updated_at).getTime();
-        if (snapshotAge > MAX_SNAPSHOT_AGE_MS) {
-          console.warn(`Snapshot for portfolio "${portfolio.name}" is ${Math.round(snapshotAge / 3600000)}h old, skipping`);
-          continue;
+        // Fallback 1: Try monitoring_snapshot (fresh < 48h)
+        const snapshot = (snapshots || []).find((s: any) => s.portfolio_id === portfolio.id);
+        if (snapshot) {
+          const snapshotAge = now - new Date(snapshot.updated_at).getTime();
+          if (snapshotAge <= MAX_SNAPSHOT_AGE_MS) {
+            sections = (snapshot.sections || []) as SnapshotSection[];
+            console.log(`Portfolio "${portfolio.name}": using monitoring_snapshot (${Math.round(snapshotAge / 3600000)}h old)`);
+          } else {
+            console.log(`Portfolio "${portfolio.name}": snapshot too old (${Math.round(snapshotAge / 3600000)}h), trying strategy_cache`);
+          }
+        } else {
+          console.log(`Portfolio "${portfolio.name}": no snapshot found, trying strategy_cache`);
         }
 
-        const sections = (snapshot.sections || []) as SnapshotSection[];
-        if (sections.length > 0) {
+        // Fallback 2: Compute from strategy_cache
+        if (!sections || sections.length === 0) {
+          try {
+            sections = await computeSectionsFromCache(supabase, portfolio.id);
+            if (sections.length > 0) {
+              console.log(`Portfolio "${portfolio.name}": computed ${sections.length} sections from strategy_cache`);
+            } else {
+              console.log(`Portfolio "${portfolio.name}": no monitorable items from strategy_cache`);
+            }
+          } catch (e) {
+            console.error(`Portfolio "${portfolio.name}": strategy_cache computation failed:`, e);
+            sections = [];
+          }
+        }
+
+        if (sections && sections.length > 0) {
           portfolioBriefings.push({ portfolioName: portfolio.name, sections });
         }
       }
