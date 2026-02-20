@@ -132,7 +132,10 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   let maxProfit = -Infinity;
 
   // Pre-compute all available monthly expiries in the date range
-  const allExpiries = getMonthlyExpiries(priceData[0].date.slice(0, 10), priceData[priceData.length - 1].date.slice(0, 10));
+  // Extend expiries 3 months beyond last bar to ensure continuity
+  const lastBarDate = new Date(priceData[priceData.length - 1].date);
+  lastBarDate.setMonth(lastBarDate.getMonth() + 3);
+  const allExpiries = getMonthlyExpiries(priceData[0].date.slice(0, 10), formatDate(lastBarDate));
 
   for (const bar of priceData) {
     const S = bar.close;
@@ -300,7 +303,7 @@ function executeApproachRule(
 
   const closeCost = -currentPrice * leg.quantity * 100;
 
-  const newStrike = roundStrike(S * (1 + approachRule.activationPct / 100), strikeStep);
+  const newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
   const newT = yearsBetween(date, nextExpiry);
   if (newT <= 0) return null;
 
@@ -388,7 +391,10 @@ function sellNewCallAfterExpiry(
   const nextExpiry = findNextExpiry(date, allExpiries);
   if (!nextExpiry) return null;
 
-  const newStrike = roundStrike(S * 1.05, ccRules.strikeStep); // default 5% barrier
+  const barrierPct = ccRules.profitRule.action === 'wait_and_sell'
+    ? ccRules.profitRule.newCallBarrierPct
+    : ccRules.approachRule.rollUpMinDistancePct;
+  const newStrike = roundStrike(S * (1 + barrierPct / 100), ccRules.strikeStep);
   const newT = yearsBetween(date, nextExpiry);
   if (newT <= 0) return null;
 

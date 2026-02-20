@@ -82,25 +82,37 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                       </Label>
                     </div>
                     {rules.approachRule.action === 'roll_up_positive' && (
-                      <div className="pl-6 flex gap-3">
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            value={rules.approachRule.minPremiumUsd}
-                            onChange={e => updateApproach({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">USD</span>
+                      <div className="pl-6 space-y-2">
+                        <div className="flex gap-3">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              value={rules.approachRule.minPremiumUsd}
+                              onChange={e => updateApproach({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
+                              className="w-16 h-7 text-xs"
+                            />
+                            <span className="text-xs">USD</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground self-center">oppure</span>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              value={rules.approachRule.minPremiumPct}
+                              onChange={e => updateApproach({ minPremiumPct: parseFloat(e.target.value) || 0 })}
+                              className="w-16 h-7 text-xs"
+                            />
+                            <span className="text-xs">% del sottostante</span>
+                          </div>
                         </div>
-                        <span className="text-xs text-muted-foreground self-center">oppure</span>
                         <div className="flex items-center gap-1">
+                          <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
                           <Input
                             type="number"
-                            value={rules.approachRule.minPremiumPct}
-                            onChange={e => updateApproach({ minPremiumPct: parseFloat(e.target.value) || 0 })}
+                            value={rules.approachRule.rollUpMinDistancePct}
+                            onChange={e => updateApproach({ rollUpMinDistancePct: parseFloat(e.target.value) || 5 })}
                             className="w-16 h-7 text-xs"
                           />
-                          <span className="text-xs">% del sottostante</span>
+                          <span className="text-xs">%</span>
                         </div>
                       </div>
                     )}

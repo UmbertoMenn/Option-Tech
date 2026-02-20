@@ -14,6 +14,9 @@ export interface ApproachRule {
   // do_nothing expiry params
   expiryAction: 'sell_new_call' | 'rebuy_and_sell';
   newCallBarrierPct: number;
+
+  // roll up min distance
+  rollUpMinDistancePct: number; // min % distance of new strike from underlying price
 }
 
 export interface ProfitRule {
@@ -52,6 +55,7 @@ export function getDefaultCoveredCallRules(): CoveredCallRules {
       minPremiumPct: 0.5,
       expiryAction: 'sell_new_call',
       newCallBarrierPct: 5,
+      rollUpMinDistancePct: 5,
     },
     profitRule: {
       enabled: true,
