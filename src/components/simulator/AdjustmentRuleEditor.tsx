@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
-import { AdjustmentRule, AdjustmentCondition, AdjustmentAction, getPresetRules, describeRule, StrategyPresetType } from '@/lib/adjustmentRules';
+import { AdjustmentRule, AdjustmentAction, getPresetRules, describeRule, StrategyPresetType } from '@/lib/adjustmentRules';
 
 interface AdjustmentRuleEditorProps {
   rules: AdjustmentRule[];
@@ -16,19 +16,17 @@ interface AdjustmentRuleEditorProps {
 
 export function AdjustmentRuleEditor({ rules, onRulesChange, strategyType }: AdjustmentRuleEditorProps) {
   const loadPreset = useCallback(() => {
-    const preset = getPresetRules(strategyType);
-    onRulesChange(preset);
+    onRulesChange(getPresetRules(strategyType));
   }, [strategyType, onRulesChange]);
 
   const addCustomRule = useCallback(() => {
     const newRule: AdjustmentRule = {
       id: `custom_${Date.now()}`,
       name: 'Nuova regola',
-      condition: { type: 'pl_threshold', plPct: -30 },
-      action: { type: 'close_all' },
+      condition: { type: 'price_near_barrier', legType: 'sold_put', distancePct: 5 },
+      action: { type: 'roll_strike', newBarrierPct: 10, rollMonths: 1 },
+      strikeStep: 5,
       priority: rules.length + 1,
-      maxTriggers: 1,
-      cooldownDays: 0,
     };
     onRulesChange([...rules, newRule]);
   }, [rules, onRulesChange]);
@@ -39,14 +37,6 @@ export function AdjustmentRuleEditor({ rules, onRulesChange, strategyType }: Adj
 
   const updateRule = useCallback((id: string, updates: Partial<AdjustmentRule>) => {
     onRulesChange(rules.map(r => r.id === id ? { ...r, ...updates } : r));
-  }, [rules, onRulesChange]);
-
-  const updateCondition = useCallback((id: string, condUpdates: Partial<AdjustmentCondition>) => {
-    onRulesChange(rules.map(r => r.id === id ? { ...r, condition: { ...r.condition, ...condUpdates } } : r));
-  }, [rules, onRulesChange]);
-
-  const updateAction = useCallback((id: string, actUpdates: Partial<AdjustmentAction>) => {
-    onRulesChange(rules.map(r => r.id === id ? { ...r, action: { ...r.action, ...actUpdates } } : r));
   }, [rules, onRulesChange]);
 
   return (
@@ -71,6 +61,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange, strategyType }: Adj
 
         {rules.map((rule, idx) => (
           <div key={rule.id} className="border rounded-lg p-3 space-y-3">
+            {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <GripVertical className="w-4 h-4 text-muted-foreground" />
@@ -90,91 +81,99 @@ export function AdjustmentRuleEditor({ rules, onRulesChange, strategyType }: Adj
               {/* Condition */}
               <div className="space-y-2">
                 <Label className="text-xs">Condizione</Label>
-                <Select value={rule.condition.type} onValueChange={v => updateCondition(rule.id, { type: v as AdjustmentCondition['type'] })}>
+                <Select
+                  value={rule.condition.legType}
+                  onValueChange={v => updateRule(rule.id, {
+                    condition: { ...rule.condition, legType: v as 'sold_put' | 'sold_call' }
+                  })}
+                >
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="price_near_barrier">Prezzo vicino a barriera</SelectItem>
-                    <SelectItem value="delta_threshold">Soglia Delta</SelectItem>
-                    <SelectItem value="days_to_expiry">Giorni a scadenza</SelectItem>
-                    <SelectItem value="pl_threshold">Soglia P/L</SelectItem>
+                    <SelectItem value="sold_put">Put venduta</SelectItem>
+                    <SelectItem value="sold_call">Call venduta</SelectItem>
                   </SelectContent>
                 </Select>
-
-                {rule.condition.type === 'price_near_barrier' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select value={rule.condition.legType || 'sold_put'} onValueChange={v => updateCondition(rule.id, { legType: v as AdjustmentCondition['legType'] })}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="sold_put">Put venduta</SelectItem>
-                        <SelectItem value="sold_call">Call venduta</SelectItem>
-                        <SelectItem value="bought_put">Put comprata</SelectItem>
-                        <SelectItem value="bought_call">Call comprata</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <div className="flex items-center gap-1">
-                      <Input type="number" value={rule.condition.distancePct ?? 5} onChange={e => updateCondition(rule.id, { distancePct: parseFloat(e.target.value) || 5 })} className="h-8 text-xs w-16" />
-                      <span className="text-xs">%</span>
-                    </div>
-                  </div>
-                )}
-
-                {rule.condition.type === 'days_to_expiry' && (
-                  <div className="flex items-center gap-1">
-                    <Input type="number" value={rule.condition.maxDays ?? 5} onChange={e => updateCondition(rule.id, { maxDays: parseInt(e.target.value) || 5 })} className="h-8 text-xs w-16" />
-                    <span className="text-xs">DTE</span>
-                  </div>
-                )}
-
-                {rule.condition.type === 'pl_threshold' && (
-                  <div className="flex items-center gap-1">
-                    <Input type="number" value={rule.condition.plPct ?? -30} onChange={e => updateCondition(rule.id, { plPct: parseFloat(e.target.value) || 0 })} className="h-8 text-xs w-20" />
-                    <span className="text-xs">%</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-1">
+                  <Label className="text-xs whitespace-nowrap">Distanza attivazione</Label>
+                  <Input
+                    type="number"
+                    value={rule.condition.distancePct}
+                    onChange={e => updateRule(rule.id, {
+                      condition: { ...rule.condition, distancePct: parseFloat(e.target.value) || 5 }
+                    })}
+                    className="h-8 text-xs w-16"
+                  />
+                  <span className="text-xs">%</span>
+                </div>
               </div>
 
               {/* Action */}
               <div className="space-y-2">
                 <Label className="text-xs">Azione</Label>
-                <Select value={rule.action.type} onValueChange={v => updateAction(rule.id, { type: v as AdjustmentAction['type'] })}>
+                <Select
+                  value={rule.action.type}
+                  onValueChange={v => updateRule(rule.id, {
+                    action: { ...rule.action, type: v as AdjustmentAction['type'] }
+                  })}
+                >
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="roll_strike">Rolla strike</SelectItem>
+                    <SelectItem value="roll_strike">Rolla barriera</SelectItem>
                     <SelectItem value="roll_expiry">Rolla scadenza</SelectItem>
-                    <SelectItem value="close_all">Chiudi tutto</SelectItem>
-                    <SelectItem value="close_leg">Chiudi gamba</SelectItem>
+                    <SelectItem value="roll_both">Rolla entrambi</SelectItem>
                   </SelectContent>
                 </Select>
 
-                {rule.action.type === 'roll_strike' && (
+                {(rule.action.type === 'roll_strike' || rule.action.type === 'roll_both') && (
                   <div className="flex items-center gap-1">
-                    <Input type="number" value={rule.action.rollDistancePct ?? -10} onChange={e => updateAction(rule.id, { rollDistancePct: parseFloat(e.target.value) || 0 })} className="h-8 text-xs w-20" />
+                    <Label className="text-xs whitespace-nowrap">Nuova barriera</Label>
+                    <Input
+                      type="number"
+                      value={rule.action.newBarrierPct}
+                      onChange={e => updateRule(rule.id, {
+                        action: { ...rule.action, newBarrierPct: parseFloat(e.target.value) || 10 }
+                      })}
+                      className="h-8 text-xs w-16"
+                    />
                     <span className="text-xs">%</span>
                   </div>
                 )}
 
-                {rule.action.type === 'roll_expiry' && (
+                {(rule.action.type === 'roll_expiry' || rule.action.type === 'roll_both') && (
                   <div className="flex items-center gap-1">
-                    <Input type="number" value={rule.action.rollMonths ?? 1} onChange={e => updateAction(rule.id, { rollMonths: parseInt(e.target.value) || 1 })} className="h-8 text-xs w-16" />
-                    <span className="text-xs">mesi</span>
+                    <Label className="text-xs whitespace-nowrap">Mesi avanti</Label>
+                    <Input
+                      type="number"
+                      value={rule.action.rollMonths}
+                      onChange={e => updateRule(rule.id, {
+                        action: { ...rule.action, rollMonths: parseInt(e.target.value) || 1 }
+                      })}
+                      className="h-8 text-xs w-16"
+                    />
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Parameters */}
-            <div className="grid grid-cols-3 gap-2">
+            {/* Strike step + Priority */}
+            <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label className="text-xs">Max trigger</Label>
-                <Input type="number" value={rule.maxTriggers} onChange={e => updateRule(rule.id, { maxTriggers: parseInt(e.target.value) || 0 })} className="h-8 text-xs" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Cooldown (gg)</Label>
-                <Input type="number" value={rule.cooldownDays} onChange={e => updateRule(rule.id, { cooldownDays: parseInt(e.target.value) || 0 })} className="h-8 text-xs" />
+                <Label className="text-xs">Strike step</Label>
+                <Input
+                  type="number"
+                  value={rule.strikeStep}
+                  onChange={e => updateRule(rule.id, { strikeStep: parseInt(e.target.value) || 5 })}
+                  className="h-8 text-xs"
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Priorità</Label>
-                <Input type="number" value={rule.priority} onChange={e => updateRule(rule.id, { priority: parseInt(e.target.value) || 1 })} className="h-8 text-xs" />
+                <Input
+                  type="number"
+                  value={rule.priority}
+                  onChange={e => updateRule(rule.id, { priority: parseInt(e.target.value) || 1 })}
+                  className="h-8 text-xs"
+                />
               </div>
             </div>
 

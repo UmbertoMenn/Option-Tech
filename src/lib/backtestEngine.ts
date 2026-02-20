@@ -4,9 +4,9 @@
  */
 import { bsPrice, bsDelta, bsGamma, bsTheta, bsVega } from './blackScholes';
 import { IVSurface } from './ivSurface';
-import { AdjustmentRule } from './adjustmentRules';
+import { AdjustmentRule, roundStrike } from './adjustmentRules';
 
-// ---- Third Friday calculation (reused from optionStratUrl logic) ----
+// ---- Third Friday calculation ----
 export function thirdFriday(year: number, month: number): Date {
   const first = new Date(year, month, 1);
   const dayOfWeek = first.getDay();
@@ -38,10 +38,10 @@ export interface BacktestLeg {
   id: string;
   type: 'call' | 'put' | 'stock';
   strike: number;
-  quantity: number; // positive = long, negative = short
+  quantity: number;
   entryDate: string;
   expiryDate: string;
-  entryPrice: number; // per-unit price at entry
+  entryPrice: number;
   active: boolean;
 }
 
@@ -51,7 +51,7 @@ export interface AdjustmentLog {
   description: string;
   legsRemoved: BacktestLeg[];
   legsAdded: BacktestLeg[];
-  cost: number; // net cost of adjustment
+  cost: number;
 }
 
 export interface DayLegResult {
@@ -102,28 +102,15 @@ export interface BacktestResult {
   winRate: number;
 }
 
-// ---- Rule trigger tracking ----
-interface RuleTriggerState {
-  triggerCount: number;
-  lastTriggerDate: string | null;
-}
-
 // ---- Engine ----
 
 export function runBacktest(config: BacktestConfig): BacktestResult {
   const { priceData, ivSurface, riskFreeRate, adjustmentRules } = config;
   const activeLegs = config.legs.map(l => ({ ...l, active: true }));
-  
+
   const days: BacktestDayResult[] = [];
   const allAdjustments: AdjustmentLog[] = [];
-  const ruleStates = new Map<string, RuleTriggerState>();
 
-  // Initialize rule states
-  for (const rule of adjustmentRules) {
-    ruleStates.set(rule.id, { triggerCount: 0, lastTriggerDate: null });
-  }
-
-  // Calculate initial portfolio value on entry date
   let initialValue = 0;
   let totalAdjustmentCost = 0;
 
@@ -134,7 +121,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     };
   }
 
-  // Entry values
   for (const leg of activeLegs) {
     initialValue += leg.entryPrice * leg.quantity * (leg.type === 'stock' ? 1 : 100);
   }
@@ -148,7 +134,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const date = bar.date;
     const dayAdjustments: AdjustmentLog[] = [];
 
-    // Price all active legs
     const legResults: DayLegResult[] = [];
     let totalValue = 0;
 
@@ -171,10 +156,9 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       let price: number, delta: number, gamma: number, theta: number, vega: number;
 
       if (T <= 0) {
-        // Expired: intrinsic value
         price = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
         delta = 0; gamma = 0; theta = 0; vega = 0;
-        leg.active = false; // expire the leg
+        leg.active = false;
       } else {
         price = bsPrice(S, leg.strike, T, riskFreeRate, iv, leg.type);
         delta = bsDelta(S, leg.strike, T, riskFreeRate, iv, leg.type);
@@ -200,33 +184,18 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const totalPL = totalValue - initialValue - totalAdjustmentCost;
     const plPct = initialValue !== 0 ? (totalPL / Math.abs(initialValue)) * 100 : 0;
 
-    // Check adjustment rules
-    for (const rule of adjustmentRules.sort((a, b) => a.priority - b.priority)) {
-      const state = ruleStates.get(rule.id)!;
-
-      // Check max triggers
-      if (rule.maxTriggers > 0 && state.triggerCount >= rule.maxTriggers) continue;
-
-      // Check cooldown
-      if (state.lastTriggerDate && rule.cooldownDays > 0) {
-        const daysSince = daysBetween(state.lastTriggerDate, date);
-        if (daysSince < rule.cooldownDays) continue;
-      }
-
-      // Evaluate condition
-      if (evaluateCondition(rule.condition, S, legResults, date, activeLegs, plPct)) {
+    // Check adjustment rules (sorted by priority)
+    for (const rule of [...adjustmentRules].sort((a, b) => a.priority - b.priority)) {
+      if (evaluateCondition(rule, S, activeLegs)) {
         const adjustment = executeAction(rule, S, date, activeLegs, ivSurface, riskFreeRate);
         if (adjustment) {
           dayAdjustments.push(adjustment);
           allAdjustments.push(adjustment);
           totalAdjustmentCost += adjustment.cost;
-          state.triggerCount++;
-          state.lastTriggerDate = date;
         }
       }
     }
 
-    // Track drawdown
     if (totalPL > maxPL) maxPL = totalPL;
     const dd = maxPL - totalPL;
     if (dd > maxDrawdown) maxDrawdown = dd;
@@ -253,7 +222,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     });
   }
 
-  // Calculate stats
   const dailyReturns = days.map((d, i) => i === 0 ? 0 : d.totalPL - days[i - 1].totalPL);
   const avgReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
   const stdReturn = Math.sqrt(dailyReturns.reduce((a, b) => a + (b - avgReturn) ** 2, 0) / dailyReturns.length);
@@ -278,62 +246,23 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 // ---- Condition evaluation ----
 
 function evaluateCondition(
-  condition: AdjustmentRule['condition'],
+  rule: AdjustmentRule,
   S: number,
-  legResults: DayLegResult[],
-  date: string,
   activeLegs: BacktestLeg[],
-  plPct: number
 ): boolean {
-  switch (condition.type) {
-    case 'price_near_barrier': {
-      const targetLegs = activeLegs.filter(l => {
-        if (!l.active) return false;
-        if (condition.legType === 'sold_put') return l.type === 'put' && l.quantity < 0;
-        if (condition.legType === 'sold_call') return l.type === 'call' && l.quantity < 0;
-        if (condition.legType === 'bought_put') return l.type === 'put' && l.quantity > 0;
-        if (condition.legType === 'bought_call') return l.type === 'call' && l.quantity > 0;
-        return false;
-      });
+  const { condition } = rule;
+  const targetLegs = activeLegs.filter(l => {
+    if (!l.active) return false;
+    if (condition.legType === 'sold_put') return l.type === 'put' && l.quantity < 0;
+    if (condition.legType === 'sold_call') return l.type === 'call' && l.quantity < 0;
+    return false;
+  });
 
-      for (const leg of targetLegs) {
-        const dist = Math.abs(S - leg.strike) / leg.strike * 100;
-        if (condition.direction === 'breached') {
-          if (leg.type === 'put' && S < leg.strike) return true;
-          if (leg.type === 'call' && S > leg.strike) return true;
-        } else {
-          if (dist <= (condition.distancePct ?? 5)) return true;
-        }
-      }
-      return false;
-    }
-
-    case 'delta_threshold': {
-      const totalDelta = legResults.reduce((acc, l) => acc + l.delta, 0);
-      if (condition.deltaMin !== undefined && totalDelta < condition.deltaMin) return true;
-      if (condition.deltaMax !== undefined && totalDelta > condition.deltaMax) return true;
-      return false;
-    }
-
-    case 'days_to_expiry': {
-      for (const leg of activeLegs) {
-        if (!leg.active || leg.type === 'stock') continue;
-        const daysLeft = daysBetween(date, leg.expiryDate);
-        if (daysLeft <= (condition.maxDays ?? 5)) return true;
-      }
-      return false;
-    }
-
-    case 'pl_threshold': {
-      const threshold = condition.plPct ?? 0;
-      if (threshold < 0 && plPct <= threshold) return true;
-      if (threshold > 0 && plPct >= threshold) return true;
-      return false;
-    }
-
-    default:
-      return false;
+  for (const leg of targetLegs) {
+    const dist = Math.abs(S - leg.strike) / leg.strike * 100;
+    if (dist <= condition.distancePct) return true;
   }
+  return false;
 }
 
 // ---- Action execution ----
@@ -346,152 +275,74 @@ function executeAction(
   ivSurface: IVSurface,
   riskFreeRate: number
 ): AdjustmentLog | null {
-  const { action } = rule;
+  const { action, condition, strikeStep } = rule;
 
-  switch (action.type) {
-    case 'close_all': {
-      const removed = activeLegs.filter(l => l.active);
-      let cost = 0;
-      for (const leg of removed) {
-        if (leg.type === 'stock') {
-          cost -= S * leg.quantity;
-        } else {
-          const legType = leg.type as 'call' | 'put';
-          const T = yearsBetween(date, leg.expiryDate);
-          const iv = ivSurface.getIV(leg.strike, leg.expiryDate, legType);
-          const price = T > 0 ? bsPrice(S, leg.strike, T, riskFreeRate, iv, legType) : 
-            (legType === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0));
-          cost -= price * leg.quantity * 100; // closing = opposite sign
-        }
-        leg.active = false;
-      }
-      return {
-        date, ruleName: rule.name,
-        description: `Chiuse tutte le posizioni (${rule.name})`,
-        legsRemoved: removed.map(l => ({ ...l })), legsAdded: [], cost,
-      };
+  // Find legs to roll
+  const legsToRoll = activeLegs.filter(l => {
+    if (!l.active || l.type === 'stock') return false;
+    if (condition.legType === 'sold_put') return l.type === 'put' && l.quantity < 0;
+    if (condition.legType === 'sold_call') return l.type === 'call' && l.quantity < 0;
+    return false;
+  });
+
+  if (legsToRoll.length === 0) return null;
+
+  let totalCost = 0;
+  const removed: BacktestLeg[] = [];
+  const added: BacktestLeg[] = [];
+
+  for (const leg of legsToRoll) {
+    const legType = leg.type as 'call' | 'put';
+    const T = yearsBetween(date, leg.expiryDate);
+    const oldIV = ivSurface.getIV(leg.strike, leg.expiryDate, legType);
+    const oldPrice = T > 0 ? bsPrice(S, leg.strike, T, riskFreeRate, oldIV, legType) : 0;
+    totalCost += -oldPrice * leg.quantity * 100; // close old
+    leg.active = false;
+    removed.push({ ...leg });
+
+    // Calculate new strike
+    let newStrike = leg.strike;
+    if (action.type === 'roll_strike' || action.type === 'roll_both') {
+      const target = condition.legType === 'sold_put'
+        ? S * (1 - action.newBarrierPct / 100)
+        : S * (1 + action.newBarrierPct / 100);
+      newStrike = roundStrike(target, strikeStep);
     }
 
-    case 'roll_strike': {
-      // Find the relevant sold legs to roll
-      const targetType = rule.condition.legType;
-      const legsToRoll = activeLegs.filter(l => {
-        if (!l.active || l.type === 'stock') return false;
-        if (targetType === 'sold_put') return l.type === 'put' && l.quantity < 0;
-        if (targetType === 'sold_call') return l.type === 'call' && l.quantity < 0;
-        return false;
-      });
-
-      if (legsToRoll.length === 0) return null;
-
-      let totalCost = 0;
-      const removed: BacktestLeg[] = [];
-      const added: BacktestLeg[] = [];
-
-      for (const leg of legsToRoll) {
-        // Close old leg
-        const legType = leg.type as 'call' | 'put';
-        const T = yearsBetween(date, leg.expiryDate);
-        const oldIV = ivSurface.getIV(leg.strike, leg.expiryDate, legType);
-        const oldPrice = T > 0 ? bsPrice(S, leg.strike, T, riskFreeRate, oldIV, legType) : 0;
-        const closeCost = -oldPrice * leg.quantity * 100;
-        totalCost += closeCost;
-        leg.active = false;
-        removed.push({ ...leg });
-
-        // Open new leg with rolled strike
-        const rollPct = action.rollDistancePct ?? 0;
-        const newStrike = Math.round(leg.strike * (1 + rollPct / 100) * 100) / 100;
-        const expiry = action.keepSameExpiry ? leg.expiryDate : nextMonthlyExpiry(date);
-        const newT = yearsBetween(date, expiry);
-        const newIV = ivSurface.getIV(newStrike, expiry, legType);
-        const newPrice = newT > 0 ? bsPrice(S, newStrike, newT, riskFreeRate, newIV, legType) : 0;
-        const openCost = newPrice * leg.quantity * 100;
-        totalCost += openCost;
-
-        const newLeg: BacktestLeg = {
-          id: `${leg.id}_rolled_${date}`,
-          type: leg.type, strike: newStrike, quantity: leg.quantity,
-          entryDate: date, expiryDate: expiry, entryPrice: newPrice, active: true,
-        };
-        activeLegs.push(newLeg);
-        added.push({ ...newLeg });
-      }
-
-      return {
-        date, ruleName: rule.name,
-        description: `Rollato ${targetType}: strike da ${removed.map(l => l.strike).join(',')} a ${added.map(l => l.strike).join(',')}`,
-        legsRemoved: removed, legsAdded: added, cost: totalCost,
-      };
+    // Calculate new expiry
+    let newExpiry = leg.expiryDate;
+    if (action.type === 'roll_expiry' || action.type === 'roll_both') {
+      newExpiry = nextMonthlyExpiry(leg.expiryDate, action.rollMonths);
     }
 
-    case 'roll_expiry': {
-      const optionLegs = activeLegs.filter(l => l.active && l.type !== 'stock');
-      if (optionLegs.length === 0) return null;
+    const newT = yearsBetween(date, newExpiry);
+    const newIV = ivSurface.getIV(newStrike, newExpiry, legType);
+    const newPrice = newT > 0 ? bsPrice(S, newStrike, newT, riskFreeRate, newIV, legType) : 0;
+    totalCost += newPrice * leg.quantity * 100; // open new
 
-      let totalCost = 0;
-      const removed: BacktestLeg[] = [];
-      const added: BacktestLeg[] = [];
-
-      for (const leg of optionLegs) {
-        const legType = leg.type as 'call' | 'put';
-        const T = yearsBetween(date, leg.expiryDate);
-        const oldIV = ivSurface.getIV(leg.strike, leg.expiryDate, legType);
-        const oldPrice = T > 0 ? bsPrice(S, leg.strike, T, riskFreeRate, oldIV, legType) : 0;
-        totalCost += -oldPrice * leg.quantity * 100;
-        leg.active = false;
-        removed.push({ ...leg });
-
-        const newExpiry = nextMonthlyExpiry(leg.expiryDate, action.rollMonths ?? 1);
-        const newT = yearsBetween(date, newExpiry);
-        const newIV = ivSurface.getIV(leg.strike, newExpiry, legType);
-        const newPrice = newT > 0 ? bsPrice(S, leg.strike, newT, riskFreeRate, newIV, legType) : 0;
-        totalCost += newPrice * leg.quantity * 100;
-
-        const newLeg: BacktestLeg = {
-          id: `${leg.id}_exp_${date}`,
-          type: leg.type, strike: leg.strike, quantity: leg.quantity,
-          entryDate: date, expiryDate: newExpiry, entryPrice: newPrice, active: true,
-        };
-        activeLegs.push(newLeg);
-        added.push({ ...newLeg });
-      }
-
-      return {
-        date, ruleName: rule.name,
-        description: `Rollato scadenza: ${removed[0]?.expiryDate} → ${added[0]?.expiryDate}`,
-        legsRemoved: removed, legsAdded: added, cost: totalCost,
-      };
-    }
-
-    case 'compound': {
-      // Execute sub-actions sequentially
-      let totalCost = 0;
-      const allRemoved: BacktestLeg[] = [];
-      const allAdded: BacktestLeg[] = [];
-
-      for (const subAction of action.subActions || []) {
-        const subRule: AdjustmentRule = { ...rule, action: subAction };
-        const result = executeAction(subRule, S, date, activeLegs, ivSurface, riskFreeRate);
-        if (result) {
-          totalCost += result.cost;
-          allRemoved.push(...result.legsRemoved);
-          allAdded.push(...result.legsAdded);
-        }
-      }
-
-      if (allRemoved.length === 0 && allAdded.length === 0) return null;
-
-      return {
-        date, ruleName: rule.name,
-        description: `Aggiustamento composto: ${rule.name}`,
-        legsRemoved: allRemoved, legsAdded: allAdded, cost: totalCost,
-      };
-    }
-
-    default:
-      return null;
+    const newLeg: BacktestLeg = {
+      id: `${leg.id}_roll_${date}`,
+      type: leg.type,
+      strike: newStrike,
+      quantity: leg.quantity,
+      entryDate: date,
+      expiryDate: newExpiry,
+      entryPrice: newPrice,
+      active: true,
+    };
+    activeLegs.push(newLeg);
+    added.push({ ...newLeg });
   }
+
+  const actionLabel = action.type === 'roll_strike' ? 'strike' : action.type === 'roll_expiry' ? 'scadenza' : 'strike+scadenza';
+  return {
+    date,
+    ruleName: rule.name,
+    description: `Roll ${actionLabel}: ${removed.map(l => l.strike).join(',')} → ${added.map(l => l.strike).join(',')}`,
+    legsRemoved: removed,
+    legsAdded: added,
+    cost: totalCost,
+  };
 }
 
 // ---- Utility ----
@@ -502,10 +353,6 @@ function formatDate(d: Date): string {
 
 function yearsBetween(from: string, to: string): number {
   return (new Date(to).getTime() - new Date(from).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-}
-
-function daysBetween(from: string, to: string): number {
-  return (new Date(to).getTime() - new Date(from).getTime()) / (24 * 60 * 60 * 1000);
 }
 
 function nextMonthlyExpiry(afterDate: string, monthsAhead: number = 1): string {
