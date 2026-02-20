@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.auto-snapshot]
 verify_jwt = false
+
+[functions.massive-proxy]
+verify_jwt = false

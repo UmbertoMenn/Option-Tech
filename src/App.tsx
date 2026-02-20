@@ -18,6 +18,7 @@ const AdminPanel = lazy(() => import("@/components/admin/AdminPanel").then(m => 
 const Derivatives = lazy(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
 const RiskAnalyzer = lazy(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
+const Simulator = lazy(() => import("@/pages/Simulator"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -87,6 +88,7 @@ function AppRoutes() {
           <Route path="/derivatives" element={<Derivatives />} />
           <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/simulator" element={<Simulator />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
