@@ -1,5 +1,5 @@
 /**
- * IV Surface construction – manual curve and market-data based.
+ * IV Surface construction – static and market-data based.
  */
 
 export interface IVPoint {
@@ -18,48 +18,22 @@ export interface IVSurface {
 }
 
 /* ──────────────────────────────────────────────
- *  Manual IV Surface (from interactive curve)
+ *  Static IV Surface (single value)
  * ────────────────────────────────────────────── */
 
-export interface ManualIVPoint {
-  date: string; // YYYY-MM-DD
-  iv: number;   // decimal, e.g. 0.30
-}
-
 /**
- * Build an IVSurface from the admin's manual IV curve.
- * IV is flat across strikes and option types – only varies over time.
+ * Build an IVSurface from a single static IV value.
+ * Returns the same IV for any strike/expiry/type.
  */
-export function buildManualIVSurface(
-  ivPoints: ManualIVPoint[],
+export function buildStaticIVSurface(
+  iv: number,
   riskFreeRate: number
 ): IVSurface {
-  const sorted = [...ivPoints].sort((a, b) => a.date.localeCompare(b.date));
-
-  function getIV(_strike: number, expiry: string, _type: 'call' | 'put'): number {
-    if (sorted.length === 0) return 0.3;
-    if (sorted.length === 1) return sorted[0].iv;
-    if (expiry <= sorted[0].date) return sorted[0].iv;
-    if (expiry >= sorted[sorted.length - 1].date) return sorted[sorted.length - 1].iv;
-
-    for (let i = 0; i < sorted.length - 1; i++) {
-      if (expiry >= sorted[i].date && expiry <= sorted[i + 1].date) {
-        const t1 = new Date(sorted[i].date).getTime();
-        const t2 = new Date(sorted[i + 1].date).getTime();
-        const t = new Date(expiry).getTime();
-        if (t2 === t1) return sorted[i].iv;
-        const w = (t - t1) / (t2 - t1);
-        return sorted[i].iv + w * (sorted[i + 1].iv - sorted[i].iv);
-      }
-    }
-    return sorted[sorted.length - 1].iv;
-  }
-
   return {
     points: [],
-    expiries: sorted.map(p => p.date),
+    expiries: [],
     riskFreeRate,
-    getIV,
+    getIV: () => iv,
   };
 }
 

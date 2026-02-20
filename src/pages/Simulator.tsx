@@ -2,6 +2,8 @@ import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ShieldAlert, Play, Loader2, Sun, Moon, LogOut } from 'lucide-react';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
@@ -9,7 +11,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ChevronDown } from 'lucide-react';
 
 import { TickerSelector, CsvPriceData } from '@/components/simulator/TickerSelector';
-import { IVCurveEditor, IVPoint, generateMonthlyPoints } from '@/components/simulator/IVCurveEditor';
 import { StrategyBuilder } from '@/components/simulator/StrategyBuilder';
 import { AdjustmentRuleEditor } from '@/components/simulator/AdjustmentRuleEditor';
 import { BacktestChart } from '@/components/simulator/BacktestChart';
@@ -17,8 +18,8 @@ import { BacktestResults } from '@/components/simulator/BacktestResults';
 import { GreeksChart } from '@/components/simulator/GreeksChart';
 
 import { BacktestLeg, BacktestResult, runBacktest } from '@/lib/backtestEngine';
-import { AdjustmentRule, StrategyPresetType } from '@/lib/adjustmentRules';
-import { buildManualIVSurface, IVSurface } from '@/lib/ivSurface';
+import { CoveredCallRules, getDefaultCoveredCallRules } from '@/lib/adjustmentRules';
+import { buildStaticIVSurface, IVSurface } from '@/lib/ivSurface';
 import { toast } from 'sonner';
 
 export function Simulator() {
@@ -27,21 +28,20 @@ export function Simulator() {
 
   const [priceData, setPriceData] = useState<{ date: string; close: number }[] | null>(null);
   const [ticker, setTicker] = useState('');
-  const [ivPoints, setIVPoints] = useState<IVPoint[]>([]);
+  const [ivPct, setIvPct] = useState(30); // static IV %
   const [riskFreeRate, setRiskFreeRate] = useState(0.045);
 
   const [legs, setLegs] = useState<BacktestLeg[]>([]);
   const [entryDate, setEntryDate] = useState('');
-  const [strategyType, setStrategyType] = useState<StrategyPresetType>('iron_condor');
-  const [adjustmentRules, setAdjustmentRules] = useState<AdjustmentRule[]>([]);
+  const [ccRules, setCcRules] = useState<CoveredCallRules>(getDefaultCoveredCallRules());
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [configOpen, setConfigOpen] = useState(true);
 
-  // Build IVSurface from manual curve
+  // Build static IVSurface
   const ivSurface: IVSurface = useMemo(
-    () => buildManualIVSurface(ivPoints, riskFreeRate),
-    [ivPoints, riskFreeRate]
+    () => buildStaticIVSurface(ivPct / 100, riskFreeRate),
+    [ivPct, riskFreeRate]
   );
 
   const dateRange = useMemo(() => {
@@ -53,10 +53,6 @@ export function Simulator() {
     setPriceData(data.priceData);
     setTicker(data.ticker);
     setBacktestResult(null);
-    // Generate monthly IV points from filtered date range
-    if (data.priceData.length > 0) {
-      setIVPoints(generateMonthlyPoints(data.priceData));
-    }
   }, []);
 
   const handleLegsChange = useCallback((newLegs: BacktestLeg[], date: string) => {
@@ -81,11 +77,11 @@ export function Simulator() {
           priceData: filteredPriceData,
           ivSurface,
           riskFreeRate,
-          adjustmentRules,
+          ccRules,
         });
         setBacktestResult(result);
         setConfigOpen(false);
-        toast.success(`Backtest completato: ${result.days.length} giorni simulati`);
+        toast.success(`Backtest completato: ${result.days.length} barre simulate`);
       } catch (err) {
         console.error('Backtest error:', err);
         toast.error(`Errore: ${err instanceof Error ? err.message : 'Errore sconosciuto'}`);
@@ -93,7 +89,7 @@ export function Simulator() {
         setRunning(false);
       }
     }, 50);
-  }, [priceData, legs, entryDate, adjustmentRules, ivSurface, riskFreeRate]);
+  }, [priceData, legs, entryDate, ccRules, ivSurface, riskFreeRate]);
 
   if (!isAdmin) {
     return (
@@ -113,10 +109,10 @@ export function Simulator() {
                 <IronCondorIcon size={24} className="text-primary" />
               </div>
               <div>
-                <h1 className="text-lg font-bold">Simulatore Backtest</h1>
+                <h1 className="text-lg font-bold">Simulatore Covered Call</h1>
                 {priceData && (
                   <p className="text-xs text-muted-foreground">
-                    {ticker} • {priceData.length} giorni
+                    {ticker} • {priceData.length} barre
                   </p>
                 )}
               </div>
@@ -152,13 +148,25 @@ export function Simulator() {
 
             {priceData && (
               <>
-                <IVCurveEditor
-                  priceData={priceData}
-                  ivPoints={ivPoints}
-                  riskFreeRate={riskFreeRate}
-                  onIVPointsChange={setIVPoints}
-                  onRiskFreeRateChange={setRiskFreeRate}
-                />
+                {/* Static IV + Risk-Free Rate */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Volatilità Implicita (%)</Label>
+                    <Input
+                      type="number"
+                      value={ivPct}
+                      onChange={e => setIvPct(parseFloat(e.target.value) || 30)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Risk-Free Rate (%)</Label>
+                    <Input
+                      type="number"
+                      value={(riskFreeRate * 100).toFixed(2)}
+                      onChange={e => setRiskFreeRate((parseFloat(e.target.value) || 4.5) / 100)}
+                    />
+                  </div>
+                </div>
 
                 <StrategyBuilder
                   priceData={priceData}
@@ -166,13 +174,11 @@ export function Simulator() {
                   riskFreeRate={riskFreeRate}
                   dateRange={dateRange}
                   onLegsChange={handleLegsChange}
-                  onStrategyTypeChange={setStrategyType}
                 />
 
                 <AdjustmentRuleEditor
-                  rules={adjustmentRules}
-                  onRulesChange={setAdjustmentRules}
-                  strategyType={strategyType}
+                  rules={ccRules}
+                  onRulesChange={setCcRules}
                 />
               </>
             )}

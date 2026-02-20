@@ -1,10 +1,11 @@
 /**
- * Backtest engine: iterates day-by-day, prices options with BS + IV surface,
- * applies adjustment rules, and produces daily results.
+ * Backtest engine for Covered Call strategy.
+ * Iterates bar-by-bar (hourly, 4h or daily), prices options with BS + static IV,
+ * applies covered-call adjustment rules, and produces results.
  */
 import { bsPrice, bsDelta, bsGamma, bsTheta, bsVega } from './blackScholes';
 import { IVSurface } from './ivSurface';
-import { AdjustmentRule, roundStrike } from './adjustmentRules';
+import { CoveredCallRules, roundStrike } from './adjustmentRules';
 
 // ---- Third Friday calculation ----
 export function thirdFriday(year: number, month: number): Date {
@@ -87,7 +88,7 @@ export interface BacktestConfig {
   priceData: { date: string; close: number }[];
   ivSurface: IVSurface;
   riskFreeRate: number;
-  adjustmentRules: AdjustmentRule[];
+  ccRules: CoveredCallRules;
 }
 
 export interface BacktestResult {
@@ -105,7 +106,7 @@ export interface BacktestResult {
 // ---- Engine ----
 
 export function runBacktest(config: BacktestConfig): BacktestResult {
-  const { priceData, ivSurface, riskFreeRate, adjustmentRules } = config;
+  const { priceData, ivSurface, riskFreeRate, ccRules } = config;
   const activeLegs = config.legs.map(l => ({ ...l, active: true }));
 
   const days: BacktestDayResult[] = [];
@@ -129,11 +130,15 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   let maxDrawdown = 0;
   let maxProfit = -Infinity;
 
+  // Pre-compute all available monthly expiries in the date range
+  const allExpiries = getMonthlyExpiries(priceData[0].date.slice(0, 10), priceData[priceData.length - 1].date.slice(0, 10));
+
   for (const bar of priceData) {
     const S = bar.close;
     const date = bar.date;
     const dayAdjustments: AdjustmentLog[] = [];
 
+    // Price all legs
     const legResults: DayLegResult[] = [];
     let totalValue = 0;
 
@@ -156,8 +161,28 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       let price: number, delta: number, gamma: number, theta: number, vega: number;
 
       if (T <= 0) {
+        // Option expired
         price = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
         delta = 0; gamma = 0; theta = 0; vega = 0;
+
+        // Handle expiry logic for approach rule do_nothing
+        if (ccRules.approachRule.enabled && ccRules.approachRule.action === 'do_nothing') {
+          const adj = handleExpiryDoNothing(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+          if (adj) {
+            dayAdjustments.push(adj);
+            allAdjustments.push(adj);
+            totalAdjustmentCost += adj.cost;
+          }
+        } else if (leg.active) {
+          // Default: sell new call at same barrier after expiry
+          const adj = sellNewCallAfterExpiry(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+          if (adj) {
+            dayAdjustments.push(adj);
+            allAdjustments.push(adj);
+            totalAdjustmentCost += adj.cost;
+          }
+        }
+
         leg.active = false;
       } else {
         price = bsPrice(S, leg.strike, T, riskFreeRate, iv, leg.type);
@@ -165,6 +190,32 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         gamma = bsGamma(S, leg.strike, T, riskFreeRate, iv);
         theta = bsTheta(S, leg.strike, T, riskFreeRate, iv, leg.type);
         vega = bsVega(S, leg.strike, T, riskFreeRate, iv);
+
+        // Check approach rule (price near sold call)
+        if (ccRules.approachRule.enabled && leg.type === 'call' && leg.quantity < 0 && leg.active) {
+          const dist = Math.abs(S - leg.strike) / leg.strike * 100;
+          if (dist <= ccRules.approachRule.activationPct && S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100)) {
+            const adj = executeApproachRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+            if (adj) {
+              dayAdjustments.push(adj);
+              allAdjustments.push(adj);
+              totalAdjustmentCost += adj.cost;
+            }
+          }
+        }
+
+        // Check profit rule (option gaining value for seller)
+        if (ccRules.profitRule.enabled && leg.type === 'call' && leg.quantity < 0 && leg.active) {
+          const gainPct = ((leg.entryPrice - price) / leg.entryPrice) * 100;
+          if (gainPct >= ccRules.profitRule.profitPct) {
+            const adj = executeProfitRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+            if (adj) {
+              dayAdjustments.push(adj);
+              allAdjustments.push(adj);
+              totalAdjustmentCost += adj.cost;
+            }
+          }
+        }
       }
 
       const value = price * leg.quantity * 100;
@@ -183,18 +234,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
     const totalPL = totalValue - initialValue - totalAdjustmentCost;
     const plPct = initialValue !== 0 ? (totalPL / Math.abs(initialValue)) * 100 : 0;
-
-    // Check adjustment rules (sorted by priority)
-    for (const rule of [...adjustmentRules].sort((a, b) => a.priority - b.priority)) {
-      if (evaluateCondition(rule, S, activeLegs)) {
-        const adjustment = executeAction(rule, S, date, activeLegs, ivSurface, riskFreeRate);
-        if (adjustment) {
-          dayAdjustments.push(adjustment);
-          allAdjustments.push(adjustment);
-          totalAdjustmentCost += adjustment.cost;
-        }
-      }
-    }
 
     if (totalPL > maxPL) maxPL = totalPL;
     const dd = maxPL - totalPL;
@@ -243,106 +282,212 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   };
 }
 
-// ---- Condition evaluation ----
+// ---- Approach Rule Execution ----
 
-function evaluateCondition(
-  rule: AdjustmentRule,
-  S: number,
-  activeLegs: BacktestLeg[],
-): boolean {
-  const { condition } = rule;
-  const targetLegs = activeLegs.filter(l => {
-    if (!l.active) return false;
-    if (condition.legType === 'sold_put') return l.type === 'put' && l.quantity < 0;
-    if (condition.legType === 'sold_call') return l.type === 'call' && l.quantity < 0;
-    return false;
-  });
+function executeApproachRule(
+  leg: BacktestLeg, S: number, date: string, currentPrice: number,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[]
+): AdjustmentLog | null {
+  const { approachRule, strikeStep } = ccRules;
 
-  for (const leg of targetLegs) {
-    const dist = Math.abs(S - leg.strike) / leg.strike * 100;
-    if (dist <= condition.distancePct) return true;
+  if (approachRule.action === 'do_nothing') return null; // handled at expiry
+
+  // Close current call
+  const closeCost = -currentPrice * leg.quantity * 100;
+  leg.active = false;
+
+  // New strike: higher, on next expiry
+  const nextExpiry = findNextExpiry(leg.expiryDate, allExpiries);
+  if (!nextExpiry) return null;
+
+  const newStrike = roundStrike(S * (1 + approachRule.activationPct / 100), strikeStep);
+  const newT = yearsBetween(date, nextExpiry);
+  if (newT <= 0) return null;
+
+  const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
+  const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
+
+  if (approachRule.action === 'roll_up_positive') {
+    const netPremium = newPrice - currentPrice;
+    const meetsUsd = netPremium >= approachRule.minPremiumUsd;
+    const meetsPct = netPremium >= S * (approachRule.minPremiumPct / 100);
+    if (!meetsUsd && !meetsPct) {
+      leg.active = true; // revert
+      return null;
+    }
   }
-  return false;
+
+  const openCost = newPrice * leg.quantity * 100;
+  const newLeg: BacktestLeg = {
+    id: `${leg.id}_rollup_${date}`,
+    type: 'call', strike: newStrike, quantity: leg.quantity,
+    entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
+  };
+  activeLegs.push(newLeg);
+
+  return {
+    date, ruleName: 'Approccio barriera',
+    description: `Roll up: ${leg.strike} → ${newStrike} (exp ${nextExpiry})`,
+    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+    cost: closeCost + openCost,
+  };
 }
 
-// ---- Action execution ----
+// ---- Expiry handling for do_nothing ----
 
-function executeAction(
-  rule: AdjustmentRule,
-  S: number,
-  date: string,
-  activeLegs: BacktestLeg[],
-  ivSurface: IVSurface,
-  riskFreeRate: number
+function handleExpiryDoNothing(
+  leg: BacktestLeg, S: number, date: string,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[]
 ): AdjustmentLog | null {
-  const { action, condition, strikeStep } = rule;
+  const { approachRule, strikeStep } = ccRules;
+  const isOTM = S < leg.strike;
 
-  // Find legs to roll
-  const legsToRoll = activeLegs.filter(l => {
-    if (!l.active || l.type === 'stock') return false;
-    if (condition.legType === 'sold_put') return l.type === 'put' && l.quantity < 0;
-    if (condition.legType === 'sold_call') return l.type === 'call' && l.quantity < 0;
-    return false;
-  });
+  const nextExpiry = findNextExpiry(date, allExpiries);
+  if (!nextExpiry) return null;
 
-  if (legsToRoll.length === 0) return null;
+  const newStrike = roundStrike(S * (1 + approachRule.newCallBarrierPct / 100), strikeStep);
+  const newT = yearsBetween(date, nextExpiry);
+  if (newT <= 0) return null;
 
-  let totalCost = 0;
-  const removed: BacktestLeg[] = [];
-  const added: BacktestLeg[] = [];
+  const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
+  const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
 
-  for (const leg of legsToRoll) {
-    const legType = leg.type as 'call' | 'put';
-    const T = yearsBetween(date, leg.expiryDate);
-    const oldIV = ivSurface.getIV(leg.strike, leg.expiryDate, legType);
-    const oldPrice = T > 0 ? bsPrice(S, leg.strike, T, riskFreeRate, oldIV, legType) : 0;
-    totalCost += -oldPrice * leg.quantity * 100; // close old
-    leg.active = false;
-    removed.push({ ...leg });
+  const newLeg: BacktestLeg = {
+    id: `${leg.id}_expiry_${date}`,
+    type: 'call', strike: newStrike, quantity: -1,
+    entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
+  };
+  activeLegs.push(newLeg);
 
-    // Calculate new strike
-    let newStrike = leg.strike;
-    if (action.type === 'roll_strike' || action.type === 'roll_both') {
-      const target = condition.legType === 'sold_put'
-        ? S * (1 - action.newBarrierPct / 100)
-        : S * (1 + action.newBarrierPct / 100);
-      newStrike = roundStrike(target, strikeStep);
+  const desc = isOTM
+    ? `Scadenza OTM: nuova call ${newStrike} (exp ${nextExpiry})`
+    : `Scadenza ITM: ricompra + nuova call ${newStrike} (exp ${nextExpiry})`;
+
+  return {
+    date, ruleName: 'Scadenza do_nothing',
+    description: desc,
+    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+    cost: newPrice * (-1) * 100, // premium received
+  };
+}
+
+function sellNewCallAfterExpiry(
+  leg: BacktestLeg, S: number, date: string,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[]
+): AdjustmentLog | null {
+  const nextExpiry = findNextExpiry(date, allExpiries);
+  if (!nextExpiry) return null;
+
+  const newStrike = roundStrike(S * 1.05, ccRules.strikeStep); // default 5% barrier
+  const newT = yearsBetween(date, nextExpiry);
+  if (newT <= 0) return null;
+
+  const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
+  const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
+
+  const newLeg: BacktestLeg = {
+    id: `${leg.id}_renew_${date}`,
+    type: 'call', strike: newStrike, quantity: -1,
+    entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
+  };
+  activeLegs.push(newLeg);
+
+  return {
+    date, ruleName: 'Rinnovo post-scadenza',
+    description: `Nuova call ${newStrike} (exp ${nextExpiry})`,
+    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+    cost: newPrice * (-1) * 100,
+  };
+}
+
+// ---- Profit Rule Execution ----
+
+function executeProfitRule(
+  leg: BacktestLeg, S: number, date: string, currentPrice: number,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[]
+): AdjustmentLog | null {
+  const { profitRule, strikeStep } = ccRules;
+
+  if (profitRule.action === 'wait_and_sell') return null; // handled at expiry
+
+  const closeCost = -currentPrice * leg.quantity * 100;
+
+  if (profitRule.action === 'roll_down_first_expiry') {
+    // Check if this is on the first available expiry
+    const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
+    if (firstExpiry && leg.expiryDate === firstExpiry) {
+      // Roll down: lower strike, same expiry
+      const newStrike = roundStrike(S * (1 + 3 / 100), strikeStep); // closer strike
+      const T = yearsBetween(date, leg.expiryDate);
+      if (T <= 0) return null;
+
+      const newIV = ivSurface.getIV(newStrike, leg.expiryDate, 'call');
+      const newPrice = bsPrice(S, newStrike, T, riskFreeRate, newIV, 'call');
+      const netPremium = newPrice - currentPrice;
+
+      const meetsUsd = netPremium >= profitRule.minPremiumUsd;
+      const meetsPct = netPremium >= S * (profitRule.minPremiumPct / 100);
+      if (!meetsUsd && !meetsPct) return null;
+
+      leg.active = false;
+      const newLeg: BacktestLeg = {
+        id: `${leg.id}_rolldown_${date}`,
+        type: 'call', strike: newStrike, quantity: leg.quantity,
+        entryDate: date, expiryDate: leg.expiryDate, entryPrice: newPrice, active: true,
+      };
+      activeLegs.push(newLeg);
+
+      return {
+        date, ruleName: 'Profitto: roll down',
+        description: `Roll down: ${leg.strike} → ${newStrike} (stessa scadenza)`,
+        legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+        cost: closeCost + newPrice * leg.quantity * 100,
+      };
     }
-
-    // Calculate new expiry
-    let newExpiry = leg.expiryDate;
-    if (action.type === 'roll_expiry' || action.type === 'roll_both') {
-      newExpiry = nextMonthlyExpiry(leg.expiryDate, action.rollMonths);
-    }
-
-    const newT = yearsBetween(date, newExpiry);
-    const newIV = ivSurface.getIV(newStrike, newExpiry, legType);
-    const newPrice = newT > 0 ? bsPrice(S, newStrike, newT, riskFreeRate, newIV, legType) : 0;
-    totalCost += newPrice * leg.quantity * 100; // open new
-
-    const newLeg: BacktestLeg = {
-      id: `${leg.id}_roll_${date}`,
-      type: leg.type,
-      strike: newStrike,
-      quantity: leg.quantity,
-      entryDate: date,
-      expiryDate: newExpiry,
-      entryPrice: newPrice,
-      active: true,
-    };
-    activeLegs.push(newLeg);
-    added.push({ ...newLeg });
   }
 
-  const actionLabel = action.type === 'roll_strike' ? 'strike' : action.type === 'roll_expiry' ? 'scadenza' : 'strike+scadenza';
-  return {
-    date,
-    ruleName: rule.name,
-    description: `Roll ${actionLabel}: ${removed.map(l => l.strike).join(',')} → ${added.map(l => l.strike).join(',')}`,
-    legsRemoved: removed,
-    legsAdded: added,
-    cost: totalCost,
-  };
+  if (profitRule.action === 'roll_down_any_expiry') {
+    // Search for best option: min expiry, strike >= S*(1+minDistancePct/100), premium >= threshold
+    const minStrike = roundStrike(S * (1 + profitRule.minDistancePct / 100), strikeStep);
+
+    for (const expiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
+      const T = yearsBetween(date, expiry);
+      if (T <= 0) continue;
+
+      // Try strikes from minStrike upwards
+      for (let strike = minStrike; strike <= S * 1.3; strike += strikeStep) {
+        const iv = ivSurface.getIV(strike, expiry, 'call');
+        const price = bsPrice(S, strike, T, riskFreeRate, iv, 'call');
+        const netPremium = price - currentPrice;
+
+        const meetsUsd = netPremium >= profitRule.rollDownMinPremiumUsd;
+        const meetsPct = currentPrice > 0 && netPremium >= currentPrice * (profitRule.rollDownMinPremiumPct / 100);
+
+        if (meetsUsd || meetsPct) {
+          leg.active = false;
+          const newLeg: BacktestLeg = {
+            id: `${leg.id}_rollany_${date}`,
+            type: 'call', strike, quantity: leg.quantity,
+            entryDate: date, expiryDate: expiry, entryPrice: price, active: true,
+          };
+          activeLegs.push(newLeg);
+
+          return {
+            date, ruleName: 'Profitto: roll scadenza',
+            description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
+            legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+            cost: closeCost + price * leg.quantity * 100,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 // ---- Utility ----
@@ -355,11 +500,7 @@ function yearsBetween(from: string, to: string): number {
   return (new Date(to).getTime() - new Date(from).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
 }
 
-function nextMonthlyExpiry(afterDate: string, monthsAhead: number = 1): string {
-  const d = new Date(afterDate);
-  let m = d.getMonth() + monthsAhead;
-  let y = d.getFullYear();
-  while (m > 11) { m -= 12; y++; }
-  const tf = thirdFriday(y, m);
-  return formatDate(tf);
+function findNextExpiry(afterDate: string, allExpiries: string[]): string | undefined {
+  const dateStr = afterDate.slice(0, 10);
+  return allExpiries.find(e => e > dateStr);
 }

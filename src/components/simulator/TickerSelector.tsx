@@ -31,25 +31,34 @@ function findColumn(headers: string[], patterns: string[]): number {
   return -1;
 }
 
-function parseDate(dateStr: string, timeStr?: string): string | null {
+function parseDateTime(dateStr: string, timeStr?: string): string | null {
   let combined = dateStr.trim();
   if (timeStr) combined += ' ' + timeStr.trim();
 
   const d = new Date(combined);
   if (!isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
+    // Preserve full ISO datetime
+    return d.toISOString().slice(0, 19);
   }
 
   const m = combined.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
   if (m) {
     const d2 = new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
-    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 19);
   }
 
   return null;
 }
 
-function parseCsvContent(text: string): { date: string; close: number }[] {
+function extractTickerFromFilename(filename: string): string {
+  // Remove extension
+  const name = filename.replace(/\.(csv|txt)$/i, '');
+  // Try patterns like PLTR_4h, PLTR-daily, PLTR_1h, PLTR
+  const match = name.match(/^([A-Z]{1,6})/i);
+  return match ? match[1].toUpperCase() : '';
+}
+
+function parseCsvContent(text: string, filename: string): { ticker: string; priceData: { date: string; close: number }[] } {
   const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
   if (lines.length < 2) throw new Error('Il file deve avere almeno 2 righe (header + dati)');
 
@@ -59,19 +68,26 @@ function parseCsvContent(text: string): { date: string; close: number }[] {
   const dateIdx = findColumn(headers, ['datetime', 'date', 'time', 'data', 'timestamp']);
   const timeIdx = findColumn(headers, ['time', 'ora']);
   const closeIdx = findColumn(headers, ['close', 'chiusura', 'price', 'prezzo', 'last', 'ultimo', 'adj close']);
+  const tickerIdx = findColumn(headers, ['ticker', 'symbol', 'simbolo']);
 
   if (dateIdx < 0) throw new Error(`Colonna data non trovata. Header: ${headers.join(', ')}`);
   if (closeIdx < 0) throw new Error(`Colonna prezzo non trovata. Header: ${headers.join(', ')}`);
 
+  let extractedTicker = '';
   const rawRows: { date: string; close: number }[] = [];
 
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     if (cols.length <= Math.max(dateIdx, closeIdx)) continue;
 
+    // Extract ticker from first valid row
+    if (!extractedTicker && tickerIdx >= 0 && cols[tickerIdx]) {
+      extractedTicker = cols[tickerIdx].toUpperCase();
+    }
+
     const dateStr = cols[dateIdx];
     const timeStr = timeIdx >= 0 && timeIdx !== dateIdx ? cols[timeIdx] : undefined;
-    const parsedDate = parseDate(dateStr, timeStr);
+    const parsedDate = parseDateTime(dateStr, timeStr);
     if (!parsedDate) continue;
 
     const closeVal = parseFloat(cols[closeIdx].replace(',', '.'));
@@ -82,14 +98,15 @@ function parseCsvContent(text: string): { date: string; close: number }[] {
 
   if (rawRows.length === 0) throw new Error('Nessuna riga valida trovata nel file');
 
-  const byDay = new Map<string, number>();
-  for (const row of rawRows) {
-    byDay.set(row.date, row.close);
+  // Fallback ticker extraction from filename
+  if (!extractedTicker) {
+    extractedTicker = extractTickerFromFilename(filename);
   }
 
-  return Array.from(byDay.entries())
-    .map(([date, close]) => ({ date, close }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // Sort by date, NO aggregation – preserve native timeframe
+  const sorted = rawRows.sort((a, b) => a.date.localeCompare(b.date));
+
+  return { ticker: extractedTicker, priceData: sorted };
 }
 
 export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
@@ -103,17 +120,17 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
   const csvBounds = useMemo(() => {
     if (!allData || allData.length === 0) return null;
     return {
-      min: new Date(allData[0].date + 'T00:00:00'),
-      max: new Date(allData[allData.length - 1].date + 'T00:00:00'),
+      min: new Date(allData[0].date),
+      max: new Date(allData[allData.length - 1].date),
     };
   }, [allData]);
 
   // Filter data and emit when dates or ticker change
   const filteredData = useMemo(() => {
     if (!allData) return null;
-    const startStr = startDate ? startDate.toISOString().slice(0, 10) : allData[0].date;
-    const endStr = endDate ? endDate.toISOString().slice(0, 10) : allData[allData.length - 1].date;
-    return allData.filter(d => d.date >= startStr && d.date <= endStr);
+    const startStr = startDate ? startDate.toISOString().slice(0, 10) : allData[0].date.slice(0, 10);
+    const endStr = endDate ? endDate.toISOString().slice(0, 10) : allData[allData.length - 1].date.slice(0, 10);
+    return allData.filter(d => d.date.slice(0, 10) >= startStr && d.date.slice(0, 10) <= endStr);
   }, [allData, startDate, endDate]);
 
   // Emit filtered data when it changes
@@ -132,14 +149,15 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
-        const data = parseCsvContent(text);
-        setAllData(data);
+        const result = parseCsvContent(text, file.name);
+        setAllData(result.priceData);
+        setTicker(result.ticker);
 
         // Auto-set dates to full range
-        setStartDate(new Date(data[0].date + 'T00:00:00'));
-        setEndDate(new Date(data[data.length - 1].date + 'T00:00:00'));
+        setStartDate(new Date(result.priceData[0].date));
+        setEndDate(new Date(result.priceData[result.priceData.length - 1].date));
 
-        toast.success(`${data.length} giorni caricati (${data[0].date} → ${data[data.length - 1].date})`);
+        toast.success(`${result.priceData.length} barre caricate • Ticker: ${result.ticker || '?'}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Errore nel parsing del file');
         setAllData(null);
@@ -154,10 +172,6 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
     maxFiles: 1,
   });
 
-  const handleTickerChange = useCallback((val: string) => {
-    setTicker(val.toUpperCase());
-  }, []);
-
   const disabledDates = useCallback((date: Date) => {
     if (!csvBounds) return true;
     return date < csvBounds.min || date > csvBounds.max;
@@ -169,6 +183,17 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
     return filteredData.filter((_, i) => i % step === 0);
   }, [filteredData]);
 
+  // Detect timeframe
+  const timeframeLabel = useMemo(() => {
+    if (!allData || allData.length < 3) return '';
+    const d1 = new Date(allData[0].date).getTime();
+    const d2 = new Date(allData[1].date).getTime();
+    const diffH = (d2 - d1) / (1000 * 60 * 60);
+    if (diffH <= 1.5) return '1H';
+    if (diffH <= 5) return '4H';
+    return 'Daily';
+  }, [allData]);
+
   return (
     <Card>
       <CardHeader>
@@ -177,11 +202,11 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
           <div className="space-y-1.5">
-            <Label>Ticker</Label>
+            <Label>Ticker (auto-estratto)</Label>
             <Input
               value={ticker}
-              onChange={e => handleTickerChange(e.target.value)}
-              placeholder="PLTR"
+              onChange={e => setTicker(e.target.value.toUpperCase())}
+              placeholder="Estratto dal CSV"
             />
           </div>
 
@@ -197,7 +222,7 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
                 <div className="flex items-center justify-center gap-2 text-sm">
                   <CheckCircle2 className="w-4 h-4 text-primary" />
                   <span className="text-muted-foreground">
-                    <strong>{fileName}</strong> — {allData.length} giorni ({allData[0].date} → {allData[allData.length - 1].date})
+                    <strong>{fileName}</strong> — {allData.length} barre {timeframeLabel} ({allData[0].date.slice(0, 10)} → {allData[allData.length - 1].date.slice(0, 10)})
                   </span>
                 </div>
               ) : (
@@ -219,9 +244,7 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
               <Label>Data Inizio</Label>
               <DateInput
                 value={startDate}
-                onChange={(d) => {
-                  if (d) setStartDate(d);
-                }}
+                onChange={(d) => { if (d) setStartDate(d); }}
                 disabled={disabledDates}
                 placeholder="GG/MM/AAAA"
               />
@@ -230,9 +253,7 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
               <Label>Data Fine</Label>
               <DateInput
                 value={endDate}
-                onChange={(d) => {
-                  if (d) setEndDate(d);
-                }}
+                onChange={(d) => { if (d) setEndDate(d); }}
                 disabled={disabledDates}
                 placeholder="GG/MM/AAAA"
               />
