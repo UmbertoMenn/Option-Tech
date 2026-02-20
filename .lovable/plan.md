@@ -1,72 +1,91 @@
 
 
-## Correzione 3 Bug nel Backtest Engine
+## Fix: Distanza minima strike in roll_up_positive + Continuita operazioni dopo roll_down
 
-### Bug 1: Prezzo di riacquisto errato nei Movimenti
+### Bug 1: Distanza minima strike mancante nel roll_up_positive
 
-Quando una call viene chiusa (riacquistata), la tabella Movimenti mostra il prezzo originale di vendita (`entryPrice`) invece del prezzo di mercato corrente al momento della chiusura. Il problema e che `legsRemoved` viene salvato con `{ ...leg }` che copia l'`entryPrice` originale.
+Nella configurazione "Rollo su scadenza successiva con strike piu alto, solo se la differenza e positiva", manca il campo per configurare la distanza minima del nuovo strike dal prezzo corrente del sottostante.
 
-**Fix**: Aggiungere un campo opzionale `closePrice` a `BacktestLeg`. Nelle funzioni di aggiustamento (`executeApproachRule`, `executeProfitRule`, `handleExpiryDoNothing`), impostare `closePrice = currentPrice` sulla copia della leg rimossa. In `BacktestResults`, usare `closePrice ?? entryPrice` per le righe di chiusura.
+Attualmente `executeApproachRule` (riga 303) calcola il nuovo strike come `S * (1 + activationPct / 100)`, riusando la distanza di attivazione. Serve un campo dedicato.
 
-### Bug 2: Strike arrotondati allo strikeStep
+**Modifiche:**
 
-Lo `StrategyBuilder` calcola lo strike iniziale con `Math.round(entryPrice * (1 + pct/100))` senza usare lo `strikeStep`. Gli strike devono sempre essere multipli di `strikeStep`.
+- **`src/lib/adjustmentRules.ts`**: aggiungere `rollUpMinDistancePct: number` a `ApproachRule`, default 5. Questo campo definisce la distanza minima % dal sottostante per il nuovo strike durante un roll up.
+- **`src/components/simulator/AdjustmentRuleEditor.tsx`**: aggiungere input "Distanza min strike" dentro il blocco `roll_up_positive` (dopo i campi USD/%), identico a quelli gia presenti nel profit rule.
+- **`src/lib/backtestEngine.ts`**: in `executeApproachRule`, usare `approachRule.rollUpMinDistancePct` al posto di `approachRule.activationPct` per calcolare `newStrike`:
+  ```text
+  const newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
+  ```
+  Anche per `roll_up_always`, usare lo stesso campo cosi il nuovo strike rispetta sempre una distanza configurabile.
 
-**Fix**: Passare `strikeStep` (da `ccRules.strikeStep`) come prop a `StrategyBuilder`. Usare `roundStrike(target, strikeStep)` per calcolare `callStrike`.
+### Bug 2: Nessuna operazione dopo roll_down su stessa scadenza
 
-### Bug 3: Nessuna operazione dopo l'ultimo roll
+Dopo un roll down sulla prima scadenza (stessa scadenza, strike piu basso), il motore non genera piu operazioni. Le cause sono:
 
-Dopo la vendita della nuova call, il motore non genera piu operazioni. Causa principale: in `executeApproachRule`, la riga `leg.active = false` viene eseguita PRIMA di verificare se esiste un `nextExpiry`. Se `findNextExpiry` restituisce `undefined`, la funzione ritorna `null` ma la leg e gia stata disattivata -- la posizione sparisce silenziosamente.
+1. **Nessun handler di scadenza per `wait_and_sell`**: nella profit rule, se `action === 'wait_and_sell'`, la funzione ritorna `null` con il commento "handled at expiry", ma alla scadenza NON c'e nessun codice che usa `profitRule.newCallBarrierPct`. Il leg scade e `sellNewCallAfterExpiry` usa una barriera hardcoded del 5%.
 
-Inoltre, il calcolo del prezzo corrente per le leg rimosse a scadenza non usa il prezzo BS attuale ma solo il valore intrinseco, impedendo il corretto tracciamento.
+2. **`sellNewCallAfterExpiry` usa barriera hardcoded**: riga 391, `S * 1.05` e fisso. Dovrebbe usare una barriera configurata. Se il profit rule e `wait_and_sell`, usare `profitRule.newCallBarrierPct`. Se l'approach rule e `do_nothing`, usare `approachRule.newCallBarrierPct`. Altrimenti usare `approachRule.rollUpMinDistancePct`.
 
-**Fix**:
-- In `executeApproachRule`: spostare `leg.active = false` DOPO il controllo `nextExpiry`, cosi se non c'e scadenza successiva la leg resta attiva.
-- In `handleExpiryDoNothing` e `sellNewCallAfterExpiry`: stessa protezione, revert `leg.active` se non si riesce a completare l'operazione.
-- Nelle funzioni di scadenza, memorizzare il prezzo corrente dell'opzione (intrinseco a scadenza) come `closePrice` sulle `legsRemoved`.
+3. **Profit rule non riparte dopo roll_down**: dopo il roll_down sulla prima scadenza, la nuova leg ha lo stesso `expiryDate`. Il prezzo BS della nuova opzione (strike piu basso, piu vicino a ATM) e alto, quindi il `gainPct` parte da ~0% e potrebbe non raggiungere mai `profitPct` prima della scadenza. Alla scadenza, il leg scade correttamente e `sellNewCallAfterExpiry` si attiva. Ma se `findNextExpiry` non trova una scadenza successiva (dati troppo corti), la strategia si interrompe silenziosamente.
+
+**Fix**: migliorare `sellNewCallAfterExpiry` per usare la barriera corretta in base alle regole configurate, e aggiungere log/handling se non ci sono scadenze disponibili. Inoltre, garantire che `allExpiries` venga calcolato con un margine di qualche mese oltre la fine dei dati per non perdere le ultime scadenze.
 
 ### Dettaglio tecnico
 
 | File | Modifica |
 |------|----------|
-| `src/lib/backtestEngine.ts` | Aggiungere `closePrice?` a `BacktestLeg`; fix ordine `leg.active = false` in tutte le funzioni di aggiustamento; impostare `closePrice` sulle leg rimosse |
-| `src/components/simulator/BacktestResults.tsx` | Usare `closePrice ?? entryPrice` per il prezzo delle righe di chiusura nella tabella Movimenti |
-| `src/components/simulator/StrategyBuilder.tsx` | Aggiungere prop `strikeStep`, usare `roundStrike` per calcolare lo strike della call |
-| `src/pages/Simulator.tsx` | Passare `ccRules.strikeStep` a `StrategyBuilder` |
+| `src/lib/adjustmentRules.ts` | Aggiungere `rollUpMinDistancePct: number` a `ApproachRule`, default 5 |
+| `src/components/simulator/AdjustmentRuleEditor.tsx` | Aggiungere input "Distanza min strike" nel blocco `roll_up_positive` |
+| `src/lib/backtestEngine.ts` | Usare `rollUpMinDistancePct` in `executeApproachRule`; fix `sellNewCallAfterExpiry` per usare barriera configurata; estendere `allExpiries` di 3 mesi oltre fine dati |
 
 ### Modifiche dettagliate
 
-**backtestEngine.ts - BacktestLeg**:
+**adjustmentRules.ts**:
 ```text
-export interface BacktestLeg {
+export interface ApproachRule {
   ...
-  closePrice?: number;  // prezzo di mercato al momento della chiusura
+  rollUpMinDistancePct: number;  // NUOVO: distanza min % del nuovo strike dal prezzo
 }
+
+// default:
+rollUpMinDistancePct: 5,
 ```
 
-**backtestEngine.ts - executeApproachRule** (fix ordine):
+**backtestEngine.ts - executeApproachRule**:
 ```text
-// PRIMA: leg.active = false era qui
-const nextExpiry = findNextExpiry(leg.expiryDate, allExpiries);
-if (!nextExpiry) return null;  // leg resta attiva
-// ORA: leg.active = false qui, DOPO il check
-leg.active = false;
+// PRIMA:
+const newStrike = roundStrike(S * (1 + approachRule.activationPct / 100), strikeStep);
+// DOPO:
+const newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
 ```
 
-**backtestEngine.ts - legsRemoved con closePrice**:
-Ogni adjustment imposta `closePrice` sulla copia della leg rimossa con il prezzo BS corrente.
-
-**BacktestResults.tsx - buildMovements**:
+**backtestEngine.ts - sellNewCallAfterExpiry**:
 ```text
-// Per legsRemoved, usare closePrice se disponibile
-price: leg.closePrice ?? leg.entryPrice,
+// PRIMA:
+const newStrike = roundStrike(S * 1.05, ccRules.strikeStep);
+// DOPO:
+const barrierPct = ccRules.profitRule.action === 'wait_and_sell'
+  ? ccRules.profitRule.newCallBarrierPct
+  : ccRules.approachRule.rollUpMinDistancePct;
+const newStrike = roundStrike(S * (1 + barrierPct / 100), ccRules.strikeStep);
 ```
 
-**StrategyBuilder.tsx**:
+**backtestEngine.ts - allExpiries range**:
 ```text
-// Nuova prop
-strikeStep: number;
-// Calcolo strike
-const callStrike = roundStrike(entryPrice * (1 + callDistancePct / 100), strikeStep);
+// PRIMA: calcola solo fino all'ultima barra
+const allExpiries = getMonthlyExpiries(priceData[0].date, priceData[last].date);
+// DOPO: estende di 3 mesi per garantire continuita
+const endDate = new Date(priceData[last].date);
+endDate.setMonth(endDate.getMonth() + 3);
+const allExpiries = getMonthlyExpiries(priceData[0].date, formatDate(endDate));
+```
+
+**AdjustmentRuleEditor.tsx**: aggiungere campo dentro `roll_up_positive`:
+```text
+<div className="flex items-center gap-1">
+  <Label>Distanza min strike</Label>
+  <Input value={rules.approachRule.rollUpMinDistancePct} ... />
+  <span>%</span>
+</div>
 ```
 
