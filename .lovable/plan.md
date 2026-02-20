@@ -1,26 +1,57 @@
 
 
-## Aggiungere "Distanza min strike" alla prima sotto-regola del Roll attivo
+## Card Movimenti Cronologici
 
-### Problema
-La sotto-regola "Se sulla prima scadenza disponibile, rollo su strike piu basso..." non ha il campo "Distanza min strike" che invece e presente nella seconda sotto-regola. L'utente vuole che anche il roll sulla prima scadenza rispetti una distanza minima dallo strike.
+### Obiettivo
+Aggiungere una card in `BacktestResults` che mostra tutte le operazioni singole (acquisti/vendite) in ordine cronologico, estratte dall'`adjustmentLog` e dall'apertura iniziale della strategia.
+
+### Logica
+
+Ogni `AdjustmentLog` contiene `legsRemoved` (posizioni chiuse) e `legsAdded` (posizioni aperte). Si costruisce un array di "movimenti" piatto:
+
+1. **Apertura iniziale**: dalle `legs` iniziali del backtest (es. "BUY 100 STOCK @ $X", "SELL 1 CALL K @ $Y")
+2. **Chiusure**: da ogni `adj.legsRemoved` -> "BUY 1 CALL K (chiusura) @ $X"
+3. **Aperture**: da ogni `adj.legsAdded` -> "SELL 1 CALL K @ $X"
+
+Ogni riga mostra: data, tipo (BUY/SELL), strumento (STOCK/CALL), strike, scadenza, quantita, prezzo, costo totale.
 
 ### Modifiche
 
-#### 1. `src/lib/adjustmentRules.ts`
-Aggiungere un campo `firstExpiryMinDistancePct: number` alla `ProfitRule` interface, con default 5. Questo campo definisce la distanza minima % dal sottostante per lo strike quando si fa roll down sulla prima scadenza.
+**File**: `src/components/simulator/BacktestResults.tsx`
 
-#### 2. `src/components/simulator/AdjustmentRuleEditor.tsx`
-Aggiungere un campo "Distanza min strike" + input numerico + "%" nella prima sotto-regola (linee 217-242), prima dei campi USD/%, identico a quello gia presente nella seconda sotto-regola.
+- Aggiungere una nuova Card "Movimenti" dopo le stat cards e prima del log aggiustamenti
+- Costruire l'array dei movimenti a partire da `result.adjustmentLog` (che contiene `legsAdded` e `legsRemoved`)
+- Includere anche le leg iniziali come primo movimento (data = prima barra)
+- Tabella con colonne: Data, Operazione (BUY/SELL badge colorato), Strumento, Strike, Scadenza, Qty, Prezzo, Totale
+- Ordinamento cronologico per data
+- Badge verde per SELL (incasso premio), rosso per BUY (costo)
+- ScrollArea per gestire molte righe
 
-#### 3. `src/lib/backtestEngine.ts`
-Aggiornare la logica `roll_down` per il caso "prima scadenza" in modo che il nuovo strike sia almeno a `firstExpiryMinDistancePct`% di distanza dal prezzo del sottostante.
+### Dettaglio tecnico
 
-### File coinvolti
+Interfaccia interna al componente:
+```text
+TradeMovement {
+  date: string
+  action: 'BUY' | 'SELL'
+  instrument: string      // "STOCK" | "CALL K120 exp 2024-03-15"
+  type: 'stock' | 'call' | 'put'
+  strike: number
+  expiry: string
+  quantity: number
+  price: number
+  total: number           // price * quantity * multiplier
+}
+```
+
+Costruzione array:
+1. Per ogni leg iniziale: action = quantity > 0 ? 'BUY' : 'SELL', date = leg.entryDate
+2. Per ogni adjustment:
+   - legsRemoved -> action inversa (se era SELL, ora BUY per chiudere)
+   - legsAdded -> action diretta dal segno della quantity
+3. Sort per data
 
 | File | Modifica |
 |------|----------|
-| `src/lib/adjustmentRules.ts` | Aggiungere `firstExpiryMinDistancePct` a `ProfitRule`, default 5 |
-| `src/components/simulator/AdjustmentRuleEditor.tsx` | Aggiungere input "Distanza min strike" nella prima sotto-regola |
-| `src/lib/backtestEngine.ts` | Usare `firstExpiryMinDistancePct` nella logica roll down prima scadenza |
+| `src/components/simulator/BacktestResults.tsx` | Aggiungere card "Movimenti" con tabella cronologica delle operazioni |
 
