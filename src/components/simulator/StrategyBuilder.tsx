@@ -8,16 +8,18 @@ import { Badge } from '@/components/ui/badge';
 import { BacktestLeg, getMonthlyExpiries } from '@/lib/backtestEngine';
 import { bsPrice } from '@/lib/blackScholes';
 import { IVSurface } from '@/lib/ivSurface';
+import { roundStrike } from '@/lib/adjustmentRules';
 
 interface StrategyBuilderProps {
   priceData: { date: string; close: number }[];
   ivSurface: IVSurface;
   riskFreeRate: number;
   dateRange: { from: string; to: string };
+  strikeStep: number;
   onLegsChange: (legs: BacktestLeg[], entryDate: string) => void;
 }
 
-export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange, onLegsChange }: StrategyBuilderProps) {
+export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange, strikeStep, onLegsChange }: StrategyBuilderProps) {
   const [entryDateStr, setEntryDateStr] = useState(dateRange.from);
   const [callDistancePct, setCallDistancePct] = useState(10);
   const [expiryMonth, setExpiryMonth] = useState('');
@@ -45,8 +47,8 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
   }, [priceData, entryDateStr]);
 
   const callStrike = useMemo(() => {
-    return Math.round(entryPrice * (1 + callDistancePct / 100));
-  }, [entryPrice, callDistancePct]);
+    return roundStrike(entryPrice * (1 + callDistancePct / 100), strikeStep);
+  }, [entryPrice, callDistancePct, strikeStep]);
 
   const callPrice = useMemo(() => {
     if (!selectedExpiry || !entryPrice) return 0;
