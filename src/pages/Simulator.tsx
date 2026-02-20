@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ChevronDown } from 'lucide-react';
 
 import { TickerSelector, CsvPriceData } from '@/components/simulator/TickerSelector';
-import { IVCurveEditor, IVPoint } from '@/components/simulator/IVCurveEditor';
+import { IVCurveEditor, IVPoint, generateMonthlyPoints } from '@/components/simulator/IVCurveEditor';
 import { StrategyBuilder } from '@/components/simulator/StrategyBuilder';
 import { AdjustmentRuleEditor } from '@/components/simulator/AdjustmentRuleEditor';
 import { BacktestChart } from '@/components/simulator/BacktestChart';
@@ -53,12 +53,9 @@ export function Simulator() {
     setPriceData(data.priceData);
     setTicker(data.ticker);
     setBacktestResult(null);
-    // Initialize IV curve: 2 points at 30%
+    // Generate monthly IV points from filtered date range
     if (data.priceData.length > 0) {
-      setIVPoints([
-        { date: data.priceData[0].date, iv: 0.3 },
-        { date: data.priceData[data.priceData.length - 1].date, iv: 0.3 },
-      ]);
+      setIVPoints(generateMonthlyPoints(data.priceData));
     }
   }, []);
 

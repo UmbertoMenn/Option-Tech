@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -6,6 +6,7 @@ import { Upload, FileText, CheckCircle2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
+import { DateInput } from '@/components/ui/date-input';
 
 export interface CsvPriceData {
   ticker: string;
@@ -16,18 +17,12 @@ interface TickerSelectorProps {
   onDataLoaded: (data: CsvPriceData) => void;
 }
 
-/**
- * Detect separator: comma, semicolon, or tab
- */
 function detectSeparator(header: string): string {
   if (header.includes('\t')) return '\t';
   if (header.includes(';')) return ';';
   return ',';
 }
 
-/**
- * Find column index matching any of the given patterns (case-insensitive)
- */
 function findColumn(headers: string[], patterns: string[]): number {
   for (const pat of patterns) {
     const idx = headers.findIndex(h => h.toLowerCase().trim().includes(pat.toLowerCase()));
@@ -36,20 +31,15 @@ function findColumn(headers: string[], patterns: string[]): number {
   return -1;
 }
 
-/**
- * Parse a date string in various formats to YYYY-MM-DD
- */
 function parseDate(dateStr: string, timeStr?: string): string | null {
   let combined = dateStr.trim();
   if (timeStr) combined += ' ' + timeStr.trim();
 
-  // Try native Date parse
   const d = new Date(combined);
   if (!isNaN(d.getTime())) {
     return d.toISOString().slice(0, 10);
   }
 
-  // Try DD/MM/YYYY or DD-MM-YYYY
   const m = combined.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
   if (m) {
     const d2 = new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
@@ -66,11 +56,8 @@ function parseCsvContent(text: string): { date: string; close: number }[] {
   const sep = detectSeparator(lines[0]);
   const headers = lines[0].split(sep).map(h => h.trim().replace(/^["']|["']$/g, ''));
 
-  // Find date column
   const dateIdx = findColumn(headers, ['datetime', 'date', 'time', 'data', 'timestamp']);
-  // Find separate time column if date doesn't include time
   const timeIdx = findColumn(headers, ['time', 'ora']);
-  // Find close/price column
   const closeIdx = findColumn(headers, ['close', 'chiusura', 'price', 'prezzo', 'last', 'ultimo', 'adj close']);
 
   if (dateIdx < 0) throw new Error(`Colonna data non trovata. Header: ${headers.join(', ')}`);
@@ -95,10 +82,9 @@ function parseCsvContent(text: string): { date: string; close: number }[] {
 
   if (rawRows.length === 0) throw new Error('Nessuna riga valida trovata nel file');
 
-  // Aggregate to daily: take last close per day
   const byDay = new Map<string, number>();
   for (const row of rawRows) {
-    byDay.set(row.date, row.close); // last one wins
+    byDay.set(row.date, row.close);
   }
 
   return Array.from(byDay.entries())
@@ -108,8 +94,34 @@ function parseCsvContent(text: string): { date: string; close: number }[] {
 
 export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
   const [ticker, setTicker] = useState('');
-  const [parsedData, setParsedData] = useState<{ date: string; close: number }[] | null>(null);
+  const [allData, setAllData] = useState<{ date: string; close: number }[] | null>(null);
   const [fileName, setFileName] = useState('');
+  const [startDate, setStartDate] = useState<Date | undefined>();
+  const [endDate, setEndDate] = useState<Date | undefined>();
+
+  // Date bounds from CSV
+  const csvBounds = useMemo(() => {
+    if (!allData || allData.length === 0) return null;
+    return {
+      min: new Date(allData[0].date + 'T00:00:00'),
+      max: new Date(allData[allData.length - 1].date + 'T00:00:00'),
+    };
+  }, [allData]);
+
+  // Filter data and emit when dates or ticker change
+  const filteredData = useMemo(() => {
+    if (!allData) return null;
+    const startStr = startDate ? startDate.toISOString().slice(0, 10) : allData[0].date;
+    const endStr = endDate ? endDate.toISOString().slice(0, 10) : allData[allData.length - 1].date;
+    return allData.filter(d => d.date >= startStr && d.date <= endStr);
+  }, [allData, startDate, endDate]);
+
+  // Emit filtered data when it changes
+  useEffect(() => {
+    if (filteredData && filteredData.length > 0 && ticker) {
+      onDataLoaded({ ticker: ticker.toUpperCase(), priceData: filteredData });
+    }
+  }, [filteredData, ticker, onDataLoaded]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -121,20 +133,20 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
       try {
         const text = e.target?.result as string;
         const data = parseCsvContent(text);
-        setParsedData(data);
+        setAllData(data);
 
-        if (ticker) {
-          onDataLoaded({ ticker: ticker.toUpperCase(), priceData: data });
-        }
+        // Auto-set dates to full range
+        setStartDate(new Date(data[0].date + 'T00:00:00'));
+        setEndDate(new Date(data[data.length - 1].date + 'T00:00:00'));
 
         toast.success(`${data.length} giorni caricati (${data[0].date} → ${data[data.length - 1].date})`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Errore nel parsing del file');
-        setParsedData(null);
+        setAllData(null);
       }
     };
     reader.readAsText(file);
-  }, [ticker, onDataLoaded]);
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -143,19 +155,19 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
   });
 
   const handleTickerChange = useCallback((val: string) => {
-    const t = val.toUpperCase();
-    setTicker(t);
-    if (t && parsedData) {
-      onDataLoaded({ ticker: t, priceData: parsedData });
-    }
-  }, [parsedData, onDataLoaded]);
+    setTicker(val.toUpperCase());
+  }, []);
+
+  const disabledDates = useCallback((date: Date) => {
+    if (!csvBounds) return true;
+    return date < csvBounds.min || date > csvBounds.max;
+  }, [csvBounds]);
 
   const miniChartData = useMemo(() => {
-    if (!parsedData) return [];
-    // Sample ~60 points for mini chart
-    const step = Math.max(1, Math.floor(parsedData.length / 60));
-    return parsedData.filter((_, i) => i % step === 0);
-  }, [parsedData]);
+    if (!filteredData) return [];
+    const step = Math.max(1, Math.floor(filteredData.length / 60));
+    return filteredData.filter((_, i) => i % step === 0);
+  }, [filteredData]);
 
   return (
     <Card>
@@ -178,14 +190,14 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors
                 ${isDragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/30 hover:border-primary/50'}
-                ${parsedData ? 'border-primary/50 bg-primary/5' : ''}`}
+                ${allData ? 'border-primary/50 bg-primary/5' : ''}`}
             >
               <input {...getInputProps()} />
-              {parsedData ? (
+              {allData ? (
                 <div className="flex items-center justify-center gap-2 text-sm">
                   <CheckCircle2 className="w-4 h-4 text-primary" />
                   <span className="text-muted-foreground">
-                    <strong>{fileName}</strong> — {parsedData.length} giorni ({parsedData[0].date} → {parsedData[parsedData.length - 1].date})
+                    <strong>{fileName}</strong> — {allData.length} giorni ({allData[0].date} → {allData[allData.length - 1].date})
                   </span>
                 </div>
               ) : (
@@ -201,7 +213,34 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
           </div>
         </div>
 
-        {parsedData && miniChartData.length > 0 && (
+        {allData && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Data Inizio</Label>
+              <DateInput
+                value={startDate}
+                onChange={(d) => {
+                  if (d) setStartDate(d);
+                }}
+                disabled={disabledDates}
+                placeholder="GG/MM/AAAA"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Data Fine</Label>
+              <DateInput
+                value={endDate}
+                onChange={(d) => {
+                  if (d) setEndDate(d);
+                }}
+                disabled={disabledDates}
+                placeholder="GG/MM/AAAA"
+              />
+            </div>
+          </div>
+        )}
+
+        {filteredData && miniChartData.length > 0 && (
           <div className="h-16">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={miniChartData}>
