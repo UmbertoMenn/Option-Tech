@@ -44,6 +44,7 @@ export interface BacktestLeg {
   expiryDate: string;
   entryPrice: number;
   active: boolean;
+  closePrice?: number; // market price at close time
 }
 
 export interface AdjustmentLog {
@@ -293,13 +294,11 @@ function executeApproachRule(
 
   if (approachRule.action === 'do_nothing') return null; // handled at expiry
 
-  // Close current call
-  const closeCost = -currentPrice * leg.quantity * 100;
-  leg.active = false;
-
-  // New strike: higher, on next expiry
+  // Check next expiry BEFORE deactivating
   const nextExpiry = findNextExpiry(leg.expiryDate, allExpiries);
-  if (!nextExpiry) return null;
+  if (!nextExpiry) return null; // leg stays active
+
+  const closeCost = -currentPrice * leg.quantity * 100;
 
   const newStrike = roundStrike(S * (1 + approachRule.activationPct / 100), strikeStep);
   const newT = yearsBetween(date, nextExpiry);
@@ -313,10 +312,11 @@ function executeApproachRule(
     const meetsUsd = netPremium >= approachRule.minPremiumUsd;
     const meetsPct = netPremium >= S * (approachRule.minPremiumPct / 100);
     if (!meetsUsd && !meetsPct) {
-      leg.active = true; // revert
-      return null;
+      return null; // leg stays active
     }
   }
+
+  leg.active = false; // deactivate AFTER all checks pass
 
   const openCost = newPrice * leg.quantity * 100;
   const newLeg: BacktestLeg = {
@@ -326,10 +326,12 @@ function executeApproachRule(
   };
   activeLegs.push(newLeg);
 
+  const removedLeg = { ...leg, closePrice: currentPrice };
+
   return {
     date, ruleName: 'Approccio barriera',
     description: `Roll up: ${leg.strike} → ${newStrike} (exp ${nextExpiry})`,
-    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
     cost: closeCost + openCost,
   };
 }
@@ -354,12 +356,17 @@ function handleExpiryDoNothing(
   const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
   const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
 
+  // Compute intrinsic value at expiry as close price
+  const expiryClosePrice = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
+
   const newLeg: BacktestLeg = {
     id: `${leg.id}_expiry_${date}`,
     type: 'call', strike: newStrike, quantity: -1,
     entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
   };
   activeLegs.push(newLeg);
+
+  const removedLeg = { ...leg, closePrice: expiryClosePrice };
 
   const desc = isOTM
     ? `Scadenza OTM: nuova call ${newStrike} (exp ${nextExpiry})`
@@ -368,8 +375,8 @@ function handleExpiryDoNothing(
   return {
     date, ruleName: 'Scadenza do_nothing',
     description: desc,
-    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
-    cost: newPrice * (-1) * 100, // premium received
+    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+    cost: newPrice * (-1) * 100,
   };
 }
 
@@ -388,6 +395,8 @@ function sellNewCallAfterExpiry(
   const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
   const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
 
+  const expiryClosePrice = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
+
   const newLeg: BacktestLeg = {
     id: `${leg.id}_renew_${date}`,
     type: 'call', strike: newStrike, quantity: -1,
@@ -395,10 +404,12 @@ function sellNewCallAfterExpiry(
   };
   activeLegs.push(newLeg);
 
+  const removedLeg = { ...leg, closePrice: expiryClosePrice };
+
   return {
     date, ruleName: 'Rinnovo post-scadenza',
     description: `Nuova call ${newStrike} (exp ${nextExpiry})`,
-    legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
     cost: newPrice * (-1) * 100,
   };
 }
@@ -440,10 +451,12 @@ function executeProfitRule(
       };
       activeLegs.push(newLeg);
 
+      const removedLeg = { ...leg, closePrice: currentPrice };
+
       return {
         date, ruleName: 'Profitto: roll down',
         description: `Roll down: ${leg.strike} → ${newStrike} (stessa scadenza)`,
-        legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+        legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
         cost: closeCost + newPrice * leg.quantity * 100,
       };
     } else {
@@ -471,10 +484,12 @@ function executeProfitRule(
             };
             activeLegs.push(newLeg);
 
+            const removedLeg = { ...leg, closePrice: currentPrice };
+
             return {
               date, ruleName: 'Profitto: roll scadenza',
               description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
-              legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+              legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
               cost: closeCost + price * leg.quantity * 100,
             };
           }

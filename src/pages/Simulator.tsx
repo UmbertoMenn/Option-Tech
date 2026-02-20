@@ -173,6 +173,7 @@ export function Simulator() {
                   ivSurface={ivSurface}
                   riskFreeRate={riskFreeRate}
                   dateRange={dateRange}
+                  strikeStep={ccRules.strikeStep}
                   onLegsChange={handleLegsChange}
                 />
 

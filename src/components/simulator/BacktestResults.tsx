@@ -55,6 +55,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
       const action: 'BUY' | 'SELL' = leg.quantity < 0 ? 'BUY' : 'SELL';
       const qty = Math.abs(leg.quantity);
       const mult = leg.type === 'stock' ? 1 : 100;
+      const closeP = leg.closePrice ?? leg.entryPrice;
       movements.push({
         date: adj.date,
         action,
@@ -63,8 +64,8 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
         strike: leg.strike,
         expiry: leg.expiryDate,
         quantity: qty,
-        price: leg.entryPrice,
-        total: leg.entryPrice * qty * mult,
+        price: closeP,
+        total: closeP * qty * mult,
       });
     }
     for (const leg of adj.legsAdded) {
