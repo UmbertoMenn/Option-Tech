@@ -20,6 +20,7 @@ interface TradeMovement {
   quantity: number;
   price: number;
   total: number;
+  underlyingPrice?: number;
 }
 
 function buildMovements(result: BacktestResult): TradeMovement[] {
@@ -32,6 +33,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
 
   // 1. Initial legs from first day
   const firstDate = result.days[0]?.date ?? '';
+  const initialPrice = result.days[0]?.underlyingPrice ?? 0;
   for (const leg of (result.days[0]?.legs ?? [])) {
     const action: 'BUY' | 'SELL' = leg.quantity > 0 ? 'BUY' : 'SELL';
     const qty = Math.abs(leg.quantity);
@@ -46,6 +48,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
       quantity: qty,
       price: leg.price,
       total: leg.price * qty * mult,
+      underlyingPrice: leg.type === 'stock' ? leg.price : initialPrice,
     });
   }
 
@@ -66,6 +69,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
         quantity: qty,
         price: closeP,
         total: closeP * qty * mult,
+        underlyingPrice: adj.underlyingPrice,
       });
     }
     for (const leg of adj.legsAdded) {
@@ -82,6 +86,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
         quantity: qty,
         price: leg.entryPrice,
         total: leg.entryPrice * qty * mult,
+        underlyingPrice: adj.underlyingPrice,
       });
     }
   }
@@ -154,8 +159,10 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                     <TableHead className="text-xs">Data</TableHead>
                     <TableHead className="text-xs">Operazione</TableHead>
                     <TableHead className="text-xs">Strumento</TableHead>
+                    <TableHead className="text-xs text-right">Sottostante</TableHead>
                     <TableHead className="text-xs text-right">Qty</TableHead>
                     <TableHead className="text-xs text-right">Prezzo</TableHead>
+                    <TableHead className="text-xs text-right">Totale</TableHead>
                     <TableHead className="text-xs text-right">Totale</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -172,6 +179,9 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs">{m.instrument}</TableCell>
+                      <TableCell className="text-xs text-right font-mono">
+                        {m.underlyingPrice != null ? `$${m.underlyingPrice.toFixed(2)}` : '—'}
+                      </TableCell>
                       <TableCell className="text-xs text-right font-mono">{m.quantity}</TableCell>
                       <TableCell className="text-xs text-right font-mono">${m.price.toFixed(2)}</TableCell>
                       <TableCell className={`text-xs text-right font-mono ${m.action === 'SELL' ? 'text-green-500' : 'text-red-500'}`}>

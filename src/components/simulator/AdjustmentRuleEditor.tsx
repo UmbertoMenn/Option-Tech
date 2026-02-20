@@ -67,11 +67,25 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                   onValueChange={v => updateApproach({ action: v as CoveredCallRules['approachRule']['action'] })}
                   className="space-y-3"
                 >
-                  <div className="flex items-start gap-2">
-                    <RadioGroupItem value="roll_up_always" id="approach_a" className="mt-1" />
-                    <Label htmlFor="approach_a" className="text-xs leading-relaxed cursor-pointer">
-                      Rollo su scadenza successiva con strike più alto (anche se il nuovo premio è inferiore al costo di riacquisto)
-                    </Label>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <RadioGroupItem value="roll_up_always" id="approach_a" className="mt-1" />
+                      <Label htmlFor="approach_a" className="text-xs leading-relaxed cursor-pointer">
+                        Rollo su scadenza successiva con strike più alto (anche se il nuovo premio è inferiore al costo di riacquisto)
+                      </Label>
+                    </div>
+                    {rules.approachRule.action === 'roll_up_always' && (
+                      <div className="pl-6 flex items-center gap-1">
+                        <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+                        <Input
+                          type="number"
+                          value={rules.approachRule.rollUpMinDistancePct}
+                          onChange={e => updateApproach({ rollUpMinDistancePct: parseFloat(e.target.value) || 5 })}
+                          className="w-16 h-7 text-xs"
+                        />
+                        <span className="text-xs">%</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
