@@ -19,7 +19,7 @@ export interface ApproachRule {
 export interface ProfitRule {
   enabled: boolean;
   profitPct: number; // % gain threshold (e.g. 80 = option lost 80% value)
-  action: 'wait_and_sell' | 'roll_down_first_expiry' | 'roll_down_any_expiry';
+  action: 'wait_and_sell' | 'roll_down';
 
   // wait_and_sell
   newCallBarrierPct: number;

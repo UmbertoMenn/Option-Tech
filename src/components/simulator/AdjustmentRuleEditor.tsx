@@ -206,74 +206,78 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
 
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
-                      <RadioGroupItem value="roll_down_first_expiry" id="profit_b" className="mt-1" />
+                      <RadioGroupItem value="roll_down" id="profit_b" className="mt-1" />
                       <Label htmlFor="profit_b" className="text-xs leading-relaxed cursor-pointer">
-                        Se sulla prima scadenza disponibile, rollo su strike più basso con stessa scadenza, se il nuovo premio è maggiore di almeno:
+                        Roll attivo
                       </Label>
                     </div>
-                    {rules.profitRule.action === 'roll_down_first_expiry' && (
-                      <div className="pl-6 flex gap-3">
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            value={rules.profitRule.minPremiumUsd}
-                            onChange={e => updateProfit({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">USD</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground self-center">oppure</span>
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            value={rules.profitRule.minPremiumPct}
-                            onChange={e => updateProfit({ minPremiumPct: parseFloat(e.target.value) || 0 })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">% del sottostante</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <RadioGroupItem value="roll_down_any_expiry" id="profit_c" className="mt-1" />
-                      <Label htmlFor="profit_c" className="text-xs leading-relaxed cursor-pointer">
-                        Se su scadenze successive, cerco opzione con strike lontano almeno X% dal sottostante, scadenza minima, premio non inferiore a:
-                      </Label>
-                    </div>
-                    {rules.profitRule.action === 'roll_down_any_expiry' && (
-                      <div className="pl-6 space-y-2">
-                        <div className="flex items-center gap-1">
-                          <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
-                          <Input
-                            type="number"
-                            value={rules.profitRule.minDistancePct}
-                            onChange={e => updateProfit({ minDistancePct: parseFloat(e.target.value) || 5 })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">%</span>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="flex items-center gap-1">
-                            <Input
-                              type="number"
-                              value={rules.profitRule.rollDownMinPremiumUsd}
-                              onChange={e => updateProfit({ rollDownMinPremiumUsd: parseFloat(e.target.value) || 0 })}
-                              className="w-16 h-7 text-xs"
-                            />
-                            <span className="text-xs">USD</span>
+                    {rules.profitRule.action === 'roll_down' && (
+                      <div className="pl-6 space-y-4">
+                        {/* Sub-rule 1: First expiry */}
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Se sulla prima scadenza disponibile, rollo su strike più basso con stessa scadenza, se il nuovo premio è maggiore di almeno:
+                          </p>
+                          <div className="flex gap-3">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={rules.profitRule.minPremiumUsd}
+                                onChange={e => updateProfit({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
+                                className="w-16 h-7 text-xs"
+                              />
+                              <span className="text-xs">USD</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground self-center">oppure</span>
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={rules.profitRule.minPremiumPct}
+                                onChange={e => updateProfit({ minPremiumPct: parseFloat(e.target.value) || 0 })}
+                                className="w-16 h-7 text-xs"
+                              />
+                              <span className="text-xs">% del sottostante</span>
+                            </div>
                           </div>
-                          <span className="text-xs text-muted-foreground self-center">oppure</span>
+                        </div>
+
+                        <Separator />
+
+                        {/* Sub-rule 2: Later expiries */}
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Se su scadenze successive, cerco opzione con strike lontano almeno X% dal sottostante, scadenza minima, premio non inferiore a:
+                          </p>
                           <div className="flex items-center gap-1">
+                            <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
                             <Input
                               type="number"
-                              value={rules.profitRule.rollDownMinPremiumPct}
-                              onChange={e => updateProfit({ rollDownMinPremiumPct: parseFloat(e.target.value) || 0 })}
+                              value={rules.profitRule.minDistancePct}
+                              onChange={e => updateProfit({ minDistancePct: parseFloat(e.target.value) || 5 })}
                               className="w-16 h-7 text-xs"
                             />
-                            <span className="text-xs">% del riacquisto</span>
+                            <span className="text-xs">%</span>
+                          </div>
+                          <div className="flex gap-3">
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={rules.profitRule.rollDownMinPremiumUsd}
+                                onChange={e => updateProfit({ rollDownMinPremiumUsd: parseFloat(e.target.value) || 0 })}
+                                className="w-16 h-7 text-xs"
+                              />
+                              <span className="text-xs">USD</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground self-center">oppure</span>
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={rules.profitRule.rollDownMinPremiumPct}
+                                onChange={e => updateProfit({ rollDownMinPremiumPct: parseFloat(e.target.value) || 0 })}
+                                className="w-16 h-7 text-xs"
+                              />
+                              <span className="text-xs">% del riacquisto</span>
+                            </div>
                           </div>
                         </div>
                       </div>

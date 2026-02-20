@@ -416,12 +416,11 @@ function executeProfitRule(
 
   const closeCost = -currentPrice * leg.quantity * 100;
 
-  if (profitRule.action === 'roll_down_first_expiry') {
-    // Check if this is on the first available expiry
+  if (profitRule.action === 'roll_down') {
     const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
     if (firstExpiry && leg.expiryDate === firstExpiry) {
-      // Roll down: lower strike, same expiry
-      const newStrike = roundStrike(S * (1 + 3 / 100), strikeStep); // closer strike
+      // First expiry: roll down lower strike, same expiry
+      const newStrike = roundStrike(S * (1 + 3 / 100), strikeStep);
       const T = yearsBetween(date, leg.expiryDate);
       if (T <= 0) return null;
 
@@ -447,41 +446,38 @@ function executeProfitRule(
         legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
         cost: closeCost + newPrice * leg.quantity * 100,
       };
-    }
-  }
+    } else {
+      // Later expiries: search best option
+      const minStrike = roundStrike(S * (1 + profitRule.minDistancePct / 100), strikeStep);
 
-  if (profitRule.action === 'roll_down_any_expiry') {
-    // Search for best option: min expiry, strike >= S*(1+minDistancePct/100), premium >= threshold
-    const minStrike = roundStrike(S * (1 + profitRule.minDistancePct / 100), strikeStep);
+      for (const expiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
+        const T = yearsBetween(date, expiry);
+        if (T <= 0) continue;
 
-    for (const expiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
-      const T = yearsBetween(date, expiry);
-      if (T <= 0) continue;
+        for (let strike = minStrike; strike <= S * 1.3; strike += strikeStep) {
+          const iv = ivSurface.getIV(strike, expiry, 'call');
+          const price = bsPrice(S, strike, T, riskFreeRate, iv, 'call');
+          const netPremium = price - currentPrice;
 
-      // Try strikes from minStrike upwards
-      for (let strike = minStrike; strike <= S * 1.3; strike += strikeStep) {
-        const iv = ivSurface.getIV(strike, expiry, 'call');
-        const price = bsPrice(S, strike, T, riskFreeRate, iv, 'call');
-        const netPremium = price - currentPrice;
+          const meetsUsd = netPremium >= profitRule.rollDownMinPremiumUsd;
+          const meetsPct = currentPrice > 0 && netPremium >= currentPrice * (profitRule.rollDownMinPremiumPct / 100);
 
-        const meetsUsd = netPremium >= profitRule.rollDownMinPremiumUsd;
-        const meetsPct = currentPrice > 0 && netPremium >= currentPrice * (profitRule.rollDownMinPremiumPct / 100);
+          if (meetsUsd || meetsPct) {
+            leg.active = false;
+            const newLeg: BacktestLeg = {
+              id: `${leg.id}_rollany_${date}`,
+              type: 'call', strike, quantity: leg.quantity,
+              entryDate: date, expiryDate: expiry, entryPrice: price, active: true,
+            };
+            activeLegs.push(newLeg);
 
-        if (meetsUsd || meetsPct) {
-          leg.active = false;
-          const newLeg: BacktestLeg = {
-            id: `${leg.id}_rollany_${date}`,
-            type: 'call', strike, quantity: leg.quantity,
-            entryDate: date, expiryDate: expiry, entryPrice: price, active: true,
-          };
-          activeLegs.push(newLeg);
-
-          return {
-            date, ruleName: 'Profitto: roll scadenza',
-            description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
-            legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
-            cost: closeCost + price * leg.quantity * 100,
-          };
+            return {
+              date, ruleName: 'Profitto: roll scadenza',
+              description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
+              legsRemoved: [{ ...leg }], legsAdded: [{ ...newLeg }],
+              cost: closeCost + price * leg.quantity * 100,
+            };
+          }
         }
       }
     }
