@@ -3,10 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Trash2, RotateCcw, Minus } from 'lucide-react';
+import { RotateCcw, Minus } from 'lucide-react';
 import {
   ComposedChart, Area, Line, Scatter, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+  CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
 export interface IVPoint {
@@ -20,6 +20,40 @@ interface IVCurveEditorProps {
   riskFreeRate: number;
   onIVPointsChange: (points: IVPoint[]) => void;
   onRiskFreeRateChange: (rate: number) => void;
+}
+
+const IV_COLOR = '#f97316'; // orange
+
+/**
+ * Generate one IV point per month boundary in the price data range.
+ * Includes start date, first of each month, and end date.
+ */
+export function generateMonthlyPoints(priceData: { date: string }[]): IVPoint[] {
+  if (priceData.length === 0) return [];
+
+  const startDate = priceData[0].date;
+  const endDate = priceData[priceData.length - 1].date;
+
+  const points: IVPoint[] = [{ date: startDate, iv: 0.3 }];
+
+  // Walk months from start
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+
+  let current = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  while (current <= end) {
+    const dateStr = current.toISOString().slice(0, 10);
+    if (dateStr !== startDate && dateStr !== endDate) {
+      points.push({ date: dateStr, iv: 0.3 });
+    }
+    current = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+  }
+
+  if (endDate !== startDate) {
+    points.push({ date: endDate, iv: 0.3 });
+  }
+
+  return points.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -68,8 +102,6 @@ export function IVCurveEditor({
       date: p.date,
       close: p.close,
       iv: interpolateIVAtDate(sorted, p.date) * 100,
-      // Mark if this date has an IV point
-      ivPoint: sorted.find(ip => ip.date === p.date) ? interpolateIVAtDate(sorted, p.date) * 100 : undefined,
     }));
   }, [sampledDates, ivPoints]);
 
@@ -82,37 +114,11 @@ export function IVCurveEditor({
     }));
   }, [ivPoints]);
 
-  const handleChartClick = useCallback((e: any) => {
-    if (draggingIdx !== null) return;
-    if (!e || !e.activeLabel) return;
-    const date = e.activeLabel as string;
-
-    // Don't add if too close to existing point
-    const existing = ivPoints.find(p => p.date === date);
-    if (existing) {
-      setSelectedIdx(ivPoints.indexOf(existing));
-      return;
-    }
-
-    const sorted = [...ivPoints].sort((a, b) => a.date.localeCompare(b.date));
-    const newIV = interpolateIVAtDate(sorted, date);
-    const newPoints = [...ivPoints, { date, iv: newIV }].sort((a, b) => a.date.localeCompare(b.date));
-    onIVPointsChange(newPoints);
-    setSelectedIdx(newPoints.findIndex(p => p.date === date));
-  }, [ivPoints, onIVPointsChange, draggingIdx]);
-
   const handleScatterClick = useCallback((data: any) => {
     if (data && data.idx !== undefined) {
       setSelectedIdx(data.idx);
     }
   }, []);
-
-  const handleDeletePoint = useCallback(() => {
-    if (selectedIdx === null || ivPoints.length <= 2) return;
-    const newPoints = ivPoints.filter((_, i) => i !== selectedIdx);
-    onIVPointsChange(newPoints);
-    setSelectedIdx(null);
-  }, [selectedIdx, ivPoints, onIVPointsChange]);
 
   const handleFlatIV = useCallback(() => {
     const val = selectedIdx !== null ? ivPoints[selectedIdx].iv : 0.3;
@@ -120,11 +126,8 @@ export function IVCurveEditor({
   }, [ivPoints, selectedIdx, onIVPointsChange]);
 
   const handleReset = useCallback(() => {
-    if (priceData.length === 0) return;
-    onIVPointsChange([
-      { date: priceData[0].date, iv: 0.3 },
-      { date: priceData[priceData.length - 1].date, iv: 0.3 },
-    ]);
+    const newPoints = generateMonthlyPoints(priceData);
+    onIVPointsChange(newPoints);
     setSelectedIdx(null);
   }, [priceData, onIVPointsChange]);
 
@@ -154,17 +157,14 @@ export function IVCurveEditor({
 
   const handleMouseMove = useCallback((e: any) => {
     if (draggingIdx === null || !e) return;
-    // Get chart area bounds to calculate IV from Y position
     const chartWrapper = chartRef.current;
     if (!chartWrapper) return;
 
-    // Use the tooltip coordinate to estimate IV
     if (e.chartY !== undefined) {
       const chartArea = chartWrapper.querySelector('.recharts-cartesian-grid');
       if (!chartArea) return;
       const rect = chartArea.getBoundingClientRect();
-      const relY = (e.chartY - 5) / (rect.height);  // normalized 0-1 from top
-      // IV axis: assume 0-150% range
+      const relY = (e.chartY - 5) / (rect.height);
       const maxIV = 150;
       const iv = Math.max(1, Math.min(maxIV, maxIV * (1 - relY))) / 100;
 
@@ -232,24 +232,16 @@ export function IVCurveEditor({
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleFlatIV}>
             <Minus className="w-3 h-3 mr-1" />IV Piatta
           </Button>
-          <Button
-            variant="outline" size="sm" className="h-8 text-xs"
-            onClick={handleDeletePoint}
-            disabled={selectedIdx === null || ivPoints.length <= 2}
-          >
-            <Trash2 className="w-3 h-3 mr-1" />Elimina
-          </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleReset}>
             <RotateCcw className="w-3 h-3 mr-1" />Reset
           </Button>
         </div>
 
         {/* Chart */}
-        <div ref={chartRef} className="select-none" style={{ cursor: draggingIdx !== null ? 'ns-resize' : 'crosshair' }}>
+        <div ref={chartRef} className="select-none" style={{ cursor: draggingIdx !== null ? 'ns-resize' : 'default' }}>
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart
               data={chartData}
-              onClick={handleChartClick}
               onMouseDown={handleMouseDown}
               onMouseMove={draggingIdx !== null ? handleMouseMove : undefined}
               onMouseUp={handleMouseUp}
@@ -283,7 +275,7 @@ export function IVCurveEditor({
                 yAxisId="iv"
                 type="monotone"
                 dataKey="iv"
-                stroke="hsl(var(--chart-2))"
+                stroke={IV_COLOR}
                 strokeWidth={2}
                 dot={false}
                 activeDot={false}
@@ -294,7 +286,7 @@ export function IVCurveEditor({
                 yAxisId="iv"
                 dataKey="ivPoint"
                 data={scatterData}
-                fill="hsl(var(--chart-2))"
+                fill={IV_COLOR}
                 onClick={handleScatterClick}
                 cursor="grab"
               />
@@ -303,7 +295,7 @@ export function IVCurveEditor({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          {ivPoints.length} punti IV • Clicca per aggiungere • Trascina verticalmente per modificare • Risk-free: {(riskFreeRate * 100).toFixed(1)}%
+          {ivPoints.length} punti IV (mensili) • Trascina verticalmente per modificare • Risk-free: {(riskFreeRate * 100).toFixed(1)}%
         </p>
       </CardContent>
     </Card>
