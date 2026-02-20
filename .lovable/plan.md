@@ -1,104 +1,51 @@
 
 
-## Caricamento CSV + Curva IV Interattiva
+## Modifiche: Date Picker + Curva IV con punti mensili
 
-### Cosa cambia
+### 1. TickerSelector -- Aggiungere date picker Start/End
 
-Attualmente il simulatore scarica i prezzi da Massive.com API e tenta di scaricare la catena opzioni (che richiede piano a pagamento). Il nuovo approccio:
+Dopo il caricamento del CSV, aggiungere due campi data (Start Date / End Date) usando il componente `DateInput` gia esistente. Le date sono vincolate al range del CSV caricato. Solo i dati tra start e end vengono passati al parent via `onDataLoaded`.
 
-1. **L'admin carica un file CSV** con i prezzi storici del sottostante (orari, 4h, daily -- qualsiasi timeframe)
-2. **L'admin disegna la curva IV** con un editor interattivo (grafico cliccabile/trascinabile)
-3. **I prezzi delle opzioni vengono calcolati con Black-Scholes** solo quando servono (nel motore di backtest e nel StrategyBuilder), usando la IV dalla curva manuale
+L'output cambia: il CSV viene parsato e salvato internamente come `allData`, ma `onDataLoaded` emette solo la fetta filtrata tra start e end date.
 
-I prezzi delle opzioni non vengono mai scaricati ne pre-calcolati: il motore li calcola on-the-fly giorno per giorno.
+### 2. IVCurveEditor -- Linea arancione + punti mensili automatici
 
----
+**Colore**: la linea IV e i punti Scatter diventano arancioni (`#f97316` / `orange`).
 
-### File modificati
+**Punti automatici**: quando il componente riceve `priceData`, genera automaticamente un punto IV per ogni primo giorno di mese nel range (es. se il range va da 2024-01-15 a 2024-06-20, crea punti per 2024-01-15, 2024-02-01, 2024-03-01, 2024-04-01, 2024-05-01, 2024-06-01, 2024-06-20). Tutti inizializzati al 30%.
 
-| File | Azione |
-|------|--------|
-| `src/components/simulator/TickerSelector.tsx` | **Riscritto**: diventa un uploader CSV con react-dropzone. Parsa il file, estrae colonne data+close, mostra anteprima. Nessuna chiamata API |
-| `src/components/simulator/IVSurfaceChart.tsx` | **Riscritto** e rinominato in `IVCurveEditor.tsx`: editor interattivo dove l'admin clicca sul grafico per aggiungere punti IV e li trascina verticalmente |
-| `src/lib/ivSurface.ts` | **Aggiunta** funzione `buildManualIVSurface(ivPoints, riskFreeRate)` che crea un `IVSurface` dalla curva manuale (IV flat per strike, interpolata nel tempo) |
-| `src/pages/Simulator.tsx` | **Aggiornato**: integra il nuovo flusso (CSV upload -> curva IV -> strategia -> backtest). Risk-free rate editabile. Stato `ivPoints` gestito qui |
-| `src/lib/massiveApi.ts` | **Rimosso** `fetchOptionChain`, `fetchOptionContracts`, `fetchOptionBars` (non usati) |
-| `supabase/functions/massive-proxy/index.ts` | **Rimossi** handler per `option-chain`, `option-contracts`, `option-bars` |
+L'admin non aggiunge punti cliccando sul grafico (la funzionalita click-to-add viene rimossa). I punti sono fissi sulle date mensili; l'admin puo solo trascinare verticalmente per cambiare la IV o usare l'input numerico.
+
+### 3. Simulator.tsx -- Gestione date range
+
+L'inizializzazione dei `ivPoints` si sposta nel `IVCurveEditor` (o viene ricalcolata quando cambiano le date). Quando `handleDataLoaded` viene chiamato, i punti IV vengono generati automaticamente in base alle date filtrate.
 
 ---
 
 ### Dettaglio tecnico
 
-#### 1. TickerSelector (CSV Uploader)
+**TickerSelector.tsx**:
+- Nuovo state: `startDate`, `endDate` (Date | undefined)
+- Dopo il parsing del CSV, auto-imposta start = primo giorno, end = ultimo giorno
+- Due `DateInput` con `disabled` che limita al range del CSV
+- `onDataLoaded` emette `priceData` filtrata tra start e end
+- Cambio di start/end ri-emette i dati filtrati
 
-Accetta file `.csv` o `.txt`. Formato atteso (auto-detect delle colonne):
-- Cerca colonne con nomi tipo `date`, `time`, `datetime`, `close`, `price`, `last`
-- Supporta separatori `,` e `;` e tab
-- Se trova colonne `date` + `time` separate, le combina
-- Se il timeframe e intraday (orario, 4h), aggrega a daily prendendo l'ultimo close di ogni giorno
-- L'admin inserisce il ticker manualmente (campo testo)
+**IVCurveEditor.tsx**:
+- Colore linea e scatter: `#f97316` (arancione) invece di `hsl(var(--chart-2))`
+- Nuova prop opzionale: nessuna -- i punti vengono generati internamente quando `priceData` cambia
+- Funzione `generateMonthlyPoints(priceData)`: crea un punto al primo giorno di ogni mese + primo e ultimo giorno del range, tutti a 30% IV
+- Rimuovere `handleChartClick` (niente piu click-to-add)
+- Rimuovere pulsante "Elimina" (i punti sono fissi)
+- Mantenere: drag verticale, input numerico, IV Piatta, Reset
 
-Output: `{ ticker: string, priceData: { date: string, close: number }[] }`
+**Simulator.tsx**:
+- L'inizializzazione dei `ivPoints` in `handleDataLoaded` usa la nuova logica mensile (o delega al componente)
 
-L'interfaccia mostra:
-- Area drag-and-drop (react-dropzone, pattern gia usato nel progetto)
-- Campo ticker
-- Dopo il parsing: numero di righe, date range, preview mini-grafico
-- Nessun campo date picker (le date vengono dal CSV)
+### File coinvolti
 
-#### 2. IVCurveEditor (nuovo componente)
-
-Grafico Recharts `ComposedChart`:
-- **Area** semitrasparente: prezzo sottostante (asse Y destro) per contesto
-- **Line + Scatter**: curva IV (asse Y sinistro, in %)
-- I punti dello Scatter sono trascinabili verticalmente (drag con mouse)
-- Click su area vuota del grafico: aggiunge un nuovo punto IV
-- Inizializzazione: 2 punti (prima e ultima data) al 30%
-
-Toolbar sopra il grafico:
-- Input numerico per IV del punto selezionato
-- Pulsante "IV Piatta" (imposta tutti i punti allo stesso valore)
-- Pulsante "Elimina punto" per il punto selezionato
-- Pulsante "Reset" (torna a 2 punti al 30%)
-- Input risk-free rate (default 4.5%)
-
-Output: `ivPoints: { date: string, iv: number }[]` + `riskFreeRate: number`
-
-#### 3. buildManualIVSurface
-
-```text
-function buildManualIVSurface(
-  ivPoints: { date: string; iv: number }[],
-  riskFreeRate: number
-): IVSurface
-
-- getIV(strike, expiry, type):
-  - Ignora strike e type (IV uniforme per tutti gli strike)
-  - Interpola linearmente tra i punti della curva usando la data
-  - Prima del primo punto: usa il primo valore
-  - Dopo l'ultimo punto: usa l'ultimo valore
-```
-
-Questa funzione mantiene l'interfaccia `IVSurface` identica, quindi `StrategyBuilder`, `backtestEngine` e le azioni di aggiustamento continuano a funzionare senza modifiche.
-
-#### 4. Flusso aggiornato in Simulator.tsx
-
-```text
-1. Admin carica CSV -> TickerSelector emette { ticker, priceData }
-2. Appare IVCurveEditor con il grafico dei prezzi
-3. Admin disegna la curva IV trascinando i punti
-4. Admin imposta risk-free rate
-5. IVSurface viene costruita con buildManualIVSurface()
-6. StrategyBuilder usa questa IVSurface per calcolare i prezzi BS delle gambe
-7. Il motore di backtest usa la stessa IVSurface giorno per giorno
-```
-
-#### 5. Cosa resta invariato
-
-- `blackScholes.ts` -- pricing engine, Greeks
-- `backtestEngine.ts` -- motore backtest (usa `ivSurface.getIV()`, compatibile)
-- `StrategyBuilder.tsx` -- costruzione strategia (usa `ivSurface.getIV()`, compatibile)
-- `AdjustmentRuleEditor.tsx` -- editor regole
-- `BacktestChart.tsx`, `GreeksChart.tsx`, `BacktestResults.tsx` -- visualizzazione risultati
-- `adjustmentRules.ts` -- logica regole
-
+| File | Modifica |
+|------|----------|
+| `src/components/simulator/TickerSelector.tsx` | Aggiunta date picker start/end con DateInput, filtraggio dati |
+| `src/components/simulator/IVCurveEditor.tsx` | Colore arancione, punti mensili fissi, rimozione click-to-add e elimina punto |
+| `src/pages/Simulator.tsx` | Aggiornamento inizializzazione ivPoints con logica mensile |
