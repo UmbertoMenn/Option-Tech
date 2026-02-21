@@ -1,48 +1,42 @@
 
 
-## Fix: Cascata infinita di operazioni sulla stessa barra
+## Fix: Regola di approccio non scatta quando il prezzo supera lo strike
 
 ### Causa del bug
 
-Nel loop principale (riga 173):
+La condizione di attivazione della regola di approccio barriera (riga 248) richiede:
 ```text
-for (const leg of activeLegs) { ... }
+dist <= activationPct (es. 2%)  AND  S >= strike * (1 - 2/100)
 ```
 
-Le funzioni di aggiustamento (`executeApproachRule`, `executeProfitRule`, `handleExpiryDoNothing`, `sellNewCallAfterExpiry`) fanno `activeLegs.push(newLeg)` -- aggiungendo la nuova leg **allo stesso array** su cui il `for...of` sta iterando.
+Questo crea una **finestra strettissima**: il prezzo deve trovarsi entro il 2% dallo strike (es. tra 132.30 e 137.70 per strike 135). Una volta che il prezzo supera questa banda (es. sale a 150, 200), la distanza diventa 11%, 48% ecc. e la regola non scatta piu.
 
-Risultato: la nuova leg viene elaborata immediatamente nella stessa barra. Se il suo prezzo BS soddisfa una regola (es. profitto >80%), scatta un altro aggiustamento, che aggiunge un'altra leg, che viene elaborata, e cosi via. Decine di operazioni sulla stessa data.
+Il risultato: dopo il roll up a strike 135 del 13/05/2025, il prezzo e salito rapidamente oltre 135 e non e piu rientrato nella banda del 2%. Nessun aggiustamento fino alla scadenza naturale nel maggio 2026.
 
 ### Soluzione
 
-All'inizio di ogni barra, prendere uno **snapshot** delle leg da elaborare. Le nuove leg aggiunte durante la barra saranno elaborate solo dalla barra successiva.
+La condizione deve scattare quando il prezzo **raggiunge o supera** la zona di attivazione, non solo quando si trova al suo interno.
 
-### Modifica in `src/lib/backtestEngine.ts`
+**Riga 248 di `src/lib/backtestEngine.ts`** -- sostituire:
 
-Riga 173, sostituire:
 ```text
-for (const leg of activeLegs) {
+// PRIMA (bug):
+const dist = Math.abs(S - leg.strike) / leg.strike * 100;
+if (dist <= ccRules.approachRule.activationPct && S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100))
+
+// DOPO (fix):
+if (S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100))
 ```
-con:
-```text
-const legsSnapshot = activeLegs.filter(l => l.active);
-for (const leg of legsSnapshot) {
-```
 
-Questo e sufficiente perche:
-- `legsSnapshot` e un array separato, creato prima del loop
-- Le nuove leg aggiunte da `activeLegs.push(newLeg)` non appaiono in `legsSnapshot`
-- Dalla barra successiva, il nuovo snapshot includera le leg appena aggiunte
+Rimuovere il controllo `dist <= activationPct`. La condizione rimasta (`S >= strike * 0.98`) e sufficiente: scatta quando il prezzo e entro il 2% sotto lo strike OPPURE ovunque sopra lo strike. In questo modo:
 
-### Perche funziona
+- Prezzo a 133 (strike 135): `133 >= 135*0.98 = 132.3` -- scatta
+- Prezzo a 200 (strike 135): `200 >= 132.3` -- scatta
+- Prezzo a 120 (strike 135): `120 >= 132.3` -- NON scatta (troppo lontano)
 
-- Le leg appena create hanno `entryDate` uguale alla data corrente
-- Il loro `T` (tempo a scadenza) e calcolato correttamente solo dalla barra successiva
-- Elaborarle immediatamente sulla stessa barra causa prezzi BS incoerenti (il prezzo cambia ad ogni iterazione per via degli aggiustamenti cascata)
-
-### File modificato
+### Dettaglio tecnico
 
 | File | Modifica |
 |------|----------|
-| `src/lib/backtestEngine.ts` | Riga 173: usare `activeLegs.filter(l => l.active)` come snapshot prima del loop |
+| `src/lib/backtestEngine.ts` | Righe 247-248: rimuovere la variabile `dist` e la condizione `dist <= activationPct`, mantenere solo `S >= leg.strike * (1 - activationPct / 100)` |
 
