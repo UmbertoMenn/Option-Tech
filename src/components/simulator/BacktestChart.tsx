@@ -13,8 +13,8 @@ interface BacktestChartProps {
 
 interface ChartDataPoint {
   date: string;
-  pl: number;
-  plPct: number;
+  stockPL: number;
+  strategyPL: number;
   price: number;
   adjustmentDesc: string | null;
 }
@@ -28,14 +28,16 @@ function CustomTooltip({ active, payload }: any) {
     <div className="bg-card border border-border rounded-lg p-3 shadow-lg text-xs max-w-xs">
       <p className="font-mono text-muted-foreground mb-1">{data.date}</p>
       <div className="flex justify-between gap-4">
-        <span>P/L:</span>
-        <span className={data.pl >= 0 ? 'text-green-500' : 'text-red-500'} style={{ fontFamily: 'monospace' }}>
-          ${data.pl.toFixed(2)}
+        <span>P/L Sottostante:</span>
+        <span className={data.stockPL >= 0 ? 'text-green-500' : 'text-red-500'} style={{ fontFamily: 'monospace' }}>
+          ${data.stockPL.toFixed(2)}
         </span>
       </div>
       <div className="flex justify-between gap-4">
-        <span>P/L %:</span>
-        <span style={{ fontFamily: 'monospace' }}>{data.plPct.toFixed(2)}%</span>
+        <span>P/L Strategia:</span>
+        <span className={data.strategyPL >= 0 ? 'text-green-500' : 'text-red-500'} style={{ fontFamily: 'monospace' }}>
+          ${data.strategyPL.toFixed(2)}
+        </span>
       </div>
       <div className="flex justify-between gap-4">
         <span>Prezzo:</span>
@@ -70,8 +72,8 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
 
     return days.map(d => ({
       date: d.date,
-      pl: Math.round(d.totalPL * 100) / 100,
-      plPct: Math.round(d.plPct * 100) / 100,
+      stockPL: Math.round(d.stockPL * 100) / 100,
+      strategyPL: Math.round(d.strategyPL * 100) / 100,
       price: d.underlyingPrice,
       adjustmentDesc: descMap.get(d.date)?.join('\n') ?? null,
     }));
@@ -97,7 +99,7 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={chartData}>
             <defs>
-              <linearGradient id="plGradient" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="stratGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
                 <stop offset="50%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
                 <stop offset="50%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
@@ -111,12 +113,17 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
             <Tooltip content={<CustomTooltip />} />
             <Legend />
             <ReferenceLine yAxisId="pl" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+            <Line
+              yAxisId="pl" type="monotone" dataKey="stockPL"
+              stroke="hsl(var(--muted-foreground))" strokeWidth={1.5}
+              strokeDasharray="5 3" dot={false} name="P/L Sottostante"
+            />
             <Area
-              yAxisId="pl" type="monotone" dataKey="pl" fill="url(#plGradient)"
-              stroke="hsl(var(--chart-2))" strokeWidth={2} name="P/L"
+              yAxisId="pl" type="monotone" dataKey="strategyPL" fill="url(#stratGradient)"
+              stroke="hsl(var(--chart-2))" strokeWidth={2} name="P/L Strategia"
               dot={<CustomDot />}
             />
-            <Line yAxisId="price" type="monotone" dataKey="price" stroke="hsl(var(--muted-foreground))" strokeWidth={1} dot={false} name="Prezzo" />
+            <Line yAxisId="price" type="monotone" dataKey="price" stroke="hsl(var(--muted-foreground))" strokeWidth={1} dot={false} name="Prezzo" opacity={0.4} />
             <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
           </ComposedChart>
         </ResponsiveContainer>

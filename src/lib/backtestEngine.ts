@@ -83,6 +83,8 @@ export interface BacktestDayResult {
   totalGamma: number;
   totalTheta: number;
   totalVega: number;
+  stockPL: number;
+  strategyPL: number;
 }
 
 export interface BacktestConfig {
@@ -103,6 +105,12 @@ export interface BacktestResult {
   totalAdjustmentCost: number;
   sharpeRatio: number;
   winRate: number;
+  totalGrossPremiums: number;
+  totalCommissions: number;
+  totalNetPremiums: number;
+  underlyingPL: number;
+  strategyPL: number;
+  tradeCount: number;
 }
 
 // ---- Engine ----
@@ -116,16 +124,31 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
   let initialValue = 0;
   let totalAdjustmentCost = 0;
+  let totalGrossPremiums = 0;
+  let tradeCount = 0;
 
   if (priceData.length === 0) {
     return {
       days: [], adjustmentLog: [], finalPL: 0, finalPLPct: 0,
       maxDrawdown: 0, maxProfit: 0, totalAdjustmentCost: 0, sharpeRatio: 0, winRate: 0,
+      totalGrossPremiums: 0, totalCommissions: 0, totalNetPremiums: 0,
+      underlyingPL: 0, strategyPL: 0, tradeCount: 0,
     };
   }
 
+  // Track initial stock price and quantity
+  let stockQty = 0;
+  const initialStockPrice = priceData[0].close;
+
   for (const leg of activeLegs) {
     initialValue += leg.entryPrice * leg.quantity * (leg.type === 'stock' ? 1 : 100);
+    tradeCount++; // each initial leg is a trade
+    if (leg.type === 'stock') {
+      stockQty = leg.quantity;
+    } else if (leg.quantity < 0) {
+      // Initial sold option premium (gross)
+      totalGrossPremiums += leg.entryPrice * Math.abs(leg.quantity) * 100;
+    }
   }
 
   let maxPL = -Infinity;
@@ -177,6 +200,13 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
             dayAdjustments.push(adj);
             allAdjustments.push(adj);
             totalAdjustmentCost += adj.cost;
+            tradeCount += adj.legsRemoved.length + adj.legsAdded.length;
+            for (const added of adj.legsAdded) {
+              if (added.quantity < 0) totalGrossPremiums += added.entryPrice * Math.abs(added.quantity) * 100;
+            }
+            for (const removed of adj.legsRemoved) {
+              if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
+            }
           }
         } else if (leg.active) {
           // Default: sell new call at same barrier after expiry
@@ -185,6 +215,13 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
             dayAdjustments.push(adj);
             allAdjustments.push(adj);
             totalAdjustmentCost += adj.cost;
+            tradeCount += adj.legsRemoved.length + adj.legsAdded.length;
+            for (const added of adj.legsAdded) {
+              if (added.quantity < 0) totalGrossPremiums += added.entryPrice * Math.abs(added.quantity) * 100;
+            }
+            for (const removed of adj.legsRemoved) {
+              if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
+            }
           }
         }
 
@@ -205,6 +242,13 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
               dayAdjustments.push(adj);
               allAdjustments.push(adj);
               totalAdjustmentCost += adj.cost;
+              tradeCount += adj.legsRemoved.length + adj.legsAdded.length;
+              for (const added of adj.legsAdded) {
+                if (added.quantity < 0) totalGrossPremiums += added.entryPrice * Math.abs(added.quantity) * 100;
+              }
+              for (const removed of adj.legsRemoved) {
+                if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
+              }
             }
           }
         }
@@ -218,6 +262,13 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
               dayAdjustments.push(adj);
               allAdjustments.push(adj);
               totalAdjustmentCost += adj.cost;
+              tradeCount += adj.legsRemoved.length + adj.legsAdded.length;
+              for (const added of adj.legsAdded) {
+                if (added.quantity < 0) totalGrossPremiums += added.entryPrice * Math.abs(added.quantity) * 100;
+              }
+              for (const removed of adj.legsRemoved) {
+                if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
+              }
             }
           }
         }
@@ -255,6 +306,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       { delta: 0, gamma: 0, theta: 0, vega: 0 }
     );
 
+    const stockPL = (S - initialStockPrice) * stockQty;
+    const currentCommissions = tradeCount * 10;
+    const currentNetPremiums = totalGrossPremiums - currentCommissions;
+    const strategyPL = stockPL + currentNetPremiums;
+
     days.push({
       date, underlyingPrice: S, totalValue,
       totalPL, plPct, adjustments: dayAdjustments,
@@ -263,6 +319,8 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       totalGamma: totals.gamma,
       totalTheta: totals.theta,
       totalVega: totals.vega,
+      stockPL,
+      strategyPL,
     });
   }
 
@@ -274,6 +332,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
   const last = days[days.length - 1];
 
+  const totalCommissions = tradeCount * 10;
+  const totalNetPremiums = totalGrossPremiums - totalCommissions;
+  const finalStockPL = last ? (last.underlyingPrice - initialStockPrice) * stockQty : 0;
+  const finalStrategyPL = finalStockPL + totalNetPremiums;
+
   return {
     days,
     adjustmentLog: allAdjustments,
@@ -284,6 +347,12 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     totalAdjustmentCost,
     sharpeRatio,
     winRate,
+    totalGrossPremiums,
+    totalCommissions,
+    totalNetPremiums,
+    underlyingPL: finalStockPL,
+    strategyPL: finalStrategyPL,
+    tradeCount,
   };
 }
 

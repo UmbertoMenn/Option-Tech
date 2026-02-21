@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { BacktestResult, BacktestLeg } from '@/lib/backtestEngine';
-import { TrendingUp, TrendingDown, BarChart3, Activity, DollarSign, Percent, List } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, Activity, DollarSign, Percent, List, Receipt } from 'lucide-react';
 
 interface BacktestResultsProps {
   result: BacktestResult;
@@ -20,6 +20,7 @@ interface TradeMovement {
   quantity: number;
   price: number;
   total: number;
+  commission: number;
   underlyingPrice?: number;
 }
 
@@ -48,6 +49,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
       quantity: qty,
       price: leg.price,
       total: leg.price * qty * mult,
+      commission: 10,
       underlyingPrice: leg.type === 'stock' ? leg.price : initialPrice,
     });
   }
@@ -69,6 +71,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
         quantity: qty,
         price: closeP,
         total: closeP * qty * mult,
+        commission: 10,
         underlyingPrice: adj.underlyingPrice,
       });
     }
@@ -86,6 +89,7 @@ function buildMovements(result: BacktestResult): TradeMovement[] {
         quantity: qty,
         price: leg.entryPrice,
         total: leg.entryPrice * qty * mult,
+        commission: 10,
         underlyingPrice: adj.underlyingPrice,
       });
     }
@@ -114,30 +118,40 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: s
 export function BacktestResults({ result }: BacktestResultsProps) {
   const movements = useMemo(() => buildMovements(result), [result]);
 
+  const avgPremium = result.tradeCount > 0
+    ? result.totalGrossPremiums / result.tradeCount
+    : 0;
+
   return (
     <div className="space-y-4">
       {/* Stats cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard
-          label="P/L Finale"
-          value={`$${result.finalPL.toFixed(2)}`}
-          icon={result.finalPL >= 0 ? TrendingUp : TrendingDown}
-          color={result.finalPL >= 0 ? 'bg-green-500/10' : 'bg-red-500/10'}
+          label="P/L Sottostante"
+          value={`$${result.underlyingPL.toFixed(2)}`}
+          icon={result.underlyingPL >= 0 ? TrendingUp : TrendingDown}
+          color={result.underlyingPL >= 0 ? 'bg-green-500/10' : 'bg-red-500/10'}
         />
-        <StatCard label="P/L %" value={`${result.finalPLPct.toFixed(2)}%`} icon={Percent} />
+        <StatCard
+          label="P/L Strategia"
+          value={`$${result.strategyPL.toFixed(2)}`}
+          icon={result.strategyPL >= 0 ? TrendingUp : TrendingDown}
+          color={result.strategyPL >= 0 ? 'bg-green-500/10' : 'bg-red-500/10'}
+        />
         <StatCard label="Max Drawdown" value={`$${result.maxDrawdown.toFixed(2)}`} icon={TrendingDown} color="bg-red-500/10" />
-        <StatCard label="Max Profitto" value={`$${result.maxProfit.toFixed(2)}`} icon={TrendingUp} color="bg-green-500/10" />
         <StatCard label="Sharpe Ratio" value={result.sharpeRatio.toFixed(2)} icon={BarChart3} />
         <StatCard label="Win Rate" value={`${result.winRate.toFixed(1)}%`} icon={Activity} />
       </div>
 
-      {/* Adjustment summary */}
+      {/* Premium & Commission summary */}
       <Card>
         <CardContent className="p-4 flex items-center gap-4">
-          <DollarSign className="w-5 h-5 text-muted-foreground" />
-          <div className="flex gap-6 text-sm">
-            <span>Aggiustamenti: <strong>{result.adjustmentLog.length}</strong></span>
-            <span>Costo totale: <strong>${result.totalAdjustmentCost.toFixed(2)}</strong></span>
+          <Receipt className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <span>Premi lordi: <strong className="text-green-500">${result.totalGrossPremiums.toFixed(2)}</strong></span>
+            <span>Premio unitario: <strong>${avgPremium.toFixed(2)}</strong></span>
+            <span>Commissioni: <strong className="text-red-500">${result.totalCommissions.toFixed(2)}</strong> ({result.tradeCount} op)</span>
+            <span>Premi netti: <strong>${result.totalNetPremiums.toFixed(2)}</strong></span>
           </div>
         </CardContent>
       </Card>
@@ -162,8 +176,8 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                     <TableHead className="text-xs text-right">Sottostante</TableHead>
                     <TableHead className="text-xs text-right">Qty</TableHead>
                     <TableHead className="text-xs text-right">Prezzo</TableHead>
-                    <TableHead className="text-xs text-right">Totale</TableHead>
-                    <TableHead className="text-xs text-right">Totale</TableHead>
+                    <TableHead className="text-xs text-right">Importo</TableHead>
+                    <TableHead className="text-xs text-right">Commissione</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -186,6 +200,9 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                       <TableCell className="text-xs text-right font-mono">${m.price.toFixed(2)}</TableCell>
                       <TableCell className={`text-xs text-right font-mono ${m.action === 'SELL' ? 'text-green-500' : 'text-red-500'}`}>
                         ${m.total.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-xs text-right font-mono text-red-500">
+                        $10.00
                       </TableCell>
                     </TableRow>
                   ))}
