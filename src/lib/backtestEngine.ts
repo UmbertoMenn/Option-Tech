@@ -170,7 +170,8 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const legResults: DayLegResult[] = [];
     let totalValue = 0;
 
-    for (const leg of activeLegs) {
+    const legsSnapshot = activeLegs.filter(l => l.active);
+    for (const leg of legsSnapshot) {
       if (!leg.active) continue;
 
       if (leg.type === 'stock') {
