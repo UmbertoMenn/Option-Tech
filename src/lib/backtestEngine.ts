@@ -194,7 +194,9 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         price = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
         delta = 0; gamma = 0; theta = 0; vega = 0;
 
-        // Handle expiry logic for approach rule do_nothing
+        // Handle expiry logic - ensure a replacement call is ALWAYS created
+        let expiryHandled = false;
+
         if (ccRules.approachRule.enabled && ccRules.approachRule.action === 'do_nothing') {
           const adj = handleExpiryDoNothing(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
           if (adj) {
@@ -208,9 +210,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
             for (const removed of adj.legsRemoved) {
               if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
             }
+            expiryHandled = true;
           }
-        } else if (leg.active) {
-          // Default: sell new call at same barrier after expiry
+        }
+
+        if (!expiryHandled && leg.active) {
           const adj = sellNewCallAfterExpiry(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
           if (adj) {
             dayAdjustments.push(adj);
@@ -223,10 +227,14 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
             for (const removed of adj.legsRemoved) {
               if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
             }
+            expiryHandled = true;
           }
         }
 
-        leg.active = false;
+        // Only deactivate if a replacement was created
+        if (expiryHandled) {
+          leg.active = false;
+        }
       } else {
         price = bsPrice(S, leg.strike, T, riskFreeRate, iv, leg.type);
         delta = bsDelta(S, leg.strike, T, riskFreeRate, iv, leg.type);
