@@ -244,8 +244,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
         // Check approach rule (price near sold call)
         if (ccRules.approachRule.enabled && leg.type === 'call' && leg.quantity < 0 && leg.active) {
-          const dist = Math.abs(S - leg.strike) / leg.strike * 100;
-          if (dist <= ccRules.approachRule.activationPct && S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100)) {
+          if (S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100)) {
             const adj = executeApproachRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
             if (adj) {
               dayAdjustments.push(adj);
