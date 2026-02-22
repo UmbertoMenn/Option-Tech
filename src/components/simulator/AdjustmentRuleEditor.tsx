@@ -111,19 +111,26 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                     </div>
                   )}
                 </div>
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <RadioGroupItem value="do_nothing" id="approach_c" className="mt-1" />
+                    <Label htmlFor="approach_c" className="text-xs leading-relaxed cursor-pointer">
+                      Non faccio nulla ed alla scadenza rivendo una nuova call con barriera:
+                    </Label>
+                  </div>
+                  {rules.approachRule.action === 'do_nothing' && (
+                    <div className="pl-6 flex items-center gap-1">
+                      <Input
+                        type="number"
+                        value={rules.approachRule.newCallBarrierPct}
+                        onChange={e => updateApproach({ newCallBarrierPct: parseFloat(e.target.value) || 5 })}
+                        className="w-16 h-7 text-xs"
+                      />
+                      <span className="text-xs">%</span>
+                    </div>
+                  )}
+                </div>
               </RadioGroup>
-            </div>
-
-            {/* Always visible: expiry barrier */}
-            <div className="flex items-center gap-1 pt-2 border-t border-border">
-              <Label className="text-xs whitespace-nowrap">Alla scadenza, barriera nuova call</Label>
-              <Input
-                type="number"
-                value={rules.approachRule.newCallBarrierPct}
-                onChange={e => updateApproach({ newCallBarrierPct: parseFloat(e.target.value) || 5 })}
-                className="w-16 h-7 text-xs"
-              />
-              <span className="text-xs">%</span>
             </div>
           </div>
         </div>

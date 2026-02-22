@@ -373,7 +373,8 @@ function executeApproachRule(
 ): AdjustmentLog | null {
   const { approachRule, strikeStep } = ccRules;
 
-  // do_nothing action removed - only roll_up_always and roll_up_positive
+  // do_nothing: no roll, let it expire naturally and sell new call at expiry
+  if (approachRule.action === 'do_nothing') return null;
 
   // Search across all future expiries starting from the one after the current leg's expiry
   const futureExpiries = allExpiries.filter(e => e > leg.expiryDate.slice(0, 10));

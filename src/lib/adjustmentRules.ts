@@ -4,7 +4,7 @@
 
 export interface ApproachRule {
   activationPct: number; // % distance from sold call strike
-  action: 'roll_up_always' | 'roll_up_positive';
+  action: 'roll_up_always' | 'roll_up_positive' | 'do_nothing';
 
   // roll_up_positive params
   minPremiumUsd: number;
