@@ -6,7 +6,6 @@ import { Upload, FileText, CheckCircle2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
-import { DateInput } from '@/components/ui/date-input';
 
 export interface CsvPriceData {
   ticker: string;
@@ -37,7 +36,6 @@ function parseDateTime(dateStr: string, timeStr?: string): string | null {
 
   const d = new Date(combined);
   if (!isNaN(d.getTime())) {
-    // Preserve full ISO datetime
     return d.toISOString().slice(0, 19);
   }
 
@@ -51,9 +49,7 @@ function parseDateTime(dateStr: string, timeStr?: string): string | null {
 }
 
 function extractTickerFromFilename(filename: string): string {
-  // Remove extension
   const name = filename.replace(/\.(csv|txt)$/i, '');
-  // Try patterns like PLTR_4h, PLTR-daily, PLTR_1h, PLTR
   const match = name.match(/^([A-Z]{1,6})/i);
   return match ? match[1].toUpperCase() : '';
 }
@@ -80,7 +76,6 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
     const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     if (cols.length <= Math.max(dateIdx, closeIdx)) continue;
 
-    // Extract ticker from first valid row
     if (!extractedTicker && tickerIdx >= 0 && cols[tickerIdx]) {
       extractedTicker = cols[tickerIdx].toUpperCase();
     }
@@ -98,12 +93,10 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
 
   if (rawRows.length === 0) throw new Error('Nessuna riga valida trovata nel file');
 
-  // Fallback ticker extraction from filename
   if (!extractedTicker) {
     extractedTicker = extractTickerFromFilename(filename);
   }
 
-  // Sort by date, NO aggregation – preserve native timeframe
   const sorted = rawRows.sort((a, b) => a.date.localeCompare(b.date));
 
   return { ticker: extractedTicker, priceData: sorted };
@@ -113,32 +106,30 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
   const [ticker, setTicker] = useState('');
   const [allData, setAllData] = useState<{ date: string; close: number }[] | null>(null);
   const [fileName, setFileName] = useState('');
-  const [startDate, setStartDate] = useState<Date | undefined>();
-  const [endDate, setEndDate] = useState<Date | undefined>();
 
-  // Date bounds from CSV
-  const csvBounds = useMemo(() => {
-    if (!allData || allData.length === 0) return null;
-    return {
-      min: new Date(allData[0].date),
-      max: new Date(allData[allData.length - 1].date),
-    };
+  // Emit all data when loaded or ticker changes
+  useEffect(() => {
+    if (allData && allData.length > 0 && ticker) {
+      onDataLoaded({ ticker: ticker.toUpperCase(), priceData: allData });
+    }
+  }, [allData, ticker, onDataLoaded]);
+
+  // Detect timeframe
+  const timeframeLabel = useMemo(() => {
+    if (!allData || allData.length < 3) return '';
+    const d1 = new Date(allData[0].date).getTime();
+    const d2 = new Date(allData[1].date).getTime();
+    const diffH = (d2 - d1) / (1000 * 60 * 60);
+    if (diffH <= 1.5) return '1H';
+    if (diffH <= 5) return '4H';
+    return 'Daily';
   }, [allData]);
 
-  // Filter data and emit when dates or ticker change
-  const filteredData = useMemo(() => {
-    if (!allData) return null;
-    const startStr = startDate ? startDate.toISOString().slice(0, 10) : allData[0].date.slice(0, 10);
-    const endStr = endDate ? endDate.toISOString().slice(0, 10) : allData[allData.length - 1].date.slice(0, 10);
-    return allData.filter(d => d.date.slice(0, 10) >= startStr && d.date.slice(0, 10) <= endStr);
-  }, [allData, startDate, endDate]);
-
-  // Emit filtered data when it changes
-  useEffect(() => {
-    if (filteredData && filteredData.length > 0 && ticker) {
-      onDataLoaded({ ticker: ticker.toUpperCase(), priceData: filteredData });
-    }
-  }, [filteredData, ticker, onDataLoaded]);
+  const miniChartData = useMemo(() => {
+    if (!allData) return [];
+    const step = Math.max(1, Math.floor(allData.length / 60));
+    return allData.filter((_, i) => i % step === 0);
+  }, [allData]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -152,11 +143,6 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
         const result = parseCsvContent(text, file.name);
         setAllData(result.priceData);
         setTicker(result.ticker);
-
-        // Auto-set dates to full range
-        setStartDate(new Date(result.priceData[0].date));
-        setEndDate(new Date(result.priceData[result.priceData.length - 1].date));
-
         toast.success(`${result.priceData.length} barre caricate • Ticker: ${result.ticker || '?'}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Errore nel parsing del file');
@@ -171,28 +157,6 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
     accept: { 'text/csv': ['.csv'], 'text/plain': ['.txt'] },
     maxFiles: 1,
   });
-
-  const disabledDates = useCallback((date: Date) => {
-    if (!csvBounds) return true;
-    return date < csvBounds.min || date > csvBounds.max;
-  }, [csvBounds]);
-
-  const miniChartData = useMemo(() => {
-    if (!filteredData) return [];
-    const step = Math.max(1, Math.floor(filteredData.length / 60));
-    return filteredData.filter((_, i) => i % step === 0);
-  }, [filteredData]);
-
-  // Detect timeframe
-  const timeframeLabel = useMemo(() => {
-    if (!allData || allData.length < 3) return '';
-    const d1 = new Date(allData[0].date).getTime();
-    const d2 = new Date(allData[1].date).getTime();
-    const diffH = (d2 - d1) / (1000 * 60 * 60);
-    if (diffH <= 1.5) return '1H';
-    if (diffH <= 5) return '4H';
-    return 'Daily';
-  }, [allData]);
 
   return (
     <Card>
@@ -238,30 +202,7 @@ export function TickerSelector({ onDataLoaded }: TickerSelectorProps) {
           </div>
         </div>
 
-        {allData && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label>Data Inizio</Label>
-              <DateInput
-                value={startDate}
-                onChange={(d) => { if (d) setStartDate(d); }}
-                disabled={disabledDates}
-                placeholder="GG/MM/AAAA"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Data Fine</Label>
-              <DateInput
-                value={endDate}
-                onChange={(d) => { if (d) setEndDate(d); }}
-                disabled={disabledDates}
-                placeholder="GG/MM/AAAA"
-              />
-            </div>
-          </div>
-        )}
-
-        {filteredData && miniChartData.length > 0 && (
+        {allData && miniChartData.length > 0 && (
           <div className="h-16">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={miniChartData}>
