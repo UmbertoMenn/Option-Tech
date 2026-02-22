@@ -17,6 +17,8 @@ interface StrategyBuilderProps {
   riskFreeRate: number;
   dateRange: { from: string; to: string };
   strikeStep: number;
+  rawEntryDate: string;
+  onRawEntryDateChange: (date: string) => void;
   onLegsChange: (legs: BacktestLeg[], entryDate: string) => void;
 }
 
@@ -29,9 +31,8 @@ function snapToWeekday(dateStr: string): string {
   return format(d, 'yyyy-MM-dd');
 }
 
-export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange, strikeStep, onLegsChange }: StrategyBuilderProps) {
-  const [rawEntryDate, setRawEntryDate] = useState(dateRange.from);
-  const entryDateStr = useMemo(() => snapToWeekday(rawEntryDate), [rawEntryDate]);
+export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange, strikeStep, rawEntryDate, onRawEntryDateChange, onLegsChange }: StrategyBuilderProps) {
+  const entryDateStr = useMemo(() => snapToWeekday(rawEntryDate || dateRange.from), [rawEntryDate, dateRange.from]);
   const [callDistancePct, setCallDistancePct] = useState(7);
   const [expiryMonth, setExpiryMonth] = useState('');
 
@@ -121,7 +122,7 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
             <DateInput
               value={rawEntryDate ? parseISO(rawEntryDate) : undefined}
               onChange={(date) => {
-                if (date) setRawEntryDate(format(date, 'yyyy-MM-dd'));
+                if (date) onRawEntryDateChange(format(date, 'yyyy-MM-dd'));
               }}
               disabled={(date) => {
                 if (!dateRange.from || !dateRange.to) return false;

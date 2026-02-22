@@ -27,10 +27,11 @@ export function Simulator() {
 
   const [priceData, setPriceData] = useState<{ date: string; close: number }[] | null>(null);
   const [ticker, setTicker] = useState('');
-  const [ivPct, setIvPct] = useState(30);
+  const [ivPct, setIvPct] = useState(55);
   const [riskFreeRate, setRiskFreeRate] = useState(0.045);
 
   const [legs, setLegs] = useState<BacktestLeg[]>([]);
+  const [rawEntryDate, setRawEntryDate] = useState('');
   const [entryDate, setEntryDate] = useState('');
   const [ccRules, setCcRules] = useState<CoveredCallRules>(getDefaultCoveredCallRules());
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
@@ -53,6 +54,7 @@ export function Simulator() {
     setPriceData(data.priceData);
     setTicker(data.ticker);
     setBacktestResult(null);
+    setRawEntryDate(prev => prev || data.priceData[0]?.date || '');
   }, []);
 
   const handleLegsChange = useCallback((newLegs: BacktestLeg[], date: string) => {
@@ -177,6 +179,8 @@ export function Simulator() {
                   riskFreeRate={riskFreeRate}
                   dateRange={dateRange}
                   strikeStep={ccRules.strikeStep}
+                  rawEntryDate={rawEntryDate}
+                  onRawEntryDateChange={setRawEntryDate}
                   onLegsChange={handleLegsChange}
                 />
 
