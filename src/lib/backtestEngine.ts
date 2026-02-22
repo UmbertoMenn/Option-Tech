@@ -375,47 +375,49 @@ function executeApproachRule(
 
   if (approachRule.action === 'do_nothing') return null; // handled at expiry
 
-  // Check next expiry BEFORE deactivating
-  const nextExpiry = findNextExpiry(leg.expiryDate, allExpiries);
-  if (!nextExpiry) return null; // leg stays active
+  // Search across all future expiries starting from the one after the current leg's expiry
+  const futureExpiries = allExpiries.filter(e => e > leg.expiryDate.slice(0, 10));
+  if (futureExpiries.length === 0) return null;
 
   const closeCost = -currentPrice * leg.quantity * 100;
-
   const newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
-  const newT = yearsBetween(date, nextExpiry);
-  if (newT <= 0) return null;
 
-  const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
-  const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
+  for (const candidateExpiry of futureExpiries) {
+    const newT = yearsBetween(date, candidateExpiry);
+    if (newT <= 0) continue;
 
-  if (approachRule.action === 'roll_up_positive') {
-    const netPremium = newPrice - currentPrice;
-    const meetsUsd = netPremium >= approachRule.minPremiumUsd;
-    const meetsPct = netPremium >= S * (approachRule.minPremiumPct / 100);
-    if (!meetsUsd && !meetsPct) {
-      return null; // leg stays active
+    const newIV = ivSurface.getIV(newStrike, candidateExpiry, 'call');
+    const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
+
+    if (approachRule.action === 'roll_up_positive') {
+      const netPremium = newPrice - currentPrice;
+      const meetsUsd = netPremium >= approachRule.minPremiumUsd;
+      const meetsPct = netPremium >= S * (approachRule.minPremiumPct / 100);
+      if (!meetsUsd && !meetsPct) continue; // try next expiry
     }
+
+    // Found a valid expiry: execute the roll
+    leg.active = false;
+    const openCost = newPrice * leg.quantity * 100;
+    const newLeg: BacktestLeg = {
+      id: `${leg.id}_rollup_${date}`,
+      type: 'call', strike: newStrike, quantity: leg.quantity,
+      entryDate: date, expiryDate: candidateExpiry, entryPrice: newPrice, active: true,
+    };
+    activeLegs.push(newLeg);
+
+    const removedLeg = { ...leg, closePrice: currentPrice };
+
+    return {
+      date, ruleName: 'Approccio barriera',
+      description: `Roll up: ${leg.strike} → ${newStrike} (exp ${candidateExpiry})`,
+      legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+      cost: closeCost + openCost,
+      underlyingPrice: S,
+    };
   }
 
-  leg.active = false; // deactivate AFTER all checks pass
-
-  const openCost = newPrice * leg.quantity * 100;
-  const newLeg: BacktestLeg = {
-    id: `${leg.id}_rollup_${date}`,
-    type: 'call', strike: newStrike, quantity: leg.quantity,
-    entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
-  };
-  activeLegs.push(newLeg);
-
-  const removedLeg = { ...leg, closePrice: currentPrice };
-
-  return {
-    date, ruleName: 'Approccio barriera',
-    description: `Roll up: ${leg.strike} → ${newStrike} (exp ${nextExpiry})`,
-    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
-    cost: closeCost + openCost,
-    underlyingPrice: S,
-  };
+  return null; // no expiry meets the conditions
 }
 
 // ---- Expiry handling for do_nothing ----
