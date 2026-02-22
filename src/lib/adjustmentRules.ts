@@ -49,7 +49,7 @@ export function getDefaultCoveredCallRules(): CoveredCallRules {
       rollUpMinDistancePct: 5,
     },
     profitRule: {
-      profitPct: 80,
+      profitPct: 50,
       action: 'roll_down',
       newCallBarrierPct: 5,
       firstExpiryMinDistancePct: 5,

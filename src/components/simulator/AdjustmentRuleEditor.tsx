@@ -29,7 +29,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
           <Input
             type="number"
             value={rules.strikeStep}
-            onChange={e => update({ strikeStep: parseInt(e.target.value) || 5 })}
+            onChange={e => update({ strikeStep: e.target.value === '' ? 0 : parseInt(e.target.value) })}
             className="w-20 h-8"
           />
         </div>
@@ -46,7 +46,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
               <Input
                 type="number"
                 value={rules.approachRule.activationPct}
-                onChange={e => updateApproach({ activationPct: parseFloat(e.target.value) || 2 })}
+                onChange={e => updateApproach({ activationPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                 className="w-16 h-8 text-xs"
               />
               <span className="text-xs text-muted-foreground">%</span>
@@ -72,7 +72,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                       <Input
                         type="number"
                         value={rules.approachRule.rollUpMinDistancePct}
-                        onChange={e => updateApproach({ rollUpMinDistancePct: parseFloat(e.target.value) || 5 })}
+                        onChange={e => updateApproach({ rollUpMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                         className="w-16 h-7 text-xs"
                       />
                       <span className="text-xs">%</span>
@@ -84,7 +84,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                   <div className="flex items-start gap-2">
                     <RadioGroupItem value="roll_up_positive" id="approach_b" className="mt-1" />
                     <Label htmlFor="approach_b" className="text-xs leading-relaxed cursor-pointer">
-                      Rollo solo se la differenza è positiva di almeno:
+                      Rollo su scadenza successiva con strike più alto, solo se la differenza è positiva di almeno:
                     </Label>
                   </div>
                   {rules.approachRule.action === 'roll_up_positive' && (
@@ -93,7 +93,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                         <Input
                           type="number"
                           value={rules.approachRule.minPremiumUsd}
-                          onChange={e => updateApproach({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
+                          onChange={e => updateApproach({ minPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                           className="w-16 h-7 text-xs"
                         />
                         <span className="text-xs">USD</span>
@@ -103,7 +103,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                         <Input
                           type="number"
                           value={rules.approachRule.rollUpMinDistancePct}
-                          onChange={e => updateApproach({ rollUpMinDistancePct: parseFloat(e.target.value) || 5 })}
+                          onChange={e => updateApproach({ rollUpMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                           className="w-16 h-7 text-xs"
                         />
                         <span className="text-xs">%</span>
@@ -123,7 +123,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                       <Input
                         type="number"
                         value={rules.approachRule.newCallBarrierPct}
-                        onChange={e => updateApproach({ newCallBarrierPct: parseFloat(e.target.value) || 5 })}
+                        onChange={e => updateApproach({ newCallBarrierPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                         className="w-16 h-7 text-xs"
                       />
                       <span className="text-xs">%</span>
@@ -147,7 +147,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
               <Input
                 type="number"
                 value={rules.profitRule.profitPct}
-                onChange={e => updateProfit({ profitPct: parseFloat(e.target.value) || 80 })}
+                onChange={e => updateProfit({ profitPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                 className="w-16 h-8 text-xs"
               />
               <span className="text-xs text-muted-foreground">% (l'opzione ha perso X% del valore)</span>
@@ -180,7 +180,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                           <Input
                             type="number"
                             value={rules.profitRule.firstExpiryMinDistancePct}
-                            onChange={e => updateProfit({ firstExpiryMinDistancePct: parseFloat(e.target.value) || 5 })}
+                            onChange={e => updateProfit({ firstExpiryMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                             className="w-16 h-7 text-xs"
                           />
                           <span className="text-xs">%</span>
@@ -189,7 +189,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                           <Input
                             type="number"
                             value={rules.profitRule.minPremiumUsd}
-                            onChange={e => updateProfit({ minPremiumUsd: parseFloat(e.target.value) || 0 })}
+                            onChange={e => updateProfit({ minPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                             className="w-16 h-7 text-xs"
                           />
                           <span className="text-xs">USD</span>
@@ -208,7 +208,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                           <Input
                             type="number"
                             value={rules.profitRule.minDistancePct}
-                            onChange={e => updateProfit({ minDistancePct: parseFloat(e.target.value) || 5 })}
+                            onChange={e => updateProfit({ minDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                             className="w-16 h-7 text-xs"
                           />
                           <span className="text-xs">%</span>
@@ -217,7 +217,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                           <Input
                             type="number"
                             value={rules.profitRule.rollDownMinPremiumUsd}
-                            onChange={e => updateProfit({ rollDownMinPremiumUsd: parseFloat(e.target.value) || 0 })}
+                            onChange={e => updateProfit({ rollDownMinPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                             className="w-16 h-7 text-xs"
                           />
                           <span className="text-xs">USD</span>
@@ -240,7 +240,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                       <Input
                         type="number"
                         value={rules.profitRule.newCallBarrierPct}
-                        onChange={e => updateProfit({ newCallBarrierPct: parseFloat(e.target.value) || 5 })}
+                        onChange={e => updateProfit({ newCallBarrierPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                         className="w-16 h-7 text-xs"
                       />
                       <span className="text-xs">%</span>

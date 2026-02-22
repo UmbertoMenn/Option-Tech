@@ -20,9 +20,19 @@ interface StrategyBuilderProps {
   onLegsChange: (legs: BacktestLeg[], entryDate: string) => void;
 }
 
+/** Snap weekend dates to next Monday */
+function snapToWeekday(dateStr: string): string {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  if (day === 6) d.setDate(d.getDate() + 2); // Saturday -> Monday
+  else if (day === 0) d.setDate(d.getDate() + 1); // Sunday -> Monday
+  return format(d, 'yyyy-MM-dd');
+}
+
 export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange, strikeStep, onLegsChange }: StrategyBuilderProps) {
-  const [entryDateStr, setEntryDateStr] = useState(dateRange.from);
-  const [callDistancePct, setCallDistancePct] = useState(10);
+  const [rawEntryDate, setRawEntryDate] = useState(dateRange.from);
+  const entryDateStr = useMemo(() => snapToWeekday(rawEntryDate), [rawEntryDate]);
+  const [callDistancePct, setCallDistancePct] = useState(7);
   const [expiryMonth, setExpiryMonth] = useState('');
 
   const availableExpiries = useMemo(() => {
@@ -34,6 +44,11 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
     const entry = new Date(entryDateStr);
     return availableExpiries.find(e => new Date(e) > entry) || availableExpiries[0];
   }, [availableExpiries, entryDateStr]);
+
+  // Reset expiryMonth when entry date changes so it auto-selects first available
+  useEffect(() => {
+    setExpiryMonth('');
+  }, [entryDateStr]);
 
   const selectedExpiry = expiryMonth || defaultExpiry;
 
@@ -104,9 +119,9 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
           <div className="space-y-1.5">
             <Label>Data Ingresso</Label>
             <DateInput
-              value={entryDateStr ? parseISO(entryDateStr) : undefined}
+              value={rawEntryDate ? parseISO(rawEntryDate) : undefined}
               onChange={(date) => {
-                if (date) setEntryDateStr(format(date, 'yyyy-MM-dd'));
+                if (date) setRawEntryDate(format(date, 'yyyy-MM-dd'));
               }}
               disabled={(date) => {
                 if (!dateRange.from || !dateRange.to) return false;
@@ -123,7 +138,7 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
             <Input
               type="number"
               value={callDistancePct}
-              onChange={e => setCallDistancePct(parseFloat(e.target.value) || 0)}
+              onChange={e => setCallDistancePct(e.target.value === '' ? 0 : parseFloat(e.target.value))}
             />
           </div>
           <div className="space-y-1.5">
