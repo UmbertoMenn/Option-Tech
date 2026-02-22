@@ -158,7 +158,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   // Pre-compute all available monthly expiries in the date range
   // Extend expiries 3 months beyond last bar to ensure continuity
   const lastBarDate = new Date(priceData[priceData.length - 1].date);
-  lastBarDate.setMonth(lastBarDate.getMonth() + 12);
+  lastBarDate.setMonth(lastBarDate.getMonth() + 30);
   const allExpiries = getMonthlyExpiries(priceData[0].date.slice(0, 10), formatDate(lastBarDate));
 
   for (const bar of priceData) {
