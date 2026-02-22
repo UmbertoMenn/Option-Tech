@@ -381,7 +381,8 @@ function executeApproachRule(
   if (futureExpiries.length === 0) return null;
 
   const closeCost = -currentPrice * leg.quantity * 100;
-  const newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
+  let newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
+  if (newStrike <= leg.strike) newStrike = leg.strike + strikeStep;
 
   for (const candidateExpiry of futureExpiries) {
     const newT = yearsBetween(date, candidateExpiry);
