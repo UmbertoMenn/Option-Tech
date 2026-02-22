@@ -1,70 +1,41 @@
 
 
-## Modifiche richieste al Simulatore Covered Call
+## Correzioni Simulatore
 
-### 1. Aggiornare la descrizione dell'opzione "roll_up_positive"
+### 1. Volatilita implicita default al 55%
 
-**File:** `src/components/simulator/AdjustmentRuleEditor.tsx`, riga 87
+**File:** `src/pages/Simulator.tsx`, riga 30
 
-Cambiare il testo da:
-> "Rollo solo se la differenza e positiva di almeno:"
+Cambiare `useState(30)` in `useState(55)`.
 
-a:
-> "Rollo su scadenza successiva con strike piu alto, solo se la differenza e positiva di almeno:"
+### 2. La data ingresso si resetta dopo il backtest
 
-### 2. Rendere i campi numerici completamente editabili
+**Causa:** Lo state `rawEntryDate` vive dentro `StrategyBuilder` (riga 33) ed e inizializzato con `dateRange.from`. Ogni volta che il componente si ri-monta o `dateRange` cambia, la data torna all'inizio del database.
 
-**File:** `src/components/simulator/AdjustmentRuleEditor.tsx` (tutti i campi `Input type="number"`)
-**File:** `src/components/simulator/StrategyBuilder.tsx` (campo Distanza Call)
+**Soluzione:** Spostare lo state `rawEntryDate` nel componente padre `Simulator.tsx`, cosi persiste per tutta la sessione. `StrategyBuilder` ricevera `rawEntryDate` e `setRawEntryDate` come props.
 
-Il problema e che `parseFloat(e.target.value) || <default>` impedisce di cancellare il valore (una stringa vuota diventa il default). La soluzione e gestire la stringa vuota separatamente, permettendo all'utente di cancellare e riscrivere.
-
-Approccio: usare `useState<string>` per il valore visualizzato e convertire a numero solo quando il campo perde il focus, oppure piu semplicemente rimuovere il fallback `|| X` dall'onChange, usando un valore controllato che accetti stringhe vuote.
-
-In pratica, nei vari `onChange`, sostituire pattern come:
-```
-onChange={e => update({ field: parseFloat(e.target.value) || 5 })}
-```
-con:
-```
-onChange={e => update({ field: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-```
-
-### 3. Rimuovere date inizio/fine da TickerSelector, tenere solo in StrategyBuilder
-
-**File:** `src/components/simulator/TickerSelector.tsx`
-
-- Rimuovere i campi "Data Inizio" e "Data Fine" (righe 241-262)
-- Rimuovere gli state `startDate` e `endDate`
-- Rimuovere il `filteredData` e passare direttamente `allData` a `onDataLoaded`
-- Il mini-chart usa tutti i dati
+**File:** `src/pages/Simulator.tsx`
+- Aggiungere state: `const [rawEntryDate, setRawEntryDate] = useState('')`
+- Nel callback `handleDataLoaded`: impostare `rawEntryDate` solo se e ancora vuoto (prima volta)
+- Passare `rawEntryDate` e `setRawEntryDate` come props a `StrategyBuilder`
 
 **File:** `src/components/simulator/StrategyBuilder.tsx`
+- Rimuovere lo state locale `rawEntryDate`
+- Accettare `rawEntryDate` e `onRawEntryDateChange` nelle props
+- Usare queste props al posto dello state locale
 
-- Il `dateRange` gia riceve `from`/`to` dal padre, resta invariato
-- Aggiungere logica: quando `entryDateStr` cade di sabato o domenica, spostare automaticamente al lunedi successivo (primo giorno utile)
-- Impostare automaticamente `selectedExpiry` alla prima scadenza mensile successiva alla data di ingresso (gia fatto con `defaultExpiry`, basta assicurarsi che funzioni correttamente)
+### 3. Il backtest parte dall'inizio del database
 
-### 4. Preimpostare Distanza Call al 7%
+**Causa:** La logica di filtraggio in `handleRunBacktest` (riga 70-71) usa `entryDate` che viene da `handleLegsChange`. Ma dato che il punto 2 resettava la data, `entryDate` tornava alla prima data del file. Inoltre, i `legs` generati da `StrategyBuilder` hanno `entryDate` uguale alla data resettata.
 
-**File:** `src/components/simulator/StrategyBuilder.tsx`, riga 25
-
-Cambiare `useState(10)` in `useState(7)`.
-
-### 5. Preimpostare Soglia di guadagno al 50%
-
-**File:** `src/lib/adjustmentRules.ts`, riga 57
-
-Nella funzione `getDefaultCoveredCallRules()`, cambiare `profitPct: 80` in `profitPct: 50`.
+**Soluzione:** Con il fix del punto 2, `entryDate` sara corretto perche `rawEntryDate` non si resettera piu. La logica di filtraggio a riga 70-71 gia fa `priceData.findIndex(p => p.date >= entryDate)` e passa solo i dati dalla data di ingresso in poi: funzionera correttamente una volta che la data e persistente.
 
 ### Dettaglio tecnico
 
 | # | File | Modifica |
 |---|------|----------|
-| 1 | `AdjustmentRuleEditor.tsx:87` | Aggiornare testo label |
-| 2 | `AdjustmentRuleEditor.tsx` (tutti gli Input) + `StrategyBuilder.tsx:126` | Sostituire `\|\| default` con gestione stringa vuota |
-| 3a | `TickerSelector.tsx` | Rimuovere sezione date e semplificare: emettere tutti i dati |
-| 3b | `StrategyBuilder.tsx` | Aggiungere snap weekend -> lunedi per data ingresso |
-| 4 | `StrategyBuilder.tsx:25` | Default callDistancePct = 7 |
-| 5 | `adjustmentRules.ts:57` | Default profitPct = 50 |
+| 1 | `Simulator.tsx:30` | `ivPct` default da 30 a 55 |
+| 2 | `Simulator.tsx` | Aggiungere state `rawEntryDate`, passarlo come prop |
+| 2 | `Simulator.tsx:52-56` | In `handleDataLoaded`, impostare `rawEntryDate` solo se vuoto |
+| 2 | `StrategyBuilder.tsx` | Rimuovere state locale, accettare props `rawEntryDate`/`onRawEntryDateChange` |
 
