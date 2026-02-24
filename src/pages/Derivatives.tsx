@@ -10,7 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -107,7 +107,7 @@ export function Derivatives() {
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
-  const [includePutPremiums, setIncludePutPremiums] = useState(false);
+  // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -254,22 +254,7 @@ export function Derivatives() {
   // Fetch underlying prices from Yahoo Finance
   const { prices: underlyingPrices, isLoading: isPricesLoading, missingCount, isFetchingMissing } = useUnderlyingPrices(allUnderlyingNames);
   
-  // Calculate naked put premiums by underlying for the CC toggle
-  const nakedPutPremiumsByUnderlying = useMemo(() => {
-    const result: Record<string, number> = {};
-    categories.nakedPuts.forEach(np => {
-      const underlying = np.option.underlying;
-      if (!underlying) return;
-      const ticker = underlyingPrices[underlying]?.ticker;
-      if (!ticker) return;
-      const optionSymbol = `NP_P${np.option.strike_price || 0}_${np.option.expiry_date || 'noexp'}`;
-      const saved = getPremiumByTickerAndSymbol(ticker, optionSymbol);
-      if (saved && saved.orders_json.length > 0) {
-        result[underlying] = (result[underlying] || 0) + saved.net_per_share;
-      }
-    });
-    return result;
-  }, [categories.nakedPuts, underlyingPrices, getPremiumByTickerAndSymbol]);
+  // nakedPutPremiumsByUnderlying removed — PUT premiums now handled inside CallPremiumCalculatorDialog
 
   // Track if we've saved the cache for the current portfolio + categories
   const lastSavedRef = useRef<string>('');
@@ -458,10 +443,6 @@ export function Derivatives() {
                     <Shield className="w-5 h-5 text-primary" />
                     <CardTitle className="text-xl">Covered Call</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length}</Badge>
-                    <div className="flex items-center gap-2 ml-4" onClick={e => e.stopPropagation()}>
-                      <Switch checked={includePutPremiums} onCheckedChange={setIncludePutPremiums} />
-                      <span className="text-xs text-muted-foreground">Includi premi PUT</span>
-                    </div>
                   </div>
                   {coveredCallOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -495,8 +476,6 @@ export function Derivatives() {
                           ] || cc.contractsCovered
                         }
                         getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
-                        includePutPremiums={includePutPremiums}
-                        putPremiumForUnderlying={cc.option.underlying ? (nakedPutPremiumsByUnderlying[cc.option.underlying] || 0) : 0}
                       />
                     ))}
                   </div>
@@ -761,11 +740,9 @@ interface CoveredCallRowProps extends RowPropsWithPrices {
   coveredCall: CoveredCallPosition;
   totalContractsForUnderlying: number;
   getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined;
-  includePutPremiums: boolean;
-  putPremiumForUnderlying: number;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTickerAndSymbol, includePutPremiums, putPremiumForUnderlying }: CoveredCallRowProps) {
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTickerAndSymbol }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
@@ -805,11 +782,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   
   // Get saved premium data for this specific option position
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
-  const baseNetPerShare = savedPremium?.net_per_share;
-  // When PUT premiums toggle is active, add PUT premiums to the UNIT value
-  const netPerShare = baseNetPerShare !== undefined 
-    ? (includePutPremiums ? baseNetPerShare + putPremiumForUnderlying : baseNetPerShare)
-    : (includePutPremiums && putPremiumForUnderlying !== 0 ? putPremiumForUnderlying : undefined);
+  const netPerShare = savedPremium?.net_per_share;
   
   return (
     <>
@@ -936,7 +909,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{includePutPremiums ? 'Netto unitario premi CALL + PUT (dalla calcolatrice)' : 'Netto unitario premi CALL (dalla calcolatrice)'}</p>
+                <p>Netto unitario premi (dalla calcolatrice)</p>
               </TooltipContent>
             </Tooltip>
             

@@ -10,10 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw, ExternalLink, History } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { 
   parseOrderFile, 
   filterAndCalculateCallPremiums,
   filterAndCalculateIronCondorPremiums,
+  filterAndCalculatePutPremiums,
   calculatePremiumMetrics,
   findFirstOperationDate,
   findLastOperationDate,
@@ -57,11 +60,15 @@ export function CallPremiumCalculatorDialog({
   const { portfolio } = usePortfolio();
   const { getPremiumByTickerAndSymbol, getPremiumsByTicker, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
   
+  const isCoveredCall = strategyType === 'covered_call';
+  
   const [transactionCost, setTransactionCost] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<PremiumMetrics | null>(null);
-  const [filteredOrders, setFilteredOrders] = useState<ParsedOrder[]>([]);
+  const [callOrders, setCallOrders] = useState<ParsedOrder[]>([]);
+  const [putOrders, setPutOrders] = useState<ParsedOrder[]>([]);
+  const [includePutPremiums, setIncludePutPremiums] = useState(false);
   const [parseResult, setParseResult] = useState<OrderParseResult | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastOperationDate, setLastOperationDate] = useState<string | null>(null);
@@ -69,11 +76,20 @@ export function CallPremiumCalculatorDialog({
   const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
 
+  // Derived: combined orders based on toggle
+  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+
+  // Helper to split saved orders into call/put
+  const splitOrdersByType = (orders: ParsedOrder[]) => {
+    const calls = orders.filter(o => o.optionType !== 'PUT');
+    const puts = orders.filter(o => o.optionType === 'PUT');
+    return { calls, puts };
+  };
+
   // Load saved data when dialog opens
   useEffect(() => {
     if (open && ticker && !isLoadingPremiums) {
       const saved = getPremiumByTickerAndSymbol(ticker, optionSymbol);
-      // Always compute historical records for same ticker (different optionSymbol)
       const allForTicker = getPremiumsByTicker(ticker);
       const historical = allForTicker.filter(p => p.option_symbol !== optionSymbol && p.orders_json.length > 0);
       setHistoricalPremiums(historical);
@@ -81,13 +97,15 @@ export function CallPremiumCalculatorDialog({
 
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
-        setFilteredOrders(saved.orders_json);
+        const { calls, puts } = splitOrdersByType(saved.orders_json);
+        setCallOrders(calls);
+        setPutOrders(puts);
+        setIncludePutPremiums(puts.length > 0);
         setLastOperationDate(saved.last_operation_date);
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
         setHasUnsavedChanges(false);
         setShowHistoricalPicker(false);
       } else {
-        // No exact match — show historical picker automatically if available
         setShowHistoricalPicker(historical.length > 0);
       }
     }
@@ -100,7 +118,10 @@ export function CallPremiumCalculatorDialog({
     if (!selected) return;
     
     setTransactionCost(selected.transaction_cost);
-    setFilteredOrders(selected.orders_json);
+    const { calls, puts } = splitOrdersByType(selected.orders_json);
+    setCallOrders(calls);
+    setPutOrders(puts);
+    setIncludePutPremiums(puts.length > 0);
     setLastOperationDate(selected.last_operation_date);
     recalculateMetrics(selected.orders_json, selected.transaction_cost);
     setHasUnsavedChanges(true);
@@ -169,16 +190,32 @@ export function CallPremiumCalculatorDialog({
         ? filterAndCalculateIronCondorPremiums(orders, ticker)
         : filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       
-      // Merge with existing orders (cumulative)
-      const mergedOrders = mergeOrders(filteredOrders, result.filteredOrders);
-      const newOrdersCount = mergedOrders.length - filteredOrders.length;
+      // Merge CALL orders with existing
+      const mergedCallOrders = mergeOrders(callOrders, result.filteredOrders);
+      const newCallCount = mergedCallOrders.length - callOrders.length;
+      setCallOrders(mergedCallOrders);
       
-      setFilteredOrders(mergedOrders);
-      recalculateMetrics(mergedOrders, transactionCost);
+      // For covered_call: also parse PUT orders
+      let mergedPutOrders = putOrders;
+      let newPutCount = 0;
+      if (isCoveredCall) {
+        const putResult = filterAndCalculatePutPremiums(orders, ticker);
+        mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders);
+        newPutCount = mergedPutOrders.length - putOrders.length;
+        setPutOrders(mergedPutOrders);
+      }
+      
+      // Recalculate with appropriate orders
+      const ordersForMetrics = includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders;
+      recalculateMetrics(ordersForMetrics, transactionCost);
       setHasUnsavedChanges(true);
       
-      if (newOrdersCount > 0) {
-        toast.success(`Aggiunte ${newOrdersCount} nuove operazioni`);
+      const totalNew = newCallCount + newPutCount;
+      if (totalNew > 0) {
+        const parts: string[] = [];
+        if (newCallCount > 0) parts.push(`${newCallCount} CALL`);
+        if (newPutCount > 0) parts.push(`${newPutCount} PUT`);
+        toast.success(`Aggiunte ${parts.join(' + ')} operazioni`);
       } else {
         toast.info('Nessuna nuova operazione trovata');
       }
@@ -188,7 +225,7 @@ export function CallPremiumCalculatorDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, filteredOrders, underlyingPrice, recalculateMetrics]);
+  }, [ticker, transactionCost, callOrders, putOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -210,10 +247,23 @@ export function CallPremiumCalculatorDialog({
     }
   };
 
+  // Handle PUT premiums toggle
+  const handleTogglePutPremiums = (checked: boolean) => {
+    setIncludePutPremiums(checked);
+    const orders = checked ? [...callOrders, ...putOrders] : callOrders;
+    recalculateMetrics(orders, transactionCost);
+    setHasUnsavedChanges(true);
+  };
+
   // Handle order removal
   const handleRemoveOrder = (index: number) => {
     const newOrders = filteredOrders.filter((_, i) => i !== index);
-    setFilteredOrders(newOrders);
+    // Split back into call/put
+    const calls = newOrders.filter(o => o.optionType !== 'PUT');
+    const puts = newOrders.filter(o => o.optionType === 'PUT');
+    setCallOrders(calls);
+    setPutOrders(puts);
+    if (puts.length === 0) setIncludePutPremiums(false);
     recalculateMetrics(newOrders, transactionCost);
     setHasUnsavedChanges(true);
   };
@@ -248,7 +298,9 @@ export function CallPremiumCalculatorDialog({
       try {
         await deletePremium({ ticker, optionSymbol });
         setMetrics(null);
-        setFilteredOrders([]);
+        setCallOrders([]);
+        setPutOrders([]);
+        setIncludePutPremiums(false);
         setParseResult(null);
         setLastOperationDate(null);
         setHasUnsavedChanges(false);
@@ -360,6 +412,18 @@ export function CallPremiumCalculatorDialog({
             )}
           </div>
 
+          {/* PUT premiums toggle - only for covered_call when PUT orders are found */}
+          {isCoveredCall && putOrders.length > 0 && (
+            <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-muted/30">
+              <Switch checked={includePutPremiums} onCheckedChange={handleTogglePutPremiums} />
+              <span className="text-sm text-muted-foreground">
+                Includi premi PUT
+              </span>
+              <Badge variant="secondary" className="text-xs ml-auto">
+                {putOrders.length} PUT
+              </Badge>
+            </div>
+          )}
           {/* Error Alert */}
           {error && (
             <Alert variant="destructive">
@@ -529,7 +593,12 @@ export function CallPremiumCalculatorDialog({
                                 <TableCell className={`text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
                                   {order.operation === 'sell' ? 'V' : 'A'}
                                 </TableCell>
-                                <TableCell className="text-xs font-mono">{order.symbol}</TableCell>
+                                <TableCell className="text-xs font-mono">
+                                  {order.symbol}
+                                  {order.optionType === 'PUT' && (
+                                    <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">PUT</Badge>
+                                  )}
+                                </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
                                 <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
