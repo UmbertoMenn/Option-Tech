@@ -73,6 +73,12 @@ export function CallPremiumCalculatorDialog({
   useEffect(() => {
     if (open && ticker && !isLoadingPremiums) {
       const saved = getPremiumByTickerAndSymbol(ticker, optionSymbol);
+      // Always compute historical records for same ticker (different optionSymbol)
+      const allForTicker = getPremiumsByTicker(ticker);
+      const historical = allForTicker.filter(p => p.option_symbol !== optionSymbol && p.orders_json.length > 0);
+      setHistoricalPremiums(historical);
+      setSelectedHistoricalId('');
+
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
         setFilteredOrders(saved.orders_json);
@@ -80,20 +86,9 @@ export function CallPremiumCalculatorDialog({
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
         setHasUnsavedChanges(false);
         setShowHistoricalPicker(false);
-        setHistoricalPremiums([]);
       } else {
-        // No exact match — check for historical records for same ticker
-        const allForTicker = getPremiumsByTicker(ticker);
-        // Filter out the current optionSymbol (which has no data)
-        const historical = allForTicker.filter(p => p.option_symbol !== optionSymbol && p.orders_json.length > 0);
-        if (historical.length > 0) {
-          setHistoricalPremiums(historical);
-          setShowHistoricalPicker(true);
-          setSelectedHistoricalId('');
-        } else {
-          setHistoricalPremiums([]);
-          setShowHistoricalPicker(false);
-        }
+        // No exact match — show historical picker automatically if available
+        setShowHistoricalPicker(historical.length > 0);
       }
     }
   }, [open, ticker, optionSymbol, isLoadingPremiums]);
@@ -288,7 +283,7 @@ export function CallPremiumCalculatorDialog({
 
         <div className="space-y-4">
           {/* Historical data picker banner */}
-          {showHistoricalPicker && historicalPremiums.length > 0 && !metrics && (
+          {showHistoricalPicker && historicalPremiums.length > 0 && (
             <Alert className="border-blue-500/50 bg-blue-500/5">
               <History className="h-4 w-4 text-blue-500" />
               <AlertDescription className="space-y-3">
@@ -324,6 +319,19 @@ export function CallPremiumCalculatorDialog({
                 </div>
               </AlertDescription>
             </Alert>
+          )}
+
+          {/* Button to toggle historical picker when hidden but available */}
+          {!showHistoricalPicker && historicalPremiums.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs gap-1.5"
+              onClick={() => setShowHistoricalPicker(true)}
+            >
+              <History className="w-3.5 h-3.5" />
+              Importa da storico ({historicalPremiums.length})
+            </Button>
           )}
 
           {/* File Upload - Always visible to add operations */}
