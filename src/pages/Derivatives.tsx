@@ -113,7 +113,7 @@ export function Derivatives() {
   );
 
   const stockPositions = useMemo(() => 
-    positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf'),
+    positions.filter(p => p.asset_type === 'stock'),
     [positions]
   );
 
