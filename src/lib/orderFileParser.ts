@@ -224,7 +224,44 @@ export function findLastOperationDate(validityDates: (string | undefined)[]): st
  * Used when merging orders from multiple Excel files
  */
 export function orderKey(o: ParsedOrder): string {
-  return `${o.symbol}|${o.operation}|${o.avgPrice}|${o.quantity}|${o.validityDate || ''}`;
+  const normalizedDate = toIsoDateFromIT(o.validityDate) || o.validityDate || '';
+  return `${o.symbol}|${o.operation}|${o.avgPrice}|${o.quantity}|${normalizedDate}`;
+}
+
+/**
+ * Check if a strategy leg is "open" in the loaded orders.
+ * A leg is open if the net quantity of matching orders (same optionType + strike)
+ * has the same sign as the leg's quantity in the portfolio.
+ */
+export function isLegOpenInOrders(
+  orders: ParsedOrder[],
+  leg: { optionType: 'CALL' | 'PUT'; strikePrice: number; quantity: number }
+): boolean {
+  const legOrders = orders.filter(o => {
+    const strike = extractStrikeFromSymbol(o.symbol);
+    return o.optionType === leg.optionType && strike === leg.strikePrice;
+  });
+
+  if (legOrders.length === 0) return false;
+
+  // Sort by validity date
+  const sorted = [...legOrders].sort((a, b) => {
+    const da = toIsoDateFromIT(a.validityDate) || '';
+    const db = toIsoDateFromIT(b.validityDate) || '';
+    return da.localeCompare(db);
+  });
+
+  // Calculate net quantity (sell = positive, buy = negative)
+  let netQty = 0;
+  for (const order of sorted) {
+    if (order.operation === 'sell') netQty += order.quantity;
+    else netQty -= order.quantity;
+  }
+
+  // Portfolio leg: quantity < 0 means sold, > 0 means bought
+  if (leg.quantity < 0) return netQty > 0; // sold in portfolio → net sells > 0 in orders
+  if (leg.quantity > 0) return netQty < 0; // bought in portfolio → net buys in orders
+  return false;
 }
 
 /**

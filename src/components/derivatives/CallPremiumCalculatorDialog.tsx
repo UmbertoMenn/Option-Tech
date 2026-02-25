@@ -21,6 +21,7 @@ import {
   findFirstOperationDate,
   findLastOperationDate,
   mergeOrders,
+  isLegOpenInOrders,
   
   PremiumMetrics,
   ParsedOrder,
@@ -34,6 +35,12 @@ import { toast } from 'sonner';
 
 export type CalculatorStrategyType = 'covered_call' | 'iron_condor' | 'double_diagonal' | 'other_strategy';
 
+export interface StrategyLeg {
+  optionType: 'CALL' | 'PUT';
+  strikePrice: number;
+  quantity: number;
+}
+
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -43,6 +50,7 @@ interface CallPremiumCalculatorDialogProps {
   contractsInPortfolio: number;
   underlyingPrice: number;
   strategyType?: CalculatorStrategyType;
+  strategyLegs?: StrategyLeg[];
 }
 
 export function CallPremiumCalculatorDialog({
@@ -54,6 +62,7 @@ export function CallPremiumCalculatorDialog({
   contractsInPortfolio,
   underlyingPrice,
   strategyType = 'covered_call',
+  strategyLegs,
 }: CallPremiumCalculatorDialogProps) {
   const isMultiLeg = strategyType === 'iron_condor' || strategyType === 'double_diagonal' || strategyType === 'other_strategy';
   const isIronCondor = strategyType === 'iron_condor';
@@ -578,7 +587,8 @@ export function CallPremiumCalculatorDialog({
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="text-xs w-8">Op.</TableHead>
+                            <TableHead className="text-xs w-8">Op.</TableHead>
+                              <TableHead className="text-xs">Data</TableHead>
                               <TableHead className="text-xs">Simbolo</TableHead>
                               <TableHead className="text-xs">Scad.</TableHead>
                               <TableHead className="text-xs text-right">Qtà</TableHead>
@@ -593,10 +603,16 @@ export function CallPremiumCalculatorDialog({
                                 <TableCell className={`text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
                                   {order.operation === 'sell' ? 'V' : 'A'}
                                 </TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {order.validityDate || '—'}
+                                </TableCell>
                                 <TableCell className="text-xs font-mono">
                                   {order.symbol}
                                   {order.optionType === 'PUT' && (
                                     <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">PUT</Badge>
+                                  )}
+                                  {order.optionType === 'CALL' && (
+                                    <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">CALL</Badge>
                                   )}
                                 </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
