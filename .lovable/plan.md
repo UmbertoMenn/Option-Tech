@@ -1,129 +1,107 @@
 
 
-## Piano: 4 correzioni alla calcolatrice premi
+## Piano: Filtro direzione sugli avvisi di distanza
 
-### 1. Deduplicazione ordini — sostituzione, non somma
+### Il problema
 
-**Problema:** quando si carica un Excel con operazioni già presenti nella calcolatrice, la funzione `mergeOrders` aggiunge solo le nuove (via `orderKey`), ma il `orderKey` attuale usa `validityDate` raw che potrebbe avere differenze di formato tra dati salvati e nuovi.
+Scenario con Naked Put (strike = 100, soglia distanza = 2%):
 
-**Soluzione in `src/lib/orderFileParser.ts`:**
-- Normalizzare `validityDate` nell'`orderKey` usando `toIsoDateFromIT` prima del confronto, così `'15/01/2025'` e `'15/01/2025'` (con eventuali spazi o apostrofi) producono la stessa chiave.
+```text
+Prezzo  Stato ITM    Stato distanza   Cosa succede
+─────── ──────────── ──────────────── ──────────────────────────
+ 105    safe         safe             Tutto ok
+  95    → alerted    safe (reset)     Avviso ITM inviato ✓
+  90    alerted      safe             Prezzo ancora giù
+ 101    → safe       safe             ITM si resetta a safe
+                                      Distanza = 1% < 2%
+                                      Stato dist = safe
+                                      → AVVISO SPURIO: "si avvicina allo strike" ✗
+```
+
+Il prezzo sta **risalendo** (allontanandosi dal pericolo), ma l'avviso scatta lo stesso perché la state machine non sa da che direzione arriva il prezzo.
+
+### La soluzione (zero modifiche allo schema)
+
+La fix è puramente logica dentro la state machine esistente: **quando uno stato critico (ITM/OOR) passa da `alerted` → `safe`, pre-impostare lo stato di distanza corrispondente a `alerted`** invece che `safe`.
+
+Questo significa che:
+- L'avviso di distanza **non scatterà** durante il ritorno dal lato pericoloso
+- Lo stato di distanza si resetterà a `safe` **solo quando il prezzo si allontana oltre la soglia** (cioè esce dalla zona di pericolo)
+- Solo a quel punto, un **nuovo avvicinamento genuino** potrà generare un avviso
+
+```text
+Prezzo  Stato ITM    Stato distanza   Cosa succede (con fix)
+─────── ──────────── ──────────────── ──────────────────────────
+ 105    safe         safe             Tutto ok
+  95    → alerted    safe (reset)     Avviso ITM ✓
+  90    alerted      safe             Ancora ITM
+ 101    → safe       → alerted (!)    ITM resettato; distanza PRE-SETTATA
+                                      a "alerted" → NESSUN avviso spurio ✓
+ 104    safe         → safe           Prezzo oltre soglia, distanza resettata
+  98    safe         → alerted        Genuino avvicinamento: avviso ✓
+```
+
+### Modifiche tecniche
+
+**Unico file: `supabase/functions/check-alerts/index.ts`**
+
+Ci sono 6 punti nel codice dove uno stato critico passa da `alerted` → `safe`. In ognuno di questi, aggiungo un upsert che imposta lo stato di distanza corrispondente a `alerted`:
+
+1. **Covered Call ITM → safe** (riga ~496-500): pre-settare `cc_dist_` a `alerted`
+2. **Naked Put ITM → safe** (riga ~607-611): pre-settare `np_dist_` a `alerted`
+3. **Iron Condor OOR → safe** (riga ~722-726): pre-settare `ic_put_dist_` e `ic_call_dist_` a `alerted`
+4. **Double Diagonal OOR → safe** (riga ~894-898): pre-settare `dd_put_dist_` e `dd_call_dist_` a `alerted`
+
+Inoltre, **rimuovere** i blocchi che resettano la distanza a `safe` quando la posizione è ITM/OOR (righe ~548-558, ~659-669, ~774-784, ~831-841, e i corrispondenti per DD). Questi blocchi sono controproducenti: resettano lo stato di distanza a `safe` durante l'ITM, preparando il terreno per l'avviso spurio al ritorno.
+
+### Esempio di codice per Naked Put
 
 ```typescript
-export function orderKey(o: ParsedOrder): string {
-  const normalizedDate = toIsoDateFromIT(o.validityDate) || o.validityDate || '';
-  return `${o.symbol}|${o.operation}|${o.avgPrice}|${o.quantity}|${normalizedDate}`;
+// PRIMA (riga ~607-611):
+} else if (!isITM && currentState?.current_state === 'alerted') {
+  await supabase.from('alert_states')
+    .update({ current_state: 'safe' })
+    .eq('id', currentState.id);
+}
+
+// DOPO:
+} else if (!isITM && currentState?.current_state === 'alerted') {
+  // Reset ITM state to safe
+  await supabase.from('alert_states')
+    .update({ current_state: 'safe' })
+    .eq('id', currentState.id);
+  
+  // Pre-set distance state to 'alerted' to suppress spurious alert
+  // during recovery from ITM side
+  const distPositionKey = `np_dist_${strategy.strategy_key}`;
+  await supabase.from('alert_states').upsert({
+    user_id: userId,
+    portfolio_id: portfolioId,
+    position_key: distPositionKey,
+    alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+    current_state: 'alerted',
+    last_alerted_at: new Date().toISOString(),
+  }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
 }
 ```
 
-### 2. Badge CALL accanto al simbolo (come il badge PUT)
+E **rimuovere** il blocco "Reset distance alert state to 'safe' when ITM":
 
-**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
-
-Nella tabella operazioni (riga ~596-601), aggiungere un badge CALL simmetrico al badge PUT esistente:
-
-```tsx
-<TableCell className="text-xs font-mono">
-  {order.symbol}
-  {order.optionType === 'PUT' && (
-    <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">PUT</Badge>
-  )}
-  {order.optionType === 'CALL' && (
-    <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">CALL</Badge>
-  )}
-</TableCell>
-```
-
-### 3. Colonna "Data operazione" nel riepilogo operazioni
-
-**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
-
-Aggiungere una colonna `Data` nell'header della tabella operazioni (dopo `Op.` e prima di `Simbolo`) che mostra la `validityDate` dell'ordine (il campo `Data Validità` dal file Excel).
-
-```tsx
-// Header
-<TableHead className="text-xs">Data</TableHead>
-
-// Cell
-<TableCell className="text-xs text-muted-foreground">
-  {order.validityDate || '—'}
-</TableCell>
-```
-
-### 4. Calcolatrice rossa se manca una gamba della strategia
-
-**Concetto:** per ogni strategia, le posizioni attuali in portafoglio (gambe) devono risultare "aperte" nell'elenco operazioni della calcolatrice. Una posizione è "aperta" se nell'elenco ordini esiste un'operazione con lo stesso ticker/tipo/strike che non è stata chiusa da un'operazione di segno opposto successiva.
-
-**Implementazione:**
-
-a) **Nuova prop per `CallPremiumCalculatorDialog`:** aggiungere `strategyLegs` opzionale — un array di oggetti `{ optionType: 'CALL'|'PUT', strikePrice: number, quantity: number }` che rappresentano le gambe attuali della strategia.
-
-b) **Funzione di verifica in `CallPremiumCalculatorDialog`:** `checkLegsOpenInOrders(legs, orders)`:
-   - Per ogni gamba, cercare negli ordini caricati operazioni con lo stesso `optionType` e `strikePrice` (estratto dal simbolo via `extractStrikeFromSymbol`)
-   - Calcolare la quantità netta per quella gamba (sell = +, buy = -), considerando solo gli ordini più recenti per determinare se la posizione è ancora aperta
-   - Se la quantità netta corrisponde al segno atteso della gamba in portafoglio (es. quantità negativa per vendita), la gamba è "aperta"
-   - Se qualsiasi gamba non è trovata o risulta chiusa → `missingLegs = true`
-
-c) **Colore calcolatrice rossa:** nella riga della strategia in `Derivatives.tsx`, passare `strategyLegs` alla calcolatrice. Se il salvato ha ordini ma almeno una gamba manca → l'icona della calcolatrice diventa rossa (destructive).
-
-**Logica dettagliata per "gamba aperta":**
 ```typescript
-function isLegOpenInOrders(
-  orders: ParsedOrder[], 
-  leg: { optionType: 'CALL'|'PUT', strikePrice: number, quantity: number }
-): boolean {
-  // Filtra ordini con stesso optionType e strike
-  const legOrders = orders.filter(o => {
-    const strike = extractStrikeFromSymbol(o.symbol);
-    return o.optionType === leg.optionType && strike === leg.strikePrice;
-  });
-  
-  if (legOrders.length === 0) return false;
-  
-  // Ordina per data validità
-  const sorted = [...legOrders].sort((a, b) => {
-    const da = toIsoDateFromIT(a.validityDate) || '';
-    const db = toIsoDateFromIT(b.validityDate) || '';
-    return da.localeCompare(db);
-  });
-  
-  // Calcola quantità netta (sell = +, buy = -)
-  let netQty = 0;
-  for (const order of sorted) {
-    if (order.operation === 'sell') netQty += order.quantity;
-    else netQty -= order.quantity;
-  }
-  
-  // La gamba in portafoglio ha quantity negativa se venduta, positiva se comprata
-  // Verifica che il segno corrisponda
-  if (leg.quantity < 0) return netQty < 0; // venduta → net negativo = aperta
-  if (leg.quantity > 0) return netQty > 0; // comprata → net positivo = aperta
-  return false;
+// RIMUOVERE (riga ~659-669):
+} else if (isITM) {
+  const distPositionKey = `np_dist_${strategy.strategy_key}`;
+  // ... reset to safe ...
 }
 ```
 
-**Passaggio `strategyLegs` dai vari Row:**
+### Riepilogo
 
-- **CoveredCallRow:** `[{ optionType: 'CALL', strikePrice: option.strike_price, quantity: option.quantity }]`
-- **IronCondorRow:** 4 gambe: soldPut, boughtPut, soldCall, boughtCall
-- **DoubleDiagonalRow:** 4 gambe
-- **GroupedOtherStrategyRow:** tutte le opzioni del gruppo
-- **NakedPutRow:** `[{ optionType: 'PUT', strikePrice: option.strike_price, quantity: option.quantity }]`
-
-**Colorazione icona:**
-```tsx
-const hasMissingLegs = savedPremium && savedPremium.orders_json.length > 0 
-  ? !strategyLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json, leg))
-  : false;
-
-<Calculator className={`w-4 h-4 ${hasMissingLegs ? 'text-red-500' : savedPremium ? 'text-primary' : 'text-muted-foreground'}`} />
-```
-
-### Riepilogo modifiche
-
-| File | Modifica |
-|------|----------|
-| `src/lib/orderFileParser.ts` | Normalizzare `validityDate` in `orderKey`, esportare `extractStrikeFromSymbol` e aggiungere `isLegOpenInOrders` |
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Badge CALL, colonna Data, prop `strategyLegs` |
-| `src/pages/Derivatives.tsx` | Passare `strategyLegs` alla calcolatrice, colorare icona se gambe mancanti |
+| Aspetto | Dettaglio |
+|---------|-----------|
+| File modificato | `supabase/functions/check-alerts/index.ts` |
+| Schema DB | Nessuna modifica |
+| Logica | Pre-set distanza a `alerted` al recovery da ITM/OOR |
+| Strategia coperte | Covered Call, Naked Put, Iron Condor (PUT+CALL), Double Diagonal (PUT+CALL) |
+| Effetto collaterale | L'avviso di distanza scatterà solo per avvicinamenti genuini dal lato sicuro |
 
