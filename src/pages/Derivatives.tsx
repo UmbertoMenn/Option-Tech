@@ -60,7 +60,8 @@ import {
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
-import { CallPremiumCalculatorDialog } from '@/components/derivatives/CallPremiumCalculatorDialog';
+import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
+import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
 import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
 import {
   buildIronCondorUrl,
@@ -784,6 +785,12 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const netPerShare = savedPremium?.net_per_share;
   
+  // Check if strategy legs are missing from calculator orders
+  const ccLegs: StrategyLeg[] = [{ optionType: 'CALL', strikePrice: option.strike_price || 0, quantity: option.quantity }];
+  const hasMissingLegs = savedPremium && (savedPremium.orders_json as ParsedOrder[]).length > 0
+    ? !ccLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
+  
   return (
     <>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -866,9 +873,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                   variant="ghost"
                   size="icon"
                   className={`h-7 w-7 ${
-                    savedPremium && savedPremium.orders_json.length > 0
-                      ? 'text-primary hover:text-primary hover:bg-primary/20'
-                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : savedPremium && savedPremium.orders_json.length > 0
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1000,6 +1009,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
         optionSymbol={optionSymbol}
         contractsInPortfolio={contractsCovered}
         underlyingPrice={(option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0}
+        strategyLegs={ccLegs}
       />
     </>
   );
@@ -1195,6 +1205,17 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
   
+  // Strategy legs for missing-legs check
+  const icLegs: StrategyLeg[] = [
+    { optionType: 'PUT', strikePrice: soldPut.strike_price || 0, quantity: soldPut.quantity },
+    { optionType: 'PUT', strikePrice: boughtPut.strike_price || 0, quantity: boughtPut.quantity },
+    { optionType: 'CALL', strikePrice: soldCall.strike_price || 0, quantity: soldCall.quantity },
+    { optionType: 'CALL', strikePrice: boughtCall.strike_price || 0, quantity: boughtCall.quantity },
+  ];
+  const hasMissingLegs = hasSavedGP
+    ? !icLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
+  
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
   const soldCallStrike = soldCall.strike_price || 0;
@@ -1253,9 +1274,11 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
                   variant="ghost"
                   size="icon"
                   className={`h-7 w-7 shrink-0 ${
-                    hasSavedGP
-                      ? 'text-primary hover:text-primary hover:bg-primary/20'
-                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : hasSavedGP
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1450,6 +1473,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
         contractsInPortfolio={contracts}
         underlyingPrice={underlyingPrice}
         strategyType="iron_condor"
+        strategyLegs={icLegs}
       />
     </Collapsible>
   );
@@ -1473,6 +1497,17 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
   const optionSymbol = `DD_${soldExpiryDate || 'unknown'}`;
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
+  
+  // Strategy legs for missing-legs check
+  const ddLegs: StrategyLeg[] = [
+    { optionType: 'PUT', strikePrice: soldPut.strike_price || 0, quantity: soldPut.quantity },
+    { optionType: 'PUT', strikePrice: boughtPut.strike_price || 0, quantity: boughtPut.quantity },
+    { optionType: 'CALL', strikePrice: soldCall.strike_price || 0, quantity: soldCall.quantity },
+    { optionType: 'CALL', strikePrice: boughtCall.strike_price || 0, quantity: boughtCall.quantity },
+  ];
+  const hasMissingLegs = hasSavedGP
+    ? !ddLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
   
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
@@ -1533,9 +1568,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
                   variant="ghost"
                   size="icon"
                   className={`h-7 w-7 shrink-0 ${
-                    hasSavedGP
-                      ? 'text-primary hover:text-primary hover:bg-primary/20'
-                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : hasSavedGP
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1737,6 +1774,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
         contractsInPortfolio={contracts}
         underlyingPrice={underlyingPrice}
         strategyType="double_diagonal"
+        strategyLegs={ddLegs}
       />
     </Collapsible>
   );
@@ -1757,6 +1795,16 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
   const optionSymbol = `OS_${underlying}`;
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
+  
+  // Strategy legs for missing-legs check
+  const osLegs: StrategyLeg[] = options.map(o => ({
+    optionType: (o.option.option_type === 'call' ? 'CALL' : 'PUT') as 'CALL' | 'PUT',
+    strikePrice: o.option.strike_price || 0,
+    quantity: o.option.quantity,
+  }));
+  const hasMissingLegs = hasSavedGP
+    ? !osLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
   
   // Calculate IR/OOR for strategies with sold PUT and CALL (Alternative Double Diagonal, Short Strangle)
   // or single-sided spread strategies (Put Spread, Call Spread, Diagonal Put/Call Spread)
@@ -1891,9 +1939,11 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                   variant="ghost"
                   size="icon"
                   className={`h-7 w-7 shrink-0 ${
-                    hasSavedGP
-                      ? 'text-primary hover:text-primary hover:bg-primary/20'
-                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : hasSavedGP
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2057,6 +2107,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         contractsInPortfolio={options.reduce((sum, o) => sum + Math.abs(o.option.quantity), 0)}
         underlyingPrice={underlyingPrice}
         strategyType="other_strategy"
+        strategyLegs={osLegs}
       />
     </Collapsible>
   );
@@ -2284,6 +2335,12 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
   const netPerShare = savedPremium?.net_per_share;
   
+  // Strategy legs for missing-legs check
+  const npLegs: StrategyLeg[] = [{ optionType: 'PUT', strikePrice: option.strike_price || 0, quantity: option.quantity }];
+  const hasMissingLegs = savedPremium && (savedPremium.orders_json as ParsedOrder[]).length > 0
+    ? !npLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
+  
   return (
     <>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -2345,9 +2402,11 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                   variant="ghost"
                   size="icon"
                   className={`h-7 w-7 ${
-                    savedPremium && savedPremium.orders_json.length > 0
-                      ? 'text-primary hover:text-primary hover:bg-primary/20'
-                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : savedPremium && savedPremium.orders_json.length > 0
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2485,6 +2544,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
         contractsInPortfolio={contracts}
         underlyingPrice={underlyingPrice}
         strategyType="other_strategy"
+        strategyLegs={npLegs}
       />
     </>
   );
