@@ -497,6 +497,18 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+                
+                // Pre-set distance state to 'alerted' to suppress spurious alert
+                // during recovery from ITM side
+                const distPositionKey = `cc_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: distPositionKey,
+                  alert_type: ALERT_TYPES.DISTANCE_COVERED_CALL,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             }
             
@@ -544,16 +556,6 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
-              }
-            } else if (isITM) {
-              // Reset distance alert state to 'safe' when ITM (state transition)
-              const distPositionKey = `cc_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_COVERED_CALL}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
               }
             }
           }
@@ -608,6 +610,18 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+                
+                // Pre-set distance state to 'alerted' to suppress spurious alert
+                // during recovery from ITM side
+                const distPositionKey = `np_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: distPositionKey,
+                  alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             }
             
@@ -655,16 +669,6 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
-              }
-            } else if (isITM) {
-              // Reset distance alert state to 'safe' when ITM (state transition)
-              const distPositionKey = `np_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_NAKED_PUT}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
               }
             }
           }
@@ -723,6 +727,28 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+                
+                // Pre-set both distance states to 'alerted' to suppress spurious alerts
+                // during recovery from OOR
+                const icPutDistKey = `ic_put_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: icPutDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                
+                const icCallDistKey = `ic_call_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: icCallDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             }
             
@@ -771,16 +797,6 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
-            } else if (isOOR_Put) {
-              // Reset PUT distance alert state to 'safe' when OOR on PUT side
-              const distPositionKey = `ic_put_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
-              }
             }
             
             // Distance alerts for IC CALL - SUPPRESSED if already OOR on CALL side
@@ -827,16 +843,6 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
-              }
-            } else if (isOOR_Call) {
-              // Reset CALL distance alert state to 'safe' when OOR on CALL side
-              const distPositionKey = `ic_call_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
               }
             }
           }
@@ -895,6 +901,27 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+                
+                // Pre-set both distance states to 'alerted' to suppress spurious alerts
+                const ddPutDistKey = `dd_put_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: ddPutDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                
+                const ddCallDistKey = `dd_call_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: ddCallDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             }
             
@@ -943,16 +970,6 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
-            } else if (isOOR_Put) {
-              // Reset PUT distance alert state to 'safe' when OOR on PUT side
-              const distPositionKey = `dd_put_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
-              }
             }
             
             // Distance alerts for DD CALL - SUPPRESSED if already OOR on CALL side
@@ -999,16 +1016,6 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
-              }
-            } else if (isOOR_Call) {
-              // Reset CALL distance alert state to 'safe' when OOR on CALL side
-              const distPositionKey = `dd_call_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
               }
             }
           }
@@ -1067,6 +1074,27 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+                
+                // Pre-set both distance states to 'alerted' to suppress spurious alerts
+                const altddPutDistKey = `altdd_put_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: altddPutDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                
+                const altddCallDistKey = `altdd_call_dist_${strategy.strategy_key}`;
+                await supabase.from('alert_states').upsert({
+                  user_id: userId,
+                  portfolio_id: portfolioId,
+                  position_key: altddCallDistKey,
+                  alert_type: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL,
+                  current_state: 'alerted',
+                  last_alerted_at: new Date().toISOString(),
+                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
               }
             }
             
@@ -1115,16 +1143,6 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
-            } else if (isOOR_Put) {
-              // Reset PUT distance alert state to 'safe' when OOR on PUT side
-              const distPositionKey = `altdd_put_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
-              }
             }
             
             // Distance alerts for Alt DD CALL - SUPPRESSED if already OOR on CALL side
@@ -1171,16 +1189,6 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
-              }
-            } else if (isOOR_Call) {
-              // Reset CALL distance alert state to 'safe' when OOR on CALL side
-              const distPositionKey = `altdd_call_dist_${strategy.strategy_key}`;
-              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL}`;
-              const distState = statesMap.get(distStateKey);
-              if (distState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', distState.id);
               }
             }
           }
