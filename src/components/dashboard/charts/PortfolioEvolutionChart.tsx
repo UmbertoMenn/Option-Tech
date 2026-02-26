@@ -51,6 +51,30 @@ interface ChartDataPoint {
   isCurrent?: boolean;
 }
 
+function downsampleData<T extends { timestamp: number }>(
+  data: T[],
+  maxPoints = 30,
+  preserveIndices?: Set<number>
+): T[] {
+  if (data.length <= maxPoints) return data;
+  const result: T[] = [data[0]];
+  const step = (data.length - 2) / (maxPoints - 2);
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(data[Math.round(i * step)]);
+  }
+  result.push(data[data.length - 1]);
+  // Ensure preserved indices are included
+  if (preserveIndices) {
+    for (const idx of preserveIndices) {
+      if (!result.includes(data[idx])) {
+        result.push(data[idx]);
+      }
+    }
+    result.sort((a, b) => a.timestamp - b.timestamp);
+  }
+  return result;
+}
+
 function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
   if (data.length === 0) return [];
   if (data.length <= maxTicks) return data.map(d => d.timestamp);
@@ -128,9 +152,12 @@ export function PortfolioEvolutionChart({
     }
 
     // Ensure chronological order as a safety measure
-    data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    data.sort((a, b) => a.timestamp - b.timestamp);
 
-    return data;
+    // Downsample for smoother curve
+    const currentIdx = data.findIndex(d => d.isCurrent);
+    const preserve = currentIdx >= 0 ? new Set([currentIdx]) : undefined;
+    return downsampleData(data, 30, preserve);
   }, [historicalData, viewMode, currentValue, currentDate, canAppendCurrent]);
 
   if (chartData.length === 0) {
@@ -191,7 +218,7 @@ export function PortfolioEvolutionChart({
           strokeWidth={2}
           fill="url(#portfolioGradient)"
           dot={(props) => {
-            const { cx, cy, payload } = props;
+            const { cx, cy, payload, index } = props;
             if (payload?.isCurrent) {
               return (
                 <circle
@@ -204,7 +231,11 @@ export function PortfolioEvolutionChart({
                 />
               );
             }
-            return <circle cx={cx} cy={cy} r={3} fill="hsl(var(--primary))" />;
+            // Show dots only on first and last points
+            if (index === 0 || index === chartData.length - 1) {
+              return <circle cx={cx} cy={cy} r={3} fill="hsl(var(--primary))" />;
+            }
+            return <circle cx={cx} cy={cy} r={0} />;
           }}
           activeDot={{ r: 5, fill: 'hsl(var(--primary))' }}
         />

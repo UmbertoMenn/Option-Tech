@@ -56,6 +56,20 @@ interface ChartDataPoint {
   benchmarkUsdPctUsed?: number;
 }
 
+function downsampleData<T extends { timestamp: number }>(
+  data: T[],
+  maxPoints = 30
+): T[] {
+  if (data.length <= maxPoints) return data;
+  const result: T[] = [data[0]];
+  const step = (data.length - 2) / (maxPoints - 2);
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(data[Math.round(i * step)]);
+  }
+  result.push(data[data.length - 1]);
+  return result;
+}
+
 function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
   if (data.length === 0) return [];
   if (data.length <= maxTicks) return data.map(d => d.timestamp);
@@ -468,9 +482,10 @@ export function PerformanceEvolutionChart({
     }
 
     // Ensure chronological order as a safety measure
-    data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    data.sort((a, b) => a.timestamp - b.timestamp);
 
-    return data;
+    // Downsample for smoother curve
+    return downsampleData(data, 30);
   }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, canAppendCurrent]);
 
   if (chartData.length === 0) {
@@ -625,7 +640,13 @@ export function PerformanceEvolutionChart({
               dataKey="returnPct"
               stroke="hsl(var(--profit))"
               strokeWidth={2}
-              dot={{ r: 3, fill: 'hsl(var(--profit))' }}
+              dot={(props: any) => {
+                const { cx, cy, index } = props;
+                if (index === 0 || index === chartData.length - 1) {
+                  return <circle cx={cx} cy={cy} r={3} fill="hsl(var(--profit))" />;
+                }
+                return <circle cx={cx} cy={cy} r={0} />;
+              }}
               activeDot={{ r: 5 }}
               name="returnPct"
             />
@@ -636,7 +657,7 @@ export function PerformanceEvolutionChart({
                 stroke="hsl(30, 100%, 50%)"
                 strokeWidth={benchmarkStrokeWidth}
                 strokeOpacity={benchmarkOpacity}
-                dot={{ r: 2, fill: 'hsl(30, 100%, 50%)', fillOpacity: benchmarkOpacity }}
+                dot={false}
                 activeDot={{ r: 4, fill: 'hsl(30, 100%, 50%)' }}
                 name="benchmarkReturn"
               />
