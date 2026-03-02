@@ -1,28 +1,45 @@
 
+Obiettivo: rendere la curva di “Evoluzione Rendimento” davvero leggibile in vista aggregata, eliminando l’effetto erratico nella parte finale.
 
-## Piano: YTD + normalizzazione curve
+Piano di implementazione (1 file):
+File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
 
-### 1. Aggiungere filtro YTD
+1) Sostituire il downsampling attuale (a indice) con downsampling a bucket temporali
+- Problema attuale: `downsampleData` seleziona punti per indice (`Math.round(i * step)`), quindi se i dati sono densi a fine periodo (tipico dell’aggregato), la coda del grafico resta troppo “nervosa”.
+- Fix: creare bucket uniformi sul tempo (timestamp), non sul numero di record, e prendere 1 punto rappresentativo per bucket.
+- Preservare sempre:
+  - primo punto
+  - ultimo punto
+  - eventuale punto corrente (`currentDate`) se presente
 
-**File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
+2) Ridurre in modo più aggressivo il numero massimo di punti renderizzati
+- Aggiornare la logica `maxPoints` nel `useMemo` di `chartData` con soglie più basse di quelle attuali.
+- Proposta:
+  - `1M`: 10
+  - `3M`: 12
+  - `6M`: 14
+  - `1Y`: 18
+  - `2Y`: 22
+  - `3Y` / `MAX` / `YTD`: 24
+- Risultato: meno ancore di tooltip/cursore e linee molto più pulite.
 
-- **Tipo** (riga 33): `'1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX' | 'YTD'`
-- **Bottoni** (riga 231): aggiungere `'YTD'` dopo `'MAX'` nell'array
-- **Label**: YTD non necessita di sostituzione (non contiene "Y" + cifra), viene visualizzato così com'è
-- **Filtro dati** (righe 327-334): aggiungere caso `case 'YTD': cutoffDate = new Date(now.getFullYear(), 0, 1); break;` — filtra dal 1° gennaio dell'anno corrente
-- **Filtro depositi** (righe 379-386): stesso caso YTD
+3) Rifinire interazione cursore/dot
+- Lasciare i dot visibili solo su primo/ultimo (già presente), ma rendere l’`activeDot` più discreto o condizionato.
+- Effetto: il cursore non dà più la sensazione di “agganciarsi” a troppi micro-movimenti.
 
-### 2. Normalizzare le curve (ridurre punti interattivi)
+4) Non toccare la logica YTD già corretta
+- `YTD` resta visibile come etichetta `YTD` (non convertita).
+- Filtro data da 1 gennaio invariato.
 
-Il downsampling a 30 punti è già attivo, ma il problema è che il tooltip `activeDot` reagisce comunque a tutti i 30 punti. Per range brevi (1M, 3M) i dati originali possono essere pochi e la curva è già liscia, ma per range lunghi con molti snapshot la curva resta erratica perché 30 punti sono ancora troppi per periodi con alta volatilità giornaliera.
+Verifica end-to-end (obbligatoria)
+- Aprire dashboard su “Il mio aggregato”.
+- Testare range: `6M`, `1Y`, `YTD`, `MAX`.
+- Verificare:
+  - coda curva visivamente più stabile
+  - meno stop del tooltip con il mouse
+  - nessuna regressione su benchmark/admin
+  - etichetta `YTD` corretta.
 
-**Soluzione**: ridurre `maxPoints` dinamicamente in base al range:
-- `1M`, `3M`: maxPoints = 20 (pochi dati, curva già liscia)
-- `6M`, `1Y`: maxPoints = 25
-- `2Y`, `3Y`, `MAX`, `YTD`: maxPoints = 30
-
-Questo si implementa passando il `timeRange` alla logica di downsampling nel `useMemo` di `chartData` (riga 504).
-
-### File modificato
-Solo `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
-
+Dettagli tecnici
+- Punto chiave: il bug visivo non è nel filtro temporale, ma nel campionamento “per indice”.
+- In serie aggregate, la distribuzione date non è uniforme: il campionamento temporale uniforme risolve proprio la coda erratica che stai vedendo.
