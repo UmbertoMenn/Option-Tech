@@ -100,9 +100,9 @@ export function PositionsTable({ positions }: PositionsTableProps) {
       )}
 
       <div className="rounded-lg border border-border overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
           <table className="data-table min-w-[900px]">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-card">
               <tr>
                 <th className="cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('description')}>
                   <div className="flex items-center gap-1">
