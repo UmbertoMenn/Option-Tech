@@ -223,9 +223,9 @@ serve(async (req) => {
 
     // Step 1: Get all active derivative positions
     const today = new Date().toISOString().split('T')[0];
-    const { data: derivatives, error: derivError } = await supabase
+    const { data: allDerivatives, error: derivError } = await supabase
       .from('positions')
-      .select('id, underlying, option_type, strike_price, expiry_date')
+      .select('id, underlying, option_type, strike_price, expiry_date, description')
       .eq('asset_type', 'derivative')
       .not('underlying', 'is', null)
       .not('option_type', 'is', null)
@@ -235,7 +235,7 @@ serve(async (req) => {
 
     if (derivError) throw new Error(`Error fetching derivatives: ${derivError.message}`);
 
-    if (!derivatives || derivatives.length === 0) {
+    if (!allDerivatives || allDerivatives.length === 0) {
       console.log("No active derivatives found");
       return new Response(
         JSON.stringify({ success: true, message: "No active derivatives", updated: 0, failed: 0, duration_ms: Date.now() - startTime }),
@@ -243,7 +243,27 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Found ${derivatives.length} active derivative positions`);
+    // Filter out EUREX/IDEM options — Yahoo doesn't support European option chains
+    const eurexIdemSkipped = allDerivatives.filter(d => {
+      const desc = (d.description || '').toUpperCase();
+      return desc.startsWith('EUREX,') || desc.startsWith('IDEM,');
+    });
+    const derivatives = allDerivatives.filter(d => {
+      const desc = (d.description || '').toUpperCase();
+      return !desc.startsWith('EUREX,') && !desc.startsWith('IDEM,');
+    });
+
+    console.log(`Found ${allDerivatives.length} active derivatives: ${derivatives.length} US (will update), ${eurexIdemSkipped.length} EUREX/IDEM (skipped)`);
+    if (eurexIdemSkipped.length > 0) {
+      console.log(`Skipped EUREX/IDEM examples: ${eurexIdemSkipped.slice(0, 3).map(d => d.description).join('; ')}`);
+    }
+
+    if (derivatives.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, message: "All derivatives are EUREX/IDEM, skipped", updated: 0, failed: 0, eurex_idem_skipped: eurexIdemSkipped.length, duration_ms: Date.now() - startTime }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Step 2: Resolve underlying -> ticker mappings
     const uniqueUnderlyings = [...new Set(derivatives.map(d => d.underlying).filter(Boolean))];
@@ -381,7 +401,8 @@ serve(async (req) => {
         updated,
         failed,
         skipped: skipped.length,
-        total: derivatives.length,
+        eurex_idem_skipped: eurexIdemSkipped.length,
+        total: allDerivatives.length,
         groups: groupEntries.length,
         duration_ms: durationMs,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
