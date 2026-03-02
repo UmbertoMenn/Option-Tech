@@ -436,27 +436,26 @@ serve(async (req) => {
         console.log(`Detected EU exchange for "${underlying}", cleaned to: "${cleanedUnderlying}"`);
       }
       
-      // Step 0: Check if input looks like a ticker (1-5 uppercase letters, optional hyphen/dot suffix)
-      // If so, validate directly on Yahoo Finance before other lookups
-      const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?(\.[A-Z]{1,4})?$/;
-      const upperInput = cleanedUnderlying.toUpperCase().trim();
-      if (tickerPattern.test(upperInput)) {
-        console.log(`Input "${underlying}" looks like a ticker, validating directly...`);
-        const isValid = await validateTicker(upperInput);
-        if (isValid) {
-          ticker = upperInput;
-          console.log(`Direct ticker "${upperInput}" validated successfully`);
-        } else {
-          console.log(`Direct ticker "${upperInput}" validation failed, continuing with other methods`);
-        }
+      // Step 0: Try static SPECIAL_MAPPINGS FIRST (use cleaned name for EU)
+      // These take ABSOLUTE priority to prevent ambiguous tickers (e.g. SAP → SAP.DE, not SAP US ADR)
+      ticker = resolveTickerFromName(cleanedUnderlying);
+      if (ticker) {
+        console.log(`Resolved "${cleanedUnderlying}" via static mapping: ${ticker}`);
       }
       
-      // Step 1: Try static mappings FIRST (use cleaned name for EU)
-      // These take priority over DB cache to prevent stale/wrong mappings
+      // Step 0b: Only if no static mapping, check if input looks like a ticker
       if (!ticker) {
-        ticker = resolveTickerFromName(cleanedUnderlying);
-        if (ticker) {
-          console.log(`Resolved "${cleanedUnderlying}" via static mapping: ${ticker}`);
+        const tickerPattern = /^[A-Z]{1,5}(-[A-Z])?(\.[A-Z]{1,4})?$/;
+        const upperInput = cleanedUnderlying.toUpperCase().trim();
+        if (tickerPattern.test(upperInput)) {
+          console.log(`Input "${underlying}" looks like a ticker, validating directly...`);
+          const isValid = await validateTicker(upperInput);
+          if (isValid) {
+            ticker = upperInput;
+            console.log(`Direct ticker "${upperInput}" validated successfully`);
+          } else {
+            console.log(`Direct ticker "${upperInput}" validation failed, continuing with other methods`);
+          }
         }
       }
       

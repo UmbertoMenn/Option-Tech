@@ -37,17 +37,13 @@ interface StrategyRecord {
  * The prices map is keyed by underlying name with UnderlyingPrice as value
  */
 function resolveTicker(underlying: string, underlyingPrices: Record<string, UnderlyingPrice>): string | null {
-  // First check if the underlying itself looks like a ticker (1-5 uppercase letters)
-  const tickerMatch = underlying.match(/^[A-Z]{1,5}$/);
-  if (tickerMatch) return underlying;
-  
-  // Check direct match in prices map
+  // 1. Check direct match in prices map FIRST — this uses the canonical mapping (e.g. SAP → SAP.DE)
   const priceData = underlyingPrices[underlying];
   if (priceData?.ticker) {
     return priceData.ticker;
   }
   
-  // Try to find by searching keys
+  // 2. Try to find by searching keys (fuzzy)
   const upperUnderlying = underlying.toUpperCase();
   for (const [key, value] of Object.entries(underlyingPrices)) {
     const upperKey = key.toUpperCase();
@@ -55,6 +51,11 @@ function resolveTicker(underlying: string, underlyingPrices: Record<string, Unde
       if (value.ticker) return value.ticker;
     }
   }
+  
+  // 3. Fallback: if the underlying itself looks like a ticker (1-5 uppercase letters)
+  // This is LAST to prevent ambiguous tickers (e.g. SAP) from bypassing proper mappings
+  const tickerMatch = underlying.match(/^[A-Z]{1,5}$/);
+  if (tickerMatch) return underlying;
   
   return null;
 }

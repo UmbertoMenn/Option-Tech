@@ -244,9 +244,12 @@ async function computeSectionsFromCache(
     if (!normalizedMappings.has(norm)) normalizedMappings.set(norm, m.ticker);
   }
 
-  // Helper to get price for a strategy
+  // Helper to get price for a strategy — prefer resolved mapping ticker over cached ticker
   const getPrice = (s: StrategyRow): number => {
-    // Try ticker first, then underlying
+    // First try resolving via underlying_mappings (canonical ticker, e.g. SAP.DE)
+    const resolved = resolveStockTicker(s.underlying, directMappings, normalizedMappings);
+    if (resolved && prices[resolved]) return prices[resolved];
+    // Then try cached ticker
     if (s.ticker && prices[s.ticker]) return prices[s.ticker];
     if (s.underlying && prices[s.underlying]) return prices[s.underlying];
     return 0;
@@ -278,9 +281,11 @@ async function computeSectionsFromCache(
     underlyingBalance.get(key)!.owned += stock.quantity;
   }
 
-  // Count calls from strategies - use ticker from strategy_cache
+  // Count calls from strategies - resolve ticker via mappings for consistency with stock resolution
   for (const s of typedStrategies) {
-    const key = s.ticker || getMatchingKey(s.underlying);
+    // Use the same resolution path as stocks: first try underlying_mappings, then fallback
+    const resolvedTicker = resolveStockTicker(s.underlying, directMappings, normalizedMappings);
+    const key = resolvedTicker || s.ticker || getMatchingKey(s.underlying);
 
     if (!underlyingBalance.has(key)) {
       underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
