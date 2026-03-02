@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ScrollArrows } from "@/components/ui/ScrollArrows";
 import { DisclaimerDialog } from "@/components/auth/DisclaimerDialog";
 import { toast } from "sonner";
 import { ThemeProvider } from "next-themes";
@@ -78,6 +79,7 @@ function AppRoutes() {
 
   return (
     <PortfolioProvider>
+      <ScrollArrows />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={
