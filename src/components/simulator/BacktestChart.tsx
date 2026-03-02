@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BacktestDayResult, AdjustmentLog } from '@/lib/backtestEngine';
 import {
-  ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Brush, Legend
+  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Brush
 } from 'recharts';
 
 interface BacktestChartProps {
@@ -13,8 +13,6 @@ interface BacktestChartProps {
 
 interface ChartDataPoint {
   date: string;
-  stockPL: number;
-  strategyPL: number;
   price: number;
   adjustmentDesc: string | null;
 }
@@ -27,18 +25,6 @@ function CustomTooltip({ active, payload }: any) {
   return (
     <div className="bg-card border border-border rounded-lg p-3 shadow-lg text-xs max-w-xs">
       <p className="font-mono text-muted-foreground mb-1">{data.date}</p>
-      <div className="flex justify-between gap-4">
-        <span>P/L Sottostante:</span>
-        <span className={data.stockPL >= 0 ? 'text-green-500' : 'text-red-500'} style={{ fontFamily: 'monospace' }}>
-          ${data.stockPL.toFixed(2)}
-        </span>
-      </div>
-      <div className="flex justify-between gap-4">
-        <span>P/L Strategia:</span>
-        <span className={data.strategyPL >= 0 ? 'text-green-500' : 'text-red-500'} style={{ fontFamily: 'monospace' }}>
-          ${data.strategyPL.toFixed(2)}
-        </span>
-      </div>
       <div className="flex justify-between gap-4">
         <span>Prezzo:</span>
         <span style={{ fontFamily: 'monospace' }}>${data.price.toFixed(2)}</span>
@@ -72,8 +58,6 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
 
     return days.map(d => ({
       date: d.date,
-      stockPL: Math.round(d.stockPL * 100) / 100,
-      strategyPL: Math.round(d.strategyPL * 100) / 100,
       price: d.underlyingPrice,
       adjustmentDesc: descMap.get(d.date)?.join('\n') ?? null,
     }));
@@ -82,7 +66,7 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
   if (days.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-base">Evoluzione P/L</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Prezzo & Operazioni</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground text-center py-8">Esegui il backtest per vedere i risultati</p>
         </CardContent>
@@ -93,37 +77,20 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Evoluzione P/L</CardTitle>
+        <CardTitle className="text-base">Prezzo & Operazioni</CardTitle>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={chartData}>
-            <defs>
-              <linearGradient id="stratGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
-                <stop offset="50%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
-                <stop offset="50%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                <stop offset="100%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-              </linearGradient>
-            </defs>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
             <XAxis dataKey="date" className="text-xs" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-            <YAxis yAxisId="pl" className="text-xs" tick={{ fontSize: 10 }} />
-            <YAxis yAxisId="price" orientation="right" className="text-xs" tick={{ fontSize: 10 }} />
+            <YAxis className="text-xs" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
             <Tooltip content={<CustomTooltip />} />
-            <Legend />
-            <ReferenceLine yAxisId="pl" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
             <Line
-              yAxisId="pl" type="monotone" dataKey="stockPL"
-              stroke="hsl(var(--muted-foreground))" strokeWidth={1.5}
-              strokeDasharray="5 3" dot={false} name="P/L Sottostante"
+              type="monotone" dataKey="price"
+              stroke="hsl(var(--chart-2))" strokeWidth={2}
+              dot={<CustomDot />} name="Prezzo"
             />
-            <Area
-              yAxisId="pl" type="monotone" dataKey="strategyPL" fill="url(#stratGradient)"
-              stroke="hsl(var(--chart-2))" strokeWidth={2} name="P/L Strategia"
-              dot={<CustomDot />}
-            />
-            <Line yAxisId="price" type="monotone" dataKey="price" stroke="hsl(var(--muted-foreground))" strokeWidth={1} dot={false} name="Prezzo" opacity={0.4} />
             <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
           </ComposedChart>
         </ResponsiveContainer>
