@@ -201,88 +201,102 @@ export function HistoricalDataForm({
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground font-medium">Dati salvati</p>
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {historicalData.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={cn(
-                      "p-3 rounded-md bg-muted/30 border border-border/50 text-sm",
-                      editingId === entry.id && "ring-2 ring-primary"
-                    )}
-                  >
-                    {editingId === entry.id ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium">Modifica dato</p>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={resetForm}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </div>
+                {(() => {
+                  const grouped = historicalData.reduce((acc, entry) => {
+                    const year = new Date(entry.snapshot_date).getFullYear();
+                    if (!acc[year]) acc[year] = [];
+                    acc[year].push(entry);
+                    return acc;
+                  }, {} as Record<number, typeof historicalData>);
+                  const years = Object.keys(grouped).map(Number).sort((a, b) => b - a);
+                  return years.map(year => (
+                    <div key={year}>
+                      <p className="text-xs text-muted-foreground font-medium text-center py-1">── {year} ──</p>
+                      {grouped[year].map((entry) => (
+                        <div
+                          key={entry.id}
+                          className={cn(
+                            "p-3 rounded-md bg-muted/30 border border-border/50 text-sm mb-2",
+                            editingId === entry.id && "ring-2 ring-primary"
+                          )}
+                        >
+                          {editingId === entry.id ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm font-medium">Modifica dato</p>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={resetForm}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
 
-                        {renderFormFields()}
+                              {renderFormFields()}
 
-                        <div className="flex gap-2 pt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={resetForm}
-                            className="flex-1"
-                          >
-                            Annulla
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={handleSave}
-                            disabled={!formDate || !formTotalValue || isLoading}
-                            className="flex-1"
-                          >
-                            <Save className="w-4 h-4 mr-1" />
-                            Salva
-                          </Button>
+                              <div className="flex gap-2 pt-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={resetForm}
+                                  className="flex-1"
+                                >
+                                  Annulla
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSave}
+                                  disabled={!formDate || !formTotalValue || isLoading}
+                                  className="flex-1"
+                                >
+                                  <Save className="w-4 h-4 mr-1" />
+                                  Salva
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between">
+                              <div className="space-y-1">
+                                <p className="font-medium">
+                                  {format(new Date(entry.snapshot_date), 'dd MMMM', { locale: it })}
+                                </p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
+                                  <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
+                                  <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
+                                  <span>Equity Exp.: <span className="font-mono text-foreground">{((entry.equity_exposure_pct ?? 0.6) * 100).toFixed(0)}%</span></span>
+                                  <span>USD Exp.: <span className="font-mono text-foreground">{((entry.usd_exposure_pct ?? 0.8) * 100).toFixed(0)}%</span></span>
+                                </div>
+                              </div>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => startEdit(entry)}
+                                  disabled={isEditing}
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => onDelete(entry.id)}
+                                  disabled={isEditing}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                          <p className="font-medium">
-                            {format(new Date(entry.snapshot_date), 'dd MMMM yyyy', { locale: it })}
-                          </p>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                            <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
-                            <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
-                            <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
-                            <span>Equity Exp.: <span className="font-mono text-foreground">{((entry.equity_exposure_pct ?? 0.6) * 100).toFixed(0)}%</span></span>
-                            <span>USD Exp.: <span className="font-mono text-foreground">{((entry.usd_exposure_pct ?? 0.8) * 100).toFixed(0)}%</span></span>
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => startEdit(entry)}
-                            disabled={isEditing}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => onDelete(entry.id)}
-                            disabled={isEditing}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      ))}
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
           )}

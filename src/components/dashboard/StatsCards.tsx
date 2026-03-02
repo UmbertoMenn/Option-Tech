@@ -9,10 +9,13 @@ import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
-import { differenceInDays, parseISO } from 'date-fns';
+import { differenceInDays, parseISO, format, getYear } from 'date-fns';
+import { it } from 'date-fns/locale';
 import {
   Select,
   SelectContent,
+  SelectGroup,
+  SelectLabel,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -409,13 +412,27 @@ export function StatsCards({
                       <Calendar className="w-3 h-3 mr-1" />
                       <SelectValue placeholder="Data riferimento" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-[250px] overflow-y-auto">
                       <SelectItem value="none">Nessuna data</SelectItem>
-                      {historicalData.map((entry) => (
-                        <SelectItem key={entry.id} value={entry.snapshot_date}>
-                          {formatDate(entry.snapshot_date)}
-                        </SelectItem>
-                      ))}
+                      {(() => {
+                        const grouped = historicalData.reduce((acc, entry) => {
+                          const year = getYear(new Date(entry.snapshot_date));
+                          if (!acc[year]) acc[year] = [];
+                          acc[year].push(entry);
+                          return acc;
+                        }, {} as Record<number, typeof historicalData>);
+                        const years = Object.keys(grouped).map(Number).sort((a, b) => b - a);
+                        return years.map(year => (
+                          <SelectGroup key={year}>
+                            <SelectLabel className="text-xs text-muted-foreground">── {year} ──</SelectLabel>
+                            {grouped[year].map((entry) => (
+                              <SelectItem key={entry.id} value={entry.snapshot_date}>
+                                {format(new Date(entry.snapshot_date), 'dd MMM', { locale: it })}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>
