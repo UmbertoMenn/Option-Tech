@@ -30,7 +30,7 @@ import { formatNumber } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
-type TimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX';
+type TimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX' | 'YTD';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -228,7 +228,7 @@ function CustomLegend({
       <div className="flex items-center gap-3">
         {/* Time range selector */}
         <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
-          {(['1M', '3M', '6M', '1Y', '2Y', '3Y', 'MAX'] as const).map((range) => (
+          {(['1M', '3M', '6M', '1Y', '2Y', '3Y', 'MAX', 'YTD'] as const).map((range) => (
             <button
               key={range}
               onClick={() => onTimeRangeChange(range)}
@@ -331,6 +331,7 @@ export function PerformanceEvolutionChart({
       case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
       case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
       case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
+      case 'YTD': cutoffDate = new Date(now.getFullYear(), 0, 1); break;
       default: cutoffDate = new Date(0); break;
     }
     
@@ -383,6 +384,7 @@ export function PerformanceEvolutionChart({
       case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
       case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
       case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
+      case 'YTD': cutoffDate = new Date(now.getFullYear(), 0, 1); break;
       default: cutoffDate = new Date(0); break;
     }
     
@@ -500,8 +502,11 @@ export function PerformanceEvolutionChart({
     // Ensure chronological order as a safety measure
     data.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Downsample for smoother curve
-    return downsampleData(data, 30);
+    // Downsample for smoother curve — dynamic maxPoints based on range
+    const maxPoints = (timeRange === '1M' || timeRange === '3M') ? 20
+      : (timeRange === '6M' || timeRange === '1Y') ? 25
+      : 30;
+    return downsampleData(data, maxPoints);
   }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, canAppendCurrent]);
 
   if (chartData.length === 0) {
