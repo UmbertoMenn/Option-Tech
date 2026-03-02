@@ -1,19 +1,13 @@
 
 
-## Aggiungere frecce su/giù alla scrollbar della pagina
+## Soluzione: limitare l'altezza della tabella Posizioni con scroll interno
 
-Il browser non supporta nativamente le frecce sulla scrollbar tramite CSS (`::-webkit-scrollbar-button` esiste ma è molto limitato e non cross-browser). L'approccio migliore è aggiungere due pulsanti fissi (freccia su e freccia giù) ai bordi dello schermo che scrollano la pagina.
+Il problema è che la tabella posizioni estende la pagina enormemente, rendendo la scrollbar del browser minuscola. La soluzione è aggiungere un'altezza massima al contenitore della tabella con scroll verticale interno, mantenendo l'header della tabella visibile (sticky).
 
-### Implementazione
+### Modifiche
 
-**File: `src/components/ui/ScrollArrows.tsx`** (nuovo)
-- Creare un componente con due pulsanti fissi posizionati in basso a destra dello schermo (sopra e sotto la scrollbar visuale)
-- Pulsante su: `position: fixed`, bottom-right, scroll up di ~300px con `smooth`
-- Pulsante giù: sotto il pulsante su, scroll down di ~300px con `smooth`
-- Nascondere il pulsante su quando si è in cima, e il pulsante giù quando si è in fondo
-- Usare icone `ChevronUp` e `ChevronDown` da lucide-react
-- Stile coerente col tema: sfondo `card`, bordo `border`, hover `primary`
-
-**File: `src/App.tsx`**
-- Importare e renderizzare `<ScrollArrows />` dentro il layout principale, visibile su tutte le pagine quando l'utente è autenticato
+**File: `src/components/dashboard/PositionsTable.tsx`**
+- Aggiungere `max-h-[600px] overflow-y-auto` al div contenitore della tabella (riga 102-103)
+- Rendere l'header della tabella sticky con `sticky top-0 z-10 bg-card`
+- Così la tabella scrolla internamente senza far crescere la pagina all'infinito
 
