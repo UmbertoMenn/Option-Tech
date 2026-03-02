@@ -153,6 +153,26 @@ const SPECIAL_MAPPINGS: Record<string, string> = {
   'SHELL': 'SHEL.L',
   'RHEINMETALL': 'RHM.DE',
   'RHEINMETALL AG': 'RHM.DE',
+  // Italian stocks
+  'TELECOM ITALIA': 'TIT.MI',
+  'TELECOM ITALIA SPA': 'TIT.MI',
+  'WEBUILD': 'WBD.MI',
+  'WEBUILD SPA': 'WBD.MI',
+  'SOL': 'SOL.MI',
+  'SOL SPA': 'SOL.MI',
+  // Swiss stocks
+  'SIKA': 'SIKA.SW',
+  'SIKA AG': 'SIKA.SW',
+  'SIKA AG-BR': 'SIKA.SW',
+  'NOVARTIS': 'NOVN.SW',
+  'NOVARTIS AG': 'NOVN.SW',
+  'NOVARTIS AG-REG SHS': 'NOVN.SW',
+  'ROCHE': 'ROG.SW',
+  'ROCHE HOLDING': 'ROG.SW',
+  'ROCHE HOLDING AG': 'ROG.SW',
+  'UBS': 'UBSG.SW',
+  'UBS GROUP': 'UBSG.SW',
+  'UBS GROUP AG': 'UBSG.SW',
 };
 
 // Detect if underlying comes from a European exchange

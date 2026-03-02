@@ -587,7 +587,8 @@ async function computeSectionsFromCache(
     // Count covered calls already sold on this underlying
     let soldCallContracts = 0;
     for (const s of typedStrategies.filter(s => s.strategy_type === "Covered Call")) {
-      const sKey = s.ticker || getMatchingKey(s.underlying);
+      const sKey = resolveStockTicker(s.underlying, directMappings, normalizedMappings)
+        || s.ticker || getMatchingKey(s.underlying);
       if (sKey === stockKey) {
         const posId = s.position_ids?.[0];
         const pos = posId ? positions.find(p => p.id === posId) : null;
