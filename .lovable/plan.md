@@ -1,34 +1,54 @@
 
 
-## Selezione date a due livelli: Mese → Data
+## Selettore data a navigazione gerarchica (singolo Select)
 
 ### Problema
-Anche raggruppando per anno, con molte date lo scroll resta infinito. Serve una navigazione a due step.
+Ci sono due Select affiancati. L'utente vuole **un solo selettore** con navigazione drill-down: Anno → Mese → Data.
 
 ### Soluzione
-Sostituire il singolo Select con **due Select affiancati**:
+Sostituire `DateSelectorDual` con un **singolo Select** che mostra 3 livelli di navigazione in sequenza:
 
-1. **Select Mese/Anno** — mostra i mesi disponibili in formato `MMM yyyy` (es. "Mar 2026", "Feb 2026"), ordinati dal più recente
-2. **Select Data** — mostra solo le date del mese selezionato, in formato `dd/MM/yyyy` (es. "01/03/2026")
+1. **Stato iniziale**: mostra gli **anni** disponibili (es. 2026, 2025, 2024)
+2. **Dopo aver scelto un anno**: mostra i **mesi** di quell'anno (es. Marzo, Febbraio, Gennaio) + un "← Indietro" per tornare agli anni
+3. **Dopo aver scelto un mese**: mostra le **date** di quel mese in formato `dd/MM/yyyy` + un "← Indietro" per tornare ai mesi + "Nessuna" per resettare
 
-Quando si seleziona un mese, il secondo Select si popola con le date di quel mese. Il valore "Nessuna data" resta come opzione di reset.
+Quando l'utente seleziona una data finale, il Select si chiude e mostra la data selezionata. Il trigger mostra sempre la data completa selezionata (es. `01/03/2026`) o "Seleziona data" se nessuna.
 
-### File da modificare
+### Implementazione
 
-**1. `src/components/dashboard/StatsCards.tsx` (righe 405-438)**
-- Estrarre i mesi disponibili da `historicalData` come `Set<string>` (chiave `yyyy-MM`)
-- Aggiungere stato locale `selectedMonth` (default: mese della data selezionata corrente, o il più recente)
-- Primo Select: mesi disponibili, formato `MMM yyyy`
-- Secondo Select: date filtrate per mese selezionato, formato `dd/MM/yyyy`
-- Layout: due select in riga (`grid grid-cols-2 gap-1`)
+**File: `src/components/dashboard/DateSelectorDual.tsx`** — riscrittura completa
 
-**2. `src/components/dashboard/HistoricalDataForm.tsx` (lista snapshot)**
-- Stesso raggruppamento per mese con intestazioni `MMM yyyy`
-- Date mostrate come `dd/MM/yyyy` complete
+- Usare un `Popover` invece di `Select` (per controllare apertura/chiusura e contenuto dinamico)
+- Stato interno: `level` (`year` | `month` | `date`), `selectedYear`, `selectedMonth`
+- Ogni livello è una lista di `Button` cliccabili dentro il `PopoverContent`
+- Click su anno → passa a livello mese; click su mese → passa a livello date; click su data → chiude popover e chiama `onDateChange`
+- Pulsante "← Indietro" per tornare al livello precedente
+- Layout compatto, stessa larghezza del selettore attuale
 
-### Risultato visivo (Card PL)
+### Risultato visivo
 ```
-[Mar 2026 ▼] [01/03/2026 ▼]
+[Seleziona data ▼]        → click
+  ┌──────────────┐
+  │ 2026         │        → click "2026"
+  │ 2025         │
+  │ 2024         │
+  └──────────────┘
+  ┌──────────────┐
+  │ ← Indietro   │
+  │ Marzo        │        → click "Marzo"
+  │ Febbraio     │
+  │ Gennaio      │
+  └──────────────┘
+  ┌──────────────┐
+  │ ← Indietro   │
+  │ Nessuna      │
+  │ 01/03/2026   │        → click → selezionata, popover chiuso
+  │ 15/03/2026   │
+  └──────────────┘
 ```
-Selezionando un mese diverso, il secondo dropdown mostra solo le date di quel mese. Nessuno scroll infinito.
+
+Trigger mostra: `01/03/2026` (o `Seleziona data` se nessuna)
+
+### File modificati
+- `src/components/dashboard/DateSelectorDual.tsx` — riscrittura con Popover + navigazione a 3 livelli
 
