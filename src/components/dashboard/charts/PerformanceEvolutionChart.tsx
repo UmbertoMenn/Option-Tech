@@ -56,17 +56,67 @@ interface ChartDataPoint {
   benchmarkUsdPctUsed?: number;
 }
 
+// Temporal bucket downsampling: distributes points uniformly over TIME, not index.
+// This prevents dense clusters at the tail when aggregated data has uneven date density.
 function downsampleData<T extends { timestamp: number }>(
   data: T[],
-  maxPoints = 30
+  maxPoints = 30,
+  preserveTimestamp?: number // optional: always keep a point closest to this timestamp
 ): T[] {
   if (data.length <= maxPoints) return data;
-  const result: T[] = [data[0]];
-  const step = (data.length - 2) / (maxPoints - 2);
-  for (let i = 1; i < maxPoints - 1; i++) {
-    result.push(data[Math.round(i * step)]);
+
+  const first = data[0];
+  const last = data[data.length - 1];
+  const tMin = first.timestamp;
+  const tMax = last.timestamp;
+
+  if (tMax === tMin) return [first];
+
+  // Number of interior buckets (excluding first and last which are always kept)
+  const bucketCount = maxPoints - 2;
+  const bucketSize = (tMax - tMin) / (bucketCount + 1); // +1 so buckets don't include edges
+
+  // For each bucket, pick the point closest to the bucket center
+  const result: T[] = [first];
+  const used = new Set<number>([0, data.length - 1]);
+
+  for (let b = 1; b <= bucketCount; b++) {
+    const bucketCenter = tMin + b * bucketSize;
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 1; i < data.length - 1; i++) {
+      if (used.has(i)) continue;
+      const dist = Math.abs(data[i].timestamp - bucketCenter);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      used.add(bestIdx);
+      result.push(data[bestIdx]);
+    }
   }
-  result.push(data[data.length - 1]);
+
+  // Ensure the preserved timestamp point is included
+  if (preserveTimestamp !== undefined) {
+    let closestIdx = -1;
+    let closestDist = Infinity;
+    for (let i = 0; i < data.length; i++) {
+      const dist = Math.abs(data[i].timestamp - preserveTimestamp);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+    if (closestIdx >= 0 && !used.has(closestIdx)) {
+      result.push(data[closestIdx]);
+    }
+  }
+
+  result.push(last);
+  // Sort by timestamp to maintain chronological order
+  result.sort((a, b) => a.timestamp - b.timestamp);
   return result;
 }
 
@@ -502,11 +552,15 @@ export function PerformanceEvolutionChart({
     // Ensure chronological order as a safety measure
     data.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Downsample for smoother curve — dynamic maxPoints based on range
-    const maxPoints = (timeRange === '1M' || timeRange === '3M') ? 20
-      : (timeRange === '6M' || timeRange === '1Y') ? 25
-      : 30;
-    return downsampleData(data, maxPoints);
+    // Downsample with temporal buckets — aggressive reduction for smoother curves
+    const maxPoints = (timeRange === '1M') ? 10
+      : (timeRange === '3M') ? 12
+      : (timeRange === '6M') ? 14
+      : (timeRange === '1Y') ? 18
+      : (timeRange === '2Y') ? 22
+      : 24; // 3Y, MAX, YTD
+    const preserveTs = currentDate ? new Date(currentDate).getTime() : undefined;
+    return downsampleData(data, maxPoints, preserveTs);
   }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, canAppendCurrent]);
 
   if (chartData.length === 0) {
@@ -668,7 +722,7 @@ export function PerformanceEvolutionChart({
                 }
                 return <circle cx={cx} cy={cy} r={0} />;
               }}
-              activeDot={{ r: 5 }}
+              activeDot={{ r: 4, strokeWidth: 0 }}
               name="returnPct"
             />
             {isAdmin && hasBenchmarkData && (
