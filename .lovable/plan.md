@@ -1,13 +1,23 @@
 
 
-## Soluzione: limitare l'altezza della tabella Posizioni con scroll interno
+## Bug: confronto case-sensitive nella diagnostica
 
-Il problema è che la tabella posizioni estende la pagina enormemente, rendendo la scrollbar del browser minuscola. La soluzione è aggiungere un'altezza massima al contenitore della tabella con scroll verticale interno, mantenendo l'header della tabella visibile (sticky).
+La diagnostica usa `Set.has()` con stringhe esatte, ma i nomi nelle `positions` sono in case misto (`Broadcom Inc`, `Eni`, `Ferrari`) mentre in `underlying_mappings` sono tutti maiuscoli (`BROADCOM INC`, `ENI`, `FERRARI`). Il tab Ticker non li mostra perché usa normalizzazione case-insensitive.
 
-### Modifiche
+### Fix
 
-**File: `src/components/dashboard/PositionsTable.tsx`**
-- Aggiungere `max-h-[600px] overflow-y-auto` al div contenitore della tabella (riga 102-103)
-- Rendere l'header della tabella sticky con `sticky top-0 z-10 bg-card`
-- Così la tabella scrolla internamente senza far crescere la pagina all'infinito
+**File: `src/components/admin/ResolutionDiagnostics.tsx`**
+
+Nella sezione "Underlying senza mapping" (riga 54, 66), normalizzare entrambi i set prima del confronto:
+
+```typescript
+// Riga 54: normalizzare le chiavi del set mappings
+const normalize = (s: string) => s.toUpperCase().replace(/[.,]+/g, ' ').replace(/\s+/g, ' ').trim();
+const mappedUnderlyings = new Set(mappings.map(m => normalize(m.underlying)));
+
+// Riga 66: normalizzare anche gli underlying delle posizioni nel confronto
+const noMapping = [...derivativeUnderlyings].filter(u => !mappedUnderlyings.has(normalize(u))).sort();
+```
+
+Questo allinea la logica della diagnostica con quella del tab Ticker, eliminando i falsi positivi.
 
