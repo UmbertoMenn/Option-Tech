@@ -78,7 +78,7 @@ function isETF(description: string, isin?: string): boolean {
   return false;
 }
 
-export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[] }): Promise<{
+export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): Promise<{
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
   snapshotDate: string | null;
@@ -190,7 +190,7 @@ function extractSnapshotDate(rows: any[][]): string | null {
   return null;
 }
 
-function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[] }): {
+function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
 } {
@@ -247,8 +247,14 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
     if (currentSection === 'cash') {
       // Check if this account should be excluded
       const accountId = String(row[0] || '').trim();
-      if (options?.excludedCashAccounts?.some(acc => accountId.includes(acc))) {
-        console.log(`[ExcelParser] Excluding cash account: ${accountId}`);
+      const isExcludedByList = options?.excludedCashAccounts?.some(acc => accountId.includes(acc));
+      const isExcludedByPattern = options?.excludedCashPatterns?.some(p => {
+        const midStart = Math.floor((accountId.length - p.mid.length) / 2);
+        const mid = accountId.slice(midStart, midStart + p.mid.length);
+        return mid === p.mid && accountId.endsWith(p.last);
+      });
+      if (isExcludedByList || isExcludedByPattern) {
+        console.log(`[ExcelParser] Excluding cash account`);
         continue;
       }
       const value = findColumnValue(row, headerRow, ['VALORIZZAZIONE EUR', 'VALORIZZAZIONE IN DIVISA']);

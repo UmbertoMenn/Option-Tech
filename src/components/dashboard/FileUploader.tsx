@@ -11,8 +11,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 
-const EXCLUDED_CASH_ACCOUNTS: Record<string, string[]> = {
-  '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': ['0652278918440'], // MauroG
+const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
+  '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
 };
 
 export function FileUploader() {
@@ -28,8 +28,6 @@ export function FileUploader() {
     const file = acceptedFiles[0];
     if (!file) return;
 
-    // IMPORTANTE: Cattura il portfolio ID all'inizio per evitare race condition
-    // Se l'utente cambia portfolio durante l'elaborazione, usiamo comunque quello iniziale
     const targetPortfolioId = portfolio?.id;
     if (!targetPortfolioId) {
       toast.error('Nessun portfolio selezionato', {
@@ -42,8 +40,8 @@ export function FileUploader() {
     setUploadSuccess(false);
 
     try {
-      const excludedCashAccounts = EXCLUDED_CASH_ACCOUNTS[effectiveUserId || ''] || [];
-      const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file, { excludedCashAccounts });
+      const excludedPatterns = EXCLUDED_CASH_PATTERNS[effectiveUserId || ''] || [];
+      const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file, { excludedCashPatterns: excludedPatterns });
       
       console.log('[FileUploader] Parsed Excel result:', { 
         positionsCount: positions.length, 
