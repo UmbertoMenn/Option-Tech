@@ -1,54 +1,37 @@
 
 
-## Selettore data a navigazione gerarchica (singolo Select)
+## Mascherare il numero di conto hardcoded e rimuovere il commento
 
-### Problema
-Ci sono due Select affiancati. L'utente vuole **un solo selettore** con navigazione drill-down: Anno → Mese → Data.
+### Cosa fare
 
-### Soluzione
-Sostituire `DateSelectorDual` con un **singolo Select** che mostra 3 livelli di navigazione in sequenza:
+**File: `src/components/dashboard/FileUploader.tsx`**
 
-1. **Stato iniziale**: mostra gli **anni** disponibili (es. 2026, 2025, 2024)
-2. **Dopo aver scelto un anno**: mostra i **mesi** di quell'anno (es. Marzo, Febbraio, Gennaio) + un "← Indietro" per tornare agli anni
-3. **Dopo aver scelto un mese**: mostra le **date** di quel mese in formato `dd/MM/yyyy` + un "← Indietro" per tornare ai mesi + "Nessuna" per resettare
+1. Sostituire il numero di conto completo `'0652278918440'` con una versione mascherata che contiene solo le 4 cifre centrali e l'ultima cifra: `'*****2789*****0'` → in pratica confrontare solo le posizioni 5-8 (4 cifre centrali) e l'ultima cifra del numero di conto proveniente dal file Excel.
 
-Quando l'utente seleziona una data finale, il Select si chiude e mostra la data selezionata. Il trigger mostra sempre la data completa selezionata (es. `01/03/2026`) o "Seleziona data" se nessuna.
+2. Cambiare la logica di confronto: invece di `===` diretto, usare una funzione che verifica se le 4 cifre centrali e l'ultima cifra corrispondono al pattern parziale memorizzato.
+
+3. Rimuovere il commento `// MauroG`.
 
 ### Implementazione
 
-**File: `src/components/dashboard/DateSelectorDual.tsx`** — riscrittura completa
+```typescript
+// Pattern: { userId: [{ mid: '2789', last: '0' }] }
+const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
+  '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
+};
 
-- Usare un `Popover` invece di `Select` (per controllare apertura/chiusura e contenuto dinamico)
-- Stato interno: `level` (`year` | `month` | `date`), `selectedYear`, `selectedMonth`
-- Ogni livello è una lista di `Button` cliccabili dentro il `PopoverContent`
-- Click su anno → passa a livello mese; click su mese → passa a livello date; click su data → chiude popover e chiama `onDateChange`
-- Pulsante "← Indietro" per tornare al livello precedente
-- Layout compatto, stessa larghezza del selettore attuale
-
-### Risultato visivo
-```
-[Seleziona data ▼]        → click
-  ┌──────────────┐
-  │ 2026         │        → click "2026"
-  │ 2025         │
-  │ 2024         │
-  └──────────────┘
-  ┌──────────────┐
-  │ ← Indietro   │
-  │ Marzo        │        → click "Marzo"
-  │ Febbraio     │
-  │ Gennaio      │
-  └──────────────┘
-  ┌──────────────┐
-  │ ← Indietro   │
-  │ Nessuna      │
-  │ 01/03/2026   │        → click → selezionata, popover chiuso
-  │ 15/03/2026   │
-  └──────────────┘
+function matchesExcludedAccount(accountId: string, patterns: { mid: string; last: string }[]): boolean {
+  return patterns.some(p => {
+    const midStart = Math.floor((accountId.length - p.mid.length) / 2);
+    const mid = accountId.slice(midStart, midStart + p.mid.length);
+    return mid === p.mid && accountId.endsWith(p.last);
+  });
+}
 ```
 
-Trigger mostra: `01/03/2026` (o `Seleziona data` se nessuna)
+Nel parsing della liquidità, il filtro `excludedCashAccounts.includes(accountId)` diventa `matchesExcludedAccount(accountId, patterns)`.
 
 ### File modificati
-- `src/components/dashboard/DateSelectorDual.tsx` — riscrittura con Popover + navigazione a 3 livelli
+- `src/components/dashboard/FileUploader.tsx` — pattern parziale + rimozione commento
+- `src/lib/excelParser.ts` — adattare il filtro per accettare pattern invece di ID completi (se il confronto avviene lì)
 
