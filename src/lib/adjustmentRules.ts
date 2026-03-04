@@ -9,19 +9,20 @@ export interface ApproachRule {
 }
 
 export interface ProfitRule {
-  profitPct: number; // % gain threshold (e.g. 80 = option lost 80% value)
-  action: 'wait_and_sell' | 'roll_down';
+  profitPct: number; // % gain threshold (e.g. 50 = option lost 50% value)
+  action: 'dynamic' | 'static';
 
-  // wait_and_sell
-  newCallBarrierPct: number;
+  // First expiry (shared by both modes)
+  firstExpiryMinDistancePct: number; // min % distance of strike from underlying
+  firstExpiryMinPremiumPct: number;  // min premium as % of underlying price
 
-  // roll_down_first_expiry
-  firstExpiryMinDistancePct: number;
-  minPremiumUsd: number;
+  // Rolling Dinamico – later expiries
+  dynamicAnnualizedPremiumPct: number; // annualized net premium threshold %
+  dynamicMinDistancePct: number;       // min % distance of strike from underlying
 
-  // roll_down_any_expiry
-  minDistancePct: number;
-  rollDownMinPremiumUsd: number;
+  // Rolling Statico – later expiries
+  staticMinDistancePct: number;    // min % distance of strike from underlying
+  staticMinPremiumPct: number;     // min net premium as % of underlying price
 }
 
 export interface CoveredCallRules {
@@ -40,12 +41,13 @@ export function getDefaultCoveredCallRules(): CoveredCallRules {
     },
     profitRule: {
       profitPct: 50,
-      action: 'roll_down',
-      newCallBarrierPct: 5,
+      action: 'dynamic',
       firstExpiryMinDistancePct: 5,
-      minPremiumUsd: 0.50,
-      minDistancePct: 5,
-      rollDownMinPremiumUsd: 0.50,
+      firstExpiryMinPremiumPct: 0.5,
+      dynamicAnnualizedPremiumPct: 10,
+      dynamicMinDistancePct: 5,
+      staticMinDistancePct: 5,
+      staticMinPremiumPct: 0.5,
     },
   };
 }

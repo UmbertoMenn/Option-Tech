@@ -98,97 +98,115 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
               <span className="text-xs text-muted-foreground">% (l'opzione ha perso X% del valore)</span>
             </div>
 
+            {/* Shared: first expiry params */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Sulla prima scadenza disponibile, rollo su strike più basso con stessa scadenza, se:
+              </p>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+                <Input
+                  type="number"
+                  value={rules.profitRule.firstExpiryMinDistancePct}
+                  onChange={e => updateProfit({ firstExpiryMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                  className="w-16 h-7 text-xs"
+                />
+                <span className="text-xs">%</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs whitespace-nowrap">Premio minimo</Label>
+                <Input
+                  type="number"
+                  value={rules.profitRule.firstExpiryMinPremiumPct}
+                  onChange={e => updateProfit({ firstExpiryMinPremiumPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                  className="w-16 h-7 text-xs"
+                  step="0.1"
+                />
+                <span className="text-xs">% del sottostante</span>
+              </div>
+            </div>
+
+            <Separator />
+
             <div>
-              <Label className="text-xs mb-2 block">Cosa fai?</Label>
+              <Label className="text-xs mb-2 block">Su scadenze successive, cosa fai?</Label>
               <RadioGroup
                 value={rules.profitRule.action}
-                onValueChange={v => updateProfit({ action: v as CoveredCallRules['profitRule']['action'] })}
+                onValueChange={v => updateProfit({ action: v as 'dynamic' | 'static' })}
                 className="space-y-3"
               >
-                {/* Roll attivo FIRST */}
+                {/* Rolling Dinamico */}
                 <div className="space-y-2">
                   <div className="flex items-start gap-2">
-                    <RadioGroupItem value="roll_down" id="profit_b" className="mt-1" />
-                    <Label htmlFor="profit_b" className="text-xs leading-relaxed cursor-pointer">
-                      Roll attivo
+                    <RadioGroupItem value="dynamic" id="profit_dynamic" className="mt-1" />
+                    <Label htmlFor="profit_dynamic" className="text-xs leading-relaxed cursor-pointer">
+                      Rolling Dinamico
                     </Label>
                   </div>
-                  {rules.profitRule.action === 'roll_down' && (
-                    <div className="pl-6 space-y-4">
-                      {/* Sub-rule 1: First expiry */}
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Sulla prima scadenza disponibile, rollo su strike più basso con stessa scadenza, se il nuovo premio è maggiore di almeno:
-                        </p>
-                        <div className="flex items-center gap-1">
-                          <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
-                          <Input
-                            type="number"
-                            value={rules.profitRule.firstExpiryMinDistancePct}
-                            onChange={e => updateProfit({ firstExpiryMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">%</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            value={rules.profitRule.minPremiumUsd}
-                            onChange={e => updateProfit({ minPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">USD</span>
-                        </div>
+                  {rules.profitRule.action === 'dynamic' && (
+                    <div className="pl-6 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Se l'opzione sta guadagnando più della soglia e i premi netti annualizzati (max 1 anno di lookback) superano la soglia, rollo indietro sulla prima scadenza disponibile, anche in perdita.
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Label className="text-xs whitespace-nowrap">Premi annualizzati min</Label>
+                        <Input
+                          type="number"
+                          value={rules.profitRule.dynamicAnnualizedPremiumPct}
+                          onChange={e => updateProfit({ dynamicAnnualizedPremiumPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                          className="w-16 h-7 text-xs"
+                          step="0.5"
+                        />
+                        <span className="text-xs">%</span>
                       </div>
-
-                      <Separator />
-
-                      {/* Sub-rule 2: Later expiries */}
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Su scadenze successive, cerco sulla scadenza più vicina possibile un'opzione con strike lontano almeno X% dal sottostante e premio netto non inferiore a:
-                        </p>
-                        <div className="flex items-center gap-1">
-                          <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
-                          <Input
-                            type="number"
-                            value={rules.profitRule.minDistancePct}
-                            onChange={e => updateProfit({ minDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">%</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            value={rules.profitRule.rollDownMinPremiumUsd}
-                            onChange={e => updateProfit({ rollDownMinPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                            className="w-16 h-7 text-xs"
-                          />
-                          <span className="text-xs">USD</span>
-                        </div>
+                      <div className="flex items-center gap-1">
+                        <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+                        <Input
+                          type="number"
+                          value={rules.profitRule.dynamicMinDistancePct}
+                          onChange={e => updateProfit({ dynamicMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                          className="w-16 h-7 text-xs"
+                        />
+                        <span className="text-xs">%</span>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Wait and sell SECOND */}
+                {/* Rolling Statico */}
                 <div className="space-y-2">
                   <div className="flex items-start gap-2">
-                    <RadioGroupItem value="wait_and_sell" id="profit_a" className="mt-1" />
-                    <Label htmlFor="profit_a" className="text-xs leading-relaxed cursor-pointer">
-                      Aspetto che scada e rivendo call con barriera:
+                    <RadioGroupItem value="static" id="profit_static" className="mt-1" />
+                    <Label htmlFor="profit_static" className="text-xs leading-relaxed cursor-pointer">
+                      Rolling Statico
                     </Label>
                   </div>
-                  {rules.profitRule.action === 'wait_and_sell' && (
-                    <div className="pl-6 flex items-center gap-1">
-                      <Input
-                        type="number"
-                        value={rules.profitRule.newCallBarrierPct}
-                        onChange={e => updateProfit({ newCallBarrierPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                        className="w-16 h-7 text-xs"
-                      />
-                      <span className="text-xs">%</span>
+                  {rules.profitRule.action === 'static' && (
+                    <div className="pl-6 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Rollo indietro sulla prima scadenza disponibile con distanza minima e premio netto positivo.
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+                        <Input
+                          type="number"
+                          value={rules.profitRule.staticMinDistancePct}
+                          onChange={e => updateProfit({ staticMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                          className="w-16 h-7 text-xs"
+                        />
+                        <span className="text-xs">%</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Label className="text-xs whitespace-nowrap">Premio netto min</Label>
+                        <Input
+                          type="number"
+                          value={rules.profitRule.staticMinPremiumPct}
+                          onChange={e => updateProfit({ staticMinPremiumPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                          className="w-16 h-7 text-xs"
+                          step="0.1"
+                        />
+                        <span className="text-xs">% del sottostante</span>
+                      </div>
                     </div>
                   )}
                 </div>

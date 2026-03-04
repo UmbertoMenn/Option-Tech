@@ -1,7 +1,5 @@
 /**
  * Backtest engine for Covered Call strategy.
- * Iterates bar-by-bar (hourly, 4h or daily), prices options with BS + static IV,
- * applies covered-call adjustment rules, and produces results.
  */
 import { bsPrice, bsDelta, bsGamma, bsTheta, bsVega } from './blackScholes';
 import { IVSurface } from './ivSurface';
@@ -44,7 +42,7 @@ export interface BacktestLeg {
   expiryDate: string;
   entryPrice: number;
   active: boolean;
-  closePrice?: number; // market price at close time
+  closePrice?: number;
 }
 
 export interface AdjustmentLog {
@@ -136,17 +134,15 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     };
   }
 
-  // Track initial stock price and quantity
   let stockQty = 0;
   const initialStockPrice = priceData[0].close;
 
   for (const leg of activeLegs) {
     initialValue += leg.entryPrice * leg.quantity * (leg.type === 'stock' ? 1 : 100);
-    tradeCount++; // each initial leg is a trade
+    tradeCount++;
     if (leg.type === 'stock') {
       stockQty = leg.quantity;
     } else if (leg.quantity < 0) {
-      // Initial sold option premium (gross)
       totalGrossPremiums += leg.entryPrice * Math.abs(leg.quantity) * 100;
     }
   }
@@ -155,8 +151,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   let maxDrawdown = 0;
   let maxProfit = -Infinity;
 
-  // Pre-compute all available monthly expiries in the date range
-  // Extend expiries 3 months beyond last bar to ensure continuity
   const lastBarDate = new Date(priceData[priceData.length - 1].date);
   lastBarDate.setMonth(lastBarDate.getMonth() + 30);
   const allExpiries = getMonthlyExpiries(priceData[0].date.slice(0, 10), formatDate(lastBarDate));
@@ -166,7 +160,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const date = bar.date;
     const dayAdjustments: AdjustmentLog[] = [];
 
-    // Price all legs
     const legResults: DayLegResult[] = [];
     let totalValue = 0;
 
@@ -190,14 +183,12 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       let price: number, delta: number, gamma: number, theta: number, vega: number;
 
       if (T <= 0) {
-        // Option expired
         price = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
         delta = 0; gamma = 0; theta = 0; vega = 0;
 
-        // Handle expiry logic - ensure a replacement call is ALWAYS created
         let expiryHandled = false;
 
-        if (!expiryHandled && leg.active) {
+        if (leg.active) {
           const adj = sellNewCallAfterExpiry(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
           if (adj) {
             dayAdjustments.push(adj);
@@ -214,7 +205,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
           }
         }
 
-        // Only deactivate if a replacement was created
         if (expiryHandled) {
           leg.active = false;
         }
@@ -225,7 +215,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         theta = bsTheta(S, leg.strike, T, riskFreeRate, iv, leg.type);
         vega = bsVega(S, leg.strike, T, riskFreeRate, iv);
 
-        // Check approach rule (price near sold call)
+        // Check approach rule
         if (leg.type === 'call' && leg.quantity < 0 && leg.active) {
           if (S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100)) {
             const adj = executeApproachRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
@@ -244,11 +234,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
           }
         }
 
-        // Check profit rule (option gaining value for seller)
+        // Check profit rule
         if (leg.type === 'call' && leg.quantity < 0 && leg.active) {
           const gainPct = ((leg.entryPrice - price) / leg.entryPrice) * 100;
           if (gainPct >= ccRules.profitRule.profitPct) {
-            const adj = executeProfitRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+            const adj = executeProfitRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries, allAdjustments);
             if (adj) {
               dayAdjustments.push(adj);
               allAdjustments.push(adj);
@@ -356,7 +346,6 @@ function executeApproachRule(
 ): AdjustmentLog | null {
   const { approachRule, strikeStep } = ccRules;
 
-  // Search across all future expiries starting from the one after the current leg's expiry
   const futureExpiries = allExpiries.filter(e => e > leg.expiryDate.slice(0, 10));
   if (futureExpiries.length === 0) return null;
 
@@ -374,9 +363,8 @@ function executeApproachRule(
     const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
 
     const netPremium = newPrice - currentPrice;
-    if (netPremium < minRequiredPremium) continue; // try next expiry
+    if (netPremium < minRequiredPremium) continue;
 
-    // Found a valid expiry: execute the roll
     leg.active = false;
     const openCost = newPrice * leg.quantity * 100;
     const newLeg: BacktestLeg = {
@@ -397,7 +385,7 @@ function executeApproachRule(
     };
   }
 
-  return null; // no expiry meets the conditions
+  return null;
 }
 
 
@@ -409,9 +397,7 @@ function sellNewCallAfterExpiry(
   const nextExpiry = findNextExpiry(date, allExpiries);
   if (!nextExpiry) return null;
 
-  const barrierPct = ccRules.profitRule.action === 'wait_and_sell'
-    ? ccRules.profitRule.newCallBarrierPct
-    : ccRules.approachRule.rollUpMinDistancePct;
+  const barrierPct = ccRules.approachRule.rollUpMinDistancePct;
   const newStrike = roundStrike(S * (1 + barrierPct / 100), ccRules.strikeStep);
   const newT = yearsBetween(date, nextExpiry);
   if (newT <= 0) return null;
@@ -441,84 +427,195 @@ function sellNewCallAfterExpiry(
 
 // ---- Profit Rule Execution ----
 
+/**
+ * Calculate annualized net premiums from the adjustment log (max 1 year lookback).
+ * Returns annualized premium as % of average underlying price.
+ */
+function calcAnnualizedPremiumPct(
+  date: string,
+  adjustmentLog: AdjustmentLog[]
+): number {
+  const now = new Date(date);
+  const oneYearAgo = new Date(date);
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  let totalNetPremium = 0;
+  let sumUnderlyingPrice = 0;
+  let count = 0;
+
+  for (const adj of adjustmentLog) {
+    const adjDate = new Date(adj.date);
+    if (adjDate < oneYearAgo || adjDate > now) continue;
+
+    // Net premium from each adjustment: premiums received minus premiums paid
+    for (const added of adj.legsAdded) {
+      if (added.quantity < 0 && added.type !== 'stock') {
+        totalNetPremium += added.entryPrice * Math.abs(added.quantity) * 100;
+      }
+    }
+    for (const removed of adj.legsRemoved) {
+      if (removed.quantity < 0 && removed.closePrice != null && removed.type !== 'stock') {
+        totalNetPremium -= removed.closePrice * Math.abs(removed.quantity) * 100;
+      }
+    }
+
+    sumUnderlyingPrice += adj.underlyingPrice;
+    count++;
+  }
+
+  if (count === 0 || sumUnderlyingPrice === 0) return 0;
+
+  const avgUnderlying = sumUnderlyingPrice / count;
+  const daysDiff = (now.getTime() - oneYearAgo.getTime()) / (1000 * 60 * 60 * 24);
+  const actualDays = Math.min(daysDiff, 365);
+
+  // Annualize: (totalNetPremium / avgUnderlying / 100) * (365 / actualDays) * 100
+  // Per 100 shares basis
+  const premiumPctRaw = (totalNetPremium / (avgUnderlying * 100)) * 100;
+  const annualized = premiumPctRaw * (365 / actualDays);
+
+  return annualized;
+}
+
 function executeProfitRule(
   leg: BacktestLeg, S: number, date: string, currentPrice: number,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[],
+  adjustmentLog: AdjustmentLog[]
+): AdjustmentLog | null {
+  const { profitRule, strikeStep } = ccRules;
+
+  const closeCost = -currentPrice * leg.quantity * 100;
+  const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
+
+  // ── First expiry: roll down on same expiry (shared logic) ──
+  if (firstExpiry && leg.expiryDate === firstExpiry) {
+    const newStrike = roundStrike(S * (1 + profitRule.firstExpiryMinDistancePct / 100), strikeStep);
+    const T = yearsBetween(date, leg.expiryDate);
+    if (T <= 0) return null;
+
+    const newIV = ivSurface.getIV(newStrike, leg.expiryDate, 'call');
+    const newPrice = bsPrice(S, newStrike, T, riskFreeRate, newIV, 'call');
+    const netPremium = newPrice - currentPrice;
+
+    const minRequired = S * (profitRule.firstExpiryMinPremiumPct / 100);
+    if (netPremium < minRequired) return null;
+
+    leg.active = false;
+    const newLeg: BacktestLeg = {
+      id: `${leg.id}_rolldown_${date}`,
+      type: 'call', strike: newStrike, quantity: leg.quantity,
+      entryDate: date, expiryDate: leg.expiryDate, entryPrice: newPrice, active: true,
+    };
+    activeLegs.push(newLeg);
+
+    const removedLeg = { ...leg, closePrice: currentPrice };
+
+    return {
+      date, ruleName: 'Profitto: roll down',
+      description: `Roll down: ${leg.strike} → ${newStrike} (stessa scadenza)`,
+      legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+      cost: closeCost + newPrice * leg.quantity * 100,
+      underlyingPrice: S,
+    };
+  }
+
+  // ── Later expiries ──
+  if (profitRule.action === 'dynamic') {
+    return executeDynamicRolling(leg, S, date, currentPrice, closeCost, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries, adjustmentLog);
+  } else {
+    return executeStaticRolling(leg, S, date, currentPrice, closeCost, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
+  }
+}
+
+/**
+ * Rolling Dinamico: if annualized premiums exceed threshold, roll back to first
+ * available expiry even at a loss, with min strike distance.
+ */
+function executeDynamicRolling(
+  leg: BacktestLeg, S: number, date: string, currentPrice: number, closeCost: number,
+  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
+  activeLegs: BacktestLeg[], allExpiries: string[],
+  adjustmentLog: AdjustmentLog[]
+): AdjustmentLog | null {
+  const { profitRule, strikeStep } = ccRules;
+
+  // Check annualized premium threshold
+  const annualizedPct = calcAnnualizedPremiumPct(date, adjustmentLog);
+  if (annualizedPct < profitRule.dynamicAnnualizedPremiumPct) return null;
+
+  // Roll back to first available expiry
+  const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
+  if (!firstExpiry) return null;
+
+  const minStrike = roundStrike(S * (1 + profitRule.dynamicMinDistancePct / 100), strikeStep);
+  const T = yearsBetween(date, firstExpiry);
+  if (T <= 0) return null;
+
+  const newIV = ivSurface.getIV(minStrike, firstExpiry, 'call');
+  const newPrice = bsPrice(S, minStrike, T, riskFreeRate, newIV, 'call');
+
+  // Roll even at a loss (no net premium check)
+  leg.active = false;
+  const newLeg: BacktestLeg = {
+    id: `${leg.id}_rolldyn_${date}`,
+    type: 'call', strike: minStrike, quantity: leg.quantity,
+    entryDate: date, expiryDate: firstExpiry, entryPrice: newPrice, active: true,
+  };
+  activeLegs.push(newLeg);
+
+  const removedLeg = { ...leg, closePrice: currentPrice };
+
+  return {
+    date, ruleName: 'Profitto: rolling dinamico',
+    description: `Roll dinamico: ${leg.strike} → ${minStrike} (exp ${firstExpiry}, ann. ${annualizedPct.toFixed(1)}%)`,
+    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+    cost: closeCost + newPrice * leg.quantity * 100,
+    underlyingPrice: S,
+  };
+}
+
+/**
+ * Rolling Statico: roll back to first available expiry with min distance and
+ * positive net premium >= staticMinPremiumPct% of S.
+ */
+function executeStaticRolling(
+  leg: BacktestLeg, S: number, date: string, currentPrice: number, closeCost: number,
   ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
   activeLegs: BacktestLeg[], allExpiries: string[]
 ): AdjustmentLog | null {
   const { profitRule, strikeStep } = ccRules;
 
-  if (profitRule.action === 'wait_and_sell') return null; // handled at expiry
+  const minStrike = roundStrike(S * (1 + profitRule.staticMinDistancePct / 100), strikeStep);
+  const minPremium = S * (profitRule.staticMinPremiumPct / 100);
 
-  const closeCost = -currentPrice * leg.quantity * 100;
+  for (const expiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
+    const T = yearsBetween(date, expiry);
+    if (T <= 0) continue;
 
-  if (profitRule.action === 'roll_down') {
-    const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
-    if (firstExpiry && leg.expiryDate === firstExpiry) {
-      // First expiry: roll down lower strike, same expiry
-      const newStrike = roundStrike(S * (1 + profitRule.firstExpiryMinDistancePct / 100), strikeStep);
-      const T = yearsBetween(date, leg.expiryDate);
-      if (T <= 0) return null;
+    for (let strike = minStrike; strike <= S * 1.3; strike += strikeStep) {
+      const iv = ivSurface.getIV(strike, expiry, 'call');
+      const price = bsPrice(S, strike, T, riskFreeRate, iv, 'call');
+      const netPremium = price - currentPrice;
 
-      const newIV = ivSurface.getIV(newStrike, leg.expiryDate, 'call');
-      const newPrice = bsPrice(S, newStrike, T, riskFreeRate, newIV, 'call');
-      const netPremium = newPrice - currentPrice;
+      if (netPremium >= minPremium) {
+        leg.active = false;
+        const newLeg: BacktestLeg = {
+          id: `${leg.id}_rollstat_${date}`,
+          type: 'call', strike, quantity: leg.quantity,
+          entryDate: date, expiryDate: expiry, entryPrice: price, active: true,
+        };
+        activeLegs.push(newLeg);
 
-      const meetsUsd = netPremium >= profitRule.minPremiumUsd;
-      if (!meetsUsd) return null;
+        const removedLeg = { ...leg, closePrice: currentPrice };
 
-      leg.active = false;
-      const newLeg: BacktestLeg = {
-        id: `${leg.id}_rolldown_${date}`,
-        type: 'call', strike: newStrike, quantity: leg.quantity,
-        entryDate: date, expiryDate: leg.expiryDate, entryPrice: newPrice, active: true,
-      };
-      activeLegs.push(newLeg);
-
-      const removedLeg = { ...leg, closePrice: currentPrice };
-
-      return {
-        date, ruleName: 'Profitto: roll down',
-        description: `Roll down: ${leg.strike} → ${newStrike} (stessa scadenza)`,
-        legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
-        cost: closeCost + newPrice * leg.quantity * 100,
-        underlyingPrice: S,
-      };
-    } else {
-      // Later expiries: search best option
-      const minStrike = roundStrike(S * (1 + profitRule.minDistancePct / 100), strikeStep);
-
-      for (const expiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
-        const T = yearsBetween(date, expiry);
-        if (T <= 0) continue;
-
-        for (let strike = minStrike; strike <= S * 1.3; strike += strikeStep) {
-          const iv = ivSurface.getIV(strike, expiry, 'call');
-          const price = bsPrice(S, strike, T, riskFreeRate, iv, 'call');
-          const netPremium = price - currentPrice;
-
-          const meetsUsd = netPremium >= profitRule.rollDownMinPremiumUsd;
-
-          if (meetsUsd) {
-            leg.active = false;
-            const newLeg: BacktestLeg = {
-              id: `${leg.id}_rollany_${date}`,
-              type: 'call', strike, quantity: leg.quantity,
-              entryDate: date, expiryDate: expiry, entryPrice: price, active: true,
-            };
-            activeLegs.push(newLeg);
-
-            const removedLeg = { ...leg, closePrice: currentPrice };
-
-            return {
-              date, ruleName: 'Profitto: roll scadenza',
-              description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
-              legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
-              cost: closeCost + price * leg.quantity * 100,
-              underlyingPrice: S,
-            };
-          }
-        }
+        return {
+          date, ruleName: 'Profitto: rolling statico',
+          description: `Roll statico: ${leg.strike} → ${strike} (exp ${expiry})`,
+          legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+          cost: closeCost + price * leg.quantity * 100,
+          underlyingPrice: S,
+        };
       }
     }
   }
