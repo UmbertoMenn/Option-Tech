@@ -1,47 +1,41 @@
 
-Capito, hai ragione: dalla diff e dallo screenshot il comportamento è regressivo.
+Hai ragione: il problema non è il raggio del pallino ma il meccanismo tooltip di `ComposedChart` (modalità axis), che non usa davvero la vicinanza al marker per mostrare i dettagli operazione.  
+Per risolverlo in modo definitivo senza rompere l’allineamento, cambio approccio: tooltip operazione gestito direttamente dai pallini (eventi sul marker), non dallo snap dell’asse X.
 
-## Cosa è andato storto
+## Piano definitivo (senza regressioni)
 
-Il problema principale è che i pallini (`Scatter`) stanno usando un dataset filtrato (`scatterData`) separato dalla linea (`chartData`) dentro un `ComposedChart` con asse X categoriale.  
-Questo può desincronizzare la posizione dei punti rispetto alla timeline completa (quindi grafico “sballato”) e rende anche il tooltip poco affidabile.
+### 1) Non toccare il mapping dati (evita errori precedenti)
+File: `src/components/simulator/BacktestChart.tsx`
+- Mantengo **un solo dataset**: `chartData` condiviso tra `Line` e `Scatter`.
+- Nessun `scatterData` filtrato separato (così i pallini restano perfettamente allineati alla linea prezzo).
 
-In più, l’hit-area usa `fill="transparent"`: in SVG spesso non intercetta bene il puntatore, quindi l’hover resta difficile.
+### 2) Tooltip operazione “prossimità reale” sui pallini
+- Introduco stato locale: `hoveredOperation` (dato operazione + posizione mouse).
+- Nel `CustomScatterDot`:
+  - pallino visibile arancione (`r=7`);
+  - hit-area ampia (`r=22/24`) quasi invisibile (`rgba(..., 0.001)`), `pointerEvents="all"`;
+  - eventi `onMouseEnter` + `onMouseMove` per aprire/aggiornare tooltip immediatamente;
+  - `onMouseLeave` per chiudere.
+- Il tooltip viene renderizzato come overlay HTML custom (non dipendente dallo snap asse X), quindi si attiva appena sei vicino al pallino.
 
-## Fix che implementerò
+### 3) Evitare conflitti/flicker tooltip
+- Quando il tooltip operazione custom è attivo, sopprimo il tooltip Recharts standard (quello axis) per evitare doppio tooltip.
+- Tooltip custom con `pointer-events: none` per evitare sfarfallio quando il cursore passa vicino al box tooltip.
 
-### 1) Riallineamento totale punti-linea
-In `BacktestChart.tsx` farò usare allo `Scatter` **lo stesso dataset della linea** (quello del `ComposedChart`), eliminando `scatterData` come fonte separata.
+### 4) Sicurezza anti-regressione grafica
+- Non cambio assi, brush, linea prezzo, dominio Y o ordinamento date.
+- Mantengo la logica descrizioni operazioni (join per date uguali) invariata.
+- Il `CustomTooltip` attuale resta come fallback quando non c’è hover operazione custom.
 
-### 2) Mostrare pallino solo dove c’è operazione
-Nel `CustomScatterDot` userò `payload.adjustmentDesc`:
-- se non c’è operazione → `return null`
-- se c’è operazione → pallino arancione visibile
+## Dettagli tecnici implementativi
+- `useState<HoveredOperation | null>` nel componente.
+- `CustomScatterDot` convertito in renderer collegato allo stato (con handler mouse).
+- Tooltip custom posizionato con coordinate cursore (`clientX/clientY` o coordinate chart convertite), offset leggero per leggibilità.
+- Condizione render: solo se `payload.adjustmentDesc` presente.
 
-Così i pallini restano perfettamente allineati alla curva del prezzo.
-
-### 3) Tooltip molto più facile da attivare
-Allargerò davvero l’area di aggancio hover:
-- cerchio invisibile grande (`r ~ 20-22`)
-- `fill="rgba(249,115,22,0.001)"` (non `transparent`)
-- `pointerEvents="all"`
-
-Questo rende il trigger “magnetico” anche quando sei vicino al pallino.
-
-### 4) Tooltip robusto sul punto giusto
-Nel `CustomTooltip` selezionerò, quando presente, il payload con `adjustmentDesc` (priorità al punto operazione), invece di usare sempre il primo elemento del payload.
-
-## Modifiche file (solo uno)
-
-- `src/components/simulator/BacktestChart.tsx`
-  - rimozione logica `scatterData` separata
-  - update `CustomScatterDot` (filtro + hit-area reale)
-  - update `Scatter` per usare data comune del chart
-  - update `CustomTooltip` per scegliere il payload corretto
-
-## Verifica finale (E2E)
-
-1. Eseguire backtest su `/simulator`.
-2. Controllare che i pallini arancioni stiano sulla linea prezzo (non “sparsi” altrove).
-3. Passare il mouse vicino (non sopra preciso): tooltip deve aprirsi con facilità.
-4. Verificare che nel tooltip compaiano data, prezzo e descrizione operazione corretta.
+## Verifica E2E (obbligatoria)
+1. Esegui backtest su `/simulator` con più operazioni.
+2. Muovi il mouse **vicino** ai pallini (senza centrarli): tooltip deve comparire subito.
+3. Verifica che i pallini restino allineati alla linea prezzo.
+4. Verifica assenza flicker e assenza doppio tooltip.
+5. Test rapido desktop + viewport mobile/tablet per assicurare usabilità hover/focus.
