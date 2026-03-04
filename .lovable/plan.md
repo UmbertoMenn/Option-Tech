@@ -1,35 +1,18 @@
 
-Obiettivo: correggere l’estrazione ticker nel Simulator, così file come `BATS_AAPL,60.csv` restituiscono `AAPL` (non `BATS`).
 
-1) Root cause (attuale)
-- In `src/components/simulator/TickerSelector.tsx` il parser cerca una singola colonna con pattern `['ticker', 'symbol', 'simbolo']`: se trova prima `ticker`, può prendere un valore exchange (es. `BATS`).
-- Il fallback filename prende sempre il primo token alfabetico (`^([A-Z]{1,6})`), quindi su `BATS_AAPL,60.csv` ritorna `BATS`.
+## Fix: linea prezzo invisibile nel grafico Backtest
 
-2) Modifiche da fare (stesso file)
-- Separare la ricerca colonne:
-  - `symbolIdx = findColumn(headers, ['symbol', 'simbolo'])`
-  - `tickerIdx = findColumn(headers, ['ticker'])`
-- Priorità estrazione riga:
-  - prima `symbolIdx`
-  - poi `tickerIdx`
-- Aggiungere normalizzazione/candidate picker ticker:
-  - uppercase, trim, rimozione quote
-  - split su separatori (`_ , : ; - spazio /`)
-  - ignorare token exchange noti (`BATS`, `NYSE`, `NASDAQ`, `ARCA`, `IEX`, `CBOE`, ecc.)
-  - scegliere il primo token “ticker-like” valido (es. `AAPL`, `SAP.DE`), ignorando token numerici (`60`)
-- Rifare `extractTickerFromFilename` con la stessa logica:
-  - caso `EXCHANGE_TICKER,...` → prendere il token successivo all’exchange (`AAPL`)
-  - fallback: primo token valido non-exchange
+### Problema
 
-3) Comportamento finale atteso
-- `BATS_AAPL,60.csv` → `AAPL`
-- CSV con colonna `ticker=BATS` e `symbol=AAPL` → `AAPL`
-- CSV con solo `ticker=MSFT` → `MSFT`
-- Se non rilevabile automaticamente, resta possibile inserimento manuale nel campo Ticker (comportamento già presente).
+Il `BacktestChart` usa `stroke="hsl(var(--chart-2))"` per la linea del prezzo, ma la variabile CSS `--chart-2` **non è definita** nel tema. Il CSS definisce variabili custom come `--chart-bonds`, `--chart-stocks`, ecc. — ma non le standard `--chart-1` ... `--chart-5`. Il risultato è che la linea viene renderizzata con colore trasparente/invisibile.
 
-4) Validazione rapida dopo implementazione
-- Test manuale upload con:
-  - `BATS_AAPL,60.csv`
-  - file con colonne `ticker` + `symbol`
-  - file con solo `ticker`
-- Verifica toast e input “Ticker (auto-estratto)” coerenti col simbolo reale.
+### Soluzione
+
+In `src/components/simulator/BacktestChart.tsx`, sostituire `hsl(var(--chart-2))` con un colore che esiste nel tema, ad esempio `hsl(var(--primary))` (blu elettrico) oppure un colore fisso come `#3b82f6`.
+
+**File: `src/components/simulator/BacktestChart.tsx`** — riga 91:
+- Da: `stroke="hsl(var(--chart-2))"`  
+- A: `stroke="hsl(var(--primary))"`
+
+Modifica singola, una riga.
+
