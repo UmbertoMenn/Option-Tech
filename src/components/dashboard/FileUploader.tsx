@@ -94,6 +94,9 @@ export function FileUploader() {
         cashValue,
       });
       
+      // Refresh strategy cache so check-alerts cron sees updated strikes (background, non-blocking)
+      refreshStrategyCacheForPortfolio(targetPortfolioId);
+      
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
       toast.success('Portfolio caricato!', {
         description: `${positions.length} posizioni importate${dateInfo}.`,
