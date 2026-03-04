@@ -19,7 +19,9 @@ interface ChartDataPoint {
 
 function CustomTooltip({ active, payload }: any) {
   if (!active || !payload || payload.length === 0) return null;
-  const data = payload[0]?.payload as ChartDataPoint;
+  // Prioritise the payload entry that has an adjustmentDesc
+  const withAdj = payload.find((p: any) => p?.payload?.adjustmentDesc);
+  const data = (withAdj?.payload ?? payload[0]?.payload) as ChartDataPoint;
   if (!data) return null;
 
   return (
@@ -40,12 +42,14 @@ function CustomTooltip({ active, payload }: any) {
 }
 
 function CustomScatterDot(props: any) {
-  const { cx, cy } = props;
+  const { cx, cy, payload } = props;
   if (cx == null || cy == null) return null;
+  // Only render dot on days with an operation
+  if (!payload?.adjustmentDesc) return null;
   return (
     <g>
-      {/* Large invisible hit-area */}
-      <circle cx={cx} cy={cy} r={18} fill="transparent" stroke="none" />
+      {/* Large near-invisible hit-area for easy hover */}
+      <circle cx={cx} cy={cy} r={22} fill="rgba(249,115,22,0.001)" pointerEvents="all" stroke="none" />
       {/* Visible orange dot */}
       <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} />
     </g>
@@ -53,7 +57,7 @@ function CustomScatterDot(props: any) {
 }
 
 export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
-  const { chartData, scatterData } = useMemo(() => {
+  const chartData = useMemo(() => {
     const descMap = new Map<string, string[]>();
     for (const adj of adjustmentLog) {
       const arr = descMap.get(adj.date) || [];
@@ -61,15 +65,11 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
       descMap.set(adj.date, arr);
     }
 
-    const allData = days.map(d => ({
+    return days.map(d => ({
       date: d.date,
       price: d.underlyingPrice,
       adjustmentDesc: descMap.get(d.date)?.join('\n') ?? null,
     }));
-
-    const scatter = allData.filter(d => d.adjustmentDesc !== null);
-
-    return { chartData: allData, scatterData: scatter };
   }, [days, adjustmentLog]);
 
   if (days.length === 0) {
@@ -101,7 +101,6 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
               dot={false} activeDot={false} name="Prezzo"
             />
             <Scatter
-              data={scatterData}
               dataKey="price"
               shape={<CustomScatterDot />}
               name="Operazioni"
