@@ -48,10 +48,24 @@ function parseDateTime(dateStr: string, timeStr?: string): string | null {
   return null;
 }
 
+const KNOWN_EXCHANGES = new Set([
+  'BATS', 'NYSE', 'NASDAQ', 'ARCA', 'AMEX', 'IEX', 'CBOE', 'EDGX', 'EDGA',
+  'BZX', 'BYX', 'PSX', 'CHX', 'NSX', 'MEMX', 'LTSE', 'PEARL', 'MIAX',
+  'XETRA', 'LSE', 'TSE', 'SSE', 'HKEX', 'JPX', 'ASX', 'KRX',
+]);
+
+function pickTicker(raw: string): string {
+  const tokens = raw.toUpperCase().trim().replace(/^["']|["']$/g, '').split(/[_,:\;\-\s\/]+/);
+  for (const t of tokens) {
+    if (!t || /^\d+$/.test(t) || KNOWN_EXCHANGES.has(t)) continue;
+    if (/^[A-Z]{1,10}(\.[A-Z]{1,4})?$/.test(t)) return t;
+  }
+  return '';
+}
+
 function extractTickerFromFilename(filename: string): string {
   const name = filename.replace(/\.(csv|txt)$/i, '');
-  const match = name.match(/^([A-Z]{1,6})/i);
-  return match ? match[1].toUpperCase() : '';
+  return pickTicker(name);
 }
 
 function parseCsvContent(text: string, filename: string): { ticker: string; priceData: { date: string; close: number }[] } {
@@ -64,7 +78,8 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
   const dateIdx = findColumn(headers, ['datetime', 'date', 'time', 'data', 'timestamp']);
   const timeIdx = findColumn(headers, ['time', 'ora']);
   const closeIdx = findColumn(headers, ['close', 'chiusura', 'price', 'prezzo', 'last', 'ultimo', 'adj close']);
-  const tickerIdx = findColumn(headers, ['ticker', 'symbol', 'simbolo']);
+  const symbolIdx = findColumn(headers, ['symbol', 'simbolo']);
+  const tickerIdx = findColumn(headers, ['ticker']);
 
   if (dateIdx < 0) throw new Error(`Colonna data non trovata. Header: ${headers.join(', ')}`);
   if (closeIdx < 0) throw new Error(`Colonna prezzo non trovata. Header: ${headers.join(', ')}`);
@@ -76,8 +91,11 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
     const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     if (cols.length <= Math.max(dateIdx, closeIdx)) continue;
 
-    if (!extractedTicker && tickerIdx >= 0 && cols[tickerIdx]) {
-      extractedTicker = cols[tickerIdx].toUpperCase();
+    if (!extractedTicker) {
+      // Priority: symbol column > ticker column
+      const symVal = symbolIdx >= 0 ? pickTicker(cols[symbolIdx] || '') : '';
+      const tikVal = tickerIdx >= 0 ? pickTicker(cols[tickerIdx] || '') : '';
+      extractedTicker = symVal || tikVal;
     }
 
     const dateStr = cols[dateIdx];
