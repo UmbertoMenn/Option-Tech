@@ -88,7 +88,7 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
             <Tooltip content={<CustomTooltip />} />
             <Line
               type="monotone" dataKey="price"
-              stroke="hsl(var(--chart-2))" strokeWidth={2}
+              stroke="hsl(var(--primary))" strokeWidth={2}
               dot={<CustomDot />} name="Prezzo"
             />
             <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
