@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BacktestDayResult, AdjustmentLog } from '@/lib/backtestEngine';
 import {
@@ -17,11 +17,16 @@ interface ChartDataPoint {
   adjustmentDesc: string | null;
 }
 
-function CustomTooltip({ active, payload }: any) {
+interface HoveredOperation {
+  data: ChartDataPoint;
+  x: number;
+  y: number;
+}
+
+/* ---------- Standard axis tooltip (price only, no operation details) ---------- */
+function AxisTooltip({ active, payload }: any) {
   if (!active || !payload || payload.length === 0) return null;
-  // Prioritise the payload entry that has an adjustmentDesc
-  const withAdj = payload.find((p: any) => p?.payload?.adjustmentDesc);
-  const data = (withAdj?.payload ?? payload[0]?.payload) as ChartDataPoint;
+  const data = payload[0]?.payload as ChartDataPoint;
   if (!data) return null;
 
   return (
@@ -31,32 +36,40 @@ function CustomTooltip({ active, payload }: any) {
         <span>Prezzo:</span>
         <span style={{ fontFamily: 'monospace' }}>${data.price.toFixed(2)}</span>
       </div>
-      {data.adjustmentDesc && (
-        <div className="mt-2 pt-2 border-t border-primary/30">
-          <p className="font-semibold text-primary mb-1">⚡ Operazione</p>
-          <p className="text-foreground whitespace-pre-line">{data.adjustmentDesc}</p>
-        </div>
-      )}
     </div>
   );
 }
 
-function CustomScatterDot(props: any) {
-  const { cx, cy, payload } = props;
-  if (cx == null || cy == null) return null;
-  // Only render dot on days with an operation
-  if (!payload?.adjustmentDesc) return null;
+/* ---------- Custom operation tooltip (HTML overlay, pointer-events:none) ---------- */
+function OperationTooltip({ op }: { op: HoveredOperation }) {
   return (
-    <g>
-      {/* Large near-invisible hit-area for easy hover */}
-      <circle cx={cx} cy={cy} r={22} fill="rgba(249,115,22,0.001)" pointerEvents="all" stroke="none" />
-      {/* Visible orange dot */}
-      <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} />
-    </g>
+    <div
+      style={{
+        position: 'fixed',
+        left: op.x + 14,
+        top: op.y - 10,
+        pointerEvents: 'none',
+        zIndex: 9999,
+      }}
+      className="bg-card border border-border rounded-lg p-3 shadow-lg text-xs max-w-xs"
+    >
+      <p className="font-mono text-muted-foreground mb-1">{op.data.date}</p>
+      <div className="flex justify-between gap-4">
+        <span>Prezzo:</span>
+        <span style={{ fontFamily: 'monospace' }}>${op.data.price.toFixed(2)}</span>
+      </div>
+      <div className="mt-2 pt-2 border-t border-primary/30">
+        <p className="font-semibold text-primary mb-1">⚡ Operazione</p>
+        <p className="text-foreground whitespace-pre-line">{op.data.adjustmentDesc}</p>
+      </div>
+    </div>
   );
 }
 
 export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
+  const [hoveredOp, setHoveredOp] = useState<HoveredOperation | null>(null);
+  const chartWrapperRef = useRef<HTMLDivElement>(null);
+
   const chartData = useMemo(() => {
     const descMap = new Map<string, string[]>();
     for (const adj of adjustmentLog) {
@@ -71,6 +84,37 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
       adjustmentDesc: descMap.get(d.date)?.join('\n') ?? null,
     }));
   }, [days, adjustmentLog]);
+
+  const handleDotEnter = useCallback((data: ChartDataPoint, e: React.MouseEvent) => {
+    setHoveredOp({ data, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleDotMove = useCallback((data: ChartDataPoint, e: React.MouseEvent) => {
+    setHoveredOp({ data, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleDotLeave = useCallback(() => {
+    setHoveredOp(null);
+  }, []);
+
+  /* Scatter dot renderer — needs access to hover handlers */
+  const renderScatterDot = useCallback((props: any) => {
+    const { cx, cy, payload } = props;
+    if (cx == null || cy == null) return null;
+    if (!payload?.adjustmentDesc) return null;
+    return (
+      <g
+        onMouseEnter={(e) => handleDotEnter(payload, e as any)}
+        onMouseMove={(e) => handleDotMove(payload, e as any)}
+        onMouseLeave={handleDotLeave}
+      >
+        {/* Large near-invisible hit-area for easy hover */}
+        <circle cx={cx} cy={cy} r={24} fill="rgba(249,115,22,0.001)" pointerEvents="all" stroke="none" />
+        {/* Visible orange dot */}
+        <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} pointerEvents="none" />
+      </g>
+    );
+  }, [handleDotEnter, handleDotMove, handleDotLeave]);
 
   if (days.length === 0) {
     return (
@@ -89,25 +133,30 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
         <CardTitle className="text-base">Prezzo & Operazioni</CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-            <XAxis dataKey="date" className="text-xs" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-            <YAxis className="text-xs" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
-            <Tooltip content={<CustomTooltip />} />
-            <Line
-              type="monotone" dataKey="price"
-              stroke="hsl(var(--primary))" strokeWidth={2}
-              dot={false} activeDot={false} name="Prezzo"
-            />
-            <Scatter
-              dataKey="price"
-              shape={<CustomScatterDot />}
-              name="Operazioni"
-            />
-            <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
-          </ComposedChart>
-        </ResponsiveContainer>
+        <div ref={chartWrapperRef} className="relative">
+          <ResponsiveContainer width="100%" height={400}>
+            <ComposedChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis dataKey="date" className="text-xs" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
+              <YAxis className="text-xs" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
+              {/* Show axis tooltip only when NOT hovering an operation dot */}
+              {!hoveredOp && <Tooltip content={<AxisTooltip />} />}
+              <Line
+                type="monotone" dataKey="price"
+                stroke="hsl(var(--primary))" strokeWidth={2}
+                dot={false} activeDot={false} name="Prezzo"
+              />
+              <Scatter
+                dataKey="price"
+                shape={renderScatterDot}
+                name="Operazioni"
+              />
+              <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
+            </ComposedChart>
+          </ResponsiveContainer>
+          {/* Custom operation tooltip overlay */}
+          {hoveredOp && <OperationTooltip op={hoveredOp} />}
+        </div>
       </CardContent>
     </Card>
   );
