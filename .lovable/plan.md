@@ -1,29 +1,34 @@
 
 
-## Cambio logica Rolling Dinamico
+## Diagnosi del problema
 
-### Cosa cambia
+### Causa radice
+La `strategy_cache` (usata dal cron `check-alerts` per determinare strike/scadenze) viene aggiornata **solo quando l'utente visita la pagina Derivati**. Se stamattina è stato caricato un nuovo Excel con la covered call NFLX a strike 100, ma nessuno ha aperto la pagina Derivati di quel portafoglio, la cache contiene ancora lo strike vecchio (98). Il cron ha letto strike 98 dalla cache, ha visto il prezzo NFLX sopra 98 → ha generato l'alert ITM.
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+### Soluzione
+Aggiornare la `strategy_cache` automaticamente **dopo ogni upload Excel**, non solo alla visita della pagina Derivati. In questo modo il cron lavora sempre con dati aggiornati.
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+### Implementazione
 
-### Logica implementativa
+**File: `src/components/dashboard/FileUploader.tsx`** (o dove avviene il salvataggio post-upload)
+- Dopo il salvataggio delle posizioni nel DB, invocare `saveStrategyCache()` con le nuove posizioni derivate e i prezzi sottostanti disponibili.
+- Questo richiede:
+  1. Riclassificare i derivati con la stessa logica di `derivativeStrategies.ts`
+  2. Chiamare `saveStrategyCache(portfolioId, categories, underlyingPrices)`
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+**Problema**: la classificazione completa dei derivati richiede `underlyingPrices` e `derivative_overrides`, che al momento del upload potrebbero non essere tutti disponibili. Tuttavia la cache verrebbe comunque aggiornata con gli strike corretti dal nuovo Excel, risolvendo il caso specifico.
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+**Approccio pratico (meno invasivo)**:
+Aggiungere un refresh della strategy cache nel flusso post-upload. Dopo che le posizioni sono state salvate:
+1. Ri-fetchare le posizioni derivate dal DB
+2. Eseguire la categorizzazione
+3. Chiamare `saveStrategyCache`
 
-### File modificati
+Questo garantisce che il cron `check-alerts` veda sempre gli strike aggiornati dall'ultimo Excel caricato, anche se nessuno apre la pagina Derivati.
 
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+### File da modificare
+- `src/components/dashboard/FileUploader.tsx` — aggiungere chiamata a `saveStrategyCache` post-upload
+- Potrebbe servire un refactor leggero per estrarre la logica di categorizzazione in una funzione riutilizzabile se non è già separata
+
+Devo prima verificare il flusso di upload per capire dove inserire la chiamata.
 
