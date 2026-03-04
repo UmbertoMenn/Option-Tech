@@ -13,7 +13,7 @@ import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon, Info } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
@@ -76,7 +76,7 @@ export function Dashboard() {
     latestEntry, 
     upsertHistoricalData, 
     deleteHistoricalData,
-    isUpserting 
+    isUpserting,
   } = useHistoricalData(portfolio?.id, viewMode);
   
   const {
@@ -234,31 +234,6 @@ export function Dashboard() {
                         <PortfolioSelector />
                       </div>
                     </DropdownMenuItem>
-                    {!isAggregatedView && (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          if (!portfolio?.snapshot_date) {
-                            toast.error('Nessuna data disponibile. Carica prima un file Excel.');
-                            return;
-                          }
-                          upsertHistoricalData({
-                            snapshot_date: portfolio.snapshot_date,
-                            total_value: summary?.totalValue ?? 0,
-                            netting_total: netting.nettingTotal,
-                            netting_ex_cc_np: netting.nettingExCCAndNP,
-                            deposits: 0,
-                            average_balance: 0,
-                            equity_exposure_pct: equityExposurePct,
-                            usd_exposure_pct: usdExposurePct,
-                          });
-                          toast.success('Snapshot salvato nei dati storici');
-                        }}
-                        disabled={isUpserting || !summary}
-                      >
-                        <Save className="w-4 h-4 mr-2" />
-                        Salva Snapshot
-                      </DropdownMenuItem>
-                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => navigate('/derivatives')}>
                       <TrendingUp className="w-4 h-4 mr-2" />
@@ -292,35 +267,6 @@ export function Dashboard() {
                 <div className="shrink-0">
                   <PortfolioSelector />
                 </div>
-                {!isAggregatedView && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => {
-                      if (!portfolio?.snapshot_date) {
-                        toast.error('Nessuna data disponibile. Carica prima un file Excel.');
-                        return;
-                      }
-                      upsertHistoricalData({
-                        snapshot_date: portfolio.snapshot_date,
-                        total_value: summary?.totalValue ?? 0,
-                        netting_total: netting.nettingTotal,
-                        netting_ex_cc_np: netting.nettingExCCAndNP,
-                        deposits: 0,
-                        average_balance: 0,
-                        equity_exposure_pct: equityExposurePct,
-                        usd_exposure_pct: usdExposurePct,
-                      });
-                      toast.success('Snapshot salvato nei dati storici');
-                    }}
-                    disabled={isUpserting || !summary}
-                    title="Salva snapshot corrente nei dati storici"
-                    className="shrink-0"
-                  >
-                    <Save className="w-4 h-4" />
-                    <span className="ml-2">Salva Snapshot</span>
-                  </Button>
-                )}
                 <Button variant="outline" size="sm" asChild className="shrink-0">
                   <Link to="/derivatives">
                     <TrendingUp className="w-4 h-4" />
