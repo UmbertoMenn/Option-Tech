@@ -103,24 +103,6 @@ export function Dashboard() {
     setIsManualAverageBalance(false);
   }, [portfolio?.id]);
 
-  // Stage latest calculated values for auto-snapshot cron
-  useEffect(() => {
-    if (!portfolio?.id || !portfolio?.snapshot_date || !summary || isAggregatedView) return;
-    supabase
-      .from('portfolio_latest_values')
-      .upsert({
-        portfolio_id: portfolio.id,
-        total_value: summary.totalValue,
-        netting_total: netting.nettingTotal,
-        netting_ex_cc_np: netting.nettingExCCAndNP,
-        equity_exposure_pct: equityExposurePct,
-        usd_exposure_pct: usdExposurePct,
-      }, { onConflict: 'portfolio_id' })
-      .then(({ error }) => {
-        if (error) console.warn('Failed to stage latest values:', error.message);
-      });
-  }, [portfolio?.id, portfolio?.snapshot_date, summary?.totalValue, netting.nettingTotal, netting.nettingExCCAndNP, equityExposurePct, usdExposurePct, isAggregatedView]);
-
   // Validate and initialize selectedHistoricalDate when historical data changes
   useEffect(() => {
     // If no historical data, reset to null

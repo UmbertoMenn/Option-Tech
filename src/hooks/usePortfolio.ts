@@ -241,6 +241,10 @@ export function usePortfolio() {
       positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
       targetPortfolioId?: string;
     }) => updatePositionsMutation.mutate(args),
+    updatePositionsAsync: (args: { 
+      positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
+      targetPortfolioId?: string;
+    }) => updatePositionsMutation.mutateAsync(args),
     isUpdating: updatePositionsMutation.isPending,
     updateInitialValue: updateInitialValueMutation.mutate,
     isUpdatingInitialValue: updateInitialValueMutation.isPending,
