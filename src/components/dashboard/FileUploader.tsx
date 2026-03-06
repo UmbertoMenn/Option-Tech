@@ -87,13 +87,22 @@ export function FileUploader() {
       await updatePositionsAsync({ positions, targetPortfolioId });
       setUploadSuccess(true);
       
-      // Immediate snapshot to historical_data
+      // Immediate snapshot to historical_data (MUST await to avoid silent failures)
       if (snapshotDate) {
-        upsertUploadSnapshot({
-          portfolioId: targetPortfolioId,
-          snapshotDate,
-          cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
-        });
+        try {
+          await upsertUploadSnapshot({
+            portfolioId: targetPortfolioId,
+            snapshotDate,
+            cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
+          });
+          // Invalidate historical data cache so charts update immediately
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        } catch (snapErr) {
+          console.error('[FileUploader] Snapshot save failed:', snapErr);
+          toast.error('Snapshot storico non salvato', {
+            description: 'Le posizioni sono state aggiornate ma lo snapshot storico non è stato registrato.',
+          });
+        }
       } else {
         console.warn('[FileUploader] No snapshot_date in file, skipping historical snapshot');
       }
