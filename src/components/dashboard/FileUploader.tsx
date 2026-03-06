@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
-import { computeAndUpsertStagingValues } from '@/lib/stagingCalculator';
+import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
@@ -20,7 +20,7 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = 
 export function FileUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
-  const { portfolio, updatePositions } = usePortfolio();
+  const { portfolio, updatePositionsAsync } = usePortfolio();
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
@@ -83,18 +83,22 @@ export function FileUploader() {
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       }
 
-      // Passa targetPortfolioId alla mutation per garantire coerenza
-      updatePositions({ positions, targetPortfolioId });
+      // Save positions (await DB completion)
+      await updatePositionsAsync({ positions, targetPortfolioId });
       setUploadSuccess(true);
       
-      // Stage latest values for auto-snapshot cron (runs in background, non-blocking)
-      computeAndUpsertStagingValues({
-        portfolioId: targetPortfolioId,
-        positions,
-        cashValue,
-      });
+      // Immediate snapshot to historical_data
+      if (snapshotDate) {
+        upsertUploadSnapshot({
+          portfolioId: targetPortfolioId,
+          snapshotDate,
+          cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
+        });
+      } else {
+        console.warn('[FileUploader] No snapshot_date in file, skipping historical snapshot');
+      }
       
-      // Refresh strategy cache so check-alerts cron sees updated strikes (background, non-blocking)
+      // Refresh strategy cache (background, non-blocking)
       refreshStrategyCacheForPortfolio(targetPortfolioId);
       
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
@@ -109,7 +113,7 @@ export function FileUploader() {
     } finally {
       setIsProcessing(false);
     }
-  }, [portfolio?.id, updatePositions, queryClient]);
+  }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
