@@ -283,7 +283,6 @@ export function AdminNotificationSettings() {
                       <MessageCircle className="w-4 h-4 text-muted-foreground" />
                       <Switch
                         checked={pref.notify_telegram}
-                        disabled={!pref.telegram_chat_id}
                         onCheckedChange={(val) =>
                           updateUserSetting(pref.user_id, 'notify_telegram', val)
                         }
