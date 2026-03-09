@@ -92,23 +92,7 @@ export function AdminNotificationSettings() {
       if (field === 'admin_notify_email') setAdminNotifyEmail(value);
       else setAdminNotifyTelegram(value);
 
-      // Propagate to all users
-      const userField = field === 'admin_notify_email' ? 'notify_email' : 'notify_telegram';
-      let query = supabase.from('profiles').update({ [userField]: value }).neq('user_id', user!.id);
-      if (userField === 'notify_telegram') {
-        query = query.not('telegram_chat_id', 'is', null);
-      }
-      const { error: batchError } = await query;
-      if (batchError) throw batchError;
-
-      setUserProfiles((prev) =>
-        prev.map((p) => ({
-          ...p,
-          [userField]: userField === 'notify_telegram' && !p.telegram_chat_id ? p.notify_telegram : value,
-        }))
-      );
-
-      toast.success('Notifiche aggiornate per tutti gli utenti');
+      toast.success('Impostazione admin aggiornata');
     } catch (error) {
       console.error('Error updating setting:', error);
       toast.error('Errore aggiornamento impostazione');
