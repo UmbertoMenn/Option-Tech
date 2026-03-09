@@ -1,29 +1,38 @@
 
 
-## Cambio logica Rolling Dinamico
+## Gestione notifiche per singolo utente dal pannello Admin
 
 ### Cosa cambia
+Nel tab "Notifiche" dell'admin panel, sotto le impostazioni admin esistenti, aggiungo una sezione con la lista di tutti gli utenti non-admin. Per ciascuno mostro:
+- Nome / Email
+- Stato Telegram (collegato o no)
+- Switch Email (legge/scrive `notify_email` sul profilo dell'utente)
+- Switch Telegram (legge/scrive `notify_telegram`, disabilitato se Telegram non collegato)
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+### Implementazione
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+**File: `src/components/admin/AdminNotificationSettings.tsx`**
 
-### Logica implementativa
+1. Dopo le card admin esistenti, aggiungo una nuova Card "Notifiche Utenti"
+2. Fetch di tutti i profili (`profiles`) con `notify_email`, `notify_telegram`, `telegram_chat_id`, `email`, `full_name`, `user_id`
+3. Per ogni utente (escluso l'admin corrente), mostro una riga con:
+   - Nome/email a sinistra
+   - Badge "Telegram ✓" se `telegram_chat_id` presente
+   - Switch per `notify_email`
+   - Switch per `notify_telegram` (disabled se no `telegram_chat_id`)
+4. L'update usa `supabase.from('profiles').update({ notify_email/notify_telegram }).eq('user_id', targetUserId)` — funziona perché l'admin ha policy `Admins can view all profiles` per SELECT, ma manca la policy UPDATE per admin.
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+**Migrazione DB necessaria**: aggiungere RLS policy per permettere all'admin di aggiornare i profili degli utenti:
+```sql
+CREATE POLICY "Admins can update all profiles"
+ON public.profiles
+FOR UPDATE
+TO authenticated
+USING (has_role(auth.uid(), 'admin'))
+WITH CHECK (has_role(auth.uid(), 'admin'));
+```
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
-
-### File modificati
-
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+### File da modificare
+- `src/components/admin/AdminNotificationSettings.tsx` — aggiungere sezione utenti con switch per-user
+- Migrazione DB — aggiungere policy UPDATE admin su `profiles`
 
