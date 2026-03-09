@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_notification_preferences: {
+        Row: {
+          admin_user_id: string
+          created_at: string
+          id: string
+          notify_email: boolean
+          notify_telegram: boolean
+          target_user_id: string
+        }
+        Insert: {
+          admin_user_id: string
+          created_at?: string
+          id?: string
+          notify_email?: boolean
+          notify_telegram?: boolean
+          target_user_id: string
+        }
+        Update: {
+          admin_user_id?: string
+          created_at?: string
+          id?: string
+          notify_email?: boolean
+          notify_telegram?: boolean
+          target_user_id?: string
+        }
+        Relationships: []
+      }
       alert_configs: {
         Row: {
           alert_type: Database["public"]["Enums"]["alert_type"]

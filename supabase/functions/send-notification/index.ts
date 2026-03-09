@@ -366,8 +366,24 @@ serve(async (req: Request): Promise<Response> => {
         .neq("user_id", alertData.user_id); // Don't double-notify if user is admin
 
       if (adminProfiles) {
+        // Fetch per-user admin notification preferences
+        const { data: adminPrefs } = await supabase
+          .from("admin_notification_preferences")
+          .select("admin_user_id, target_user_id, notify_email, notify_telegram")
+          .eq("target_user_id", alertData.user_id)
+          .in("admin_user_id", adminUserIds);
+
+        const prefsMap = new Map(
+          (adminPrefs || []).map((p) => [p.admin_user_id, p])
+        );
+
         for (const admin of adminProfiles) {
-          if (admin.admin_notify_email && admin.email) {
+          const pref = prefsMap.get(admin.user_id);
+          // Send only if general toggle AND per-user pref are both true (default true if no pref)
+          const shouldEmail = admin.admin_notify_email && (pref ? pref.notify_email : true);
+          const shouldTelegram = admin.admin_notify_telegram && (pref ? pref.notify_telegram : true);
+
+          if (shouldEmail && admin.email) {
             const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
@@ -378,7 +394,7 @@ serve(async (req: Request): Promise<Response> => {
               emailResult.error
             );
           }
-          if (admin.admin_notify_telegram && admin.telegram_chat_id) {
+          if (shouldTelegram && admin.telegram_chat_id) {
             const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
