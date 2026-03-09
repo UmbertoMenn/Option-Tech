@@ -1,22 +1,29 @@
 
 
-## Toggle admin generali che propagano a tutti gli utenti
+## Cambio logica Rolling Dinamico
 
-Quando l'admin toglie/attiva il toggle generale "Email utenti" o "Telegram utenti", lo stato deve propagarsi a tutti i profili utente nella lista sottostante.
+### Cosa cambia
 
-### Modifiche
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-**File: `src/components/admin/AdminNotificationSettings.tsx`**
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-Nella funzione `updateSetting`, dopo aver aggiornato il campo admin (`admin_notify_email` / `admin_notify_telegram`), eseguo un batch update su tutti i profili non-admin:
+### Logica implementativa
 
-- Se toggle `admin_notify_email` cambia → aggiorna `notify_email` su tutti gli utenti nella lista
-- Se toggle `admin_notify_telegram` cambia → aggiorna `notify_telegram` su tutti gli utenti nella lista (solo quelli con `telegram_chat_id` se si disattiva; se si attiva, solo quelli con Telegram collegato)
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-Concretamente:
-1. Dopo l'update del proprio profilo admin, chiamo `supabase.from('profiles').update({ notify_email: value }).neq('user_id', user.id)` (per email) oppure `.update({ notify_telegram: value }).neq('user_id', user.id).not('telegram_chat_id', 'is', null)` (per telegram, solo utenti con Telegram collegato)
-2. Aggiorno lo stato locale `userProfiles` di conseguenza
-3. Mostro toast "Notifiche aggiornate per tutti gli utenti"
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
 
-Nessuna migrazione DB necessaria — la policy "Admins can update all profiles" già copre questo caso.
+### File modificati
+
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
