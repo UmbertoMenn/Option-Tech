@@ -25,10 +25,10 @@ export interface OrderParseResult {
 // Column name mappings (Italian Excel format)
 const COLUMN_MAPPINGS = {
   operation: ['Operazione', 'operazione', 'OPERAZIONE'],
-  symbol: ['Simbolo', 'simbolo', 'SIMBOLO'],
+  symbol: ['Simbolo', 'simbolo', 'SIMBOLO', 'Titolo', 'titolo', 'TITOLO'],
   status: ['Stato', 'stato', 'STATO'],
   avgPrice: ['Prz Medio', 'prz medio', 'PRZ MEDIO', 'Prezzo Medio', 'prezzo medio'],
-  quantity: ['Qtà Eseguita', 'qta eseguita', 'QTA ESEGUITA', 'Quantità Eseguita', 'quantità eseguita'],
+  quantity: ['Qtà Eseguita', 'qta eseguita', 'QTA ESEGUITA', 'Quantità Eseguita', 'quantità eseguita', 'Qtà/VN', 'QTA/VN', 'qtà/vn'],
   callPut: ['Call/Put', 'call/put', 'CALL/PUT', 'CallPut', 'callput'],
   validityDate: ['Data Validità', 'data validità', 'DATA VALIDITÀ', 'Data Validita', 'data validita', 'DATA VALIDITA'],
   expiryDate: ['Scadenza', 'scadenza', 'SCADENZA', 'Data Scadenza', 'data scadenza', 'DATA SCADENZA'],
