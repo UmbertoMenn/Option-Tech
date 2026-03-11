@@ -151,9 +151,14 @@ function matchesUnderlying(option: Position, stock: Position): boolean {
   const stockName = normalizeForMatching(stock.description);
   if (stockName.length > 0 && optionText.includes(stockName)) return true;
   
-  // 4. Token-based matching
-  const optionTokens = optionText.split(' ').filter(t => t.length > 2);
-  const stockTokens = stockText.split(' ').filter(t => t.length > 2);
+  // 4. Token-based matching (filter corporate stopwords to avoid false positives)
+  const CORPORATE_STOPWORDS = new Set([
+    'group', 'holding', 'holdings', 'company', 'companies', 'corp',
+    'corporation', 'limited', 'ltd', 'inc', 'incorporated', 'plc',
+    'ag', 'sa', 'spa', 'nv', 'bv', 'se', 'the'
+  ]);
+  const optionTokens = optionText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
+  const stockTokens = stockText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
   
   if (stockTokens.length > 0) {
     const matchCount = stockTokens.filter(t => optionTokens.includes(t)).length;
