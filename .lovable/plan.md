@@ -1,29 +1,25 @@
 
 
-## Cambio logica Rolling Dinamico
+## Fix: Gestione corretta dello sfasamento ora legale US/EU
 
-### Cosa cambia
+### Problema
+Il codice in `src/lib/marketHours.ts` calcola gli orari del mercato US come fissi a **15:30-22:00 CET**. Ma questo è corretto solo quando sia US che EU sono nella stessa modalità (entrambi standard o entrambi DST). Durante il gap (2a domenica di marzo → ultima domenica di marzo, e 1a domenica di novembre → ultima domenica di ottobre), gli orari US in tempo italiano cambiano:
+- **US su EDT, EU su CET** (circa 2 settimane a marzo): mercato US apre **14:30-21:00 CET**
+- **US su EST, EU su CEST** (circa 1 settimana a novembre): mercato US apre **16:30-23:00 CEST**
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+Lo stesso problema è presente nel frontend (`isMarketOpen`) che mostra "Mercato chiuso" erroneamente. Le edge functions `check-alerts` usano già correttamente l'offset ET indipendente, quindi non sono affette.
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+### Soluzione
 
-### Logica implementativa
+**`src/lib/marketHours.ts`** — Riscrivere la logica US per calcolare l'orario in **Eastern Time** (usando le regole DST americane: 2a domenica di marzo, 1a domenica di novembre), e poi verificare se sono le 9:30-16:00 ET, invece di convertire tutto in CET.
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+Implementazione:
+1. Aggiungere una funzione `getETOffset(date)` che calcola UTC-4 (EDT) o UTC-5 (EST) usando le regole DST americane
+2. Nel ramo US di `isMarketOpen`, convertire l'ora corrente in ET e verificare 9:30-16:00 ET
+3. Nel ramo EU, mantenere la logica CET/CEST esistente (9:00-17:30 CET/CEST)
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+Questo elimina il problema alla radice: non dipende più dal confronto CET/ET con offset fisso.
 
-### File modificati
-
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+### File da modificare
+- `src/lib/marketHours.ts` — aggiungere `getETOffset`, riscrivere ramo US in `isMarketOpen`
 
