@@ -715,7 +715,7 @@ export function filterAndCalculateCallPremiums(
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const isCall = order.optionType === 'CALL';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && isCall && matchesTicker;
+    return isExecuted && isCall && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
   
   // Step 2: Identify symbols that have at least one sell (Covered Call or rolling)
