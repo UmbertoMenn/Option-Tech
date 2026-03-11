@@ -784,7 +784,7 @@ export function filterAndCalculatePutPremiums(
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const isPut = order.optionType === 'PUT';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && isPut && matchesTicker;
+    return isExecuted && isPut && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
   
   // Step 2: Identify symbols that have at least one sell (Naked Put or rolling)
