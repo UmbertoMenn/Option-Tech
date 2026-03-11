@@ -232,19 +232,55 @@ export function CallPremiumCalculatorDialog({
         newPutCount = mergedPutOrders.length - putOrders.length;
         setPutOrders(mergedPutOrders);
       }
+
+      // Detect stock sells for assignment detection
+      const allParsedOrders = orders.filter(o =>
+        o.status.toLowerCase() === 'eseguito' && o.isStockTrade && o.operation === 'sell' && symbolMatchesTicker(o.symbol, ticker)
+      );
+
+      const newAssignments: ParsedOrder[] = [];
+      const pendingForUser: { stockSell: ParsedOrder; candidates: OpenPutCandidate[] }[] = [];
+
+      // Use all parsed orders (including current file) to detect open PUTs
+      const allOptionOrders = [...mergedCallOrders, ...mergedPutOrders, ...orders.filter(o => !o.isStockTrade && !o.isAssignment)];
+
+      for (const stockSell of allParsedOrders) {
+        const openPuts = detectOpenPuts(allOptionOrders, ticker);
+        if (openPuts.length === 1) {
+          newAssignments.push(buildAssignmentOrder(stockSell, openPuts[0].strike));
+        } else if (openPuts.length > 1) {
+          pendingForUser.push({ stockSell, candidates: openPuts });
+        }
+        // 0 open PUTs → ignore
+      }
+
+      if (newAssignments.length > 0) {
+        setAssignmentOrders(prev => [...prev, ...newAssignments]);
+      }
+
+      if (pendingForUser.length > 0) {
+        setPendingAssignments(pendingForUser);
+        setCurrentPendingIdx(0);
+        setShowAssignmentDialog(true);
+      }
       
       // Recalculate with appropriate orders
-      const ordersForMetrics = includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders;
+      const ordersForMetrics = [
+        ...(includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders),
+        ...assignmentOrders,
+        ...newAssignments,
+      ];
       recalculateMetrics(ordersForMetrics, transactionCost);
       setHasUnsavedChanges(true);
       
-      const totalNew = newCallCount + newPutCount;
+      const totalNew = newCallCount + newPutCount + newAssignments.length;
       if (totalNew > 0) {
         const parts: string[] = [];
         if (newCallCount > 0) parts.push(`${newCallCount} CALL`);
         if (newPutCount > 0) parts.push(`${newPutCount} PUT`);
+        if (newAssignments.length > 0) parts.push(`${newAssignments.length} assegnaz.`);
         toast.success(`Aggiunte ${parts.join(' + ')} operazioni`);
-      } else {
+      } else if (pendingForUser.length === 0) {
         toast.info('Nessuna nuova operazione trovata');
       }
     } catch (err) {
