@@ -392,7 +392,7 @@ export function CallPremiumCalculatorDialog({
         ticker,
         option_symbol: optionSymbol,
         underlying,
-        orders_json: [...callOrders, ...putOrders, ...assignmentOrders],
+        orders_json: [...callOrders, ...putOrders],
         transaction_cost: transactionCost,
         net_per_share: isMultiLeg ? metrics.netPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
