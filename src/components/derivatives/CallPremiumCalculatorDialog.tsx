@@ -122,12 +122,11 @@ export function CallPremiumCalculatorDialog({
   // Assignments are stored inline in callOrders, so no separate append needed
   const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
 
-  // Helper to split saved orders into call/put
+  // Helper to split saved orders into call/put (assignments stay in calls)
   const splitOrdersByType = (orders: ParsedOrder[]) => {
-    const calls = orders.filter(o => o.optionType !== 'PUT' && !o.isAssignment);
+    const calls = orders.filter(o => o.optionType !== 'PUT');
     const puts = orders.filter(o => o.optionType === 'PUT' && !o.isAssignment);
-    const assignments = orders.filter(o => o.isAssignment === true);
-    return { calls, puts, assignments };
+    return { calls, puts };
   };
 
   // Load saved data when dialog opens
