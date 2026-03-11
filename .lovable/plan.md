@@ -1,29 +1,52 @@
 
 
-## Cambio logica Rolling Dinamico
+## Problema reale: falsa protezione PUT 260 su MARA
 
-### Cosa cambia
+### Diagnosi
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+Nel portafoglio di MAURO G.:
+- **Stock**: `MARA HOLDINGS INC` (300 azioni)
+- **PUT strike 260**: `Crowdstrike Holdings Inc PUT 260 MAY/26` (bought, qty=1)
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+La funzione `matchesUnderlying` in `riskCalculator.ts` (step 4, token matching) associa erroneamente la PUT Crowdstrike a MARA perché:
 
-### Logica implementativa
+```text
+Stock tokens:  ["mara", "holdings", "inc"]   (3 tokens)
+Option tokens: ["crowdstrike", "holdings", "inc", ...]
+Match count:   2 ("holdings", "inc")
+Threshold:     ceil(3/2) = 2
+Risultato:     2 >= 2 → TRUE (FALSO POSITIVO!)
+```
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+I token "holdings" e "inc" sono parole generiche corporate che compaiono in centinaia di nomi di società. Il matching le considera significative, ma non lo sono.
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+**NON c'entra nulla Marathon Petroleum** — il bug è nel token matching che usa stopword generiche come token validi.
 
-### File modificati
+### Fix
 
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+**File: `src/lib/riskCalculator.ts`** — funzione `matchesUnderlying`, step 4 (righe 154-164)
+
+Aggiungere un filtro per escludere corporate stopwords dal token matching, identico a quanto già fatto in `sectorExposure.ts`:
+
+```typescript
+const CORPORATE_STOPWORDS = new Set([
+  'group', 'holding', 'holdings', 'company', 'companies', 'corp', 
+  'corporation', 'limited', 'ltd', 'inc', 'incorporated', 'plc', 
+  'ag', 'sa', 'spa', 'nv', 'bv', 'se', 'the'
+]);
+
+// Step 4: Token-based matching (filter stopwords)
+const optionTokens = optionText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
+const stockTokens = stockText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
+```
+
+Con il fix:
+- Stock tokens filtrati: `["mara"]` (1 token)
+- Option tokens filtrati: `["crowdstrike"]`
+- Match count: 0 → **FALSE** ✓
+
+Lo stesso fix va applicato anche in `derivativeStrategies.ts` se esiste token matching analogo nella funzione `findUnderlyingStock` / `matchOptionToStocks`.
+
+### File da modificare
+- `src/lib/riskCalculator.ts` — aggiungere CORPORATE_STOPWORDS e filtrare nello step 4
 
