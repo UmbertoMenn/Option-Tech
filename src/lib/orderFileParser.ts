@@ -550,10 +550,12 @@ export async function parseOrderFile(file: File): Promise<ParsedOrder[]> {
  * Extract strike price from option symbol
  * BABAH6C165 → 165
  * TSLAG6P350 → 350
+ * CEGH6P322.5 → 322.5
+ * LULUH6P167.5 → 167.5
  */
 export function extractStrikeFromSymbol(symbol: string): number | null {
-  const match = symbol.match(/(\d+)$/);
-  return match ? parseInt(match[1], 10) : null;
+  const match = symbol.match(/(\d+(?:\.\d+)?)$/);
+  return match ? parseFloat(match[1]) : null;
 }
 
 /**
