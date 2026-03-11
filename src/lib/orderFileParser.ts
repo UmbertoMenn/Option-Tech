@@ -442,17 +442,22 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       ? String(row[colIndices.expiryDate] || '').trim().replace(/^'+/, '') || undefined
       : undefined;
     
-    // Skip non-option rows (e.g. stock trades where Call/Put = "NN")
+    // Detect stock trades (Call/Put = "NN")
+    let isStockTrade = false;
     if (colIndices.callPut !== -1 && optionType === null) {
       const callPutRaw = String(row[colIndices.callPut] || '').trim().toUpperCase();
-      if (callPutRaw === 'NN' || callPutRaw === '') continue;
+      if (callPutRaw === 'NN') {
+        isStockTrade = true;
+      } else if (callPutRaw === '') {
+        continue; // Skip empty rows
+      }
     }
     
     // Skip rows with no symbol or quantity
     if (!symbol || quantity === 0) continue;
     
-    // Calculate order value (quantity * avgPrice * 100 for options)
-    const orderValue = quantity * avgPrice * 100;
+    // Calculate order value: stocks = quantity * avgPrice, options = quantity * avgPrice * 100
+    const orderValue = isStockTrade ? quantity * avgPrice : quantity * avgPrice * 100;
     
     orders.push({
       operation,
@@ -464,6 +469,7 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       orderValue,
       validityDate: validityDateRaw,
       expiryDate: expiryDateRaw,
+      isStockTrade,
     });
   }
   
