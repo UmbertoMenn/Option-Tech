@@ -702,18 +702,27 @@ export function CallPremiumCalculatorDialog({
                                 </TableCell>
                                 <TableCell className="text-xs font-mono">
                                   {order.symbol}
-                                  {order.optionType === 'PUT' && (
+                                  {order.isAssignment && (
+                                    <Badge className="text-[10px] ml-1 px-1 py-0 bg-orange-500/20 text-orange-600 border-orange-500/30 hover:bg-orange-500/30">ASSEGNAZIONE</Badge>
+                                  )}
+                                  {!order.isAssignment && order.optionType === 'PUT' && (
                                     <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">PUT</Badge>
                                   )}
-                                  {order.optionType === 'CALL' && (
+                                  {!order.isAssignment && order.optionType === 'CALL' && (
                                     <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">CALL</Badge>
+                                  )}
+                                  {order.isAssignment && order.assignmentStrike && (
+                                    <span className="text-[10px] text-muted-foreground ml-1">
+                                      (strike {formatNumber(order.assignmentStrike, 2)})
+                                    </span>
                                   )}
                                 </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
                                 <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
-                                <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
-                                  {order.operation === 'sell' ? '+' : '-'}{formatCurrency(order.orderValue, 'USD')}
+                                <TableCell className={`text-xs text-right ${order.orderValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {order.orderValue >= 0 ? '+' : ''}{formatCurrency(order.orderValue, 'USD')}
+                                </TableCell>
                                 </TableCell>
                                 <TableCell className="text-xs">
                                   <Button
