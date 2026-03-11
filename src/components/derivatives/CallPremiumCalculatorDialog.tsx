@@ -123,9 +123,10 @@ export function CallPremiumCalculatorDialog({
 
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
-        const { calls, puts } = splitOrdersByType(saved.orders_json);
+        const { calls, puts, assignments } = splitOrdersByType(saved.orders_json);
         setCallOrders(calls);
         setPutOrders(puts);
+        setAssignmentOrders(assignments);
         setIncludePutPremiums(puts.length > 0);
         setLastOperationDate(saved.last_operation_date);
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
