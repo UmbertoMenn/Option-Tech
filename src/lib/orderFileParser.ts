@@ -574,6 +574,75 @@ export function extractStrikeFromSymbol(symbol: string): number | null {
 }
 
 /**
+ * Open PUT candidate for assignment selection
+ */
+export interface OpenPutCandidate {
+  symbol: string;
+  strike: number;
+  netQty: number; // net sold quantity still open
+  expiry: string | null; // extracted expiry for display
+}
+
+/**
+ * Detect open (net sold, never fully bought back) PUT positions for a given ticker.
+ * Groups PUT orders by symbol and checks net = Σ(sell qty) - Σ(buy qty) > 0.
+ */
+export function detectOpenPuts(orders: ParsedOrder[], ticker: string): OpenPutCandidate[] {
+  // Filter executed PUT orders matching ticker
+  const putOrders = orders.filter(o => {
+    const isExecuted = o.status.toLowerCase() === 'eseguito';
+    const isPut = o.optionType === 'PUT';
+    const matchesTicker = symbolMatchesTicker(o.symbol, ticker);
+    return isExecuted && isPut && matchesTicker && !o.isStockTrade && !o.isAssignment;
+  });
+
+  // Group by symbol and compute net quantity
+  const symbolMap = new Map<string, { sellQty: number; buyQty: number }>();
+  for (const o of putOrders) {
+    const entry = symbolMap.get(o.symbol) || { sellQty: 0, buyQty: 0 };
+    if (o.operation === 'sell') entry.sellQty += o.quantity;
+    else entry.buyQty += o.quantity;
+    symbolMap.set(o.symbol, entry);
+  }
+
+  const results: OpenPutCandidate[] = [];
+  for (const [symbol, { sellQty, buyQty }] of symbolMap) {
+    const netQty = sellQty - buyQty;
+    if (netQty > 0) {
+      const strike = extractStrikeFromSymbol(symbol);
+      if (strike !== null) {
+        const expiry = extractExpiryFromSymbol(symbol);
+        results.push({ symbol, strike, netQty, expiry });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Build a synthetic assignment order from a stock sell + assigned PUT strike.
+ * orderValue = (avgPrice - putStrike) * quantity  (negative if strike > avgPrice)
+ */
+export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number): ParsedOrder {
+  const assignmentValue = (stockSellOrder.avgPrice - putStrike) * stockSellOrder.quantity;
+  return {
+    operation: 'sell',
+    symbol: stockSellOrder.symbol,
+    status: stockSellOrder.status,
+    avgPrice: stockSellOrder.avgPrice,
+    quantity: stockSellOrder.quantity,
+    optionType: null,
+    orderValue: assignmentValue,
+    validityDate: stockSellOrder.validityDate,
+    expiryDate: stockSellOrder.expiryDate,
+    isStockTrade: false,
+    isAssignment: true,
+    assignmentStrike: putStrike,
+  };
+}
+
+/**
  * Filter orders for a specific ticker's CALL options and calculate premiums
  * Optionally filters out LEAP calls (buy-only with high strike)
  */
