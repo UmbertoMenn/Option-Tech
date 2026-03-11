@@ -86,9 +86,7 @@ export function CallPremiumCalculatorDialog({
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
 
   // Derived: combined orders based on toggle
-  const filteredOrders = (includePutPremiums ? [...callOrders, ...putOrders] : callOrders)
-    .slice()
-    .sort((a, b) => (b.validityDate || '').localeCompare(a.validityDate || ''));
+  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
 
   // Helper to split saved orders into call/put
   const splitOrdersByType = (orders: ParsedOrder[]) => {
