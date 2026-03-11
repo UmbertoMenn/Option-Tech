@@ -306,7 +306,7 @@ export function CallPremiumCalculatorDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, callOrders, putOrders, assignmentOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
+  }, [ticker, transactionCost, callOrders, putOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
