@@ -285,11 +285,8 @@ export function CallPremiumCalculatorDialog({
       }
       
       // Recalculate with appropriate orders
-      const ordersForMetrics = [
-        ...(includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders),
-        ...assignmentOrders,
-        ...newAssignments,
-      ];
+      const finalCallOrders = newAssignments.length > 0 ? updatedCallOrders : mergedCallOrders;
+      const ordersForMetrics = includePutPremiums ? [...finalCallOrders, ...mergedPutOrders] : finalCallOrders;
       recalculateMetrics(ordersForMetrics, transactionCost);
       setHasUnsavedChanges(true);
       
