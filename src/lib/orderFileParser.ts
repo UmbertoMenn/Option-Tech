@@ -7,9 +7,12 @@ export interface ParsedOrder {
   avgPrice: number;
   quantity: number;
   optionType: 'CALL' | 'PUT' | null;
-  orderValue: number; // quantity * avgPrice * 100
+  orderValue: number; // quantity * avgPrice * 100 (options) or quantity * avgPrice (stocks)
   validityDate?: string; // Data Validità in formato DD/MM/YYYY
   expiryDate?: string; // Scadenza dal file Excel
+  isStockTrade?: boolean;    // true for NN rows (stock buy/sell)
+  isAssignment?: boolean;    // true for synthetic assignment orders
+  assignmentStrike?: number; // strike of the assigned PUT
 }
 
 export interface OrderParseResult {
