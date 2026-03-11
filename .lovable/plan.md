@@ -1,29 +1,29 @@
 
 
-## Fix: Mantenere ordine cronologico per le righe di assegnazione
+## Cambio logica Rolling Dinamico
 
-### Problema
-Le righe di assegnazione vengono aggiunte in coda alla lista (`...assignmentOrders` alla fine dell'array), invece di essere inserite nella posizione cronologica corretta tra le altre operazioni.
+### Cosa cambia
 
-### Soluzione
-Eliminare l'array separato `assignmentOrders` e trattare le assegnazioni come ordini normali, inserendoli direttamente in `callOrders` (o `putOrders`) al momento della creazione, nella posizione originale del file. In alternativa, più semplice: mantenere i tre array separati ma nel `filteredOrders` fare un merge unico e poi **non riordinare** — piuttosto, inserire ogni assegnazione nella posizione giusta al momento della creazione.
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-**Approccio scelto** (minimo impatto): al momento della creazione dell'assegnazione, copiare la `validityDate` dalla vendita titoli corrispondente (già presente nel file). Poi nel `filteredOrders`, dopo il merge dei 3 array, ordinare per `validityDate` preservando l'ordine relativo del file per gli ordini con stessa data. Siccome l'utente vuole l'ordine del file (che è già cronologico decrescente), basta un sort decrescente per `validityDate`.
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-**Ma attenzione**: l'utente ha detto di NON ordinare. Quindi l'approccio migliore è: non usare un array separato, ma inserire l'assegnazione nella posizione corretta nell'array principale.
+### Logica implementativa
 
-### Piano finale
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-1. **`src/lib/orderFileParser.ts`**: assicurarsi che `buildAssignmentOrder` copi la `validityDate` dal `stockSellOrder`
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
 
-2. **`src/components/derivatives/CallPremiumCalculatorDialog.tsx`**:
-   - Rimuovere lo state `assignmentOrders` separato
-   - Quando si crea un'assegnazione (automatica o da selezione utente), inserirla nell'array `callOrders` subito dopo (o prima) della vendita titoli corrispondente, nella stessa posizione in cui si trova nel file
-   - In pratica: trovare l'indice della stock sell nel file originale e inserire l'assegnazione subito dopo
-   - `filteredOrders` torna a essere semplicemente il merge di callOrders e putOrders senza append separato
-   - Aggiornare tutti i riferimenti a `assignmentOrders` (save, load, clear, recalculate)
+### File modificati
 
-### File da modificare
-- `src/lib/orderFileParser.ts` — verificare che `buildAssignmentOrder` abbia `validityDate` corretta
-- `src/components/derivatives/CallPremiumCalculatorDialog.tsx` — eliminare stato separato `assignmentOrders`, inserire assegnazioni inline in `callOrders`
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 

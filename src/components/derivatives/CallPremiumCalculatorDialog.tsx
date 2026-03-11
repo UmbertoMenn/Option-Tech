@@ -25,12 +25,33 @@ import {
   detectOpenPuts,
   buildAssignmentOrder,
   symbolMatchesTicker,
+  toIsoDateFromIT,
   
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult,
   OpenPutCandidate,
 } from '@/lib/orderFileParser';
+
+/**
+ * Insert an assignment order into an orders array at the correct chronological position.
+ * The file order is descending (most recent first), so we find the first order
+ * whose ISO date is <= the assignment's ISO date and insert before it.
+ */
+function insertAssignmentInOrder(orders: ParsedOrder[], assignment: ParsedOrder): ParsedOrder[] {
+  const assignIso = toIsoDateFromIT(assignment.validityDate) || '';
+  const result = [...orders];
+  let insertIdx = result.length; // default: append at end
+  for (let i = 0; i < result.length; i++) {
+    const orderIso = toIsoDateFromIT(result[i].validityDate) || '';
+    if (orderIso && assignIso && orderIso <= assignIso) {
+      insertIdx = i;
+      break;
+    }
+  }
+  result.splice(insertIdx, 0, assignment);
+  return result;
+}
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
 import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
@@ -88,7 +109,6 @@ export function CallPremiumCalculatorDialog({
   const [historicalPremiums, setHistoricalPremiums] = useState<CoveredCallPremium[]>([]);
   const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
-  const [assignmentOrders, setAssignmentOrders] = useState<ParsedOrder[]>([]);
   
   // Pending assignment selection state
   const [pendingAssignments, setPendingAssignments] = useState<{
@@ -99,17 +119,14 @@ export function CallPremiumCalculatorDialog({
   const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
   // Derived: combined orders based on toggle
-  const filteredOrders = [
-    ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
-    ...assignmentOrders,
-  ];
+  // Assignments are stored inline in callOrders, so no separate append needed
+  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
 
-  // Helper to split saved orders into call/put
+  // Helper to split saved orders into call/put (assignments stay in calls)
   const splitOrdersByType = (orders: ParsedOrder[]) => {
-    const calls = orders.filter(o => o.optionType !== 'PUT' && !o.isAssignment);
+    const calls = orders.filter(o => o.optionType !== 'PUT');
     const puts = orders.filter(o => o.optionType === 'PUT' && !o.isAssignment);
-    const assignments = orders.filter(o => o.isAssignment === true);
-    return { calls, puts, assignments };
+    return { calls, puts };
   };
 
   // Load saved data when dialog opens
@@ -123,10 +140,9 @@ export function CallPremiumCalculatorDialog({
 
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
-        const { calls, puts, assignments } = splitOrdersByType(saved.orders_json);
+        const { calls, puts } = splitOrdersByType(saved.orders_json);
         setCallOrders(calls);
         setPutOrders(puts);
-        setAssignmentOrders(assignments);
         setIncludePutPremiums(puts.length > 0);
         setLastOperationDate(saved.last_operation_date);
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
@@ -145,10 +161,9 @@ export function CallPremiumCalculatorDialog({
     if (!selected) return;
     
     setTransactionCost(selected.transaction_cost);
-    const { calls, puts, assignments } = splitOrdersByType(selected.orders_json);
+    const { calls, puts } = splitOrdersByType(selected.orders_json);
     setCallOrders(calls);
     setPutOrders(puts);
-    setAssignmentOrders(assignments);
     setIncludePutPremiums(puts.length > 0);
     setLastOperationDate(selected.last_operation_date);
     recalculateMetrics(selected.orders_json, selected.transaction_cost);
@@ -254,8 +269,13 @@ export function CallPremiumCalculatorDialog({
         // 0 open PUTs → ignore
       }
 
+      // Insert assignments inline into callOrders at chronological position
+      let updatedCallOrders = mergedCallOrders;
+      for (const a of newAssignments) {
+        updatedCallOrders = insertAssignmentInOrder(updatedCallOrders, a);
+      }
       if (newAssignments.length > 0) {
-        setAssignmentOrders(prev => [...prev, ...newAssignments]);
+        setCallOrders(updatedCallOrders);
       }
 
       if (pendingForUser.length > 0) {
@@ -265,11 +285,8 @@ export function CallPremiumCalculatorDialog({
       }
       
       // Recalculate with appropriate orders
-      const ordersForMetrics = [
-        ...(includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders),
-        ...assignmentOrders,
-        ...newAssignments,
-      ];
+      const finalCallOrders = newAssignments.length > 0 ? updatedCallOrders : mergedCallOrders;
+      const ordersForMetrics = includePutPremiums ? [...finalCallOrders, ...mergedPutOrders] : finalCallOrders;
       recalculateMetrics(ordersForMetrics, transactionCost);
       setHasUnsavedChanges(true);
       
@@ -289,7 +306,7 @@ export function CallPremiumCalculatorDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, callOrders, putOrders, assignmentOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
+  }, [ticker, transactionCost, callOrders, putOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -314,7 +331,7 @@ export function CallPremiumCalculatorDialog({
   // Handle PUT premiums toggle
   const handleTogglePutPremiums = (checked: boolean) => {
     setIncludePutPremiums(checked);
-    const orders = [...(checked ? [...callOrders, ...putOrders] : callOrders), ...assignmentOrders];
+    const orders = checked ? [...callOrders, ...putOrders] : callOrders;
     recalculateMetrics(orders, transactionCost);
     setHasUnsavedChanges(true);
   };
@@ -322,10 +339,9 @@ export function CallPremiumCalculatorDialog({
   // Handle order removal
   const handleRemoveOrder = (index: number) => {
     const newOrders = filteredOrders.filter((_, i) => i !== index);
-    const { calls, puts, assignments } = splitOrdersByType(newOrders);
+    const { calls, puts } = splitOrdersByType(newOrders);
     setCallOrders(calls);
     setPutOrders(puts);
-    setAssignmentOrders(assignments);
     if (puts.length === 0) setIncludePutPremiums(false);
     recalculateMetrics(newOrders, transactionCost);
     setHasUnsavedChanges(true);
@@ -337,8 +353,8 @@ export function CallPremiumCalculatorDialog({
     if (!pending) return;
     
     const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike);
-    const updatedAssignments = [...assignmentOrders, newAssignment];
-    setAssignmentOrders(updatedAssignments);
+    const updatedCallOrders = insertAssignmentInOrder(callOrders, newAssignment);
+    setCallOrders(updatedCallOrders);
     
     const nextIdx = currentPendingIdx + 1;
     if (nextIdx < pendingAssignments.length) {
@@ -348,12 +364,9 @@ export function CallPremiumCalculatorDialog({
       setPendingAssignments([]);
       setCurrentPendingIdx(0);
       // Recalculate with new assignments
-      const ordersForMetrics = [
-        ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
-        ...updatedAssignments,
-      ];
+      const ordersForMetrics = includePutPremiums ? [...updatedCallOrders, ...putOrders] : updatedCallOrders;
       recalculateMetrics(ordersForMetrics, transactionCost);
-      toast.success(`Aggiunta ${updatedAssignments.length - assignmentOrders.length + 1} assegnazione`);
+      toast.success('Assegnazione aggiunta');
     }
     setHasUnsavedChanges(true);
   };
@@ -379,7 +392,7 @@ export function CallPremiumCalculatorDialog({
         ticker,
         option_symbol: optionSymbol,
         underlying,
-        orders_json: [...callOrders, ...putOrders, ...assignmentOrders],
+        orders_json: [...callOrders, ...putOrders],
         transaction_cost: transactionCost,
         net_per_share: isMultiLeg ? metrics.netPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
@@ -402,7 +415,6 @@ export function CallPremiumCalculatorDialog({
         setMetrics(null);
         setCallOrders([]);
         setPutOrders([]);
-        setAssignmentOrders([]);
         setIncludePutPremiums(false);
         setParseResult(null);
         setLastOperationDate(null);
