@@ -1,29 +1,23 @@
 
 
-## Cambio logica Rolling Dinamico
+## Fix: Deduplicazione ordini Excel e nuovo tasto "Cancella Operazioni"
 
-### Cosa cambia
+### Problema 1: Duplicati al caricamento
+`mergeOrders` usa un set di chiavi per evitare duplicati esatti, ma non filtra le operazioni precedenti all'ultima già caricata. Se l'utente carica un file che contiene sia operazioni vecchie che nuove, vengono aggiunte tutte quelle non duplicate per chiave, ma non c'è un filtro temporale.
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+**Soluzione**: dopo il merge, filtrare le nuove operazioni in modo che vengano aggiunte solo quelle con data successiva all'ultima operazione già presente (`lastOperationDate`). Questo va fatto dentro `onDrop`, confrontando la `validityDate` (convertita in ISO) delle nuove operazioni con l'ultima data già presente negli ordini correnti.
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+### Problema 2: "Cancella Operazioni" vs "Reset"
+Attualmente esiste solo "Reset" che cancella tutto dal database. L'utente vuole un tasto "Cancella Operazioni" che pulisca solo la card (stato locale: `callOrders`, `putOrders`, `metrics`) senza toccare il database, così lo storico resta recuperabile.
 
-### Logica implementativa
+**Soluzione**: aggiungere un nuovo handler `handleClearOrders` che resetta solo lo stato locale (ordini, metriche, parseResult) senza chiamare `deletePremium`. Aggiungere un bottone `Trash2` accanto a "Reset".
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+### File da modificare
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+**`src/lib/orderFileParser.ts`** — Aggiornare `mergeOrders` per accettare un parametro opzionale `afterDate?: string` che filtra i nuovi ordini con data > afterDate prima di fare il merge.
 
-### File modificati
-
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+**`src/components/derivatives/CallPremiumCalculatorDialog.tsx`**:
+- Nel `onDrop`, calcolare la data dell'ultima operazione corrente e passarla a `mergeOrders` per filtrare solo operazioni successive
+- Aggiungere `handleClearOrders` che resetta solo lo stato locale (callOrders, putOrders, metrics, parseResult) senza toccare il DB
+- Aggiungere bottone "Cancella Operazioni" (icona Trash2) accanto al bottone "Reset" nella barra azioni
 
