@@ -1,34 +1,29 @@
 
 
-## Fix: Parser ordini Excel — strike decimali e robustezza colonne
+## Cambio logica Rolling Dinamico
 
-### Problema principale
+### Cosa cambia
 
-Il file viene parsato correttamente a livello di colonne (il `findColumnIndex` è già header-based). Il bug reale è in `extractStrikeFromSymbol`: la regex `(\d+)$` **non matcha strike con decimali** come `CEGH6P322.5`, `AVGOH6P347.5`, `LULUH6P167.5`.
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-```
-CEGH6P322.5  → regex (\d+)$ → NO MATCH → strike = null ❌
-CEGZ7P260    → regex (\d+)$ → 260 ✓
-```
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-Questo causa il mancato riconoscimento di diversi ordini nella calcolatrice premi.
+### Logica implementativa
 
-### Fix — file `src/lib/orderFileParser.ts`
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-**1. `extractStrikeFromSymbol`** (riga 554-557): cambiare regex per supportare decimali
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
 
-```typescript
-export function extractStrikeFromSymbol(symbol: string): number | null {
-  // Match trailing number with optional decimal: 322.5, 167.5, 260
-  const match = symbol.match(/(\d+(?:\.\d+)?)$/);
-  return match ? parseFloat(match[1]) : null;
-}
-```
+### File modificati
 
-**2. Aggiungere alias colonne mancanti** per robustezza futura:
-- `symbol`: aggiungere `'Titolo'` come fallback se `'Simbolo'` non presente
-- `quantity`: aggiungere `'Qtà/VN'`, `'QTA/VN'` come fallback
-
-### File da modificare
-- `src/lib/orderFileParser.ts` — 2 modifiche puntuali
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
