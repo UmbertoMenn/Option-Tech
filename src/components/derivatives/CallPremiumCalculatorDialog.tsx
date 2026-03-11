@@ -791,7 +791,17 @@ export function CallPremiumCalculatorDialog({
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={handleClearOrders}
+                    title="Pulisci operazioni dalla vista (senza cancellare dal database)"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Cancella
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleReset}
+                    title="Cancella tutto dal database (irreversibile)"
                   >
                     <RefreshCw className="w-4 h-4 mr-1" />
                     Reset
