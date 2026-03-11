@@ -402,6 +402,7 @@ export function CallPremiumCalculatorDialog({
         setMetrics(null);
         setCallOrders([]);
         setPutOrders([]);
+        setAssignmentOrders([]);
         setIncludePutPremiums(false);
         setParseResult(null);
         setLastOperationDate(null);
