@@ -353,8 +353,8 @@ export function CallPremiumCalculatorDialog({
     if (!pending) return;
     
     const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike);
-    const updatedAssignments = [...assignmentOrders, newAssignment];
-    setAssignmentOrders(updatedAssignments);
+    const updatedCallOrders = insertAssignmentInOrder(callOrders, newAssignment);
+    setCallOrders(updatedCallOrders);
     
     const nextIdx = currentPendingIdx + 1;
     if (nextIdx < pendingAssignments.length) {
@@ -364,12 +364,9 @@ export function CallPremiumCalculatorDialog({
       setPendingAssignments([]);
       setCurrentPendingIdx(0);
       // Recalculate with new assignments
-      const ordersForMetrics = [
-        ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
-        ...updatedAssignments,
-      ];
+      const ordersForMetrics = includePutPremiums ? [...updatedCallOrders, ...putOrders] : updatedCallOrders;
       recalculateMetrics(ordersForMetrics, transactionCost);
-      toast.success(`Aggiunta ${updatedAssignments.length - assignmentOrders.length + 1} assegnazione`);
+      toast.success('Assegnazione aggiunta');
     }
     setHasUnsavedChanges(true);
   };
