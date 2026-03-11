@@ -233,8 +233,12 @@ export function CallPremiumCalculatorDialog({
         ? filterAndCalculateIronCondorPremiums(orders, ticker)
         : filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       
-      // Merge CALL orders with existing
-      const mergedCallOrders = mergeOrders(callOrders, result.filteredOrders);
+      // Determine cutoff date: only add orders after the last existing operation
+      const existingDates = [...callOrders, ...putOrders].map(o => o.validityDate);
+      const cutoffDate = findLastOperationDate(existingDates);
+
+      // Merge CALL orders with existing (date-filtered)
+      const mergedCallOrders = mergeOrders(callOrders, result.filteredOrders, cutoffDate);
       const newCallCount = mergedCallOrders.length - callOrders.length;
       setCallOrders(mergedCallOrders);
       
@@ -243,7 +247,7 @@ export function CallPremiumCalculatorDialog({
       let newPutCount = 0;
       if (isCoveredCall) {
         const putResult = filterAndCalculatePutPremiums(orders, ticker);
-        mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders);
+        mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders, cutoffDate);
         newPutCount = mergedPutOrders.length - putOrders.length;
         setPutOrders(mergedPutOrders);
       }
