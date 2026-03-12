@@ -327,6 +327,16 @@ export function buildOptionStratUrlFromOrders(
 
     while (remaining.length > 0) {
       const opening = remaining.shift()!;
+
+      // Handle stock assignment legs (e.g. TSLAx100@440@410)
+      if (opening.isAssignment && opening.assignmentStrike) {
+        const qty = opening.quantity;
+        const buyPrice = formatStrike(opening.assignmentStrike);
+        const sellPrice = formatStrike(opening.avgPrice);
+        legs.push(`${ticker}x${qty}@${buyPrice}@${sellPrice}`);
+        continue;
+      }
+
       const parsed = parseSymbolTypeAndStrike(opening.symbol);
       if (!parsed) continue;
 
