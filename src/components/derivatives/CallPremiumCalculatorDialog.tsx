@@ -364,7 +364,8 @@ export function CallPremiumCalculatorDialog({
     const pending = pendingAssignments[currentPendingIdx];
     if (!pending) return;
     
-    const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike);
+    const selectedCandidate = pending.candidates.find(c => c.strike === putStrike);
+    const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike, selectedCandidate?.symbol);
     const updatedCallOrders = insertAssignmentInOrder(callOrders, newAssignment);
     setCallOrders(updatedCallOrders);
     

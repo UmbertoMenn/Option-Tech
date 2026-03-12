@@ -13,6 +13,7 @@ export interface ParsedOrder {
   isStockTrade?: boolean;    // true for NN rows (stock buy/sell)
   isAssignment?: boolean;    // true for synthetic assignment orders
   assignmentStrike?: number; // strike of the assigned PUT
+  assignmentPutSymbol?: string; // symbol of the assigned PUT (for URL generation)
 }
 
 export interface OrderParseResult {
