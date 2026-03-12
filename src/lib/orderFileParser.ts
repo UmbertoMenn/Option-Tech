@@ -654,7 +654,7 @@ export function detectOpenPuts(orders: ParsedOrder[], ticker: string): OpenPutCa
  * Build a synthetic assignment order from a stock sell + assigned PUT strike.
  * orderValue = (avgPrice - putStrike) * quantity  (negative if strike > avgPrice)
  */
-export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number): ParsedOrder {
+export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number, putSymbol?: string): ParsedOrder {
   const assignmentValue = (stockSellOrder.avgPrice - putStrike) * stockSellOrder.quantity;
   return {
     operation: 'sell',
@@ -669,6 +669,7 @@ export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: num
     isStockTrade: false,
     isAssignment: true,
     assignmentStrike: putStrike,
+    assignmentPutSymbol: putSymbol,
   };
 }
 
