@@ -314,9 +314,19 @@ export function buildOptionStratUrlFromOrders(
   const legs: string[] = [];
 
   for (const [, group] of groups) {
-    // Expand qty > 1 into individual unit orders for correct 1:1 FIFO matching
+    // Handle assignments before expansion (preserve original quantity)
+    const assignmentOrders = group.filter(o => o.isAssignment && o.assignmentStrike);
+    const nonAssignmentOrders = group.filter(o => !(o.isAssignment && o.assignmentStrike));
+
+    for (const order of assignmentOrders) {
+      const buyPrice = formatStrike(order.assignmentStrike);
+      const sellPrice = formatStrike(order.avgPrice);
+      legs.push(`${ticker}x${order.quantity}@${buyPrice}@${sellPrice}`);
+    }
+
+    // Expand only non-assignment orders for FIFO matching
     const expanded: ParsedOrder[] = [];
-    for (const order of group) {
+    for (const order of nonAssignmentOrders) {
       for (let i = 0; i < order.quantity; i++) {
         expanded.push({ ...order, quantity: 1 });
       }
@@ -327,15 +337,6 @@ export function buildOptionStratUrlFromOrders(
 
     while (remaining.length > 0) {
       const opening = remaining.shift()!;
-
-      // Handle stock assignment legs (e.g. TSLAx100@440@410)
-      if (opening.isAssignment && opening.assignmentStrike) {
-        const qty = opening.quantity;
-        const buyPrice = formatStrike(opening.assignmentStrike);
-        const sellPrice = formatStrike(opening.avgPrice);
-        legs.push(`${ticker}x${qty}@${buyPrice}@${sellPrice}`);
-        continue;
-      }
 
       const parsed = parseSymbolTypeAndStrike(opening.symbol);
       if (!parsed) continue;

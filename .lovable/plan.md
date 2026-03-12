@@ -1,39 +1,29 @@
 
 
-## Fix: assegnazioni spezzate dall'espansione unitaria
+## Cambio logica Rolling Dinamico
 
-### Problema
-Il loop di espansione (righe 318-323) scompone **ogni** ordine in unità di quantità 1 per il matching FIFO. Questo funziona per le opzioni, ma per le assegnazioni produce 100 leg separate `TSLAx1@440@410` invece di un singolo `TSLAx100@440@410`.
+### Cosa cambia
 
-Le opzioni normali non sono toccate — hanno già i punti al posto giusto (riga 352).
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-### Soluzione
-Intercettare le assegnazioni **prima** dell'espansione unitaria, così la quantità originale viene preservata.
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-**File: `src/lib/optionStratUrl.ts`** — nel loop `for (const [, group] of groups)`, prima dell'espansione:
+### Logica implementativa
 
-```typescript
-for (const [, group] of groups) {
-  // Handle assignments before expansion (preserve original quantity)
-  const assignmentOrders = group.filter(o => o.isAssignment && o.assignmentStrike);
-  const nonAssignmentOrders = group.filter(o => !(o.isAssignment && o.assignmentStrike));
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-  for (const order of assignmentOrders) {
-    const buyPrice = formatStrike(order.assignmentStrike);
-    const sellPrice = formatStrike(order.avgPrice);
-    legs.push(`${ticker}x${order.quantity}@${buyPrice}@${sellPrice}`);
-  }
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
 
-  // Expand only non-assignment orders for FIFO matching
-  const expanded: ParsedOrder[] = [];
-  for (const order of nonAssignmentOrders) {
-    for (let i = 0; i < order.quantity; i++) {
-      expanded.push({ ...order, quantity: 1 });
-    }
-  }
+### File modificati
 
-  // ... rest of FIFO matching (unchanged)
-```
-
-Rimuovere il check `isAssignment` dentro il `while` loop (righe 331-338) dato che ora è gestito prima.
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
