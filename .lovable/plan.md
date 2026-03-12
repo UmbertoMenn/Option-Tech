@@ -1,29 +1,19 @@
 
 
-## Cambio logica Rolling Dinamico
+## Fix: Commissioni fisse per operazioni su titoli (NN) e assegnazioni
 
-### Cosa cambia
+### Problema
+La riga `const commissions = totalLots * transactionCost` calcola le commissioni moltiplicando la quantità per 10 USD per **tutti** gli ordini, inclusi quelli su titoli (NN) e assegnazioni. Ma per le operazioni su titoli, la commissione è fissa a 10 USD/EUR per transazione, non per lotto.
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+### Soluzione
+In `calculatePremiumMetrics` (`src/lib/orderFileParser.ts`, righe 900-902), separare il calcolo:
+- **Ordini opzioni** (non `isStockTrade` e non `isAssignment`): `quantità × 10`
+- **Ordini titoli/assegnazioni** (`isStockTrade` o `isAssignment`): `10` fisso per ordine
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+```
+commissions = Σ(option orders: qty × 10) + Σ(stock/assignment orders: 10 ciascuno)
+```
 
-### Logica implementativa
-
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
-
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
-
-### File modificati
-
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+### File da modificare
+- `src/lib/orderFileParser.ts` — righe 900-902: iterare su `filteredOrders` e sommare commissioni diverse per tipo
 
