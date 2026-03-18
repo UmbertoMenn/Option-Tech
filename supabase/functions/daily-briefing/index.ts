@@ -752,16 +752,10 @@ serve(async (req: Request): Promise<Response> => {
 
     console.log("Starting daily briefing...");
 
-    // 1. Get users with notifications enabled
+    // 1. Get ALL user profiles
     const { data: profiles } = await supabase
       .from("profiles")
       .select("user_id, email, full_name, notify_email, notify_telegram, telegram_chat_id");
-
-    const notifiableUsers = (profiles || []).filter(
-      (p: any) => p.notify_telegram || p.notify_email
-    );
-
-    console.log(`Found ${notifiableUsers.length} users with notifications enabled`);
 
     // 2. Get admin users for oversight
     const { data: adminRoles } = await supabase
@@ -775,11 +769,30 @@ serve(async (req: Request): Promise<Response> => {
       .select("user_id, email, full_name, admin_notify_email, admin_notify_telegram, telegram_chat_id")
       .in("user_id", Array.from(adminUserIds));
 
+    // 3. Load admin notification preferences (per-user overrides)
+    const { data: adminPrefs } = await supabase
+      .from("admin_notification_preferences")
+      .select("admin_user_id, target_user_id, notify_email, notify_telegram")
+      .in("admin_user_id", Array.from(adminUserIds));
+
+    const adminPrefsMap = new Map<string, { notify_email: boolean; notify_telegram: boolean }>();
+    for (const p of (adminPrefs || [])) {
+      adminPrefsMap.set(`${p.admin_user_id}:${p.target_user_id}`, {
+        notify_email: p.notify_email,
+        notify_telegram: p.notify_telegram,
+      });
+    }
+
+    // All users (including admins — they may have their own portfolios)
+    const allUsers = (profiles || []);
+
+    console.log(`Found ${allUsers.length} total users to process`);
+
     const MAX_SNAPSHOT_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours
     let totalSent = 0;
 
-    // 3. Process each notifiable user
-    for (const user of notifiableUsers) {
+    // 4. Process ALL users — generate briefings regardless of personal notification toggles
+    for (const user of allUsers) {
       // Get user's portfolios
       const { data: portfolios } = await supabase
         .from("portfolios")
@@ -844,7 +857,7 @@ serve(async (req: Request): Promise<Response> => {
 
       const userName = user.full_name || user.email;
 
-      // Send to user
+      // Send to user (only if their personal toggles are enabled)
       if (user.notify_telegram && user.telegram_chat_id) {
         const msg = buildTelegramMessage(portfolioBriefings);
         const ok = await sendTelegram(user.telegram_chat_id, msg);
@@ -857,17 +870,22 @@ serve(async (req: Request): Promise<Response> => {
         if (ok) totalSent++;
       }
 
-      // Send to admins
+      // Send to admins (ALWAYS, regardless of user's personal toggles)
+      // Only controlled by admin's own toggles + per-user preferences
       if (adminProfiles) {
         for (const admin of adminProfiles) {
-          if (admin.user_id === user.user_id) continue;
+          if (admin.user_id === user.user_id) continue; // don't send admin a copy of their own briefing
 
-          if (admin.admin_notify_telegram && admin.telegram_chat_id) {
+          const pref = adminPrefsMap.get(`${admin.user_id}:${user.user_id}`);
+          const shouldTelegram = admin.admin_notify_telegram && (pref ? pref.notify_telegram : true);
+          const shouldEmail = admin.admin_notify_email && (pref ? pref.notify_email : true);
+
+          if (shouldTelegram && admin.telegram_chat_id) {
             const msg = buildTelegramMessage(portfolioBriefings, userName);
             await sendTelegram(admin.telegram_chat_id, msg);
           }
 
-          if (admin.admin_notify_email && admin.email) {
+          if (shouldEmail && admin.email) {
             const html = buildEmailHTML(portfolioBriefings, userName);
             await sendEmail(admin.email, `📋 Briefing Pre-Apertura — ${userName} — ${formatDateIT()}`, html);
           }
