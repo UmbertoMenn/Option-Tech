@@ -145,7 +145,8 @@ function clusterHasSoldOptions(cluster: Position[]): boolean {
 export function categorizeDerivatives(
   derivatives: Position[],
   allPositions: Position[],
-  overrides: DerivativeOverride[] = []
+  overrides: DerivativeOverride[] = [],
+  strategyConfigs: StrategyConfiguration[] = []
 ): DerivativeCategories {
   // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
   const filteredDerivatives = derivatives.filter(d => {
@@ -154,6 +155,7 @@ export function categorizeDerivatives(
   });
   
   const coveredCalls: CoveredCallPosition[] = [];
+  const deRiskingCoveredCalls: DeRiskingCoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
   const doubleDiagonals: DoubleDiagonalPosition[] = [];
