@@ -1,5 +1,6 @@
 import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 export interface CoveredCallPosition {
   option: Position;
