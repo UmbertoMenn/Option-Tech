@@ -152,7 +152,7 @@ export function Derivatives() {
 
       // Initialize empty merged result
       const merged: DerivativeCategories = {
-        coveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
+        coveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
         nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [],
       };
 
@@ -162,6 +162,7 @@ export function Derivatives() {
         const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides);
 
         merged.coveredCalls.push(...result.coveredCalls);
+        merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
         merged.longPuts.push(...result.longPuts);
         merged.ironCondors.push(...result.ironCondors);
         merged.doubleDiagonals.push(...result.doubleDiagonals);
