@@ -103,6 +103,7 @@ export function Derivatives() {
   const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
+  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
@@ -111,6 +112,7 @@ export function Derivatives() {
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
