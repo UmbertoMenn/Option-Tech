@@ -224,6 +224,7 @@ export function usePortfolio() {
       queryClient.invalidateQueries({ queryKey: ['portfolios'] });
       queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       queryClient.invalidateQueries({ queryKey: ['derivative-overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-configurations'] });
       toast.success('Portfolio aggiornato!');
     },
     onError: (error) => {

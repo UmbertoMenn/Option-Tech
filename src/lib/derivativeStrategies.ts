@@ -265,6 +265,118 @@ export function categorizeDerivatives(
     }
   }
   
+  // ============ STEP 0.5: Apply Strategy Configurations ============
+  for (const config of strategyConfigs) {
+    const configKey = normalizeForMatching(config.underlying);
+    const remaining = filteredDerivatives.filter(d => 
+      !usedDerivatives.has(d.id) && 
+      normalizeForMatching(d.underlying || d.description) === configKey
+    );
+    if (remaining.length === 0) continue;
+
+    const linkedStock = config.linked_stock_id 
+      ? allPositions.find(p => p.id === config.linked_stock_id) 
+      : findUnderlyingStock(remaining[0], stockPositions);
+
+    switch (config.strategy_type) {
+      case 'covered_call': {
+        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const stock = linkedStock || createDummyStock(config.underlying);
+        for (const call of calls) {
+          const contracts = Math.abs(call.quantity);
+          coveredCalls.push({
+            option: call, underlying: stock, contractsCovered: contracts,
+            sharesCovered: contracts * 100, isFullyCovered: true,
+          });
+          usedDerivatives.add(call.id);
+        }
+        break;
+      }
+      case 'derisking_covered_call': {
+        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const boughtPuts = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const stock = linkedStock || createDummyStock(config.underlying);
+        // If we have synthetic PUT (deep ITM sold PUT), find it
+        const syntheticPut = config.is_synthetic 
+          ? remaining.find(d => d.option_type === 'put' && d.quantity < 0) 
+          : undefined;
+        for (const call of calls) {
+          const contracts = Math.abs(call.quantity);
+          const cc: CoveredCallPosition = {
+            option: call, underlying: stock, contractsCovered: contracts,
+            sharesCovered: contracts * 100, isFullyCovered: true,
+          };
+          const protPut = boughtPuts.shift();
+          if (protPut) {
+            deRiskingCoveredCalls.push({
+              coveredCall: cc, protectionPut: protPut,
+              isSynthetic: config.is_synthetic, syntheticPut,
+            });
+            usedDerivatives.add(protPut.id);
+          } else {
+            // No protection PUT left, fall back to regular CC
+            coveredCalls.push(cc);
+          }
+          usedDerivatives.add(call.id);
+        }
+        if (syntheticPut) usedDerivatives.add(syntheticPut.id);
+        // Mark any remaining bought PUTs as used
+        for (const p of boughtPuts) usedDerivatives.add(p.id);
+        break;
+      }
+      case 'iron_condor': {
+        const sc = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const bc = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
+        const sp = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
+        const bp = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const ic = tryMatchIronCondor(sc, bc, sp, bp);
+        if (ic) {
+          ironCondors.push(ic.condor);
+          [ic.condor.soldCall, ic.condor.boughtCall, ic.condor.soldPut, ic.condor.boughtPut]
+            .forEach(leg => usedDerivatives.add(leg.id));
+        }
+        break;
+      }
+      case 'double_diagonal': {
+        const sc = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const bc = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
+        const sp = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
+        const bp = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const dd = tryMatchDoubleDiagonal(sc, bc, sp, bp);
+        if (dd) {
+          doubleDiagonals.push(dd.diagonal);
+          [dd.diagonal.soldCall, dd.diagonal.boughtCall, dd.diagonal.soldPut, dd.diagonal.boughtPut]
+            .forEach(leg => usedDerivatives.add(leg.id));
+        }
+        break;
+      }
+      case 'naked_put': {
+        const puts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
+        for (const put of puts) {
+          nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
+          usedDerivatives.add(put.id);
+        }
+        break;
+      }
+      case 'leap_call': {
+        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
+        for (const call of calls) {
+          leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
+          usedDerivatives.add(call.id);
+        }
+        break;
+      }
+      default: {
+        // 'other' or any custom strategy type
+        for (const opt of remaining) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
+        break;
+      }
+    }
+  }
+
   // ============ STEP 1: Find Covered Calls ============
   const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
   

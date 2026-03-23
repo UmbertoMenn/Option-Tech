@@ -164,7 +164,8 @@ export function Derivatives() {
       for (const [pid, portfolioPositions] of positionsByPortfolio) {
         const portfolioDerivatives = portfolioPositions.filter(p => p.asset_type === 'derivative');
         const portfolioOverrides = overridesByPortfolio.get(pid) || [];
-        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides);
+        const portfolioConfigs = strategyConfigs.filter(c => c.portfolio_id === pid);
+        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs);
 
         merged.coveredCalls.push(...result.coveredCalls);
         merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
