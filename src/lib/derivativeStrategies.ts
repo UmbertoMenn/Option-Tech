@@ -378,7 +378,7 @@ export function categorizeDerivatives(
   }
 
   // ============ STEP 1: Find Covered Calls ============
-  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
+  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id));
   
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 

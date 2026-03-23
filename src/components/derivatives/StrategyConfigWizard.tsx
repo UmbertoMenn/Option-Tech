@@ -9,7 +9,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Settings2, Check, Zap, Plus, X, Wand2 } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight } from 'lucide-react';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 // Format expiry as MMM/YY
