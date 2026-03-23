@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, findUnderlyingStock } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Settings2, Check, Zap } from 'lucide-react';
+import { Settings2, Check, Zap, Plus, X, Wand2 } from 'lucide-react';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 // Format expiry as MMM/YY
@@ -30,16 +30,12 @@ const STRATEGY_OPTIONS = [
   { value: 'other', label: 'Altre Strategie' },
 ];
 
-interface UnderlyingGroup {
-  underlying: string;
-  options: Position[];
-  stocks: Position[];
+interface WizardStrategy {
+  id: string;
+  positions: Position[];
+  strategyType: string;
+  isSynthetic: boolean;
   suggestedType: string;
-  hasSoldCalls: boolean;
-  hasBoughtPuts: boolean;
-  hasSoldPuts: boolean;
-  hasBoughtCalls: boolean;
-  hasStock: boolean;
 }
 
 interface StrategyConfigWizardProps {
@@ -50,46 +46,105 @@ interface StrategyConfigWizardProps {
   existingConfigs: StrategyConfiguration[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
-  /** If set, only show these underlyings (for partial re-config) */
   filterUnderlyings?: string[];
 }
 
-function buildSignatures(options: Position[]): PositionSignature[] {
-  return options.map(o => ({
-    option_type: o.option_type || 'unknown',
-    strike: o.strike_price || 0,
-    expiry: o.expiry_date || '',
-    quantity_sign: o.quantity >= 0 ? 1 : -1,
-  }));
+function buildSignatures(positions: Position[]): PositionSignature[] {
+  return positions
+    .filter(p => p.asset_type === 'derivative')
+    .map(o => ({
+      option_type: o.option_type || 'unknown',
+      strike: o.strike_price || 0,
+      expiry: o.expiry_date || '',
+      quantity_sign: o.quantity >= 0 ? 1 : -1,
+    }));
 }
 
-function suggestStrategyType(group: UnderlyingGroup): string {
-  const { hasSoldCalls, hasBoughtPuts, hasSoldPuts, hasBoughtCalls, hasStock, options } = group;
-  
-  const callCount = options.filter(o => o.option_type === 'call').length;
-  const putCount = options.filter(o => o.option_type === 'put').length;
-  
-  // 4-leg strategies
-  if (callCount >= 2 && putCount >= 2) {
+function positionLabel(p: Position): string {
+  if (p.asset_type === 'stock' || p.asset_type === 'etf') {
+    return `${p.description} (${p.quantity} azioni)`;
+  }
+  const side = p.quantity < 0 ? 'V' : 'A';
+  const type = p.option_type?.toUpperCase() || '?';
+  const strike = p.strike_price || '?';
+  const expiry = formatExpiryMMY(p.expiry_date);
+  const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
+  return `${side} ${type} ${strike} ${expiry}${qty}`;
+}
+
+function positionBadgeClass(p: Position): string {
+  if (p.asset_type === 'stock' || p.asset_type === 'etf') return 'border-blue-500/50 text-blue-500';
+  return p.quantity < 0 ? 'border-green-500/50 text-green-500' : 'border-red-500/50 text-red-500';
+}
+
+/** Auto-detect strategy type from a group of positions */
+function detectStrategyType(positions: Position[]): string {
+  const options = positions.filter(p => p.asset_type === 'derivative');
+  const stocks = positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+
+  const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+  const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+  const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
+  const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+  const hasStock = stocks.some(s => s.quantity > 0);
+
+  // 4-leg
+  if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1) {
     const expiries = new Set(options.map(o => o.expiry_date));
     if (expiries.size === 1) return 'iron_condor';
-    if (expiries.size > 1) return 'double_diagonal';
+    if (expiries.size >= 2) return 'double_diagonal';
   }
-  
-  // CC with protection
-  if (hasSoldCalls && hasStock && hasBoughtPuts) return 'derisking_covered_call';
-  
-  // Pure CC
-  if (hasSoldCalls && hasStock) return 'covered_call';
-  
-  // Naked Put
-  if (hasSoldPuts && !hasStock && !hasBoughtCalls) return 'naked_put';
-  
-  // LEAP Call
-  if (hasBoughtCalls && !hasSoldCalls && !hasSoldPuts) return 'leap_call';
-  
+
+  if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
+    if (boughtPuts.length > 0) return 'derisking_covered_call';
+    if (hasStock) return 'covered_call';
+  }
+
+  if (soldPuts.length > 0 && !hasStock && soldCalls.length === 0 && boughtCalls.length === 0) return 'naked_put';
+  if (boughtCalls.length > 0 && soldCalls.length === 0 && soldPuts.length === 0) return 'leap_call';
+
   return 'other';
 }
+
+/** Group positions by underlying and auto-classify */
+function autoClassify(derivatives: Position[], allPositions: Position[]): WizardStrategy[] {
+  const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+  const groups = new Map<string, Position[]>();
+
+  for (const d of derivatives) {
+    const key = normalizeForMatching(d.underlying || d.description || '');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(d);
+  }
+
+  const strategies: WizardStrategy[] = [];
+  let idCounter = 0;
+
+  for (const [key, options] of groups) {
+    // Find matching stocks
+    const matchingStocks = stockPositions.filter(s => {
+      const stockKey = normalizeForMatching(s.description || s.ticker || '');
+      return stockKey === key || stockKey.includes(key) || key.includes(stockKey);
+    });
+
+    const positionsInGroup = [...options];
+    if (matchingStocks.length > 0) positionsInGroup.push(...matchingStocks);
+
+    const suggested = detectStrategyType(positionsInGroup);
+    strategies.push({
+      id: `auto-${idCounter++}`,
+      positions: positionsInGroup,
+      strategyType: suggested,
+      isSynthetic: false,
+      suggestedType: suggested,
+    });
+  }
+
+  return strategies;
+}
+
+let nextId = 0;
+function genId() { return `ws-${Date.now()}-${nextId++}`; }
 
 export function StrategyConfigWizard({
   open,
@@ -101,230 +156,274 @@ export function StrategyConfigWizard({
   isSaving,
   filterUnderlyings,
 }: StrategyConfigWizardProps) {
-  // Group derivatives by underlying
-  const underlyingGroups = useMemo(() => {
-    const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
-    const groups = new Map<string, { options: Position[]; normalizedKey: string }>();
-    
-    for (const d of derivatives) {
-      const name = d.underlying || d.description || '';
-      const key = normalizeForMatching(name);
-      if (!groups.has(key)) {
-        groups.set(key, { options: [], normalizedKey: key });
-      }
-      groups.get(key)!.options.push(d);
+  // All available positions (derivatives + stocks)
+  const allAvailable = useMemo(() => {
+    const stocks = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+    let derivs = derivatives;
+    if (filterUnderlyings) {
+      derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
-    
-    const result: UnderlyingGroup[] = [];
-    
-    for (const [, group] of groups) {
-      const underlying = group.options[0].underlying || group.options[0].description || '';
-      
-      // Filter if needed
-      if (filterUnderlyings && !filterUnderlyings.includes(underlying)) continue;
-      
-      const matchingStocks = stockPositions.filter(s => {
-        const stockKey = normalizeForMatching(s.description || s.ticker || '');
-        return stockKey === group.normalizedKey || 
-               stockKey.includes(group.normalizedKey) || 
-               group.normalizedKey.includes(stockKey);
-      });
-      
-      const hasSoldCalls = group.options.some(o => o.option_type === 'call' && o.quantity < 0);
-      const hasBoughtPuts = group.options.some(o => o.option_type === 'put' && o.quantity > 0);
-      const hasSoldPuts = group.options.some(o => o.option_type === 'put' && o.quantity < 0);
-      const hasBoughtCalls = group.options.some(o => o.option_type === 'call' && o.quantity > 0);
-      const hasStock = matchingStocks.some(s => s.quantity > 0);
-      
-      const g: UnderlyingGroup = {
-        underlying,
-        options: group.options.sort((a, b) => {
-          const typeOrder = { put: 0, call: 1 };
-          const ta = typeOrder[a.option_type as keyof typeof typeOrder] ?? 2;
-          const tb = typeOrder[b.option_type as keyof typeof typeOrder] ?? 2;
-          if (ta !== tb) return ta - tb;
-          return (a.strike_price || 0) - (b.strike_price || 0);
-        }),
-        stocks: matchingStocks,
-        suggestedType: '',
-        hasSoldCalls,
-        hasBoughtPuts,
-        hasSoldPuts,
-        hasBoughtCalls,
-        hasStock,
-      };
-      g.suggestedType = suggestStrategyType(g);
-      result.push(g);
-    }
-    
-    return result.sort((a, b) => a.underlying.localeCompare(b.underlying));
+    return [...derivs, ...stocks];
   }, [derivatives, allPositions, filterUnderlyings]);
 
-  // Initialize selections from existing configs or suggestions
-  const [selections, setSelections] = useState<Record<string, { type: string; isSynthetic: boolean }>>(() => {
-    const init: Record<string, { type: string; isSynthetic: boolean }> = {};
-    for (const g of underlyingGroups) {
-      const existing = existingConfigs.find(c => c.underlying === g.underlying);
-      init[g.underlying] = {
-        type: existing?.strategy_type || g.suggestedType,
-        isSynthetic: existing?.is_synthetic || false,
-      };
-    }
-    return init;
-  });
+  const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Reset selections when groups change
-  useMemo(() => {
-    setSelections(prev => {
-      const next = { ...prev };
-      for (const g of underlyingGroups) {
-        if (!next[g.underlying]) {
-          const existing = existingConfigs.find(c => c.underlying === g.underlying);
-          next[g.underlying] = {
-            type: existing?.strategy_type || g.suggestedType,
-            isSynthetic: existing?.is_synthetic || false,
-          };
-        }
-      }
+  // Pool = all positions not assigned to any strategy
+  const assignedIds = useMemo(() => {
+    const ids = new Set<string>();
+    strategies.forEach(s => s.positions.forEach(p => ids.add(p.id)));
+    return ids;
+  }, [strategies]);
+
+  const pool = useMemo(() => 
+    allAvailable.filter(p => !assignedIds.has(p.id)),
+    [allAvailable, assignedIds]
+  );
+
+  // Reset state when dialog opens
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (isOpen) {
+      setStrategies([]);
+      setSelectedIds(new Set());
+    }
+    onOpenChange(isOpen);
+  }, [onOpenChange]);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
-  }, [underlyingGroups, existingConfigs]);
+  };
+
+  const createStrategyFromSelected = () => {
+    const selected = pool.filter(p => selectedIds.has(p.id));
+    if (selected.length === 0) return;
+
+    const suggested = detectStrategyType(selected);
+    setStrategies(prev => [...prev, {
+      id: genId(),
+      positions: selected,
+      strategyType: suggested,
+      isSynthetic: false,
+      suggestedType: suggested,
+    }]);
+    setSelectedIds(new Set());
+  };
+
+  const removeFromStrategy = (strategyId: string, positionId: string) => {
+    setStrategies(prev => prev.map(s => {
+      if (s.id !== strategyId) return s;
+      const newPositions = s.positions.filter(p => p.id !== positionId);
+      if (newPositions.length === 0) return null as any;
+      const suggested = detectStrategyType(newPositions);
+      return { ...s, positions: newPositions, suggestedType: suggested };
+    }).filter(Boolean));
+  };
+
+  const deleteStrategy = (strategyId: string) => {
+    setStrategies(prev => prev.filter(s => s.id !== strategyId));
+  };
+
+  const updateStrategyType = (strategyId: string, type: string) => {
+    setStrategies(prev => prev.map(s => 
+      s.id === strategyId ? { ...s, strategyType: type } : s
+    ));
+  };
+
+  const toggleSynthetic = (strategyId: string) => {
+    setStrategies(prev => prev.map(s => 
+      s.id === strategyId ? { ...s, isSynthetic: !s.isSynthetic } : s
+    ));
+  };
+
+  const handleAutoClassify = () => {
+    const auto = autoClassify(derivatives, allPositions);
+    setStrategies(auto);
+    setSelectedIds(new Set());
+  };
 
   const handleSave = async () => {
     const configs: UpsertConfigParams[] = [];
-    
-    for (const group of underlyingGroups) {
-      const sel = selections[group.underlying];
-      if (!sel) continue;
-      
+
+    for (const strategy of strategies) {
+      const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
+        || strategy.positions[0]?.description || 'Unknown';
+      const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+
       configs.push({
-        underlying: group.underlying,
-        strategy_type: sel.type,
-        position_signatures: buildSignatures(group.options),
-        is_synthetic: sel.isSynthetic,
-        linked_stock_id: group.stocks[0]?.id || null,
+        underlying,
+        strategy_type: strategy.strategyType,
+        position_signatures: buildSignatures(strategy.positions),
+        is_synthetic: strategy.isSynthetic,
+        linked_stock_id: stockPos?.id || null,
       });
     }
-    
-    // Also keep existing configs for underlyings not in this wizard
-    for (const existing of existingConfigs) {
-      if (!configs.some(c => c.underlying === existing.underlying)) {
-        configs.push({
-          underlying: existing.underlying,
-          strategy_type: existing.strategy_type,
-          position_signatures: existing.position_signatures,
-          is_synthetic: existing.is_synthetic,
-          linked_stock_id: existing.linked_stock_id,
-        });
+
+    // Keep existing configs for underlyings not in this wizard (when filterUnderlyings is set)
+    if (filterUnderlyings) {
+      for (const existing of existingConfigs) {
+        if (!configs.some(c => c.underlying === existing.underlying)) {
+          configs.push({
+            underlying: existing.underlying,
+            strategy_type: existing.strategy_type,
+            position_signatures: existing.position_signatures,
+            is_synthetic: existing.is_synthetic,
+            linked_stock_id: existing.linked_stock_id,
+          });
+        }
       }
     }
-    
+
     await onSave(configs);
     onOpenChange(false);
   };
 
-  if (underlyingGroups.length === 0) return null;
+  if (allAvailable.length === 0) return null;
+
+  const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="w-5 h-5" />
             Configurazione Strategie Derivati
           </DialogTitle>
           <DialogDescription>
-            Classifica le opzioni per sottostante. La configurazione verrà ricordata per i prossimi upload.
+            Seleziona le posizioni dal pool e crea strategie. Usa "Auto-classifica" per un suggerimento iniziale.
           </DialogDescription>
         </DialogHeader>
-        
-        <ScrollArea className="flex-1 pr-4">
+
+        <div className="flex items-center gap-2 pb-2 border-b">
+          <Button variant="outline" size="sm" onClick={handleAutoClassify}>
+            <Wand2 className="w-4 h-4 mr-2" />
+            Auto-classifica
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {pool.length} posizioni non assegnate • {strategies.length} strategie create
+          </span>
+        </div>
+
+        <ScrollArea className="flex-1 pr-2">
           <div className="space-y-4 pb-4">
-            {underlyingGroups.map(group => {
-              const sel = selections[group.underlying] || { type: group.suggestedType, isSynthetic: false };
-              const showSynthetic = sel.type === 'covered_call' || sel.type === 'derisking_covered_call';
-              
+            {/* === POOL === */}
+            <Card className="border-dashed">
+              <CardHeader className="pb-2 pt-3 px-4">
+                <CardTitle className="text-sm font-medium flex items-center justify-between">
+                  <span>Pool posizioni disponibili ({pool.length})</span>
+                  {selectedIds.size > 0 && (
+                    <Button size="sm" variant="default" onClick={createStrategyFromSelected}>
+                      <Plus className="w-3 h-3 mr-1" />
+                      Crea strategia ({selectedIds.size} sel.)
+                    </Button>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-3">
+                {pool.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">Tutte le posizioni sono state assegnate.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pool.map(p => (
+                      <label
+                        key={p.id}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                          selectedIds.has(p.id)
+                            ? 'bg-primary/10 border-primary'
+                            : 'hover:bg-muted/50'
+                        } ${positionBadgeClass(p)}`}
+                      >
+                        <Checkbox
+                          checked={selectedIds.has(p.id)}
+                          onCheckedChange={() => toggleSelected(p.id)}
+                          className="w-3.5 h-3.5"
+                        />
+                        {positionLabel(p)}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* === STRATEGY GROUPS === */}
+            {strategies.map(strategy => {
+              const showSynthetic = strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call';
               return (
-                <Card key={group.underlying} className="border-border">
-                  <CardHeader className="pb-2 pt-4 px-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <CardTitle className="text-base font-semibold truncate">
-                        {group.underlying}
-                      </CardTitle>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {group.hasStock && (
-                          <Badge variant="outline" className="text-[10px]">
-                            STOCK: {group.stocks[0]?.quantity}
+                <Card key={strategy.id} className="border-border">
+                  <CardHeader className="pb-2 pt-3 px-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Select
+                          value={strategy.strategyType}
+                          onValueChange={(v) => updateStrategyType(strategy.id, v)}
+                        >
+                          <SelectTrigger className="w-52 h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {STRATEGY_OPTIONS.map(opt => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {strategy.suggestedType && strategy.suggestedType !== strategy.strategyType && (
+                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                            Suggerito: {strategyLabel(strategy.suggestedType)}
                           </Badge>
                         )}
+
+                        {strategy.suggestedType === strategy.strategyType && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            ✓ Auto-detected
+                          </Badge>
+                        )}
+
+                        {showSynthetic && (
+                          <div className="flex items-center gap-1.5">
+                            <Checkbox
+                              id={`syn-${strategy.id}`}
+                              checked={strategy.isSynthetic}
+                              onCheckedChange={() => toggleSynthetic(strategy.id)}
+                              className="w-3.5 h-3.5"
+                            />
+                            <Label htmlFor={`syn-${strategy.id}`} className="text-[10px] text-muted-foreground cursor-pointer flex items-center gap-1">
+                              <Zap className="w-3 h-3" /> Sintetica
+                            </Label>
+                          </div>
+                        )}
                       </div>
+
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(strategy.id)}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </CardHeader>
-                  <CardContent className="px-4 pb-4 space-y-3">
-                    {/* Option legs */}
+                  <CardContent className="px-4 pb-3">
                     <div className="flex flex-wrap gap-1.5">
-                      {group.options.map(opt => (
+                      {strategy.positions.map(p => (
                         <Badge
-                          key={opt.id}
+                          key={p.id}
                           variant="outline"
-                          className={`text-xs ${
-                            opt.quantity < 0
-                              ? 'border-green-500/50 text-green-500'
-                              : 'border-red-500/50 text-red-500'
-                          }`}
+                          className={`text-xs pr-1 ${positionBadgeClass(p)}`}
                         >
-                          {opt.quantity < 0 ? 'V' : 'A'}{' '}
-                          {opt.option_type?.toUpperCase()} {opt.strike_price}{' '}
-                          {formatExpiryMMY(opt.expiry_date)}
-                          {Math.abs(opt.quantity) > 1 ? ` ×${Math.abs(opt.quantity)}` : ''}
+                          {positionLabel(p)}
+                          <button
+                            className="ml-1 hover:text-destructive"
+                            onClick={() => removeFromStrategy(strategy.id, p.id)}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
                         </Badge>
                       ))}
-                    </div>
-                    
-                    {/* Strategy selector */}
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <Select
-                        value={sel.type}
-                        onValueChange={(value) =>
-                          setSelections(prev => ({
-                            ...prev,
-                            [group.underlying]: { ...prev[group.underlying], type: value },
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="w-56 h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STRATEGY_OPTIONS.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      
-                      {showSynthetic && (
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`synthetic-${group.underlying}`}
-                            checked={sel.isSynthetic}
-                            onCheckedChange={(checked) =>
-                              setSelections(prev => ({
-                                ...prev,
-                                [group.underlying]: { ...prev[group.underlying], isSynthetic: !!checked },
-                              }))
-                            }
-                          />
-                          <Label
-                            htmlFor={`synthetic-${group.underlying}`}
-                            className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1"
-                          >
-                            <Zap className="w-3 h-3" />
-                            Sintetica
-                          </Label>
-                        </div>
-                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -332,12 +431,12 @@ export function StrategyConfigWizard({
             })}
           </div>
         </ScrollArea>
-        
+
         <DialogFooter className="pt-4 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Annulla
           </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
+          <Button onClick={handleSave} disabled={isSaving || strategies.length === 0}>
             <Check className="w-4 h-4 mr-2" />
             {isSaving ? 'Salvataggio...' : 'Salva Configurazione'}
           </Button>
