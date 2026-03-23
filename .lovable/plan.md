@@ -1,22 +1,33 @@
 
 
-## Fix: Scroll non funzionante nel wizard configurazione strategie
+## Miglioramenti al Wizard: ticker/sottostante + pool separato per tipo
 
-### Problema
-Il `DialogContent` ha `max-h-[90vh] flex flex-col` e il contenuto è dentro un `<ScrollArea>` (Radix), ma il `ScrollArea` non ha un'altezza esplicita — solo `flex-1`. In molti casi Radix ScrollArea non calcola correttamente l'altezza con solo `flex-1`, impedendo sia lo scroll con rotellina che la visualizzazione della scrollbar.
+### Problemi attuali
+1. Le label dei derivati nel pool e nelle strategie mostrano solo "V CALL 150 MAR/25" — manca il ticker/sottostante, impossibile distinguere opzioni su titoli diversi
+2. Il pool è un unico blocco flat di chips — nessuna separazione per tipo strumento
+3. Nelle strategy card create, non si vede il nome del sottostante
 
-### Soluzione
-Sostituire `<ScrollArea className="flex-1 pr-2">` con un semplice `<div>` che usa `overflow-y-auto` e `min-h-0` (necessario in flex column per permettere lo shrink):
+### Modifiche a `src/components/derivatives/StrategyConfigWizard.tsx`
 
-```tsx
-<div className="flex-1 min-h-0 overflow-y-auto pr-2">
+**1. Label derivati con ticker/underlying**
+
+Modificare `positionLabel()` per i derivati: aggiungere il ticker o underlying all'inizio:
 ```
+LULU V CALL 150 MAR/25
+AVGO A PUT 200 GIU/25 ×2
+```
+Logica: usare `p.ticker || p.underlying || p.description` come prefisso.
 
-Questo approccio:
-- Abilita lo scroll nativo con rotellina
-- Mostra la scrollbar del browser
-- Funziona correttamente in flex column con `min-h-0`
+**2. Pool separato in 3 sezioni**
 
-### File da modificare
-- `src/components/derivatives/StrategyConfigWizard.tsx` — riga 312: sostituire `<ScrollArea>` con `<div>` con overflow, e chiusura corrispondente
+Dentro la Card "Pool posizioni disponibili", invece di un unico `flex-wrap`, dividere in 3 sotto-sezioni con header:
+- **Azioni** — `pool.filter(p => p.asset_type === 'stock')`
+- **ETF** — `pool.filter(p => p.asset_type === 'etf')`
+- **Derivati** — `pool.filter(p => p.asset_type === 'derivative')`
+
+Ogni sezione ha un titoletto (`text-[11px] text-muted-foreground font-medium uppercase`) e i chips sotto. Sezioni vuote nascoste.
+
+**3. Underlying nelle strategy card**
+
+Nell'header di ogni strategy card, mostrare il nome del sottostante principale (derivato dal primo derivato nel gruppo: `underlying || description`), accanto al dropdown tipo strategia. Es: "**LULULEMON** — [Covered Call ▾]"
 
