@@ -454,7 +454,7 @@ export function Derivatives() {
         {!hasConfigurations && derivatives.length > 0 && (
           <Card className="p-8 text-center border-dashed">
             <CardContent className="space-y-4">
-              <Settings2 className="w-12 h-12 mx-auto text-muted-foreground" />
+              <Settings className="w-12 h-12 mx-auto text-muted-foreground" />
               <h2 className="text-lg font-semibold">Configura le strategie derivati</h2>
               <p className="text-muted-foreground text-sm max-w-md mx-auto">
                 Per visualizzare le strategie, configura prima come classificare le posizioni derivati.
