@@ -309,7 +309,7 @@ export function StrategyConfigWizard({
           </span>
         </div>
 
-        <ScrollArea className="flex-1 pr-2">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
           <div className="space-y-4 pb-4">
             {/* === POOL === */}
             <Card className="border-dashed">
