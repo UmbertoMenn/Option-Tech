@@ -64,12 +64,13 @@ function positionLabel(p: Position): string {
   if (p.asset_type === 'stock' || p.asset_type === 'etf') {
     return `${p.description} (${p.quantity} azioni)`;
   }
+  const prefix = p.ticker || p.underlying || p.description || '';
   const side = p.quantity < 0 ? 'V' : 'A';
   const type = p.option_type?.toUpperCase() || '?';
   const strike = p.strike_price || '?';
   const expiry = formatExpiryMMY(p.expiry_date);
   const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
-  return `${side} ${type} ${strike} ${expiry}${qty}`;
+  return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
 }
 
 function positionBadgeClass(p: Position): string {
