@@ -430,7 +430,7 @@ export function StrategyConfigWizard({
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter className="pt-4 border-t">
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
