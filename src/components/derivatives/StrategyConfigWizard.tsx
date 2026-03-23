@@ -330,34 +330,39 @@ export function StrategyConfigWizard({
                 {pool.length === 0 ? (
                   <p className="text-xs text-muted-foreground py-2">Tutte le posizioni sono state assegnate.</p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-1">
                     {([
                       { label: 'AZIONI', items: pool.filter(p => p.asset_type === 'stock') },
-                      { label: 'ETF', items: pool.filter(p => p.asset_type === 'etf') },
                       { label: 'DERIVATI', items: pool.filter(p => p.asset_type === 'derivative') },
+                      { label: 'ETF', items: pool.filter(p => p.asset_type === 'etf') },
                     ] as const).filter(s => s.items.length > 0).map(section => (
-                      <div key={section.label}>
-                        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide mb-1.5">{section.label}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {section.items.map(p => (
-                            <label
-                              key={p.id}
-                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
-                                selectedIds.has(p.id)
-                                  ? 'bg-primary/10 border-primary'
-                                  : 'hover:bg-muted/50'
-                              } ${positionBadgeClass(p)}`}
-                            >
-                              <Checkbox
-                                checked={selectedIds.has(p.id)}
-                                onCheckedChange={() => toggleSelected(p.id)}
-                                className="w-3.5 h-3.5"
-                              />
-                              {positionLabel(p)}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
+                      <Collapsible key={section.label} defaultOpen>
+                        <CollapsibleTrigger className="flex items-center gap-1.5 w-full py-1.5 text-[11px] text-muted-foreground font-medium uppercase tracking-wide hover:text-foreground transition-colors group">
+                          <ChevronDown className="w-3.5 h-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
+                          {section.label} ({section.items.length})
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="flex flex-wrap gap-1.5 pb-2">
+                            {section.items.map(p => (
+                              <label
+                                key={p.id}
+                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                                  selectedIds.has(p.id)
+                                    ? 'bg-primary/10 border-primary'
+                                    : 'hover:bg-muted/50'
+                                } ${positionBadgeClass(p)}`}
+                              >
+                                <Checkbox
+                                  checked={selectedIds.has(p.id)}
+                                  onCheckedChange={() => toggleSelected(p.id)}
+                                  className="w-3.5 h-3.5"
+                                />
+                                {positionLabel(p)}
+                              </label>
+                            ))}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     ))}
                   </div>
                 )}
