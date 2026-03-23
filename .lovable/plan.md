@@ -1,33 +1,45 @@
 
 
-## Miglioramenti al Wizard: ticker/sottostante + pool separato per tipo
+## Fix: 3 problemi nel Wizard Configurazione Strategie
 
-### Problemi attuali
-1. Le label dei derivati nel pool e nelle strategie mostrano solo "V CALL 150 MAR/25" — manca il ticker/sottostante, impossibile distinguere opzioni su titoli diversi
-2. Il pool è un unico blocco flat di chips — nessuna separazione per tipo strumento
-3. Nelle strategy card create, non si vede il nome del sottostante
+### 1. Pool con tendine (collapsible) e ordine Azioni → Derivati → ETF
 
-### Modifiche a `src/components/derivatives/StrategyConfigWizard.tsx`
+Attualmente le sezioni del pool (Azioni/ETF/Derivati) sono sempre aperte e ordinate Azioni → ETF → Derivati. Cambiare a:
+- **Ordine**: Azioni → Derivati → ETF
+- **Collapsible**: ogni sezione è una tendina (Collapsible) aperta di default, cliccabile per chiudere/aprire
 
-**1. Label derivati con ticker/underlying**
+**File**: `src/components/derivatives/StrategyConfigWizard.tsx` — riga 333-360
+- Aggiungere stato per sezioni aperte/chiuse
+- Wrappare ogni sezione in `<Collapsible>` con header cliccabile
+- Riordinare l'array: `stock` → `derivative` → `etf`
 
-Modificare `positionLabel()` per i derivati: aggiungere il ticker o underlying all'inizio:
+### 2. Derivati ALPHABET mancanti nel pool
+
+Questo richiede un'indagine sui dati reali dell'utente MELD. Possibili cause:
+- Le opzioni ALPHABET potrebbero avere `asset_type` diverso da `derivative`
+- L'`underlying` potrebbe non corrispondere al nome atteso
+
+**Azione**: aggiungere un log diagnostico temporaneo nel wizard per verificare cosa contiene `derivatives` e `allAvailable`. Verificherò anche il parsing Excel per ALPHABET/GOOGL.
+
+### 3. Posizioni duplicate nelle Covered Call dopo il salvataggio (**BUG CRITICO**)
+
+**Causa root trovata**: In `src/lib/derivativeStrategies.ts`, riga 381:
+```typescript
+const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
 ```
-LULU V CALL 150 MAR/25
-AVGO A PUT 200 GIU/25 ×2
+Questo **NON filtra** le posizioni già usate in Step 0.5 (configurazioni salvate). Risultato: le CALL vendute classificate dal wizard come Covered Call vengono ri-classificate anche da Step 1, duplicandole.
+
+**Fix**: Aggiungere il check `!usedDerivatives.has(d.id)`:
+```typescript
+const soldCalls = filteredDerivatives.filter(d => 
+  d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id)
+);
 ```
-Logica: usare `p.ticker || p.underlying || p.description` come prefisso.
 
-**2. Pool separato in 3 sezioni**
+**File**: `src/lib/derivativeStrategies.ts` — riga 381
 
-Dentro la Card "Pool posizioni disponibili", invece di un unico `flex-wrap`, dividere in 3 sotto-sezioni con header:
-- **Azioni** — `pool.filter(p => p.asset_type === 'stock')`
-- **ETF** — `pool.filter(p => p.asset_type === 'etf')`
-- **Derivati** — `pool.filter(p => p.asset_type === 'derivative')`
+### File da modificare
 
-Ogni sezione ha un titoletto (`text-[11px] text-muted-foreground font-medium uppercase`) e i chips sotto. Sezioni vuote nascoste.
-
-**3. Underlying nelle strategy card**
-
-Nell'header di ogni strategy card, mostrare il nome del sottostante principale (derivato dal primo derivato nel gruppo: `underlying || description`), accanto al dropdown tipo strategia. Es: "**LULULEMON** — [Covered Call ▾]"
+1. **`src/components/derivatives/StrategyConfigWizard.tsx`** — Tendine collapsibili nel pool, ordine Azioni → Derivati → ETF
+2. **`src/lib/derivativeStrategies.ts`** — riga 381: aggiungere filtro `usedDerivatives` a Step 1
 
