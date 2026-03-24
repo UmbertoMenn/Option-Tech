@@ -97,8 +97,19 @@ function detectStrategyType(positions: Position[]): string {
     if (expiries.size >= 2) return 'double_diagonal';
   }
 
+  // Check for put spread: bought put strike < sold put strike → spread, not protection
+  const hasPutSpread = soldPuts.length > 0 && boughtPuts.length > 0 && (() => {
+    const maxSoldPutStrike = Math.max(...soldPuts.map(p => p.strike_price || 0));
+    const minBoughtPutStrike = Math.min(...boughtPuts.map(p => p.strike_price || 0));
+    return minBoughtPutStrike < maxSoldPutStrike;
+  })();
+
+  // Pure put spread (no calls) → other
+  if (hasPutSpread && soldCalls.length === 0 && boughtCalls.length === 0) return 'other';
+
   if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
-    if (boughtPuts.length > 0) return 'derisking_covered_call';
+    // Only classify as derisking if bought put is protective (not a spread)
+    if (boughtPuts.length > 0 && !hasPutSpread) return 'derisking_covered_call';
     if (hasStock) return 'covered_call';
   }
 
