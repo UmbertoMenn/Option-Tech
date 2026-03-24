@@ -327,6 +327,11 @@ export function categorizeDerivatives(
         if (syntheticPut) usedDerivatives.add(syntheticPut.id);
         // Mark any remaining bought PUTs as used
         for (const p of boughtPuts) usedDerivatives.add(p.id);
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
         break;
       }
       case 'iron_condor': {
