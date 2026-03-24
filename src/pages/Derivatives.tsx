@@ -249,6 +249,13 @@ export function Derivatives() {
       }
     });
     
+    // De-Risking Covered Calls - ALL underlyings
+    categories.deRiskingCoveredCalls.forEach(dr => {
+      if (dr.coveredCall.option.underlying) {
+        names.add(dr.coveredCall.option.underlying);
+      }
+    });
+    
     // Grouped Other Strategies
     categories.groupedOtherStrategies.forEach(group => {
       names.add(group.underlying);
