@@ -345,6 +345,11 @@ export function categorizeDerivatives(
           [ic.condor.soldCall, ic.condor.boughtCall, ic.condor.soldPut, ic.condor.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
         break;
       }
       case 'double_diagonal': {
