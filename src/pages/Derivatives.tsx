@@ -187,6 +187,9 @@ export function Derivatives() {
     return {
       ...raw,
       coveredCalls: sortByOptionUnderlying(raw.coveredCalls),
+      deRiskingCoveredCalls: [...raw.deRiskingCoveredCalls].sort((a, b) => 
+        (a.coveredCall.option.underlying || '').localeCompare(b.coveredCall.option.underlying || '')
+      ),
       longPuts: sortByOptionUnderlying(raw.longPuts),
       ironCondors: sortByUnderlyingString(raw.ironCondors),
       doubleDiagonals: sortByUnderlyingString(raw.doubleDiagonals),
