@@ -363,6 +363,11 @@ export function categorizeDerivatives(
           [dd.diagonal.soldCall, dd.diagonal.boughtCall, dd.diagonal.soldPut, dd.diagonal.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
         break;
       }
       case 'naked_put': {
