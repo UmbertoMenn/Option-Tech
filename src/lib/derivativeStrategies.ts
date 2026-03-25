@@ -422,9 +422,8 @@ export function categorizeDerivatives(
           leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
           usedDerivatives.add(call.id);
         }
-        // Mark any remaining unhandled positions as used → other strategies
+        // ALL remaining positions for this underlying stay consumed
         for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
         break;
