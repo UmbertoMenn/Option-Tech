@@ -190,6 +190,7 @@ export function Derivatives() {
     return {
       ...raw,
       coveredCalls: sortByOptionUnderlying(raw.coveredCalls),
+      syntheticCoveredCalls: sortByOptionUnderlying(raw.syntheticCoveredCalls),
       deRiskingCoveredCalls: [...raw.deRiskingCoveredCalls].sort((a, b) => 
         (a.coveredCall.option.underlying || '').localeCompare(b.coveredCall.option.underlying || '')
       ),
