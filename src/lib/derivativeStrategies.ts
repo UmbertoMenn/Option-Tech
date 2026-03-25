@@ -307,12 +307,18 @@ export function categorizeDerivatives(
       }
       case 'derisking_covered_call': {
         const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
-        const boughtPuts = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
         const stock = linkedStock || createDummyStock(config.underlying);
-        // If we have synthetic PUT (deep ITM sold PUT), find it
+        
+        // If synthetic, isolate the sold PUT (deep ITM) FIRST as stock replacement
         const syntheticPut = config.is_synthetic 
           ? remaining.find(d => d.option_type === 'put' && d.quantity < 0) 
           : undefined;
+        
+        // Bought PUTs exclude the synthetic sold PUT
+        const boughtPuts = remaining.filter(d => 
+          d.option_type === 'put' && d.quantity > 0
+        );
+        
         for (const call of calls) {
           const contracts = Math.abs(call.quantity);
           const cc: CoveredCallPosition = {
@@ -321,13 +327,19 @@ export function categorizeDerivatives(
           };
           const protPut = boughtPuts.shift();
           if (protPut) {
+            // Has protection PUT → De-Risking CC
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: protPut,
               isSynthetic: config.is_synthetic, syntheticPut,
             });
             usedDerivatives.add(protPut.id);
+          } else if (config.is_synthetic && syntheticPut) {
+            // No protection PUT but is synthetic → Synthetic CC (not standard CC)
+            syntheticCoveredCalls.push({
+              option: call, syntheticPut, contracts,
+            });
           } else {
-            // No protection PUT left, fall back to regular CC
+            // No protection PUT, not synthetic → regular CC
             coveredCalls.push(cc);
           }
           usedDerivatives.add(call.id);
@@ -339,6 +351,7 @@ export function categorizeDerivatives(
         for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
           otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
+        }
         }
         break;
       }
