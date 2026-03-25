@@ -555,6 +555,56 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
+        {/* Section 1.5: Covered Call Sintetiche (Collapsible) */}
+        <Collapsible open={syntheticCCOpen} onOpenChange={setSyntheticCCOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Shield className="w-5 h-5 text-primary" />
+                      <span className="absolute -bottom-0.5 -right-1 text-[9px] font-bold text-orange-400">S</span>
+                    </div>
+                    <CardTitle className="text-xl">Covered Call Sintetiche</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.syntheticCoveredCalls.length}</Badge>
+                  </div>
+                  {syntheticCCOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  CALL vendute con PUT venduta deep ITM al posto del sottostante
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.syntheticCoveredCalls.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna Covered Call Sintetica presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1 overflow-x-auto">
+                    {categories.syntheticCoveredCalls.map((scc, index) => (
+                      <SyntheticCoveredCallRow 
+                        key={index} 
+                        syntheticCC={scc} 
+                        stockPositions={stockPositions} 
+                        getOverrideForPosition={getOverrideForPosition}
+                        underlyingPrices={underlyingPrices}
+                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
         {/* Section 2: De-Risking Covered Call (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
