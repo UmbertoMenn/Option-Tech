@@ -1,68 +1,69 @@
 
 
-## Suddivisione Covered Call standard vs sintetiche + fix Accenture
+## Fix classificazione per configurazione + splitting azioni in slot da 100
 
-### Problema 1: Accenture classificata male
-Il case `derisking_covered_call` in Step 0.5 cerca `remaining.find(d => d.option_type === 'put' && d.quantity < 0)` per la synthetic PUT, ma questa viene trovata PRIMA di filtrare `boughtPuts`. Risultato: la sold PUT viene presa sia come `syntheticPut` sia potenzialmente confusa con le bought puts. Se il matching fallisce (es. non ci sono bought puts rimaste dopo lo shift), la call va in CC standard e le put in "other".
+### Problema 1: Accenture e altre posizioni non rispettano la configurazione salvata
 
-**Root cause**: quando `is_synthetic=true`, la PUT venduta deep ITM deve essere trattata come "stock equivalente" e NON deve finire in `boughtPuts`. Inoltre, se non ci sono PUT comprate protettive, la strategia deve comunque rimanere come CC sintetica (non derisking), non frammentarsi.
+**Root cause**: In Step 0.5, il matching tra `config.underlying` e `d.underlying` usa `normalizeForMatching` su entrambi i lati. Se il wizard salva l'underlying come (ad esempio) `"ACCENTURE PLC"` ma la posizione ha `underlying: "ACCENTURE"` (o viceversa), dopo la normalizzazione (che rimuove "PLC") dovrebbero matchare. Tuttavia, ci sono due problemi:
 
-### Problema 2: Nessuna sezione separata per CC sintetiche
-Attualmente `coveredCalls` contiene sia standard che sintetiche senza distinzione. Serve una sezione separata con tendina dedicata che, quando aperta, mostri la gamba PUT venduta deep ITM.
+1. Il wizard salva `underlying` dal primo derivativo nel gruppo (`strategy.positions.find(p => p.asset_type === 'derivative')?.underlying`). Se un derivativo ha `underlying: null` e usa `.description` come fallback, la normalizzazione potrebbe divergere.
 
-### Piano
+2. **Bug critico**: nel case `derisking_covered_call` con `is_synthetic`, se ci sono 2 sold puts (una deep ITM sintetica e una regolare), `remaining.find(d => d.option_type === 'put' && d.quantity < 0)` prende la prima a caso — potrebbe prendere quella sbagliata. Inoltre, se non ci sono bought puts (perché la configurazione non prevedeva protezione), la call finisce in `syntheticCoveredCalls` ma se `is_synthetic` non è correttamente salvato/letto, finisce in `coveredCalls` standard.
 
-#### File 1: `src/lib/derivativeStrategies.ts`
+**Fix**: Rendere Step 0.5 robusto — tutte le posizioni di un underlying con config salvata DEVONO finire nella categoria configurata, senza eccezioni.
 
-**A. Nuova interfaccia `SyntheticCoveredCallPosition`:**
+#### Modifiche in `src/lib/derivativeStrategies.ts` — Step 0.5:
+
+- **Logica `derisking_covered_call` con `is_synthetic`**: selezionare la sold PUT sintetica come quella con lo strike più basso (deep ITM = strike molto basso per una PUT venduta). Se ci sono bought puts → `deRiskingCoveredCalls`. Se non ce ne sono → `syntheticCoveredCalls`. 
+- **Fallback**: qualunque posizione rimasta per quell'underlying viene aggiunta come gamba aggiuntiva nella stessa strategia, NON in "altre strategie".
+- Aggiungere log di debug per tracciare ogni step del matching.
+
+### Problema 2: Splitting azioni in slot da 100
+
+L'utente vuole poter assegnare 100 azioni Apple a una strategia e 100 a un'altra. Attualmente il pool mostra "APPLE (200 azioni)" come singola voce.
+
+#### Modifiche in `src/components/derivatives/StrategyConfigWizard.tsx`:
+
+**A. Generazione slot virtuali nel pool**
+
+Nel `useMemo` che calcola `allAvailable`, per ogni posizione stock/ETF con `quantity >= 200`, generare slot virtuali da 100 azioni ciascuno:
+
 ```typescript
-export interface SyntheticCoveredCallPosition {
-  option: Position;           // CALL venduta
-  syntheticPut: Position;     // PUT venduta deep ITM (sostituto stock)
-  contracts: number;
+// Per ogni stock con qty >= 200, creare slot da 100
+const virtualPositions: Position[] = [];
+for (const stock of stocks) {
+  if (stock.quantity >= 200) {
+    const slots = Math.floor(stock.quantity / 100);
+    for (let i = 0; i < slots; i++) {
+      virtualPositions.push({
+        ...stock,
+        id: `${stock.id}__slot_${i}`,  // ID virtuale
+        quantity: 100,
+      });
+    }
+    // Slot per il resto (se qty non è multiplo di 100)
+    const remainder = stock.quantity % 100;
+    if (remainder > 0) {
+      virtualPositions.push({
+        ...stock,
+        id: `${stock.id}__slot_${slots}`,
+        quantity: remainder,
+      });
+    }
+  } else {
+    virtualPositions.push(stock);
+  }
 }
 ```
 
-**B. Aggiungere `syntheticCoveredCalls` a `DerivativeCategories`**
+**B. Label slot**: `positionLabel` mostrerà "APPLE (100 azioni) [1/2]", "APPLE (100 azioni) [2/2]"
 
-**C. Fix Step 0.5 `derisking_covered_call` con `is_synthetic=true`:**
-- Isolare la sold PUT come `syntheticPut` PRIMA di filtrare boughtPuts
-- Se ci sono bought puts protettive → `deRiskingCoveredCalls` (sintetica)
-- Se NON ci sono bought puts → `syntheticCoveredCalls` (CC sintetica senza protezione)
+**C. Salvataggio**: in `handleSave`, quando si cerca `linked_stock_id`, usare l'ID originale (rimuovendo il suffisso `__slot_N`) e salvarlo. Il campo `linked_stock_id` punterà sempre alla posizione reale.
 
-**D. Fix Step 0.5 `covered_call`:** se `is_synthetic` nel config, mandare a `syntheticCoveredCalls` invece di `coveredCalls`
-
-#### File 2: `src/pages/Derivatives.tsx`
-
-**E. Nuova sezione "Covered Call Sintetiche"** tra Covered Call e De-Risking:
-- Ordine: 1. CC Standard → 2. CC Sintetiche → 3. De-Risking CC → ...
-- Icona: Shield + badge "S" arancione
-- Descrizione: "CALL vendute con PUT venduta deep ITM al posto del sottostante"
-- Ogni riga mostra la CALL venduta (come CoveredCallRow) con PMC, prezzo, gain/loss %
-- Tendina espansa: mostra la gamba PUT venduta deep ITM con strike, scadenza, PMC, prezzo
-
-**F. Nuovo componente `SyntheticCoveredCallRow`:**
-- Riga principale: stesse colonne di CoveredCallRow (V badge, descrizione, OptionStrat, ITM/OTM, menu, calculator, UNIT, PS, contratti, PMC, prezzo+%)
-- Badge "S" arancione accanto alla descrizione
-- Collapsible: dettagli PUT sintetica (strike, scadenza, PMC, prezzo, P/L%)
-
-**G. Stato e wiring:** aggiungere `syntheticCCOpen` state, rendering della sezione, aggiungere underlyings alla lista prezzi
-
-#### File 3: `src/components/derivatives/StrategyConfigWizard.tsx`
-- Nessuna modifica necessaria: il wizard già gestisce `is_synthetic` flag
-
-### Ordine sezioni finale
-1. Covered Call (standard, con azioni reali)
-2. Covered Call Sintetiche (con PUT venduta deep ITM)
-3. De-Risking Covered Call (CC + protezione, standard o sintetiche)
-4. Iron Condor
-5. Double Diagonal
-6. Naked Put
-7. Leap Call
-8. Protezioni
-9. Altre Strategie
+**D. Impatto su categorizzazione**: Nessuna modifica necessaria in `derivativeStrategies.ts` perché il `linked_stock_id` punta già allo stock reale. La differenza è solo nella configurazione: l'utente può ora assegnare sottoinsiemi di azioni a strategie diverse.
 
 ### File da modificare
-1. `src/lib/derivativeStrategies.ts` — nuova interfaccia, nuovo array, fix Step 0.5
-2. `src/pages/Derivatives.tsx` — nuova sezione, nuovo componente row, riordino
+
+1. `src/lib/derivativeStrategies.ts` — Fix Step 0.5 per rispettare rigorosamente la configurazione salvata
+2. `src/components/derivatives/StrategyConfigWizard.tsx` — Splitting azioni in slot da 100, label aggiornate, fix salvataggio
 
