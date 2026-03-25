@@ -171,6 +171,7 @@ export function Derivatives() {
         const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs);
 
         merged.coveredCalls.push(...result.coveredCalls);
+        merged.syntheticCoveredCalls.push(...result.syntheticCoveredCalls);
         merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
         merged.longPuts.push(...result.longPuts);
         merged.ironCondors.push(...result.ironCondors);
