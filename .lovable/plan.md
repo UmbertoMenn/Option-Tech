@@ -1,28 +1,33 @@
 
 
-## Fix wizard: ricerca nel pool + auto-classificazione corretta
+## Fix auto-classificazione: usare `categorizeDerivatives` direttamente
 
-### Problema 1: Pool azioni troppo confusionale
+### Problema
 
-Con lo splitting in slot da 100, il pool AZIONI diventa enorme e innavigabile. 
+L'`autoClassify` nel wizard reimplementa (male) la logica di classificazione, producendo risultati diversi da `categorizeDerivatives` in `derivativeStrategies.ts`. L'utente vuole che il wizard usi ESATTAMENTE la stessa logica originale.
 
-**Soluzione**: Aggiungere un campo di ricerca (Input) sopra le sezioni del pool. Filtra in tempo reale tutte le posizioni (azioni, derivati, ETF) per nome/descrizione. Sotto-raggruppare le azioni per nome (es. "APPLE" → 2 slot) così sono visivamente raggruppati.
+### Soluzione
 
-### Problema 2: Auto-classificazione mette bought calls nelle covered call
+Sostituire la funzione `autoClassify` nel wizard per chiamare direttamente `categorizeDerivatives()` e poi convertire il risultato `DerivativeCategories` in array di `WizardStrategy[]`.
 
-**Root cause**: `autoClassify` raggruppa TUTTE le posizioni dello stesso underlying in un unico gruppo. Se ci sono sia sold calls (covered call) che bought calls (leap) sullo stesso titolo, finiscono tutti insieme. Poi `detectStrategyType` vede sold calls + bought calls + stock e li classifica come iron condor/double diagonal (4-leg check a riga 102) oppure li lascia come covered call includendo erroneamente le bought calls.
+### File: `src/components/derivatives/StrategyConfigWizard.tsx`
 
-**Fix in `autoClassify`**: Dopo il raggruppamento per underlying, se il gruppo contiene sia sold calls che bought calls MA non ha la struttura 4-leg (iron condor / double diagonal), separare le bought calls in una strategia `leap_call` dedicata. Analogamente, separare bought puts standalone come protezioni.
+**Rimuovere**: le funzioni `detectStrategyType`, `isFourLeg`, e l'attuale `autoClassify` (righe ~91-213).
 
-### File da modificare
+**Nuova `autoClassify`**:
+1. Importare `categorizeDerivatives` da `derivativeStrategies.ts`
+2. Chiamarla con `(derivatives, allPositions, [], [])` — zero overrides e zero configs, esattamente come faceva il sistema prima della configurazione manuale
+3. Iterare su ogni categoria del risultato (`coveredCalls`, `deRiskingCoveredCalls`, `ironCondors`, `doubleDiagonals`, `nakedPuts`, `leapCalls`, `otherStrategies`, `longPuts`) e convertirle in `WizardStrategy[]`:
+   - Covered Call → raggruppa per underlying, tipo `covered_call`, posizioni = `[cc.option, cc.underlying]`
+   - De-Risking CC → tipo `derisking_covered_call`, posizioni = `[cc.coveredCall.option, cc.coveredCall.underlying, cc.protectionPut]` + eventuale `syntheticPut`
+   - Iron Condor → tipo `iron_condor`, posizioni = 4 gambe
+   - Double Diagonal → tipo `double_diagonal`, posizioni = 4 gambe
+   - Naked Put → tipo `naked_put`, posizioni = `[option]`
+   - Leap Call → tipo `leap_call`, posizioni = `[option]`
+   - Long Puts / Protezioni → tipo `other`, posizioni = `[option]`
+   - Other → tipo `other`, posizioni raggruppate per underlying
+4. Raggruppare posizioni dello stesso underlying e tipo in una singola `WizardStrategy` (per evitare duplicati)
+5. Aggiungere al pool le posizioni non consumate (se ce ne sono)
 
-**`src/components/derivatives/StrategyConfigWizard.tsx`**:
-
-1. **Aggiungere stato `searchQuery`** e un `<Input>` con placeholder "Cerca posizione..." sopra le sezioni collapsibili del pool
-2. **Filtrare** `pool` per `searchQuery` (match su `description`, `ticker`, `underlying`)
-3. **Sotto-raggruppare azioni** nella sezione AZIONI per nome titolo, mostrando "APPLE (2 slot)" come sotto-header
-4. **Fix `autoClassify`**: dopo il raggruppamento iniziale per underlying, per ogni gruppo:
-   - Se è un vero 4-leg (iron condor / double diagonal) → mantienilo unito
-   - Altrimenti, separa bought calls (→ `leap_call`) e isola sold calls + stock (→ `covered_call`)
-   - Separa bought puts standalone senza sold calls (→ `other` / protezione)
+Questo garantisce che MICRON e qualsiasi altra posizione venga classificata esattamente come nel sistema pre-wizard.
 
