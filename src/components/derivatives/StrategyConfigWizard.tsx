@@ -263,6 +263,7 @@ export function StrategyConfigWizard({
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Pool = all positions not assigned to any strategy
   const assignedIds = useMemo(() => {
