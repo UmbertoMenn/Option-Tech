@@ -770,7 +770,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, syntheticCoveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
 }
 
 /**
