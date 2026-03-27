@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 // Format expiry as MMM/YY
@@ -127,7 +128,16 @@ function detectStrategyType(positions: Position[]): string {
   return 'other';
 }
 
-/** Group positions by underlying and auto-classify */
+/** Check if a group forms a valid 4-leg structure */
+function isFourLeg(options: Position[]): boolean {
+  const soldCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity < 0);
+  const boughtCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity > 0);
+  const soldPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity < 0);
+  const boughtPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity > 0);
+  return soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1;
+}
+
+/** Group positions by underlying and auto-classify, splitting incompatible legs */
 function autoClassify(derivatives: Position[], allPositions: Position[]): WizardStrategy[] {
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
   const groups = new Map<string, Position[]>();
@@ -141,24 +151,62 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
 
+  const makeStrategy = (positions: Position[]): WizardStrategy => {
+    const suggested = detectStrategyType(positions);
+    return {
+      id: `auto-${idCounter++}`,
+      positions,
+      strategyType: suggested,
+      isSynthetic: false,
+      suggestedType: suggested,
+    };
+  };
+
   for (const [key, options] of groups) {
-    // Find matching stocks
     const matchingStocks = stockPositions.filter(s => {
       const stockKey = normalizeForMatching(s.description || s.ticker || '');
       return stockKey === key || stockKey.includes(key) || key.includes(stockKey);
     });
 
-    const positionsInGroup = [...options];
-    if (matchingStocks.length > 0) positionsInGroup.push(...matchingStocks);
+    const allInGroup = [...options];
+    if (matchingStocks.length > 0) allInGroup.push(...matchingStocks);
 
-    const suggested = detectStrategyType(positionsInGroup);
-    strategies.push({
-      id: `auto-${idCounter++}`,
-      positions: positionsInGroup,
-      strategyType: suggested,
-      isSynthetic: false,
-      suggestedType: suggested,
-    });
+    // If it's a true 4-leg structure, keep it together
+    if (isFourLeg(options)) {
+      strategies.push(makeStrategy(allInGroup));
+      continue;
+    }
+
+    // Otherwise, split: separate bought calls (leaps) from the rest
+    const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+    const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+    const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
+    const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+
+    // Main group: sold calls + sold puts + bought puts (for derisking) + stocks
+    const mainLegs: Position[] = [...soldCalls, ...soldPuts];
+    // Include bought puts only if there are sold calls (derisking pattern)
+    if (soldCalls.length > 0 && boughtPuts.length > 0) {
+      mainLegs.push(...boughtPuts);
+    }
+    if (mainLegs.length > 0) {
+      const mainGroup = [...mainLegs, ...matchingStocks];
+      strategies.push(makeStrategy(mainGroup));
+    } else if (matchingStocks.length > 0 && boughtCalls.length === 0 && boughtPuts.length === 0) {
+      // Stocks with no derivatives - skip
+    }
+
+    // Bought calls → separate leap_call strategies
+    for (const bc of boughtCalls) {
+      strategies.push(makeStrategy([bc]));
+    }
+
+    // Bought puts without sold calls → separate protection/other strategies
+    if (soldCalls.length === 0 && boughtPuts.length > 0) {
+      for (const bp of boughtPuts) {
+        strategies.push(makeStrategy([bp]));
+      }
+    }
   }
 
   return strategies;
@@ -215,6 +263,7 @@ export function StrategyConfigWizard({
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Pool = all positions not assigned to any strategy
   const assignedIds = useMemo(() => {
@@ -228,11 +277,22 @@ export function StrategyConfigWizard({
     [allAvailable, assignedIds]
   );
 
+  const filteredPool = useMemo(() => {
+    if (!searchQuery.trim()) return pool;
+    const q = searchQuery.toLowerCase();
+    return pool.filter(p =>
+      (p.description || '').toLowerCase().includes(q) ||
+      (p.ticker || '').toLowerCase().includes(q) ||
+      (p.underlying || '').toLowerCase().includes(q)
+    );
+  }, [pool, searchQuery]);
+
   // Reset state when dialog opens
   const handleOpenChange = useCallback((isOpen: boolean) => {
     if (isOpen) {
       setStrategies([]);
       setSelectedIds(new Set());
+      setSearchQuery('');
     }
     onOpenChange(isOpen);
   }, [onOpenChange]);
@@ -378,39 +438,81 @@ export function StrategyConfigWizard({
                   <p className="text-xs text-muted-foreground py-2">Tutte le posizioni sono state assegnate.</p>
                 ) : (
                   <div className="space-y-1">
-                    {([
-                      { label: 'AZIONI', items: pool.filter(p => p.asset_type === 'stock') },
-                      { label: 'DERIVATI', items: pool.filter(p => p.asset_type === 'derivative') },
-                      { label: 'ETF', items: pool.filter(p => p.asset_type === 'etf') },
-                    ] as const).filter(s => s.items.length > 0).map(section => (
-                      <Collapsible key={section.label} defaultOpen>
-                        <CollapsibleTrigger className="flex items-center gap-1.5 w-full py-1.5 text-[11px] text-muted-foreground font-medium uppercase tracking-wide hover:text-foreground transition-colors group">
-                          <ChevronDown className="w-3.5 h-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
-                          {section.label} ({section.items.length})
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <div className="flex flex-wrap gap-1.5 pb-2">
-                            {section.items.map(p => (
-                              <label
-                                key={p.id}
-                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
-                                  selectedIds.has(p.id)
-                                    ? 'bg-primary/10 border-primary'
-                                    : 'hover:bg-muted/50'
-                                } ${positionBadgeClass(p)}`}
-                              >
-                                <Checkbox
-                                  checked={selectedIds.has(p.id)}
-                                  onCheckedChange={() => toggleSelected(p.id)}
-                                  className="w-3.5 h-3.5"
-                                />
-                                {positionLabel(p)}
-                              </label>
-                            ))}
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    ))}
+                    <div className="relative mb-2">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Cerca posizione..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="h-8 text-xs pl-8"
+                      />
+                    </div>
+                    {(() => {
+                      const stockItems = filteredPool.filter(p => p.asset_type === 'stock');
+                      const derivItems = filteredPool.filter(p => p.asset_type === 'derivative');
+                      const etfItems = filteredPool.filter(p => p.asset_type === 'etf');
+
+                      // Group stocks by base name for sub-grouping
+                      const stockGroups = new Map<string, Position[]>();
+                      for (const s of stockItems) {
+                        const baseName = s.description || s.ticker || 'Unknown';
+                        if (!stockGroups.has(baseName)) stockGroups.set(baseName, []);
+                        stockGroups.get(baseName)!.push(s);
+                      }
+
+                      const renderPositionChip = (p: Position) => (
+                        <label
+                          key={p.id}
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                            selectedIds.has(p.id)
+                              ? 'bg-primary/10 border-primary'
+                              : 'hover:bg-muted/50'
+                          } ${positionBadgeClass(p)}`}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(p.id)}
+                            onCheckedChange={() => toggleSelected(p.id)}
+                            className="w-3.5 h-3.5"
+                          />
+                          {positionLabel(p)}
+                        </label>
+                      );
+
+                      return ([
+                        { label: 'AZIONI', items: stockItems, isStock: true },
+                        { label: 'DERIVATI', items: derivItems, isStock: false },
+                        { label: 'ETF', items: etfItems, isStock: false },
+                      ] as const).filter(s => s.items.length > 0).map(section => (
+                        <Collapsible key={section.label} defaultOpen>
+                          <CollapsibleTrigger className="flex items-center gap-1.5 w-full py-1.5 text-[11px] text-muted-foreground font-medium uppercase tracking-wide hover:text-foreground transition-colors group">
+                            <ChevronDown className="w-3.5 h-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
+                            {section.label} ({section.items.length})
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            {section.isStock ? (
+                              <div className="space-y-1.5 pb-2">
+                                {Array.from(stockGroups.entries()).map(([name, slots]) => (
+                                  <div key={name}>
+                                    {stockGroups.size > 1 && slots.length > 1 && (
+                                      <span className="text-[10px] text-muted-foreground font-medium ml-1">
+                                        {name} ({slots.length} slot)
+                                      </span>
+                                    )}
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {slots.map(renderPositionChip)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5 pb-2">
+                                {section.items.map(renderPositionChip)}
+                              </div>
+                            )}
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ));
+                    })()}
                   </div>
                 )}
               </CardContent>
