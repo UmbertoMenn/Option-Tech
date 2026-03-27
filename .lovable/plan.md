@@ -1,49 +1,28 @@
 
 
-## Merge Covered Call Sintetiche nella sezione Covered Call
+## Fix wizard: ricerca nel pool + auto-classificazione corretta
 
-### Cosa cambia
+### Problema 1: Pool azioni troppo confusionale
 
-Rimuovere la sezione dedicata "Covered Call Sintetiche" e mostrare le CC sintetiche direttamente nella sezione "Covered Call" con badge S arancione + tooltip, come già fatto per le de-risking sintetiche.
+Con lo splitting in slot da 100, il pool AZIONI diventa enorme e innavigabile. 
 
-### File 1: `src/lib/derivativeStrategies.ts`
+**Soluzione**: Aggiungere un campo di ricerca (Input) sopra le sezioni del pool. Filtra in tempo reale tutte le posizioni (azioni, derivati, ETF) per nome/descrizione. Sotto-raggruppare le azioni per nome (es. "APPLE" → 2 slot) così sono visivamente raggruppati.
 
-**A. Estendere `CoveredCallPosition`** con campi opzionali:
-```typescript
-export interface CoveredCallPosition {
-  option: Position;
-  underlying: Position;
-  contractsCovered: number;
-  sharesCovered: number;
-  isFullyCovered: boolean;
-  isSynthetic?: boolean;        // nuovo
-  syntheticPut?: Position;      // nuovo - PUT venduta deep ITM
-}
-```
+### Problema 2: Auto-classificazione mette bought calls nelle covered call
 
-**B. Eliminare `SyntheticCoveredCallPosition`** e rimuovere `syntheticCoveredCalls` da `DerivativeCategories`.
+**Root cause**: `autoClassify` raggruppa TUTTE le posizioni dello stesso underlying in un unico gruppo. Se ci sono sia sold calls (covered call) che bought calls (leap) sullo stesso titolo, finiscono tutti insieme. Poi `detectStrategyType` vede sold calls + bought calls + stock e li classifica come iron condor/double diagonal (4-leg check a riga 102) oppure li lascia come covered call includendo erroneamente le bought calls.
 
-**C. Aggiornare la logica di categorizzazione**: dove attualmente si fa `syntheticCoveredCalls.push(...)`, creare invece un `CoveredCallPosition` con `isSynthetic: true` e `syntheticPut` e pusharlo in `coveredCalls`.
+**Fix in `autoClassify`**: Dopo il raggruppamento per underlying, se il gruppo contiene sia sold calls che bought calls MA non ha la struttura 4-leg (iron condor / double diagonal), separare le bought calls in una strategia `leap_call` dedicata. Analogamente, separare bought puts standalone come protezioni.
 
-**D. Rimuovere il return di `syntheticCoveredCalls`** dal risultato finale.
+### File da modificare
 
-### File 2: `src/pages/Derivatives.tsx`
+**`src/components/derivatives/StrategyConfigWizard.tsx`**:
 
-**E. Rimuovere** la sezione "Covered Call Sintetiche" (righe ~558-606), lo stato `syntheticCCOpen`, e il componente `SyntheticCoveredCallRow`.
-
-**F. Aggiornare `CoveredCallRow`**: 
-- Dopo la descrizione (Col 3), se `coveredCall.isSynthetic`, mostrare il badge S arancione con tooltip "Synthetic position / short PUT delta -1" (stesso stile usato nelle de-risking sintetiche).
-- Nel collapsible content (dettagli espansi), se `coveredCall.syntheticPut` è presente, mostrare i dettagli della PUT venduta deep ITM (strike, scadenza, PMC, prezzo, P/L%).
-
-**G. Rimuovere** riferimenti a `syntheticCoveredCalls` dal merge, sort, e underlying price extraction.
-
-### Ordine sezioni risultante
-1. Covered Call (standard + sintetiche con badge S)
-2. De-Risking Covered Call
-3. Iron Condor
-4. Double Diagonal
-5. Naked Put
-6. Leap Call
-7. Protezioni
-8. Altre Strategie
+1. **Aggiungere stato `searchQuery`** e un `<Input>` con placeholder "Cerca posizione..." sopra le sezioni collapsibili del pool
+2. **Filtrare** `pool` per `searchQuery` (match su `description`, `ticker`, `underlying`)
+3. **Sotto-raggruppare azioni** nella sezione AZIONI per nome titolo, mostrando "APPLE (2 slot)" come sotto-header
+4. **Fix `autoClassify`**: dopo il raggruppamento iniziale per underlying, per ogni gruppo:
+   - Se è un vero 4-leg (iron condor / double diagonal) → mantienilo unito
+   - Altrimenti, separa bought calls (→ `leap_call`) e isola sold calls + stock (→ `covered_call`)
+   - Separa bought puts standalone senza sold calls (→ `other` / protezione)
 
