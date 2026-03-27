@@ -277,6 +277,16 @@ export function StrategyConfigWizard({
     [allAvailable, assignedIds]
   );
 
+  const filteredPool = useMemo(() => {
+    if (!searchQuery.trim()) return pool;
+    const q = searchQuery.toLowerCase();
+    return pool.filter(p =>
+      (p.description || '').toLowerCase().includes(q) ||
+      (p.ticker || '').toLowerCase().includes(q) ||
+      (p.underlying || '').toLowerCase().includes(q)
+    );
+  }, [pool, searchQuery]);
+
   // Reset state when dialog opens
   const handleOpenChange = useCallback((isOpen: boolean) => {
     if (isOpen) {
