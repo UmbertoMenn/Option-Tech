@@ -456,8 +456,6 @@ export function StrategyConfigWizard({
     onOpenChange(false);
   };
 
-  if (allAvailable.length === 0) return null;
-
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
 
   // Filter groups by search
