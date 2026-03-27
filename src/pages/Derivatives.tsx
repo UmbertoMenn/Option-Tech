@@ -924,8 +924,25 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             {/* Col 2: V/A Badge */}
             <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
             
-            {/* Col 3: Descrizione */}
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            {/* Col 3: Descrizione + Synthetic badge */}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+              {coveredCall.isSynthetic && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span 
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-help shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      S
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Synthetic position / short PUT delta -1</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
             
             {/* Col 4: OptionStrat */}
             <OptionStratButton url={
