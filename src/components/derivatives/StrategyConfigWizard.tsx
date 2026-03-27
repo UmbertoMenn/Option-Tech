@@ -136,33 +136,42 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
   const result = categorizeDerivatives(derivatives, allPositions, [], []);
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
+  const consumedIds = new Set<string>();
 
-  const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+  const addUnique = (positions: Position[]): Position[] => {
+    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
+    return unique.filter(p => !consumedIds.has(p.id));
+  };
 
-  const make = (positions: Position[], type: string): WizardStrategy => ({
+  const consume = (positions: Position[]) => {
+    positions.forEach(p => consumedIds.add(p.id));
+  };
+
+  const make = (positions: Position[], type: string, synthetic = false): WizardStrategy => ({
     id: `auto-${idCounter++}`,
     positions,
     strategyType: type,
-    isSynthetic: false,
+    isSynthetic: synthetic,
     suggestedType: type,
   });
 
   // --- Covered Calls: group by underlying ---
-  const ccByUnderlying = new Map<string, Position[]>();
+  const ccByUnderlying = new Map<string, { positions: Position[], isSynthetic: boolean }>();
   for (const cc of result.coveredCalls) {
     const key = normalizeForMatching(cc.option.underlying || cc.option.description || '');
-    if (!ccByUnderlying.has(key)) ccByUnderlying.set(key, []);
-    ccByUnderlying.get(key)!.push(cc.option);
-    if (cc.underlying) ccByUnderlying.get(key)!.push(cc.underlying);
-    if (cc.syntheticPut) ccByUnderlying.get(key)!.push(cc.syntheticPut);
+    if (!ccByUnderlying.has(key)) ccByUnderlying.set(key, { positions: [], isSynthetic: false });
+    const entry = ccByUnderlying.get(key)!;
+    entry.positions.push(cc.option);
+    if (cc.underlying) entry.positions.push(cc.underlying);
+    if (cc.syntheticPut) entry.positions.push(cc.syntheticPut);
+    if (cc.isSynthetic) entry.isSynthetic = true;
   }
-  for (const [, positions] of ccByUnderlying) {
-    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
-    const s = make(unique, 'covered_call');
-    // If any CC in this group is synthetic, mark it
-    const hasSynthetic = result.coveredCalls.some(cc => cc.isSynthetic && unique.some(u => u.id === cc.option.id));
-    s.isSynthetic = hasSynthetic;
-    strategies.push(s);
+  for (const [, { positions, isSynthetic }] of ccByUnderlying) {
+    const unique = addUnique(positions);
+    if (unique.length > 0) {
+      consume(unique);
+      strategies.push(make(unique, 'covered_call', isSynthetic));
+    }
   }
 
   // --- De-Risking Covered Calls: group by underlying ---
@@ -177,26 +186,29 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
     if (drcc.isSynthetic) entry.isSynthetic = true;
   }
   for (const [, { positions, isSynthetic }] of drccByUnderlying) {
-    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
-    const s = make(unique, 'derisking_covered_call');
-    s.isSynthetic = isSynthetic;
-    strategies.push(s);
+    const unique = addUnique(positions);
+    if (unique.length > 0) {
+      consume(unique);
+      strategies.push(make(unique, 'derisking_covered_call', isSynthetic));
+    }
   }
 
-  // --- Iron Condors ---
+  // --- Iron Condors: solo gambe opzioni ---
   for (const ic of result.ironCondors) {
-    const stock = findUnderlyingStock(ic.soldCall, stockPositions);
-    const positions = [ic.soldCall, ic.boughtCall, ic.soldPut, ic.boughtPut];
-    if (stock) positions.push(stock);
-    strategies.push(make(positions, 'iron_condor'));
+    const legs = addUnique([ic.soldCall, ic.boughtCall, ic.soldPut, ic.boughtPut]);
+    if (legs.length > 0) {
+      consume(legs);
+      strategies.push(make(legs, 'iron_condor'));
+    }
   }
 
-  // --- Double Diagonals ---
+  // --- Double Diagonals: solo gambe opzioni ---
   for (const dd of result.doubleDiagonals) {
-    const stock = findUnderlyingStock(dd.soldCall, stockPositions);
-    const positions = [dd.soldCall, dd.boughtCall, dd.soldPut, dd.boughtPut];
-    if (stock) positions.push(stock);
-    strategies.push(make(positions, 'double_diagonal'));
+    const legs = addUnique([dd.soldCall, dd.boughtCall, dd.soldPut, dd.boughtPut]);
+    if (legs.length > 0) {
+      consume(legs);
+      strategies.push(make(legs, 'double_diagonal'));
+    }
   }
 
   // --- Naked Puts: group by underlying ---
@@ -207,7 +219,11 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
     npByUnderlying.get(key)!.push(np.option);
   }
   for (const [, positions] of npByUnderlying) {
-    strategies.push(make(positions, 'naked_put'));
+    const unique = addUnique(positions);
+    if (unique.length > 0) {
+      consume(unique);
+      strategies.push(make(unique, 'naked_put'));
+    }
   }
 
   // --- Leap Calls: group by underlying ---
@@ -218,23 +234,30 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
     lcByUnderlying.get(key)!.push(lc.option);
   }
   for (const [, positions] of lcByUnderlying) {
-    strategies.push(make(positions, 'leap_call'));
+    const unique = addUnique(positions);
+    if (unique.length > 0) {
+      consume(unique);
+      strategies.push(make(unique, 'leap_call'));
+    }
   }
 
-  // --- Long Puts (protections) → other ---
+  // --- Long Puts: solo opzione, niente azione ---
   for (const lp of result.longPuts) {
-    const positions: Position[] = [lp.option];
-    if (lp.underlying) positions.push(lp.underlying);
-    strategies.push(make(positions, 'other'));
+    const legs = addUnique([lp.option]);
+    if (legs.length > 0) {
+      consume(legs);
+      strategies.push(make(legs, 'other'));
+    }
   }
 
-  // --- Other Strategies: use groupedOtherStrategies ---
+  // --- Other Strategies: solo gambe opzioni, niente azione ---
   for (const group of result.groupedOtherStrategies) {
-    const positions = group.options.map(o => o.option);
-    const stock = group.options[0]?.underlying;
-    if (stock) positions.push(stock);
-    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
-    strategies.push(make(unique, 'other'));
+    const options = group.options.map(o => o.option);
+    const unique = addUnique(options);
+    if (unique.length > 0) {
+      consume(unique);
+      strategies.push(make(unique, 'other'));
+    }
   }
 
   return strategies;
