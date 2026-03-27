@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Position } from '@/types/portfolio';
-import { normalizeForMatching, findUnderlyingStock } from '@/lib/derivativeStrategies';
+import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
