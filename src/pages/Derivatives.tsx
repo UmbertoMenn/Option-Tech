@@ -1107,7 +1107,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               <div>
                 <p className="text-muted-foreground text-xs">Sottostante</p>
                 <p className="font-medium">{underlying.description}</p>
-                <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+                {coveredCall.isSynthetic ? (
+                  <p className="text-xs text-orange-400">Sintetico (PUT venduta deep ITM)</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+                )}
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Strike</p>
@@ -1127,6 +1131,42 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 P/L: {formatPercentage(adjustedProfitLossPct)}
               </div>
             )}
+            {coveredCall.isSynthetic && coveredCall.syntheticPut && (() => {
+              const sp = coveredCall.syntheticPut!;
+              const spPrice = sp.current_price || 0;
+              const spAvgCost = sp.avg_cost || 0;
+              const spChangePct = spAvgCost > 0 ? ((spPrice - spAvgCost) / spAvgCost) * 100 : null;
+              return (
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs text-orange-400 font-medium mb-2">📌 PUT Sintetica (venduta deep ITM)</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Strike</p>
+                      <p className="font-medium">{sp.strike_price}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Scadenza</p>
+                      <p className="font-medium">{formatExpiryMMY(sp.expiry_date)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">PMC</p>
+                      <p className="font-medium">{formatCurrency(spAvgCost, getOptionCurrency(sp))}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Prezzo</p>
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium">{formatCurrency(spPrice, getOptionCurrency(sp))}</span>
+                        {spChangePct !== null && (
+                          <span className={`text-xs font-medium ${spChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {spChangePct >= 0 ? '+' : ''}{spChangePct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </CollapsibleContent>
       </Collapsible>
