@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Position } from '@/types/portfolio';
-import { normalizeForMatching, findUnderlyingStock } from '@/lib/derivativeStrategies';
+import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -128,85 +128,113 @@ function detectStrategyType(positions: Position[]): string {
   return 'other';
 }
 
-/** Check if a group forms a valid 4-leg structure */
-function isFourLeg(options: Position[]): boolean {
-  const soldCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity < 0);
-  const boughtCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity > 0);
-  const soldPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity < 0);
-  const boughtPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity > 0);
-  return soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1;
-}
-
-/** Group positions by underlying and auto-classify, splitting incompatible legs */
+/** 
+ * Auto-classify using the SAME categorizeDerivatives logic used in the rest of the app.
+ * Called with zero overrides and zero configs to get the "default" classification.
+ */
 function autoClassify(derivatives: Position[], allPositions: Position[]): WizardStrategy[] {
-  const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
-  const groups = new Map<string, Position[]>();
-
-  for (const d of derivatives) {
-    const key = normalizeForMatching(d.underlying || d.description || '');
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(d);
-  }
-
+  const result = categorizeDerivatives(derivatives, allPositions, [], []);
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
 
-  const makeStrategy = (positions: Position[]): WizardStrategy => {
-    const suggested = detectStrategyType(positions);
-    return {
-      id: `auto-${idCounter++}`,
-      positions,
-      strategyType: suggested,
-      isSynthetic: false,
-      suggestedType: suggested,
-    };
-  };
+  const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
 
-  for (const [key, options] of groups) {
-    const matchingStocks = stockPositions.filter(s => {
-      const stockKey = normalizeForMatching(s.description || s.ticker || '');
-      return stockKey === key || stockKey.includes(key) || key.includes(stockKey);
-    });
+  const make = (positions: Position[], type: string): WizardStrategy => ({
+    id: `auto-${idCounter++}`,
+    positions,
+    strategyType: type,
+    isSynthetic: false,
+    suggestedType: type,
+  });
 
-    const allInGroup = [...options];
-    if (matchingStocks.length > 0) allInGroup.push(...matchingStocks);
+  // --- Covered Calls: group by underlying ---
+  const ccByUnderlying = new Map<string, Position[]>();
+  for (const cc of result.coveredCalls) {
+    const key = normalizeForMatching(cc.option.underlying || cc.option.description || '');
+    if (!ccByUnderlying.has(key)) ccByUnderlying.set(key, []);
+    ccByUnderlying.get(key)!.push(cc.option);
+    if (cc.underlying) ccByUnderlying.get(key)!.push(cc.underlying);
+    if (cc.syntheticPut) ccByUnderlying.get(key)!.push(cc.syntheticPut);
+  }
+  for (const [, positions] of ccByUnderlying) {
+    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
+    const s = make(unique, 'covered_call');
+    // If any CC in this group is synthetic, mark it
+    const hasSynthetic = result.coveredCalls.some(cc => cc.isSynthetic && unique.some(u => u.id === cc.option.id));
+    s.isSynthetic = hasSynthetic;
+    strategies.push(s);
+  }
 
-    // If it's a true 4-leg structure, keep it together
-    if (isFourLeg(options)) {
-      strategies.push(makeStrategy(allInGroup));
-      continue;
-    }
+  // --- De-Risking Covered Calls: group by underlying ---
+  const drccByUnderlying = new Map<string, { positions: Position[], isSynthetic: boolean }>();
+  for (const drcc of result.deRiskingCoveredCalls) {
+    const key = normalizeForMatching(drcc.coveredCall.option.underlying || drcc.coveredCall.option.description || '');
+    if (!drccByUnderlying.has(key)) drccByUnderlying.set(key, { positions: [], isSynthetic: false });
+    const entry = drccByUnderlying.get(key)!;
+    entry.positions.push(drcc.coveredCall.option, drcc.protectionPut);
+    if (drcc.coveredCall.underlying) entry.positions.push(drcc.coveredCall.underlying);
+    if (drcc.syntheticPut) entry.positions.push(drcc.syntheticPut);
+    if (drcc.isSynthetic) entry.isSynthetic = true;
+  }
+  for (const [, { positions, isSynthetic }] of drccByUnderlying) {
+    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
+    const s = make(unique, 'derisking_covered_call');
+    s.isSynthetic = isSynthetic;
+    strategies.push(s);
+  }
 
-    // Otherwise, split: separate bought calls (leaps) from the rest
-    const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
-    const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
-    const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
-    const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+  // --- Iron Condors ---
+  for (const ic of result.ironCondors) {
+    const stock = findUnderlyingStock(ic.soldCall, stockPositions);
+    const positions = [ic.soldCall, ic.boughtCall, ic.soldPut, ic.boughtPut];
+    if (stock) positions.push(stock);
+    strategies.push(make(positions, 'iron_condor'));
+  }
 
-    // Main group: sold calls + sold puts + bought puts (for derisking) + stocks
-    const mainLegs: Position[] = [...soldCalls, ...soldPuts];
-    // Include bought puts only if there are sold calls (derisking pattern)
-    if (soldCalls.length > 0 && boughtPuts.length > 0) {
-      mainLegs.push(...boughtPuts);
-    }
-    if (mainLegs.length > 0) {
-      const mainGroup = [...mainLegs, ...matchingStocks];
-      strategies.push(makeStrategy(mainGroup));
-    } else if (matchingStocks.length > 0 && boughtCalls.length === 0 && boughtPuts.length === 0) {
-      // Stocks with no derivatives - skip
-    }
+  // --- Double Diagonals ---
+  for (const dd of result.doubleDiagonals) {
+    const stock = findUnderlyingStock(dd.soldCall, stockPositions);
+    const positions = [dd.soldCall, dd.boughtCall, dd.soldPut, dd.boughtPut];
+    if (stock) positions.push(stock);
+    strategies.push(make(positions, 'double_diagonal'));
+  }
 
-    // Bought calls → separate leap_call strategies
-    for (const bc of boughtCalls) {
-      strategies.push(makeStrategy([bc]));
-    }
+  // --- Naked Puts: group by underlying ---
+  const npByUnderlying = new Map<string, Position[]>();
+  for (const np of result.nakedPuts) {
+    const key = normalizeForMatching(np.option.underlying || np.option.description || '');
+    if (!npByUnderlying.has(key)) npByUnderlying.set(key, []);
+    npByUnderlying.get(key)!.push(np.option);
+  }
+  for (const [, positions] of npByUnderlying) {
+    strategies.push(make(positions, 'naked_put'));
+  }
 
-    // Bought puts without sold calls → separate protection/other strategies
-    if (soldCalls.length === 0 && boughtPuts.length > 0) {
-      for (const bp of boughtPuts) {
-        strategies.push(makeStrategy([bp]));
-      }
-    }
+  // --- Leap Calls: group by underlying ---
+  const lcByUnderlying = new Map<string, Position[]>();
+  for (const lc of result.leapCalls) {
+    const key = normalizeForMatching(lc.option.underlying || lc.option.description || '');
+    if (!lcByUnderlying.has(key)) lcByUnderlying.set(key, []);
+    lcByUnderlying.get(key)!.push(lc.option);
+  }
+  for (const [, positions] of lcByUnderlying) {
+    strategies.push(make(positions, 'leap_call'));
+  }
+
+  // --- Long Puts (protections) → other ---
+  for (const lp of result.longPuts) {
+    const positions: Position[] = [lp.option];
+    if (lp.underlying) positions.push(lp.underlying);
+    strategies.push(make(positions, 'other'));
+  }
+
+  // --- Other Strategies: use groupedOtherStrategies ---
+  for (const group of result.groupedOtherStrategies) {
+    const positions = group.options.map(o => o.option);
+    const stock = group.options[0]?.underlying;
+    if (stock) positions.push(stock);
+    const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
+    strategies.push(make(unique, 'other'));
   }
 
   return strategies;
