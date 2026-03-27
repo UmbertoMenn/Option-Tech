@@ -292,6 +292,7 @@ export function StrategyConfigWizard({
     if (isOpen) {
       setStrategies([]);
       setSelectedIds(new Set());
+      setSearchQuery('');
     }
     onOpenChange(isOpen);
   }, [onOpenChange]);
