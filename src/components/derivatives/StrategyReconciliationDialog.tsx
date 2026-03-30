@@ -128,7 +128,11 @@ function hasTokenOverlap(a: string, b: string): boolean {
   const tokensA = getSignificantTokens(a);
   const tokensB = getSignificantTokens(b);
   if (tokensA.length === 0 || tokensB.length === 0) return false;
-  return tokensA.some(t => tokensB.includes(t));
+  const [shorter, longer] = tokensA.length <= tokensB.length
+    ? [tokensA, tokensB] : [tokensB, tokensA];
+  const matchCount = shorter.filter(t => longer.includes(t)).length;
+  if (shorter.length >= 2) return matchCount >= 2;
+  return matchCount === 1 && shorter[0].length >= 4;
 }
 
 function getUnderlyingKeyForStock(pos: Position, allDerivatives: Position[]): string {
