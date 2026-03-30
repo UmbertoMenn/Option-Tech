@@ -451,7 +451,26 @@ export function StrategyConfigWizard({
 
   const handleAutoClassify = () => {
     const auto = autoClassify(derivatives, allPositions);
-    setStrategies(auto);
+    
+    // Remap original stock IDs to virtual slot IDs
+    const usedSlotIds = new Set<string>();
+    const remappedStrategies = auto.map(strat => ({
+      ...strat,
+      positions: strat.positions.map(p => {
+        if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
+        // Find matching virtual slot in allAvailable
+        const slot = allAvailable.find(a =>
+          (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
+        );
+        if (slot && slot.id !== p.id) {
+          usedSlotIds.add(slot.id);
+          return { ...p, id: slot.id, quantity: slot.quantity };
+        }
+        return p;
+      }),
+    }));
+    
+    setStrategies(remappedStrategies);
     setSelectedIdsByGroup(new Map());
   };
 
