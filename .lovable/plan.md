@@ -1,61 +1,27 @@
 
 
-## Bug: Config "consuma tutto il sottostante" impedisce strategie multiple per lo stesso underlying
+## Nascondere sezioni vuote nella pagina Derivati
 
-### Problema identificato
-In `categorizeDerivatives` (riga 274-458 di `derivativeStrategies.ts`), quando si processa un config, **ogni case del switch consuma TUTTE le posizioni rimanenti del sottostante** con il pattern:
-```typescript
-for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-  usedDerivatives.add(opt.id);
-}
-```
-
-Per UNH con 2 config (`diagonal_put_spread` + `naked_put`):
-1. `diagonal_put_spread` → cade nel `default` → **tutte e 3** le PUT vengono consumate come "otherStrategies"
-2. `naked_put` → `remaining` è vuoto → non fa nulla
-
-Risultato: tutte e 3 le gambe in un unico gruppo "Diagonal Put Spread".
+### Problema
+Alcune sezioni (Put Spread, Diagonal Put Spread) hanno già il guard `{x.length > 0 && (...)}`, ma le altre sezioni vengono sempre renderizzate anche quando vuote, mostrando "Nessuna X presente".
 
 ### Soluzione
-Modificare ogni case dello switch in STEP 0.5 per consumare solo le posizioni che **matchano le signatures** della config corrente, non tutto il sottostante. Le posizioni non matchate devono restare disponibili per config successive dello stesso underlying.
+Wrappare ogni sezione con un controllo `length > 0`, come già fatto per Put Spread e Diagonal Put Spread.
 
-### Modifiche a `src/lib/derivativeStrategies.ts`
+### Modifiche a `src/pages/Derivatives.tsx`
 
-**1. Aggiungere funzione helper per filtrare `remaining` solo per signatures matchate:**
-```typescript
-function filterBySignatures(
-  positions: Position[], 
-  signatures: PositionSignature[]
-): Position[] {
-  const matched: Position[] = [];
-  const usedSigs = new Set<number>();
-  for (const p of positions) {
-    const sigIdx = signatures.findIndex((sig, i) => 
-      !usedSigs.has(i) &&
-      (p.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
-      Math.abs((p.strike_price || 0) - sig.strike) < 0.01 &&
-      (p.expiry_date || '') === sig.expiry &&
-      (p.quantity >= 0 ? 1 : -1) === sig.quantity_sign
-    );
-    if (sigIdx >= 0) {
-      matched.push(p);
-      usedSigs.add(sigIdx);
-    }
-  }
-  return matched;
-}
-```
+Aggiungere il guard condizionale a queste 8 sezioni:
 
-**2. In ogni case dello switch (covered_call, derisking_covered_call, iron_condor, double_diagonal, naked_put, leap_call, default):**
-- Rimuovere il pattern "consume ALL remaining" 
-- Al suo posto: utilizzare `filterBySignatures(remaining, config.position_signatures)` per limitare le posizioni a quelle dichiarate nella config
-- Le posizioni non matchate restano nel pool per la config successiva
+1. **Covered Call** (riga 553): `{categories.coveredCalls.length > 0 && (<Collapsible ...>...</Collapsible>)}`
+2. **De-Risking Covered Call** (riga 605): `{categories.deRiskingCoveredCalls.length > 0 && (...)}`
+3. **Iron Condor** (riga 655): `{categories.ironCondors.length > 0 && (...)}`
+4. **Double Diagonal** (riga 695): `{categories.doubleDiagonals.length > 0 && (...)}`
+5. **Naked Put** (riga 735): `{categories.nakedPuts.length > 0 && (...)}`
+6. **Leap Call** (riga 847): `{categories.leapCalls.length > 0 && (...)}`
+7. **Protezioni** (riga 887): `{categories.longPuts.length > 0 && (...)}`
+8. **Altre Strategie** (riga 924): `{remainingOtherStrategies.length > 0 && (...)}`
 
-**3. Per il `default` case** (che gestisce `diagonal_put_spread`, `put_spread`, `other`):
-- Cambiare da `for (const opt of remaining)` a iterare solo sui `filterBySignatures` match
+Rimuovere anche i blocchi interni "Nessuna X presente" che diventano irraggiungibili.
 
-Questo permette a due config diverse (es. `diagonal_put_spread` con 2 sigs + `naked_put` con 1 sig) sullo stesso underlying di funzionare indipendentemente.
-
-### File da modificare
-- **`src/lib/derivativeStrategies.ts`** — aggiungere helper + rimuovere "consume all remaining" da tutti i case del config switch
+### Nessuna modifica ad altri file
 
