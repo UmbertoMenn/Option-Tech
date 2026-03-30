@@ -648,6 +648,7 @@ export function Derivatives() {
         )}
 
         {/* Section 3: Iron Condor */}
+        {categories.ironCondors.length > 0 && (
         <Collapsible open={ironCondorOpen} onOpenChange={setIronCondorOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -671,21 +672,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.ironCondors.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessun Iron Condor presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.ironCondors.map((ic, index) => (
-                      <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.ironCondors.map((ic, index) => (
+                    <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 3.5: Double Diagonal */}
         <Collapsible open={doubleDiagonalOpen} onOpenChange={setDoubleDiagonalOpen}>
