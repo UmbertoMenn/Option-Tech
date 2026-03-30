@@ -480,6 +480,10 @@ export function getBreakdownForViewMode(
           }
         }
 
+        // Cap: intrinsic cannot exceed market value in absolute terms
+        if (tickerIntrinsic < det.value) {
+          tickerIntrinsic = det.value;
+        }
         if (Math.abs(tickerIntrinsic) > 0.01) {
           intrinsicDetails.push({ ...det, value: tickerIntrinsic });
           intrinsicTotal += tickerIntrinsic;
