@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
