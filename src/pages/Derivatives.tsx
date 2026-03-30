@@ -119,6 +119,8 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
+  const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
