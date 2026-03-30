@@ -40,6 +40,7 @@ export function StrategyReconciliationDialog({
   open,
   onOpenChange,
   items,
+  allConfigs,
   onSave,
   isSaving,
 }: StrategyReconciliationDialogProps) {
