@@ -828,6 +828,7 @@ export function Derivatives() {
         )}
 
         {/* Section 6: Leap Call (Collapsible) */}
+        {categories.leapCalls.length > 0 && (
         <Collapsible open={leapCallsOpen} onOpenChange={setLeapCallsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -851,21 +852,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.leapCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Leap Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.leapCalls.map((lc, index) => (
-                      <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.leapCalls.map((lc, index) => (
+                    <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 6: Protezioni - Long PUT (Collapsible) */}
         <Collapsible open={protectionsOpen} onOpenChange={setProtectionsOpen}>
