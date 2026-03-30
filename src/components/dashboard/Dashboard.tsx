@@ -10,6 +10,7 @@ import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,6 +46,7 @@ export function Dashboard() {
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
+  const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
   
   // Fetch underlying prices for derivatives without stock in portfolio
   const derivativeUnderlyings = useMemo(() => 
@@ -55,7 +57,7 @@ export function Dashboard() {
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
   
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate);
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs);
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,
@@ -346,6 +348,8 @@ export function Dashboard() {
             onViewModeChange={setViewMode}
             overrides={overrides}
             underlyingPrices={underlyingPrices}
+            hasConfigurations={hasConfigurations}
+            strategyConfigs={strategyConfigs}
           />
 
           {/* File Upload & Historical Data - Hidden in aggregated view */}
