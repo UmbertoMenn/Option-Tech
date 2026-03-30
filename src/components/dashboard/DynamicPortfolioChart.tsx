@@ -2,11 +2,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PortfolioDonutChart } from '@/components/dashboard/PortfolioDonutChart';
 import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLegend';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
-import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode } from '@/hooks/useDerivativeNetting';
+import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode, STRATEGY_SECTION_LABELS, StrategySectionCategory } from '@/hooks/useDerivativeNetting';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { ViewMode } from './ViewModeSelector';
-import { Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, ChevronDown, ChevronUp, AlertTriangle, Settings } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip } from 'recharts';
 import { formatEUR } from '@/lib/formatters';
 import { useMemo, useState, useCallback, useEffect } from 'react';
@@ -21,6 +22,8 @@ import {
 } from '@/components/ui/carousel';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -31,16 +34,21 @@ interface DynamicPortfolioChartProps {
   onViewModeChange?: (mode: ViewMode) => void;
   overrides?: DerivativeOverride[];
   underlyingPrices?: Record<string, UnderlyingPrice>;
+  hasConfigurations?: boolean;
+  strategyConfigs?: StrategyConfiguration[];
 }
 
-// ─── Colors ───────────────────────────────────────────────────
-const PIE_COLORS: Record<string, string> = {
-  cc_itm: 'hsl(0, 72%, 51%)',
-  cc_otm: 'hsl(15, 80%, 55%)',
-  np_itm: 'hsl(330, 70%, 50%)',
-  np_otm: 'hsl(350, 65%, 60%)',
-  long_put: 'hsl(142, 71%, 45%)',
+// ─── Colors per strategy section ──────────────────────────────
+const SECTION_COLORS: Record<string, string> = {
+  covered_call: 'hsl(0, 72%, 51%)',
+  derisking_cc: 'hsl(15, 80%, 55%)',
+  iron_condor: 'hsl(38, 92%, 50%)',
+  double_diagonal: 'hsl(280, 70%, 60%)',
+  naked_put: 'hsl(330, 70%, 50%)',
+  put_spread: 'hsl(170, 60%, 45%)',
+  diagonal_put_spread: 'hsl(240, 60%, 55%)',
   leap_call: 'hsl(160, 60%, 45%)',
+  long_put: 'hsl(142, 71%, 45%)',
   other: 'hsl(45, 80%, 55%)',
 };
 
@@ -86,24 +94,50 @@ function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalVa
   );
 }
 
+// ─── Missing Configuration Warning ───────────────────────────
+function MissingConfigWarning() {
+  const navigate = useNavigate();
+  return (
+    <div className="flex flex-col items-center justify-center h-[220px] gap-3 text-center px-4">
+      <AlertTriangle className="w-10 h-10 text-warning" />
+      <p className="text-sm text-muted-foreground">
+        Nessuna configurazione strategie presente. Configura le strategie per visualizzare il breakdown del netting.
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => navigate('/derivatives')}
+        className="gap-2"
+      >
+        <Settings className="w-4 h-4" />
+        Configura strategie
+      </Button>
+    </div>
+  );
+}
+
 // ─── Breakdown Bar Chart ──────────────────────────────────────
-function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
+function NettingBreakdownChart({ items, hasConfigurations }: { items: NettingBreakdownItem[]; hasConfigurations: boolean }) {
   const barData = useMemo(() => {
     return items
       .filter(item => Math.abs(item.value) > 0.01)
       .map(item => ({
-        name: item.label,
+        name: STRATEGY_SECTION_LABELS[item.category as StrategySectionCategory] || item.label,
         value: item.value,
         category: item.category,
-        fill: PIE_COLORS[item.category] || 'hsl(var(--muted-foreground))',
+        fill: SECTION_COLORS[item.category] || 'hsl(var(--muted-foreground))',
         details: item.details
           .slice()
-          .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-          .slice(0, 8),
+          .sort((a, b) => Math.abs(b.value) - Math.abs(a.value)),
       }));
   }, [items]);
 
   const totalDerivatives = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
+
+  // Show missing config warning if no configurations exist and we have derivatives
+  if (!hasConfigurations) {
+    return <MissingConfigWarning />;
+  }
 
   if (barData.length === 0) {
     return (
@@ -185,14 +219,12 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const topPositions = useMemo(() => {
-    // First collect all details, then aggregate by ticker
     const allDetails = items.flatMap(item =>
       item.details.map(d => ({
         ...d,
         category: item.label,
       }))
     );
-    // Aggregate by ticker
     const byTicker = new Map<string, typeof allDetails[0]>();
     for (const d of allDetails) {
       const existing = byTicker.get(d.ticker);
@@ -261,7 +293,7 @@ const nettingSlides = [
 ];
 
 
-export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices }: DynamicPortfolioChartProps) {
+export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [] }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
@@ -288,8 +320,11 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       summary,
       overrides,
       underlyingPrices,
+      strategyConfigs,
     );
-  }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices]);
+  }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices, strategyConfigs]);
+
+  const hasDer = positions.some(p => p.asset_type === 'derivative');
 
   const renderChart = () => {
     if (viewMode === 'base') {
@@ -331,9 +366,9 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 )}
               </div>
             </CarouselItem>
-            {/* Slide 2: Pie chart breakdown */}
+            {/* Slide 2: Breakdown chart */}
             <CarouselItem>
-              <NettingBreakdownChart items={breakdownItems} />
+              <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
