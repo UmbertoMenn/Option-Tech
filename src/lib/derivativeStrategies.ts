@@ -462,8 +462,12 @@ export function categorizeDerivatives(
         break;
       }
       default: {
-        // 'other' or any custom strategy type
-        for (const opt of remaining) {
+        // 'other' or any custom strategy type — only consume signature-matched positions
+        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+        const sigMatched_def = sigs.length > 0
+          ? filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), sigs)
+          : remaining.filter(d => !usedDerivatives.has(d.id));
+        for (const opt of sigMatched_def) {
           otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
