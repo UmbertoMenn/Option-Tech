@@ -111,6 +111,8 @@ export function Derivatives() {
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
   const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
+  const [putSpreadOpen, setPutSpreadOpen] = useState(false);
+  const [diagonalPutSpreadOpen, setDiagonalPutSpreadOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
