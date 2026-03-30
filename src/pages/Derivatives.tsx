@@ -550,6 +550,7 @@ export function Derivatives() {
         />
         
         {/* Section 1: Covered Call (Collapsible) */}
+        {categories.coveredCalls.length > 0 && (
         <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -573,33 +574,28 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.coveredCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Covered Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.coveredCalls.map((cc, index) => (
-                      <CoveredCallRow 
-                        key={index} 
-                        coveredCall={cc} 
-                        stockPositions={stockPositions} 
-                        getOverrideForPosition={getOverrideForPosition}
-                        underlyingPrices={underlyingPrices}
-                        totalContractsForUnderlying={
-                          totalCoveredCallContractsByUnderlying[
-                            cc.underlying.description || cc.option.underlying || ''
-                          ] || cc.contractsCovered
-                        }
-                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.coveredCalls.map((cc, index) => (
+                    <CoveredCallRow 
+                      key={index} 
+                      coveredCall={cc} 
+                      stockPositions={stockPositions} 
+                      getOverrideForPosition={getOverrideForPosition}
+                      underlyingPrices={underlyingPrices}
+                      totalContractsForUnderlying={
+                        totalCoveredCallContractsByUnderlying[
+                          cc.underlying.description || cc.option.underlying || ''
+                        ] || cc.contractsCovered
+                      }
+                      getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                    />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
 
         {categories.deRiskingCoveredCalls.length > 0 && (
