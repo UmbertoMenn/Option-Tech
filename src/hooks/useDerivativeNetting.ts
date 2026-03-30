@@ -465,7 +465,8 @@ export function useDerivativeNetting(
       let mergedNettingExCC = 0;
       let mergedNettingExCCAndNP = 0;
       const mergedBreakdown: NettingBreakdownItem[] = [];
-      const mergedOTB: OptionTypeBreakdown = { ...emptyBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
+      const mergedOTB: OptionTypeBreakdown = { sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
+      const mergedOTBIntrinsic: OptionTypeBreakdown = { sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
       const mergedStrategyBreakdown: NettingBreakdownItem[] = [];
 
       for (const [pid, pPositions] of byPortfolio) {
