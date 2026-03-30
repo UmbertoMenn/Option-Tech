@@ -422,10 +422,8 @@ export function categorizeDerivatives(
           [ic.condor.soldCall, ic.condor.boughtCall, ic.condor.soldPut, ic.condor.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_ic = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_ic) usedDerivatives.add(opt.id);
         break;
       }
       case 'double_diagonal': {
