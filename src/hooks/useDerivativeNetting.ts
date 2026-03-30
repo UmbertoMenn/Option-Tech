@@ -256,10 +256,10 @@ export function computeSinglePortfolioNetting(
   overrides: DerivativeOverride[],
   underlyingPrices?: Record<string, UnderlyingPrice>,
   strategyConfigs: StrategyConfiguration[] = []
-): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[]; optionTypeBreakdown: OptionTypeBreakdown; strategyBreakdown: NettingBreakdownItem[] } {
+): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[]; optionTypeBreakdown: OptionTypeBreakdown; optionTypeBreakdownIntrinsic: OptionTypeBreakdown; strategyBreakdown: NettingBreakdownItem[] } {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) {
-    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [], optionTypeBreakdown: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, strategyBreakdown: [] };
+    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [], optionTypeBreakdown: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, optionTypeBreakdownIntrinsic: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, strategyBreakdown: [] };
   }
 
   const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
