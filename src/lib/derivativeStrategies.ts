@@ -1,6 +1,32 @@
 import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
-import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
+
+/**
+ * Filters positions to only those matching the saved position_signatures of a config.
+ * Each signature can only match one position (1:1 mapping).
+ */
+function filterBySignatures(
+  positions: Position[],
+  signatures: PositionSignature[]
+): Position[] {
+  const matched: Position[] = [];
+  const usedSigs = new Set<number>();
+  for (const p of positions) {
+    const sigIdx = signatures.findIndex((sig, i) =>
+      !usedSigs.has(i) &&
+      (p.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
+      Math.abs((p.strike_price || 0) - sig.strike) < 0.01 &&
+      (p.expiry_date || '') === sig.expiry &&
+      (p.quantity >= 0 ? 1 : -1) === sig.quantity_sign
+    );
+    if (sigIdx >= 0) {
+      matched.push(p);
+      usedSigs.add(sigIdx);
+    }
+  }
+  return matched;
+}
 
 export interface CoveredCallPosition {
   option: Position;
@@ -332,10 +358,9 @@ export function categorizeDerivatives(
             usedDerivatives.add(call.id);
           }
         }
-        // ALL remaining positions for this underlying stay consumed (not leaked to other categories)
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        // Only consume positions matching saved signatures (not all remaining)
+        const sigMatched_cc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_cc) usedDerivatives.add(opt.id);
         break;
       }
       case 'derisking_covered_call': {
@@ -382,10 +407,8 @@ export function categorizeDerivatives(
         }
         if (syntheticPut) usedDerivatives.add(syntheticPut.id);
         for (const p of boughtPuts) usedDerivatives.add(p.id);
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_dcc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_dcc) usedDerivatives.add(opt.id);
         break;
       }
       case 'iron_condor': {
@@ -399,10 +422,8 @@ export function categorizeDerivatives(
           [ic.condor.soldCall, ic.condor.boughtCall, ic.condor.soldPut, ic.condor.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_ic = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_ic) usedDerivatives.add(opt.id);
         break;
       }
       case 'double_diagonal': {
@@ -416,10 +437,8 @@ export function categorizeDerivatives(
           [dd.diagonal.soldCall, dd.diagonal.boughtCall, dd.diagonal.soldPut, dd.diagonal.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_dd = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_dd) usedDerivatives.add(opt.id);
         break;
       }
       case 'naked_put': {
@@ -428,10 +447,8 @@ export function categorizeDerivatives(
           nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
           usedDerivatives.add(put.id);
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_np = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_np) usedDerivatives.add(opt.id);
         break;
       }
       case 'leap_call': {
@@ -440,15 +457,17 @@ export function categorizeDerivatives(
           leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
           usedDerivatives.add(call.id);
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_lc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_lc) usedDerivatives.add(opt.id);
         break;
       }
       default: {
-        // 'other' or any custom strategy type
-        for (const opt of remaining) {
+        // 'other' or any custom strategy type — only consume signature-matched positions
+        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+        const sigMatched_def = sigs.length > 0
+          ? filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), sigs)
+          : remaining.filter(d => !usedDerivatives.has(d.id));
+        for (const opt of sigMatched_def) {
           otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
