@@ -10,6 +10,7 @@ import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
