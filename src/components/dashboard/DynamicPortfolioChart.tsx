@@ -439,7 +439,9 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             </CarouselItem>
             {/* Slide 2: Option type breakdown */}
             <CarouselItem>
-              <OptionTypeBreakdownChart breakdown={netting.optionTypeBreakdown} />
+              <OptionTypeBreakdownChart
+                breakdown={viewMode === 'netting_total' ? netting.optionTypeBreakdown : netting.optionTypeBreakdownIntrinsic}
+              />
             </CarouselItem>
             {/* Slide 3: Strategy breakdown */}
             <CarouselItem>
