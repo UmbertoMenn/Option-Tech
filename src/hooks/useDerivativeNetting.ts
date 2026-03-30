@@ -404,13 +404,15 @@ export function computeSinglePortfolioNetting(
   addIfNonZero('leap_call', 'Leap Call', acc.leapCall.value, 'gain', acc.leapCall.details);
   addIfNonZero('other', 'Altre Strategie', acc.other.value, 'cost', acc.other.details);
 
-  // Compute option type breakdown
-  const optionTypeBreakdown = computeOptionTypeBreakdown(positions, underlyingPrices);
+  // Compute option type breakdown (buyback cost for netting_total)
+  const optionTypeBreakdown = computeOptionTypeBreakdown(positions, underlyingPrices, 'netting_total');
+  // Compute option type breakdown (intrinsic for netting_ex_cc_np)
+  const optionTypeBreakdownIntrinsic = computeOptionTypeBreakdown(positions, underlyingPrices, 'netting_ex_cc_np');
 
   // Compute strategy breakdown
   const strategyBreakdown = computeStrategyBreakdown(positions, overrides, underlyingPrices, strategyConfigs);
 
-  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown, optionTypeBreakdown, strategyBreakdown };
+  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown, optionTypeBreakdown, optionTypeBreakdownIntrinsic, strategyBreakdown };
 }
 
 export function useDerivativeNetting(
