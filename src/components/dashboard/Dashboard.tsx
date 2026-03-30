@@ -56,7 +56,8 @@ export function Dashboard() {
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
   
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate);
+  const { configurations: strategyConfigs } = useStrategyConfigurations();
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs);
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,
