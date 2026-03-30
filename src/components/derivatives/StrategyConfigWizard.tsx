@@ -404,14 +404,78 @@ export function StrategyConfigWizard({
     return ids;
   }, [strategies]);
 
+  const restoreFromConfigs = useCallback((): WizardStrategy[] => {
+    if (!existingConfigs || existingConfigs.length === 0) return [];
+    const usedIds = new Set<string>();
+    const restored: WizardStrategy[] = [];
+
+    for (const config of existingConfigs) {
+      const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
+      if (signatures.length === 0) continue;
+
+      const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+      const groupPositions = allAvailable.filter(p => {
+        const derivsOnly = allAvailable.filter(pp => pp.asset_type === 'derivative');
+        return getUnderlyingKey(p, derivsOnly) === configUnderlyingKey;
+      });
+
+      const matched: Position[] = [];
+
+      for (const sig of signatures) {
+        const match = groupPositions.find(p => {
+          if (usedIds.has(p.id)) return false;
+          if (p.asset_type !== 'derivative') return false;
+          const optType = (p.option_type || '').toLowerCase();
+          const sigType = (sig.option_type || '').toLowerCase();
+          if (optType !== sigType) return false;
+          if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
+          if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
+          const posSign = p.quantity >= 0 ? 1 : -1;
+          if (posSign !== sig.quantity_sign) return false;
+          return true;
+        });
+        if (match) {
+          usedIds.add(match.id);
+          matched.push(match);
+        }
+      }
+
+      // If linked_stock_id, try to find the stock slot
+      if (config.linked_stock_id) {
+        const stockSlot = groupPositions.find(p =>
+          !usedIds.has(p.id) &&
+          (p.asset_type === 'stock' || p.asset_type === 'etf') &&
+          (p.id === config.linked_stock_id || p.id.startsWith(config.linked_stock_id + '__slot_'))
+        );
+        if (stockSlot) {
+          usedIds.add(stockSlot.id);
+          matched.push(stockSlot);
+        }
+      }
+
+      if (matched.length > 0) {
+        restored.push({
+          id: genId(),
+          positions: matched,
+          strategyType: config.strategy_type,
+          isSynthetic: config.is_synthetic || false,
+          suggestedType: config.strategy_type,
+        });
+      }
+    }
+
+    return restored;
+  }, [existingConfigs, allAvailable]);
+
   const handleOpenChange = useCallback((isOpen: boolean) => {
     if (isOpen) {
-      setStrategies([]);
+      const restored = restoreFromConfigs();
+      setStrategies(restored);
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
     onOpenChange(isOpen);
-  }, [onOpenChange]);
+  }, [onOpenChange, restoreFromConfigs]);
 
   const toggleSelected = (groupKey: string, posId: string) => {
     setSelectedIdsByGroup(prev => {
