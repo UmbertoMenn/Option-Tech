@@ -2,11 +2,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PortfolioDonutChart } from '@/components/dashboard/PortfolioDonutChart';
 import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLegend';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
-import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode } from '@/hooks/useDerivativeNetting';
+import { NettingResult, NettingBreakdownItem, OptionTypeBreakdown, OptionTypeBucket, getBreakdownForViewMode } from '@/hooks/useDerivativeNetting';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { ViewMode } from './ViewModeSelector';
-import { Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip as RechartsTooltip } from 'recharts';
 import { formatEUR } from '@/lib/formatters';
 import { useMemo, useState, useCallback, useEffect } from 'react';
@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/carousel';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { Link } from 'react-router-dom';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -42,6 +44,24 @@ const PIE_COLORS: Record<string, string> = {
   long_put: 'hsl(142, 71%, 45%)',
   leap_call: 'hsl(160, 60%, 45%)',
   other: 'hsl(45, 80%, 55%)',
+};
+
+const OPTION_TYPE_COLORS: Record<string, string> = {
+  sold_put_itm: 'hsl(0, 72%, 51%)',
+  sold_call_itm: 'hsl(330, 70%, 50%)',
+  sold_put_otm: 'hsl(25, 95%, 53%)',
+  sold_call_otm: 'hsl(45, 80%, 55%)',
+};
+
+const STRATEGY_COLORS: Record<string, string> = {
+  str_covered_call: 'hsl(217, 91%, 60%)',
+  str_derisking_cc: 'hsl(200, 80%, 50%)',
+  str_iron_condor: 'hsl(280, 70%, 60%)',
+  str_double_diagonal: 'hsl(320, 60%, 55%)',
+  str_naked_put: 'hsl(0, 72%, 51%)',
+  str_leap_call: 'hsl(142, 71%, 45%)',
+  str_protezioni: 'hsl(160, 60%, 45%)',
+  str_other: 'hsl(45, 80%, 55%)',
 };
 
 // ─── Simple Bars Chart ────────────────────────────────────────
@@ -86,25 +106,14 @@ function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalVa
   );
 }
 
-// ─── Breakdown Bar Chart ──────────────────────────────────────
-function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
-  const barData = useMemo(() => {
-    return items
-      .filter(item => Math.abs(item.value) > 0.01)
-      .map(item => ({
-        name: item.label,
-        value: item.value,
-        category: item.category,
-        fill: PIE_COLORS[item.category] || 'hsl(var(--muted-foreground))',
-        details: item.details
-          .slice()
-          .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-          .slice(0, 8),
-      }));
-  }, [items]);
-
-  const totalDerivatives = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
-
+// ─── Generic Vertical Breakdown Chart ─────────────────────────
+function VerticalBreakdownChart({
+  barData,
+  totalValue,
+}: {
+  barData: { name: string; value: number; fill: string; details: { ticker: string; value: number }[] }[];
+  totalValue: number;
+}) {
   if (barData.length === 0) {
     return (
       <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
@@ -151,9 +160,9 @@ function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
                     <p className={`font-bold mb-1.5 ${d.value < 0 ? 'text-red-400' : 'text-green-400'}`}>
                       {formatEUR(d.value)}
                     </p>
-                    {d.details.length > 0 && (
+                    {d.details && d.details.length > 0 && (
                       <div className="border-t border-border pt-1.5 space-y-0.5">
-                        {d.details.map((det: { ticker: string; value: number }, i: number) => (
+                        {d.details.slice(0, 8).map((det: { ticker: string; value: number }, i: number) => (
                           <div key={i} className="flex justify-between gap-3 text-xs">
                             <span className="text-muted-foreground truncate">{det.ticker}</span>
                             <span className={det.value < 0 ? 'text-red-400' : 'text-green-400'}>
@@ -175,9 +184,106 @@ function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-2xl font-bold text-blue-500 mt-2">{formatEUR(totalDerivatives)}</p>
+      <p className="text-2xl font-bold text-blue-500 mt-2">{formatEUR(totalValue)}</p>
     </div>
   );
+}
+
+// ─── Option Type Breakdown (Slide 2) ──────────────────────────
+function OptionTypeBreakdownChart({ breakdown }: { breakdown: OptionTypeBreakdown }) {
+  const barData = useMemo(() => {
+    const buckets: { key: keyof OptionTypeBreakdown; label: string }[] = [
+      { key: 'sold_put_itm', label: 'PUT Vend. ITM' },
+      { key: 'sold_call_itm', label: 'CALL Vend. ITM' },
+      { key: 'sold_put_otm', label: 'PUT Vend. OTM' },
+      { key: 'sold_call_otm', label: 'CALL Vend. OTM' },
+    ];
+
+    return buckets
+      .filter(b => Math.abs(breakdown[b.key].total) > 0.01 || breakdown[b.key].details.length > 0)
+      .map(b => ({
+        name: b.label,
+        value: breakdown[b.key].total,
+        fill: OPTION_TYPE_COLORS[b.key],
+        details: breakdown[b.key].details,
+      }));
+  }, [breakdown]);
+
+  const total = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
+
+  return <VerticalBreakdownChart barData={barData} totalValue={total} />;
+}
+
+// ─── Strategy Breakdown (Slide 3) ─────────────────────────────
+function StrategyBreakdownChart({
+  strategyBreakdown,
+  hasConfigurations,
+}: {
+  strategyBreakdown: NettingBreakdownItem[];
+  hasConfigurations: boolean;
+}) {
+  const barData = useMemo(() => {
+    return strategyBreakdown
+      .filter(item => Math.abs(item.value) > 0.01)
+      .map(item => ({
+        name: item.label,
+        value: item.value,
+        fill: STRATEGY_COLORS[item.category] || 'hsl(var(--muted-foreground))',
+        details: item.details.map(d => ({ ticker: d.ticker, value: d.value })),
+      }));
+  }, [strategyBreakdown]);
+
+  const total = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
+
+  if (!hasConfigurations) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[280px] text-center px-4 gap-3">
+        <AlertTriangle className="w-8 h-8 text-warning" />
+        <p className="text-sm text-muted-foreground">
+          Nessuna configurazione strategia salvata.
+        </p>
+        <Link
+          to="/derivatives"
+          className="text-sm text-primary hover:underline font-medium"
+        >
+          Vai a Strategie Derivati per configurare
+        </Link>
+      </div>
+    );
+  }
+
+  if (barData.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
+        Nessuna strategia con impatto netting
+      </div>
+    );
+  }
+
+  return <VerticalBreakdownChart barData={barData} totalValue={total} />;
+}
+
+// ─── Old Breakdown Bar Chart (kept for existing breakdown view) ───
+function NettingBreakdownChart({ items }: { items: NettingBreakdownItem[] }) {
+  const barData = useMemo(() => {
+    return items
+      .filter(item => Math.abs(item.value) > 0.01)
+      .map(item => ({
+        name: item.label,
+        value: item.value,
+        category: item.category,
+        fill: PIE_COLORS[item.category] || 'hsl(var(--muted-foreground))',
+        details: item.details
+          .slice()
+          .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+          .slice(0, 8)
+          .map(d => ({ ticker: d.ticker, value: d.value })),
+      }));
+  }, [items]);
+
+  const totalDerivatives = useMemo(() => barData.reduce((s, d) => s + d.value, 0), [barData]);
+
+  return <VerticalBreakdownChart barData={barData} totalValue={totalDerivatives} />;
 }
 
 // ─── Top Costose ──────────────────────────────────────────────
@@ -185,14 +291,12 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const topPositions = useMemo(() => {
-    // First collect all details, then aggregate by ticker
     const allDetails = items.flatMap(item =>
       item.details.map(d => ({
         ...d,
         category: item.label,
       }))
     );
-    // Aggregate by ticker
     const byTicker = new Map<string, typeof allDetails[0]>();
     for (const d of allDetails) {
       const existing = byTicker.get(d.ticker);
@@ -257,13 +361,15 @@ const CHART_TITLES: Record<ViewMode, string> = {
 
 const nettingSlides = [
   { id: 'bars', title: 'Confronto Valori' },
-  { id: 'pie', title: 'Breakdown Netting' },
+  { id: 'option_type', title: 'Breakdown per Tipo' },
+  { id: 'strategy', title: 'Breakdown per Strategia' },
 ];
 
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
+  const { hasConfigurations } = useStrategyConfigurations();
 
   const onSelect = useCallback(() => {
     if (!api) return;
@@ -310,7 +416,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       );
     }
 
-    // Netting views — carousel with bars + pie
+    // Netting views — carousel with 3 slides
     const baseValue = summary?.totalValue ?? 0;
 
     return (
@@ -331,9 +437,16 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 )}
               </div>
             </CarouselItem>
-            {/* Slide 2: Pie chart breakdown */}
+            {/* Slide 2: Option type breakdown */}
             <CarouselItem>
-              <NettingBreakdownChart items={breakdownItems} />
+              <OptionTypeBreakdownChart breakdown={netting.optionTypeBreakdown} />
+            </CarouselItem>
+            {/* Slide 3: Strategy breakdown */}
+            <CarouselItem>
+              <StrategyBreakdownChart
+                strategyBreakdown={netting.strategyBreakdown}
+                hasConfigurations={hasConfigurations}
+              />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
