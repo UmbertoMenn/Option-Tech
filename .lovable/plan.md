@@ -1,35 +1,33 @@
 
 
-## Fix: Token-overlap troppo permissivo causa falsi match
+## Ripristino configurazioni salvate nel Wizard
 
 ### Problema
-`hasTokenOverlap` matcha se **un solo token** è in comune. "REGULUS THERAPEUTICS" e "AQUESTIVE THERAPEUTICS" condividono "THERAPEUTICS" → vengono raggruppati erroneamente. Lo stesso bug esiste anche nel wizard.
+Quando si apre "Riconfigura strategie", il wizard resetta sempre `strategies` a `[]` (riga 408 di `StrategyConfigWizard.tsx`). Le configurazioni salvate in `existingConfigs` vengono ignorate, costringendo l'utente a riconfigurare tutto da zero.
 
 ### Soluzione
-Rafforzare la logica di token-overlap in **entrambi i file** (dialog e wizard) richiedendo che **la maggior parte** dei token significativi del termine più corto sia presente nell'altro, non solo uno.
+All'apertura del wizard, ricostruire le `WizardStrategy[]` dalle `existingConfigs` salvate, associando ogni `PositionSignature` alla posizione corrente corrispondente (matching per option_type, strike, expiry, quantity_sign). Le posizioni matchate vengono assegnate alle strategie; quelle non matchate restano nel pool disponibile.
 
-Nuova logica `hasTokenOverlap`:
-```typescript
-function hasTokenOverlap(a: string, b: string): boolean {
-  const tokensA = getSignificantTokens(a);
-  const tokensB = getSignificantTokens(b);
-  if (tokensA.length === 0 || tokensB.length === 0) return false;
-  // Use the shorter token list as reference
-  const [shorter, longer] = tokensA.length <= tokensB.length 
-    ? [tokensA, tokensB] : [tokensB, tokensA];
-  const matchCount = shorter.filter(t => longer.includes(t)).length;
-  // Require majority match (>50% of shorter), with minimum 2 matches if both have 2+ tokens
-  if (shorter.length >= 2) return matchCount >= 2;
-  // Single-token case: exact match only
-  return matchCount === 1 && shorter[0].length >= 4;
-}
+### Modifiche a `src/components/derivatives/StrategyConfigWizard.tsx`
+
+1. **Nuova funzione `restoreFromConfigs`**: per ogni config in `existingConfigs`, scorre le `position_signatures` e cerca la posizione corrente corrispondente in `allAvailable` (stessa logica di `signaturesMatch` del reconciliation). Per le config con `linked_stock_id`, cerca anche lo slot stock corrispondente. Costruisce un array di `WizardStrategy` con le posizioni trovate.
+
+2. **Aggiornare `handleOpenChange`** (riga 407-413): invece di `setStrategies([])`, chiamare `restoreFromConfigs()` che popola `strategies` con le configurazioni salvate e le posizioni attuali associate.
+
+Logica di matching per ogni signature:
+```text
+Per ogni config in existingConfigs:
+  Per ogni signature in config.position_signatures:
+    Cerca in allAvailable (stessa underlying key) una posizione dove:
+      - option_type === signature.option_type
+      - strike_price === signature.strike
+      - expiry_date === signature.expiry
+      - sign(quantity) === signature.quantity_sign
+      - non già assegnata ad altra strategia
+  Se linked_stock_id → cerca stock slot corrispondente
+  Crea WizardStrategy con posizioni trovate, strategyType da config
 ```
 
-Regole:
-- Se il set più corto ha ≥2 token → richiede almeno 2 match (es. "SUPER" + "MICRO" matchano, ma "THERAPEUTICS" da solo no)
-- Se ha 1 solo token → match solo se il token è lungo ≥4 caratteri (per evitare falsi positivi su token generici, ma permettere match come "BAIDU")
-
-### File da modificare
-1. **`src/components/derivatives/StrategyReconciliationDialog.tsx`** — aggiornare `hasTokenOverlap` (riga 127-132)
-2. **`src/components/derivatives/StrategyConfigWizard.tsx`** — aggiornare `hasTokenOverlap` (riga 146-151) con la stessa logica
+### Nessuna modifica ad altri file
+Il wizard ha già accesso a `existingConfigs` e `allAvailable` — serve solo la logica di restore.
 
