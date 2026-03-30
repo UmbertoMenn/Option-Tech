@@ -26,6 +26,7 @@ interface StrategyReconciliationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: ReconciliationItem[];
+  allConfigs: StrategyConfiguration[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
 }
