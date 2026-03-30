@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { Position, PortfolioSummary } from '@/types/portfolio';
-import { categorizeDerivatives } from '@/lib/derivativeStrategies';
+import { categorizeDerivatives, findUnderlyingStock } from '@/lib/derivativeStrategies';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 export interface NettingBreakdownDetail {
   positionId: string;
@@ -21,11 +22,30 @@ export interface NettingBreakdownItem {
   details: NettingBreakdownDetail[];
 }
 
+export interface OptionTypeDetail {
+  ticker: string;
+  value: number;
+}
+
+export interface OptionTypeBucket {
+  total: number;
+  details: OptionTypeDetail[];
+}
+
+export interface OptionTypeBreakdown {
+  sold_put_itm: OptionTypeBucket;
+  sold_call_itm: OptionTypeBucket;
+  sold_put_otm: OptionTypeBucket;
+  sold_call_otm: OptionTypeBucket;
+}
+
 export interface NettingResult {
   nettingExCoveredCall: number;
   nettingTotal: number;
   nettingExCCAndNP: number;
   breakdown: NettingBreakdownItem[];
+  optionTypeBreakdown: OptionTypeBreakdown;
+  strategyBreakdown: NettingBreakdownItem[];
 }
 
 function getEffectiveExchangeRate(position: Position): number {
@@ -35,18 +55,196 @@ function getEffectiveExchangeRate(position: Position): number {
   return 1;
 }
 
+const emptyOptionTypeBreakdown: OptionTypeBreakdown = {
+  sold_put_itm: { total: 0, details: [] },
+  sold_call_itm: { total: 0, details: [] },
+  sold_put_otm: { total: 0, details: [] },
+  sold_call_otm: { total: 0, details: [] },
+};
+
+/** Resolve underlying price for a derivative */
+function resolveUnderlyingPriceForDerivative(
+  derivative: Position,
+  allPositions: Position[],
+  underlyingPrices?: Record<string, UnderlyingPrice>
+): number {
+  const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
+  const stock = findUnderlyingStock(derivative, stockPositions);
+  let price = stock?.snapshot_price ?? stock?.current_price ?? 0;
+  if (price <= 0 && underlyingPrices) {
+    const key = derivative.underlying || derivative.description || '';
+    price = underlyingPrices[key]?.price ?? 0;
+  }
+  return price;
+}
+
+/** Compute option type breakdown (4 buckets: sold PUT/CALL × ITM/OTM) */
+function computeOptionTypeBreakdown(
+  positions: Position[],
+  underlyingPrices?: Record<string, UnderlyingPrice>
+): OptionTypeBreakdown {
+  const derivatives = positions.filter(p => p.asset_type === 'derivative');
+  const result: OptionTypeBreakdown = {
+    sold_put_itm: { total: 0, details: [] },
+    sold_call_itm: { total: 0, details: [] },
+    sold_put_otm: { total: 0, details: [] },
+    sold_call_otm: { total: 0, details: [] },
+  };
+
+  for (const d of derivatives) {
+    if (d.quantity >= 0) continue; // only sold options
+    const strike = d.strike_price ?? 0;
+    const exchangeRate = getEffectiveExchangeRate(d);
+    const contracts = Math.abs(d.quantity);
+    const ticker = d.underlying || d.ticker || d.description || '?';
+    const underlyingPrice = resolveUnderlyingPriceForDerivative(d, positions, underlyingPrices);
+    const marketPrice = d.snapshot_price ?? d.current_price ?? 0;
+
+    if (d.option_type === 'put') {
+      if (underlyingPrice > 0 && strike >= underlyingPrice) {
+        // ITM PUT: intrinsic value (negative = cost)
+        const intrinsic = -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
+        result.sold_put_itm.total += intrinsic;
+        result.sold_put_itm.details.push({ ticker, value: intrinsic });
+      } else {
+        // OTM PUT: market value (negative = cost to close)
+        const mv = (marketPrice * d.quantity * 100) / exchangeRate;
+        result.sold_put_otm.total += mv;
+        result.sold_put_otm.details.push({ ticker, value: mv });
+      }
+    } else if (d.option_type === 'call') {
+      if (underlyingPrice > 0 && strike < underlyingPrice) {
+        // ITM CALL: intrinsic value (negative = cost)
+        const intrinsic = -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
+        result.sold_call_itm.total += intrinsic;
+        result.sold_call_itm.details.push({ ticker, value: intrinsic });
+      } else {
+        // OTM CALL: market value (negative = cost to close)
+        const mv = (marketPrice * d.quantity * 100) / exchangeRate;
+        result.sold_call_otm.total += mv;
+        result.sold_call_otm.details.push({ ticker, value: mv });
+      }
+    }
+  }
+
+  // Aggregate details by ticker for each bucket
+  for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
+    const byTicker = new Map<string, OptionTypeDetail>();
+    for (const d of result[key].details) {
+      const existing = byTicker.get(d.ticker);
+      if (existing) existing.value += d.value;
+      else byTicker.set(d.ticker, { ...d });
+    }
+    result[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
+  }
+
+  return result;
+}
+
+/** Compute strategy section breakdown for the chart */
+function computeStrategyBreakdown(
+  positions: Position[],
+  overrides: DerivativeOverride[],
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  strategyConfigs: StrategyConfiguration[] = []
+): NettingBreakdownItem[] {
+  const derivatives = positions.filter(p => p.asset_type === 'derivative');
+  if (derivatives.length === 0) return [];
+
+  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+  const multiplier = 100;
+
+  const calcNettingValue = (p: Position) => {
+    const price = p.snapshot_price ?? p.current_price ?? 0;
+    return (price * p.quantity * multiplier) / getEffectiveExchangeRate(p);
+  };
+
+  // Compute per section, grouping details by underlying
+  const sections: { key: string; label: string; positions: Position[] }[] = [];
+
+  // Covered Calls
+  if (categories.coveredCalls.length > 0) {
+    sections.push({ key: 'str_covered_call', label: 'Covered Call', positions: categories.coveredCalls.map(cc => cc.option) });
+  }
+  // De-Risking CC
+  if (categories.deRiskingCoveredCalls.length > 0) {
+    const legs: Position[] = [];
+    categories.deRiskingCoveredCalls.forEach(dr => {
+      legs.push(dr.coveredCall.option, dr.protectionPut);
+      if (dr.syntheticPut) legs.push(dr.syntheticPut);
+    });
+    sections.push({ key: 'str_derisking_cc', label: 'De-Risking CC', positions: legs });
+  }
+  // Iron Condors
+  if (categories.ironCondors.length > 0) {
+    const legs: Position[] = [];
+    categories.ironCondors.forEach(ic => legs.push(ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall));
+    sections.push({ key: 'str_iron_condor', label: 'Iron Condor', positions: legs });
+  }
+  // Double Diagonals
+  if (categories.doubleDiagonals.length > 0) {
+    const legs: Position[] = [];
+    categories.doubleDiagonals.forEach(dd => legs.push(dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall));
+    sections.push({ key: 'str_double_diagonal', label: 'Double Diagonal', positions: legs });
+  }
+  // Naked Puts
+  if (categories.nakedPuts.length > 0) {
+    sections.push({ key: 'str_naked_put', label: 'Naked Put', positions: categories.nakedPuts.map(np => np.option) });
+  }
+  // Leap Calls
+  if (categories.leapCalls.length > 0) {
+    sections.push({ key: 'str_leap_call', label: 'Leap Call', positions: categories.leapCalls.map(lc => lc.option) });
+  }
+  // Protezioni
+  if (categories.longPuts.length > 0) {
+    sections.push({ key: 'str_protezioni', label: 'Protezioni', positions: categories.longPuts.map(lp => lp.option) });
+  }
+  // Other strategies
+  if (categories.otherStrategies.length > 0) {
+    sections.push({ key: 'str_other', label: 'Altre Strategie', positions: categories.otherStrategies.map(os => os.option) });
+  }
+
+  const result: NettingBreakdownItem[] = [];
+  for (const section of sections) {
+    // Group by underlying and sum
+    const byUnderlying = new Map<string, number>();
+    for (const p of section.positions) {
+      const underlying = p.underlying || p.description || '?';
+      byUnderlying.set(underlying, (byUnderlying.get(underlying) || 0) + calcNettingValue(p));
+    }
+
+    const totalValue = [...byUnderlying.values()].reduce((s, v) => s + v, 0);
+    const details: NettingBreakdownDetail[] = [...byUnderlying.entries()]
+      .map(([ticker, value]) => ({ positionId: '', ticker, description: ticker, value }))
+      .sort((a, b) => a.value - b.value);
+
+    if (Math.abs(totalValue) > 0.01) {
+      result.push({
+        category: section.key,
+        label: section.label,
+        value: totalValue,
+        color: totalValue < 0 ? 'cost' : 'gain',
+        details,
+      });
+    }
+  }
+
+  return result;
+}
+
 /** Compute netting for a single portfolio's positions */
 export function computeSinglePortfolioNetting(
   positions: Position[],
   overrides: DerivativeOverride[],
-  underlyingPrices?: Record<string, UnderlyingPrice>
-): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[] } {
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  strategyConfigs: StrategyConfiguration[] = []
+): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[]; optionTypeBreakdown: OptionTypeBreakdown; strategyBreakdown: NettingBreakdownItem[] } {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) {
-    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [] };
+    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [], optionTypeBreakdown: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, strategyBreakdown: [] };
   }
 
-  const categories = categorizeDerivatives(derivatives, positions, overrides);
+  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
 
   const coveredCallMap = new Map(categories.coveredCalls.map(cc => [cc.option.id, cc]));
   const nakedPutMap = new Map(categories.nakedPuts.map(np => [np.option.id, np]));
@@ -188,7 +386,13 @@ export function computeSinglePortfolioNetting(
   addIfNonZero('leap_call', 'Leap Call', acc.leapCall.value, 'gain', acc.leapCall.details);
   addIfNonZero('other', 'Altre Strategie', acc.other.value, 'cost', acc.other.details);
 
-  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown };
+  // Compute option type breakdown
+  const optionTypeBreakdown = computeOptionTypeBreakdown(positions, underlyingPrices);
+
+  // Compute strategy breakdown
+  const strategyBreakdown = computeStrategyBreakdown(positions, overrides, underlyingPrices, strategyConfigs);
+
+  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown, optionTypeBreakdown, strategyBreakdown };
 }
 
 export function useDerivativeNetting(
@@ -196,20 +400,28 @@ export function useDerivativeNetting(
   summary: PortfolioSummary | null,
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  isGlobalAggregate: boolean = false
+  isGlobalAggregate: boolean = false,
+  strategyConfigs: StrategyConfiguration[] = []
 ): NettingResult {
   return useMemo(() => {
+    const emptyBreakdown: OptionTypeBreakdown = {
+      sold_put_itm: { total: 0, details: [] },
+      sold_call_itm: { total: 0, details: [] },
+      sold_put_otm: { total: 0, details: [] },
+      sold_call_otm: { total: 0, details: [] },
+    };
     const emptyResult: NettingResult = {
       nettingExCoveredCall: summary?.totalValue ?? 0,
       nettingTotal: summary?.totalValue ?? 0,
       nettingExCCAndNP: summary?.totalValue ?? 0,
       breakdown: [],
+      optionTypeBreakdown: emptyBreakdown,
+      strategyBreakdown: [],
     };
 
     if (!summary || positions.length === 0) return emptyResult;
 
     if (isGlobalAggregate) {
-      // Per-portfolio netting: group by portfolio_id, compute each, then sum
       const byPortfolio = new Map<string, Position[]>();
       positions.forEach(p => {
         if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
@@ -222,18 +434,34 @@ export function useDerivativeNetting(
         overridesByPortfolio.get(o.portfolio_id)!.push(o);
       });
 
+      const configsByPortfolio = new Map<string, StrategyConfiguration[]>();
+      strategyConfigs.forEach(c => {
+        if (!configsByPortfolio.has(c.portfolio_id)) configsByPortfolio.set(c.portfolio_id, []);
+        configsByPortfolio.get(c.portfolio_id)!.push(c);
+      });
+
       let mergedTotalNetting = 0;
       let mergedNettingExCC = 0;
       let mergedNettingExCCAndNP = 0;
       const mergedBreakdown: NettingBreakdownItem[] = [];
+      const mergedOTB: OptionTypeBreakdown = { ...emptyBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
+      const mergedStrategyBreakdown: NettingBreakdownItem[] = [];
 
       for (const [pid, pPositions] of byPortfolio) {
         const pOverrides = overridesByPortfolio.get(pid) || [];
-        const result = computeSinglePortfolioNetting(pPositions, pOverrides, underlyingPrices);
+        const pConfigs = configsByPortfolio.get(pid) || [];
+        const result = computeSinglePortfolioNetting(pPositions, pOverrides, underlyingPrices, pConfigs);
         mergedTotalNetting += result.totalNetting;
         mergedNettingExCC += result.nettingExCoveredCall;
         mergedNettingExCCAndNP += result.nettingExCCAndNP;
         mergedBreakdown.push(...result.breakdown);
+        mergedStrategyBreakdown.push(...result.strategyBreakdown);
+
+        // Merge option type breakdown
+        for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
+          mergedOTB[key].total += result.optionTypeBreakdown[key].total;
+          mergedOTB[key].details.push(...result.optionTypeBreakdown[key].details);
+        }
       }
 
       // Merge breakdown items by category
@@ -248,24 +476,56 @@ export function useDerivativeNetting(
         }
       }
 
+      // Merge strategy breakdown by category
+      const byStratCat = new Map<string, NettingBreakdownItem>();
+      for (const item of mergedStrategyBreakdown) {
+        const existing = byStratCat.get(item.category);
+        if (existing) {
+          existing.value += item.value;
+          // Merge details by ticker
+          for (const d of item.details) {
+            const existingDetail = existing.details.find(ed => ed.ticker === d.ticker);
+            if (existingDetail) existingDetail.value += d.value;
+            else existing.details.push({ ...d });
+          }
+        } else {
+          byStratCat.set(item.category, { ...item, details: [...item.details] });
+        }
+      }
+
+      // Re-aggregate option type details by ticker
+      for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
+        const byTicker = new Map<string, OptionTypeDetail>();
+        for (const d of mergedOTB[key].details) {
+          const existing = byTicker.get(d.ticker);
+          if (existing) existing.value += d.value;
+          else byTicker.set(d.ticker, { ...d });
+        }
+        mergedOTB[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
+      }
+
       return {
         nettingTotal: summary.totalValue + mergedTotalNetting,
         nettingExCoveredCall: summary.totalValue + mergedNettingExCC,
         nettingExCCAndNP: summary.totalValue + mergedNettingExCCAndNP,
         breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01),
+        optionTypeBreakdown: mergedOTB,
+        strategyBreakdown: [...byStratCat.values()].filter(b => Math.abs(b.value) > 0.01),
       };
     }
 
     // Standard single-portfolio logic
-    const result = computeSinglePortfolioNetting(positions, overrides, underlyingPrices);
+    const result = computeSinglePortfolioNetting(positions, overrides, underlyingPrices, strategyConfigs);
 
     return {
       nettingExCoveredCall: summary.totalValue + result.nettingExCoveredCall,
       nettingTotal: summary.totalValue + result.totalNetting,
       nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
       breakdown: result.breakdown,
+      optionTypeBreakdown: result.optionTypeBreakdown,
+      strategyBreakdown: result.strategyBreakdown,
     };
-  }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate]);
+  }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs]);
 }
 
 /**
