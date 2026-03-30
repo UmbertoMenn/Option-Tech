@@ -348,6 +348,8 @@ export function Dashboard() {
             onViewModeChange={setViewMode}
             overrides={overrides}
             underlyingPrices={underlyingPrices}
+            hasConfigurations={hasConfigurations}
+            strategyConfigs={strategyConfigs}
           />
 
           {/* File Upload & Historical Data - Hidden in aggregated view */}
