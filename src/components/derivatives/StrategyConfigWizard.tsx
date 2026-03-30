@@ -475,7 +475,7 @@ export function StrategyConfigWizard({
   };
 
   const handleSave = async () => {
-    const configs: UpsertConfigParams[] = [];
+    const rawConfigs: UpsertConfigParams[] = [];
 
     for (const strategy of strategies) {
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
@@ -483,7 +483,7 @@ export function StrategyConfigWizard({
       const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
       const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
 
-      configs.push({
+      rawConfigs.push({
         underlying,
         strategy_type: strategy.strategyType,
         position_signatures: buildSignatures(strategy.positions),
@@ -494,8 +494,8 @@ export function StrategyConfigWizard({
 
     if (filterUnderlyings) {
       for (const existing of existingConfigs) {
-        if (!configs.some(c => c.underlying === existing.underlying)) {
-          configs.push({
+        if (!rawConfigs.some(c => c.underlying === existing.underlying)) {
+          rawConfigs.push({
             underlying: existing.underlying,
             strategy_type: existing.strategy_type,
             position_signatures: existing.position_signatures,
@@ -506,7 +506,24 @@ export function StrategyConfigWizard({
       }
     }
 
-    await onSave(configs);
+    // Deduplicate: merge configs with same (underlying, strategy_type)
+    const deduped = new Map<string, UpsertConfigParams>();
+    for (const cfg of rawConfigs) {
+      const key = `${cfg.underlying}::${cfg.strategy_type}`;
+      if (deduped.has(key)) {
+        const existing = deduped.get(key)!;
+        existing.position_signatures = [
+          ...existing.position_signatures,
+          ...cfg.position_signatures,
+        ];
+        if (cfg.is_synthetic) existing.is_synthetic = true;
+        if (cfg.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = cfg.linked_stock_id;
+      } else {
+        deduped.set(key, { ...cfg });
+      }
+    }
+
+    await onSave(Array.from(deduped.values()));
     onOpenChange(false);
   };
 

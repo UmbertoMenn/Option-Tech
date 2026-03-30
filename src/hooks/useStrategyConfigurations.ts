@@ -116,7 +116,21 @@ export function useStrategyConfigurations() {
       
       if (configs.length === 0) return;
       
-      const rows = configs.map(c => ({
+      // Deduplicate by (underlying, strategy_type) as safety net
+      const deduped = new Map<string, UpsertConfigParams>();
+      for (const c of configs) {
+        const key = `${c.underlying}::${c.strategy_type}`;
+        if (deduped.has(key)) {
+          const existing = deduped.get(key)!;
+          existing.position_signatures = [...existing.position_signatures, ...c.position_signatures];
+          if (c.is_synthetic) existing.is_synthetic = true;
+          if (c.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = c.linked_stock_id;
+        } else {
+          deduped.set(key, { ...c });
+        }
+      }
+      
+      const rows = Array.from(deduped.values()).map(c => ({
         portfolio_id: portfolioId,
         underlying: c.underlying,
         strategy_type: c.strategy_type,
