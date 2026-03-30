@@ -39,6 +39,8 @@ export const STRATEGY_TYPE_LABELS: Record<string, string> = {
   iron_condor: 'Iron Condor',
   double_diagonal: 'Double Diagonal',
   naked_put: 'Naked Put',
+  put_spread: 'Put Spread',
+  diagonal_put_spread: 'Diagonal Put Spread',
   leap_call: 'LEAP Call',
   other: 'Altre Strategie',
 };
