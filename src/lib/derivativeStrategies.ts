@@ -358,10 +358,9 @@ export function categorizeDerivatives(
             usedDerivatives.add(call.id);
           }
         }
-        // ALL remaining positions for this underlying stay consumed (not leaked to other categories)
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        // Only consume positions matching saved signatures (not all remaining)
+        const sigMatched_cc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_cc) usedDerivatives.add(opt.id);
         break;
       }
       case 'derisking_covered_call': {
