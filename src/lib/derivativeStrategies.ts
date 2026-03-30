@@ -1,6 +1,32 @@
 import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
-import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
+
+/**
+ * Filters positions to only those matching the saved position_signatures of a config.
+ * Each signature can only match one position (1:1 mapping).
+ */
+function filterBySignatures(
+  positions: Position[],
+  signatures: PositionSignature[]
+): Position[] {
+  const matched: Position[] = [];
+  const usedSigs = new Set<number>();
+  for (const p of positions) {
+    const sigIdx = signatures.findIndex((sig, i) =>
+      !usedSigs.has(i) &&
+      (p.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
+      Math.abs((p.strike_price || 0) - sig.strike) < 0.01 &&
+      (p.expiry_date || '') === sig.expiry &&
+      (p.quantity >= 0 ? 1 : -1) === sig.quantity_sign
+    );
+    if (sigIdx >= 0) {
+      matched.push(p);
+      usedSigs.add(sigIdx);
+    }
+  }
+  return matched;
+}
 
 export interface CoveredCallPosition {
   option: Position;
