@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp } from 'lucide-react';
 
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
