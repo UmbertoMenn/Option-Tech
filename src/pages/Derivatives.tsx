@@ -202,6 +202,28 @@ export function Derivatives() {
     };
   }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
 
+  // Split groupedOtherStrategies into putSpreads, diagonalPutSpreads, and remaining
+  const { putSpreads, diagonalPutSpreads, remainingOtherStrategies } = useMemo(() => {
+    const putSpreads: GroupedOtherStrategy[] = [];
+    const diagonalPutSpreads: GroupedOtherStrategy[] = [];
+    const remainingOtherStrategies: GroupedOtherStrategy[] = [];
+
+    for (const group of categories.groupedOtherStrategies) {
+      const configMatch = strategyConfigs.find(c => 
+        c.underlying === group.underlying && (c.strategy_type === 'put_spread' || c.strategy_type === 'diagonal_put_spread')
+      );
+      if (configMatch?.strategy_type === 'put_spread' || (!configMatch && group.strategyName === 'Put Spread')) {
+        putSpreads.push(group);
+      } else if (configMatch?.strategy_type === 'diagonal_put_spread' || (!configMatch && group.strategyName === 'Diagonal Put Spread')) {
+        diagonalPutSpreads.push(group);
+      } else {
+        remainingOtherStrategies.push(group);
+      }
+    }
+
+    return { putSpreads, diagonalPutSpreads, remainingOtherStrategies };
+  }, [categories.groupedOtherStrategies, strategyConfigs]);
+
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
     const totals: Record<string, number> = {};
