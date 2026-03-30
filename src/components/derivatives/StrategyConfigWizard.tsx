@@ -26,6 +26,8 @@ const STRATEGY_OPTIONS = [
   { value: 'iron_condor', label: 'Iron Condor' },
   { value: 'double_diagonal', label: 'Double Diagonal' },
   { value: 'naked_put', label: 'Naked Put' },
+  { value: 'put_spread', label: 'Put Spread' },
+  { value: 'diagonal_put_spread', label: 'Diagonal Put Spread' },
   { value: 'leap_call', label: 'LEAP Call' },
   { value: 'other', label: 'Altre Strategie' },
 ];
@@ -105,7 +107,10 @@ function detectStrategyType(positions: Position[]): string {
     return minBoughtPutStrike < maxSoldPutStrike;
   })();
 
-  if (hasPutSpread && soldCalls.length === 0 && boughtCalls.length === 0) return 'other';
+  if (hasPutSpread && soldCalls.length === 0 && boughtCalls.length === 0) {
+    const allPutExpiries = new Set([...soldPuts, ...boughtPuts].map(p => p.expiry_date || ''));
+    return allPutExpiries.size <= 1 ? 'put_spread' : 'diagonal_put_spread';
+  }
 
   if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
     if (boughtPuts.length > 0 && !hasPutSpread) return 'derisking_covered_call';

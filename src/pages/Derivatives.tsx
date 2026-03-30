@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp } from 'lucide-react';
 
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
@@ -111,6 +111,8 @@ export function Derivatives() {
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
   const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
+  const [putSpreadOpen, setPutSpreadOpen] = useState(false);
+  const [diagonalPutSpreadOpen, setDiagonalPutSpreadOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
@@ -199,6 +201,28 @@ export function Derivatives() {
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
   }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
+
+  // Split groupedOtherStrategies into putSpreads, diagonalPutSpreads, and remaining
+  const { putSpreads, diagonalPutSpreads, remainingOtherStrategies } = useMemo(() => {
+    const putSpreads: GroupedOtherStrategy[] = [];
+    const diagonalPutSpreads: GroupedOtherStrategy[] = [];
+    const remainingOtherStrategies: GroupedOtherStrategy[] = [];
+
+    for (const group of categories.groupedOtherStrategies) {
+      const configMatch = strategyConfigs.find(c => 
+        c.underlying === group.underlying && (c.strategy_type === 'put_spread' || c.strategy_type === 'diagonal_put_spread')
+      );
+      if (configMatch?.strategy_type === 'put_spread' || (!configMatch && group.strategyName === 'Put Spread')) {
+        putSpreads.push(group);
+      } else if (configMatch?.strategy_type === 'diagonal_put_spread' || (!configMatch && group.strategyName === 'Diagonal Put Spread')) {
+        diagonalPutSpreads.push(group);
+      } else {
+        remainingOtherStrategies.push(group);
+      }
+    }
+
+    return { putSpreads, diagonalPutSpreads, remainingOtherStrategies };
+  }, [categories.groupedOtherStrategies, strategyConfigs]);
 
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
@@ -548,7 +572,6 @@ export function Derivatives() {
         </Collapsible>
 
 
-        {/* Section 2: De-Risking Covered Call (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -718,7 +741,79 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 5: Leap Call (Collapsible) */}
+        {/* Section 5a: Put Spread (Collapsible) */}
+        {putSpreads.length > 0 && (
+        <Collapsible open={putSpreadOpen} onOpenChange={setPutSpreadOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ArrowDownUp className="w-5 h-5 text-teal-500" />
+                    <CardTitle className="text-xl">Put Spread</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{putSpreads.length}</Badge>
+                  </div>
+                  {putSpreadOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  PUT venduta + PUT comprata a strike inferiore, stessa scadenza
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                <div className="space-y-1 overflow-x-auto">
+                  {putSpreads.map((group, index) => (
+                    <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+        )}
+
+        {/* Section 5b: Diagonal Put Spread (Collapsible) */}
+        {diagonalPutSpreads.length > 0 && (
+        <Collapsible open={diagonalPutSpreadOpen} onOpenChange={setDiagonalPutSpreadOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ArrowDownUp className="w-5 h-5 text-indigo-500" />
+                    <CardTitle className="text-xl">Diagonal Put Spread</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{diagonalPutSpreads.length}</Badge>
+                  </div>
+                  {diagonalPutSpreadOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  PUT venduta + PUT comprata a strike inferiore, scadenze diverse
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                <div className="space-y-1 overflow-x-auto">
+                  {diagonalPutSpreads.map((group, index) => (
+                    <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+        )}
+
+        {/* Section 6: Leap Call (Collapsible) */}
         <Collapsible open={leapCallsOpen} onOpenChange={setLeapCallsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -804,7 +899,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Puzzle className="w-5 h-5 text-cyan-500" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.groupedOtherStrategies.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{remainingOtherStrategies.length}</Badge>
                   </div>
                   {otherStrategiesOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -819,13 +914,13 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.groupedOtherStrategies.length === 0 ? (
+                {remainingOtherStrategies.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
                     <p className="text-sm">Nessuna altra strategia presente</p>
                   </div>
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
-                    {categories.groupedOtherStrategies.map((group, index) => (
+                    {remainingOtherStrategies.map((group, index) => (
                       <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
