@@ -1,53 +1,37 @@
 
 
-## Rework Netting Bar Charts per Sezione Strategia
+## Fix: Naked Put intrinsic più negativo del valore di mercato
 
-### Problema attuale
-Il breakdown del netting usa categorie basate su ITM/OTM (cc_itm, cc_otm, np_itm, np_otm, long_put, leap_call, other) anziché sulle sezioni strategia della pagina Derivati. Mancano categorie come de-risking CC, iron condor, double diagonal, put spread, diagonal put spread. Non c'è avviso se mancano le configurazioni.
+### Causa
+In `getBreakdownForViewMode`, per il view `netting_ex_cc_np`, il valore intrinseco delle naked put ITM viene calcolato usando il prezzo sottostante corrente (`underlyingPrices` o `snapshot_price` del sottostante), mentre il valore di mercato nel `netting_total` usa il `snapshot_price` dell'opzione. Se il prezzo dell'opzione è stale (non aggiornato), il valore intrinseco calcolato può superare il valore di mercato, il che è economicamente impossibile.
 
-### Nuovo comportamento
+### Soluzione
+Aggiungere un cap: il valore intrinseco per ogni posizione naked put non può mai essere più negativo del suo valore di mercato. Lo stesso principio va applicato anche a covered call e de-risking CC.
 
-**Netting Totale** — una barra per sezione strategia con valore di mercato:
-- Covered Call, De-Risking CC, Iron Condor, Double Diagonal, Naked Put, Put Spread, Diagonal Put Spread, Leap Call, Protezioni, Altre Strategie
-- Tooltip: ticker + valore per sottostante
-- Sezioni vuote → nessuna barra
-- Senza configurazioni → avviso + bottone "Configura strategie" (link a /derivatives)
+### Modifica a `src/hooks/useDerivativeNetting.ts`
 
-**Netting ex CC e NP** — stesse sezioni, ma:
-- Covered Call, De-Risking CC, Naked Put → solo valore intrinseco di perdita (ITM)
-- Tutte le altre → valore di mercato (costo chiusura)
-- Stessa logica tooltip/vuote/avviso
+**In `getBreakdownForViewMode`**, sezione naked put (righe ~500-538):
+- Dopo aver calcolato `tickerIntrinsic`, confrontarlo con il valore di mercato del ticker (`det.value`)
+- Se `tickerIntrinsic < det.value` (più negativo), usare `det.value` come cap
+
+```typescript
+// Cap: intrinsic cannot exceed market value in absolute terms
+if (tickerIntrinsic < det.value) {
+  tickerIntrinsic = det.value;
+}
+```
+
+**Stessa logica per covered_call e derisking_cc** (righe ~440-497):
+- Cap `tickerIntrinsic` a `det.value` per evitare lo stesso problema con prezzi stale delle covered call
+
+**In `computeSinglePortfolioNetting`**, sezione naked_put (righe ~256-273):
+- Applicare lo stesso cap anche al calcolo di `nettingExCCAndNP`: se `-intrinsicValue` è più negativo di `nettingValue`, usare `nettingValue`
+
+```typescript
+const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
+nettingExCCAndNP += cappedIntrinsic;
+```
 
 ### File da modificare
-
-**1. `src/hooks/useDerivativeNetting.ts`**
-- Espandere `computeSinglePortfolioNetting` per produrre breakdown con categorie per sezione strategia: `covered_call`, `derisking_cc`, `iron_condor`, `double_diagonal`, `naked_put`, `put_spread`, `diagonal_put_spread`, `leap_call`, `long_put`, `other`
-- Tracciare deRiskingCoveredCalls, ironCondors, doubleDiagonals separatamente (attualmente cadono in "other" o non sono distinti)
-- Aggiungere set per putSpreads e diagonalPutSpreads dal `groupedOtherStrategies` di `categorizeDerivatives`
-- Aggregare details per ticker in ogni categoria
-- Aggiornare `getBreakdownForViewMode`:
-  - `netting_total`: mostra valore mercato per tutte le sezioni
-  - `netting_ex_cc_np`: per covered_call e derisking_cc → solo intrinseco ITM; per naked_put → solo intrinseco ITM; per tutte le altre → valore mercato
-
-**2. `src/components/dashboard/DynamicPortfolioChart.tsx`**
-- Aggiungere prop `hasConfigurations` a `DynamicPortfolioChart`
-- Aggiornare `PIE_COLORS` con colori per le nuove categorie
-- In `NettingBreakdownChart`: se `hasConfigurations === false`, mostrare avviso con testo + bottone "Configura strategie" che naviga a `/derivatives`
-- Aggiornare labels nelle barre per matchare i nomi sezioni
-
-**3. `src/components/dashboard/Dashboard.tsx`**
-- Importare e chiamare `useStrategyConfigurations` per ottenere `hasConfigurations`
-- Passare `hasConfigurations` a `DynamicPortfolioChart`
-
-### Dettaglio tecnico — espansione breakdown
-
-Attualmente il loop in `computeSinglePortfolioNetting` usa solo `coveredCallMap`, `nakedPutMap`, `longPutSet`, `leapCallSet` e tutto il resto va in `other`. Il fix aggiunge:
-- `deRiskingCCSet` da `categories.deRiskingCoveredCalls` (tutte le gambe: option + protectionPut + eventuale syntheticPut)
-- `ironCondorSet` da `categories.ironCondors` (4 gambe)
-- `doubleDiagonalSet` da `categories.doubleDiagonals` (4 gambe)
-- Per put_spread e diagonal_put_spread: si riconoscono dal `strategy_type` nelle `otherStrategies`/`groupedOtherStrategies`
-
-Ogni set accumula il nettingValue nella propria categoria di breakdown.
-
-Per il view mode `netting_ex_cc_np`, la funzione `getBreakdownForViewMode` calcola il valore intrinseco solo per le categorie CC-related (covered_call + derisking_cc) e naked_put, lasciando le altre al valore di mercato.
+- `src/hooks/useDerivativeNetting.ts` — aggiungere cap intrinseco ≤ mercato in 3 punti
 
