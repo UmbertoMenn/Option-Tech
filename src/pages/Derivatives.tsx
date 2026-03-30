@@ -39,6 +39,8 @@ import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSumm
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { reconcileConfigs } from '@/lib/strategyReconciliation';
+import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
   categorizeDerivatives, 
   formatOptionDescription,
@@ -117,6 +119,8 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
+  const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
@@ -328,6 +332,21 @@ export function Derivatives() {
     });
   }, [portfolio?.id, categories, underlyingPrices]);
 
+  // Reconciliation: compare saved configs vs current positions
+  const reconciliationItems = useMemo(() => {
+    if (!hasConfigurations || strategyConfigs.length === 0 || positions.length === 0) return [];
+    return reconcileConfigs(strategyConfigs, positions);
+  }, [hasConfigurations, strategyConfigs, positions]);
+
+  // Auto-open reconciliation dialog once per mount when discrepancies found
+  useEffect(() => {
+    if (reconciliationCheckedRef.current) return;
+    if (reconciliationItems.length > 0 && !isLoading) {
+      reconciliationCheckedRef.current = true;
+      setReconciliationOpen(true);
+    }
+  }, [reconciliationItems, isLoading]);
+
   if (isLoading) {
     return <DerivativesSkeleton />;
   }
@@ -460,6 +479,16 @@ export function Derivatives() {
           derivatives={derivatives}
           allPositions={positions}
           existingConfigs={strategyConfigs}
+          onSave={upsertBatch}
+          isSaving={isConfigSaving}
+        />
+
+        {/* Reconciliation Dialog */}
+        <StrategyReconciliationDialog
+          open={reconciliationOpen}
+          onOpenChange={setReconciliationOpen}
+          items={reconciliationItems}
+          allConfigs={strategyConfigs}
           onSave={upsertBatch}
           isSaving={isConfigSaving}
         />
