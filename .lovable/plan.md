@@ -1,63 +1,27 @@
 
 
-## Fix: Costo di riacquisto per Netting Totale, mantenere intrinseco per Netting ex CC e NP
+## Nascondere sezioni vuote nella pagina Derivati
 
 ### Problema
-Slide 2 e 3 del Netting Totale usano valore intrinseco per ITM. L'utente vuole che nel **Netting Totale** si usi sempre il **costo di riacquisto** (prezzo mercato Excel), ma che il calcolo intrinseco resti disponibile per il **Netting ex CC e NP**.
+Alcune sezioni (Put Spread, Diagonal Put Spread) hanno già il guard `{x.length > 0 && (...)}`, ma le altre sezioni vengono sempre renderizzate anche quando vuote, mostrando "Nessuna X presente".
 
-### Modifiche a `src/hooks/useDerivativeNetting.ts`
+### Soluzione
+Wrappare ogni sezione con un controllo `length > 0`, come già fatto per Put Spread e Diagonal Put Spread.
 
-**1. Aggiungere parametro `viewMode` a `computeOptionTypeBreakdown`**
+### Modifiche a `src/pages/Derivatives.tsx`
 
-La funzione riceverà un parametro `mode: 'netting_total' | 'netting_ex_cc_np'`:
-- `netting_total` → TUTTE le vendute usano buyback cost: `-(|qty| × 100 × marketPrice) / exchangeRate`
-- `netting_ex_cc_np` → ITM vendute usano valore intrinseco (logica attuale), OTM vendute usano market price
+Aggiungere il guard condizionale a queste 8 sezioni:
 
-**2. Modificare i blocchi ITM (righe 104-108 e 116-120)**
+1. **Covered Call** (riga 553): `{categories.coveredCalls.length > 0 && (<Collapsible ...>...</Collapsible>)}`
+2. **De-Risking Covered Call** (riga 605): `{categories.deRiskingCoveredCalls.length > 0 && (...)}`
+3. **Iron Condor** (riga 655): `{categories.ironCondors.length > 0 && (...)}`
+4. **Double Diagonal** (riga 695): `{categories.doubleDiagonals.length > 0 && (...)}`
+5. **Naked Put** (riga 735): `{categories.nakedPuts.length > 0 && (...)}`
+6. **Leap Call** (riga 847): `{categories.leapCalls.length > 0 && (...)}`
+7. **Protezioni** (riga 887): `{categories.longPuts.length > 0 && (...)}`
+8. **Altre Strategie** (riga 924): `{remainingOtherStrategies.length > 0 && (...)}`
 
-Aggiungere condizione sul mode:
-```typescript
-if (mode === 'netting_total') {
-  // Buyback cost for all sold options
-  const mv = -(contracts * 100 * marketPrice) / exchangeRate;
-  bucket.total += mv;
-  bucket.details.push({ ticker, value: mv });
-} else {
-  // Intrinsic value for ITM (netting_ex_cc_np)
-  const intrinsic = -(contracts * 100 * Math.abs(strike - underlyingPrice)) / exchangeRate;
-  bucket.total += intrinsic;
-  bucket.details.push({ ticker, value: intrinsic });
-}
-```
+Rimuovere anche i blocchi interni "Nessuna X presente" che diventano irraggiungibili.
 
-**3. Calcolare due versioni di optionTypeBreakdown nel risultato**
-
-In `computeSinglePortfolioNetting`, chiamare `computeOptionTypeBreakdown` due volte (o una volta con entrambi i mode) e restituire:
-- `optionTypeBreakdown` → per netting_total (buyback cost)
-- `optionTypeBreakdownIntrinsic` → per netting_ex_cc_np (valore intrinseco)
-
-Oppure, più semplice: calcolare solo con buyback cost e mantenere la logica intrinseca separata nel breakdown esistente (che già la usa per `getBreakdownForViewMode`).
-
-**Approccio scelto (più pulito):** aggiungere `optionTypeBreakdownIntrinsic` come secondo campo nel `NettingResult`.
-
-**4. Stesso allineamento per `computeStrategyBreakdown` (Slide 3)**
-
-La funzione `calcNettingValue` già usa market price → è già corretta per Netting Totale. Nessuna modifica necessaria.
-
-**5. Aggiornare `NettingResult` interface**
-
-```typescript
-export interface NettingResult {
-  // ... existing fields
-  optionTypeBreakdown: OptionTypeBreakdown;        // buyback cost (netting totale)
-  optionTypeBreakdownIntrinsic: OptionTypeBreakdown; // intrinsic (netting ex cc np)
-  strategyBreakdown: NettingBreakdownItem[];
-}
-```
-
-**6. `DynamicPortfolioChart.tsx`** — Slide 2 usa `netting.optionTypeBreakdown` quando viewMode è `netting_total`, e `netting.optionTypeBreakdownIntrinsic` quando viewMode è `netting_ex_cc_np`.
-
-### File da modificare
-1. `src/hooks/useDerivativeNetting.ts` — due versioni del breakdown per tipo opzione
-2. `src/components/dashboard/DynamicPortfolioChart.tsx` — selezione del breakdown corretto in base al viewMode
+### Nessuna modifica ad altri file
 
