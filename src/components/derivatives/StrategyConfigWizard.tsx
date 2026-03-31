@@ -448,8 +448,20 @@ export function StrategyConfigWizard({
         }
       }
 
-      // If linked_stock_id, try to find the stock slot
-      if (config.linked_stock_id) {
+      // Restore stock slots from linked_stock_slot_ids (preferred) or legacy linked_stock_id
+      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (savedSlotIds.length > 0) {
+        for (const slotId of savedSlotIds) {
+          const stockSlot = groupPositions.find(p =>
+            !usedIds.has(p.id) && p.asset_type === 'stock' && p.id === slotId
+          );
+          if (stockSlot) {
+            usedIds.add(stockSlot.id);
+            matched.push(stockSlot);
+          }
+        }
+      } else if (config.linked_stock_id) {
+        // Legacy fallback: try exact match or prefix match
         const stockSlot = groupPositions.find(p =>
           !usedIds.has(p.id) &&
           p.asset_type === 'stock' &&
