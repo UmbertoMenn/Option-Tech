@@ -342,7 +342,7 @@ export function StrategyConfigWizard({
   // Build all available positions (derivatives + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
-    const stocks = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+    const stocks = allPositions.filter(p => p.asset_type === 'stock');
     let derivs = derivatives;
     if (filterUnderlyings) {
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
