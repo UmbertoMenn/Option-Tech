@@ -1,59 +1,44 @@
 
+Obiettivo: fermare il crash della pagina Derivati e rendere “Riconfigura strategie” sicuro anche con portafogli grandi, senza toccare la logica di classificazione già salvata.
 
-## Fix: impedire auto-classificazione delle posizioni dopo upload Excel
+Diagnosi reale dal codice:
+- `addToStrategy` nel Wizard oggi è sintatticamente completo: non è lì il bug principale.
+- Il crash più evidente nel codice è in `src/components/derivatives/StrategyReconciliationDialog.tsx`: il dialog inizializza stato durante il render con `if (open && !initialized) { initStates(); }`, e questo può mandare in errore l’intera route.
+- In `src/pages/Derivatives.tsx` i dialog sono montati sempre, senza `ErrorBoundary`: se uno dei due fallisce, salta tutta la pagina.
+- `src/components/derivatives/StrategyConfigWizard.tsx` fa comunque lavoro pesante di grouping/restoration; su portafogli grandi questo può sembrare un crash anche quando non salva nulla.
 
-### Problema
-Quando viene caricato un nuovo Excel, `categorizeDerivatives` viene invocato con le nuove posizioni e le vecchie configurazioni. Le posizioni che non matchano le signatures salvate (es. gamba rollata con nuovo strike/scadenza) cadono attraverso gli STEP 1-6 e vengono auto-classificate — creando duplicati o spostando posizioni in categorie diverse da quelle configurate dall'utente.
+Piano di fix
 
-### Causa tecnica
-In `src/lib/derivativeStrategies.ts`, STEP 0.5 consuma solo le posizioni che matchano le `position_signatures` salvate. Le posizioni non matchate (nuova gamba, rollover) passano agli STEP 1-6 (Covered Call auto-detect, Iron Condor auto-detect, ecc.) dove vengono classificate automaticamente, ignorando la configurazione manuale dell'utente.
+1. Mettere in sicurezza la pagina Derivati
+- In `src/pages/Derivatives.tsx`, montare `StrategyConfigWizard` e `StrategyReconciliationDialog` solo quando sono aperti.
+- Wrappare entrambi in `ErrorBoundary` dedicati, così un errore in un dialog non butta giù tutta la pagina Strategie Derivati.
 
-### Soluzione
-Quando `strategyConfigs.length > 0` (modalità strict), le posizioni il cui underlying ha già una configurazione salvata devono essere **escluse** dagli STEP 1-6 di auto-classificazione. Queste posizioni non matchate devono finire direttamente in "Altre Strategie" come posizioni non configurate, in attesa che l'utente le assegni manualmente tramite il wizard o la riconciliazione.
+2. Correggere il crash reale del dialog “Configurazioni da aggiornare”
+- In `src/components/derivatives/StrategyReconciliationDialog.tsx`, rimuovere completamente l’inizializzazione che oggi avviene durante il render.
+- Spostare tutta l’inizializzazione in un `useEffect` o nel solo flusso di apertura del dialog, in modo React-safe.
+- Lasciare invariato il bottone `+N` già presente lì.
 
-### Modifica
+3. Alleggerire davvero “Riconfigura strategie”
+- In `src/components/derivatives/StrategyConfigWizard.tsx`, evitare lavoro pesante quando `open === false`:
+  - short-circuit su `allAvailable` / `underlyingGroups` quando il dialog è chiuso
+  - restore delle configurazioni solo all’apertura
+- Tenere `startTransition`, ma fare in modo che il Wizard non prepari tutto in anticipo quando non serve.
 
-**File: `src/lib/derivativeStrategies.ts`**
+4. Blindare il Wizard senza cambiare comportamento utente
+- Lasciare il `+N` nel Wizard, ma consolidare `addToStrategy` nella forma più semplice e sicura:
+  - prende solo posizioni selezionate e non assegnate
+  - le aggiunge alla strategia
+  - ricalcola `suggestedType`
+  - pulisce la selezione del gruppo
+- Verificare che l’apertura del Wizard non faccia nessun salvataggio né variazione automatica: deve solo leggere configurazioni esistenti e mostrarle.
 
-Dopo STEP 0.5 (riga ~477), prima di STEP 1:
+5. Verifica funzionale finale
+- Caso 1: upload Excel con discrepanze → il dialog “Configurazioni da aggiornare” si apre senza schermata bianca.
+- Caso 2: click su “Riconfigura strategie” → la pagina non crasha e resta responsiva.
+- Caso 3: apertura/chiusura del Wizard senza salvare → nessuna modifica visibile nelle strategie derivate.
+- Caso 4: `+N` presente e funzionante sia nel Wizard sia nel dialog di riconciliazione.
 
-1. Creare un set di `configuredUnderlyingKeys` — tutti i `normalizeForMatching(config.underlying)` per ogni config
-2. In ogni STEP (1-6), prima di processare una posizione, verificare: se `strategyConfigs.length > 0` e la posizione appartiene a un underlying configurato (`configuredUnderlyingKeys.has(underlyingKey)`), **saltare** la posizione
-3. A fine STEP 6, raccogliere tutte le posizioni saltate e aggiungerle a `otherStrategies`
-
-```typescript
-// After STEP 0.5, before STEP 1
-const configuredUnderlyingKeys = new Set(
-  strategyConfigs.map(c => normalizeForMatching(c.underlying))
-);
-const hasStrictConfigs = strategyConfigs.length > 0;
-```
-
-Poi in STEP 1 (Covered Calls auto-detect, riga ~480):
-```typescript
-const soldCalls = filteredDerivatives.filter(d => 
-  d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id) &&
-  !(hasStrictConfigs && configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description)))
-);
-```
-
-Stesso pattern per STEP 2-6: aggiungere il filtro `!(hasStrictConfigs && configuredUnderlyingKeys.has(...))`.
-
-Infine, dopo STEP 6, raccogliere le posizioni "orfane" di underlying configurati:
-```typescript
-// STEP 6.5: Unconfigured positions on configured underlyings → Other Strategies
-if (hasStrictConfigs) {
-  const orphans = filteredDerivatives.filter(d => 
-    !usedDerivatives.has(d.id) && 
-    configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description))
-  );
-  for (const opt of orphans) {
-    otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
-    usedDerivatives.add(opt.id);
-  }
-}
-```
-
-### File da modificare
-- `src/lib/derivativeStrategies.ts` — aggiungere guard `configuredUnderlyingKeys` per escludere posizioni configurate dagli STEP 1-6
-
+File da toccare
+- `src/pages/Derivatives.tsx`
+- `src/components/derivatives/StrategyReconciliationDialog.tsx`
+- `src/components/derivatives/StrategyConfigWizard.tsx`
