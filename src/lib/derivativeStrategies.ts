@@ -744,7 +744,7 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 6: Singole gambe ============
-  const singleLegs = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const singleLegs = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
