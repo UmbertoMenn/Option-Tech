@@ -312,21 +312,19 @@ export function StrategyReconciliationDialog({
     setInitialized(true);
   }, [items, currentPositions]);
 
-  // Re-initialize when dialog opens
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    if (isOpen && !initialized) {
+  // Initialize via useEffect — never during render
+  useEffect(() => {
+    if (open && !initialized) {
       initStates();
     }
-    if (!isOpen) {
+    if (!open && initialized) {
       setInitialized(false);
     }
-    onOpenChange(isOpen);
-  }, [onOpenChange, initStates, initialized]);
+  }, [open, initialized, initStates]);
 
-  // Initialize on first render if open
-  if (open && !initialized) {
-    initStates();
-  }
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    onOpenChange(isOpen);
+  }, [onOpenChange]);
 
   // Compute assigned IDs across all strategies
   const assignedIds = useMemo(() => {

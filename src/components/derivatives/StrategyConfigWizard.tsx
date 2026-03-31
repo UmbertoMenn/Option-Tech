@@ -339,8 +339,9 @@ export function StrategyConfigWizard({
   isSaving,
   filterUnderlyings,
 }: StrategyConfigWizardProps) {
-  // Build all available positions (derivatives + split stocks)
+  // Build all available positions (derivatives + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
+    if (!open) return [];
     const stocks = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
     let derivs = derivatives;
     if (filterUnderlyings) {
@@ -365,17 +366,17 @@ export function StrategyConfigWizard({
     }
     
     return [...derivs, ...virtualStocks];
-  }, [derivatives, allPositions, filterUnderlyings]);
+  }, [open, derivatives, allPositions, filterUnderlyings]);
 
-  // Group all positions by normalized underlying
+  // Group all positions by normalized underlying — skip when closed
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
+    if (!open) return [];
     const groupMap = new Map<string, { displayName: string; positions: Position[] }>();
     const derivsOnly = allAvailable.filter(p => p.asset_type === 'derivative');
 
     for (const p of allAvailable) {
       const key = getUnderlyingKey(p, derivsOnly);
       if (!groupMap.has(key)) {
-        // Pick a human-readable display name
         let display = key;
         if (p.asset_type === 'derivative' && p.underlying) {
           display = p.underlying;
@@ -387,11 +388,10 @@ export function StrategyConfigWizard({
       groupMap.get(key)!.positions.push(p);
     }
 
-    // Sort groups alphabetically by display name
     return Array.from(groupMap.entries())
       .map(([key, { displayName, positions }]) => ({ key, displayName, positions }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [allAvailable]);
+  }, [open, allAvailable]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());

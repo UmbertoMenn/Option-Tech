@@ -473,27 +473,35 @@ export function Derivatives() {
             </CardContent>
           </Card>
         ) : (<>
-        {/* Strategy Config Wizard */}
-        <StrategyConfigWizard
-          open={wizardOpen}
-          onOpenChange={setWizardOpen}
-          derivatives={derivatives}
-          allPositions={positions}
-          existingConfigs={strategyConfigs}
-          onSave={upsertBatch}
-          isSaving={isConfigSaving}
-        />
+        {/* Strategy Config Wizard — mounted only when open */}
+        {wizardOpen && (
+          <ErrorBoundary title="Errore nel Wizard Strategie">
+            <StrategyConfigWizard
+              open={wizardOpen}
+              onOpenChange={setWizardOpen}
+              derivatives={derivatives}
+              allPositions={positions}
+              existingConfigs={strategyConfigs}
+              onSave={upsertBatch}
+              isSaving={isConfigSaving}
+            />
+          </ErrorBoundary>
+        )}
 
-        {/* Reconciliation Dialog */}
-        <StrategyReconciliationDialog
-          open={reconciliationOpen}
-          onOpenChange={setReconciliationOpen}
-          items={reconciliationItems}
-          allConfigs={strategyConfigs}
-          currentPositions={positions}
-          onSave={upsertBatch}
-          isSaving={isConfigSaving}
-        />
+        {/* Reconciliation Dialog — mounted only when open */}
+        {reconciliationOpen && (
+          <ErrorBoundary title="Errore nella Riconciliazione">
+            <StrategyReconciliationDialog
+              open={reconciliationOpen}
+              onOpenChange={setReconciliationOpen}
+              items={reconciliationItems}
+              allConfigs={strategyConfigs}
+              currentPositions={positions}
+              onSave={upsertBatch}
+              isSaving={isConfigSaving}
+            />
+          </ErrorBoundary>
+        )}
 
         {/* Info + Riconfigura button */}
         <div className="flex items-center justify-between">
