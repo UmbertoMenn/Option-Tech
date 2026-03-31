@@ -609,7 +609,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 3 & 4: Find Iron Condor and Double Diagonal ============
   // Group remaining derivatives by underlying
-  const remainingDerivatives = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const remainingDerivatives = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of remainingDerivatives) {
