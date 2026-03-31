@@ -541,29 +541,45 @@ export function StrategyConfigWizard({
     ));
   };
 
-  const handleAutoClassify = () => {
-    const auto = autoClassify(derivatives, allPositions);
-    
-    // Remap original stock IDs to virtual slot IDs
-    const usedSlotIds = new Set<string>();
-    const remappedStrategies = auto.map(strat => ({
-      ...strat,
-      positions: strat.positions.map(p => {
-        if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
-        // Find matching virtual slot in allAvailable
-        const slot = allAvailable.find(a =>
-          (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
-        );
-        if (slot && slot.id !== p.id) {
-          usedSlotIds.add(slot.id);
-          return { ...p, id: slot.id, quantity: slot.quantity };
-        }
-        return p;
-      }),
+  const addToStrategy = (groupKey: string, strategyId: string, groupPositions: Position[]) => {
+    const selectedSet = selectedIdsByGroup.get(groupKey);
+    if (!selectedSet || selectedSet.size === 0) return;
+    const toAdd = groupPositions.filter(p => !assignedIds.has(p.id) && selectedSet.has(p.id));
+    if (toAdd.length === 0) return;
+
+    setStrategies(prev => prev.map(st => {
+      if (st.id !== strategyId) return st;
+      const newPositions = [...st.positions, ...toAdd];
+      return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
     }));
-    
-    setStrategies(remappedStrategies);
-    setSelectedIdsByGroup(new Map());
+    setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(groupKey); return next; });
+  };
+
+  const handleAutoClassify = () => {
+    startTransition(() => {
+      const auto = autoClassify(derivatives, allPositions);
+      
+      // Remap original stock IDs to virtual slot IDs
+      const usedSlotIds = new Set<string>();
+      const remappedStrategies = auto.map(strat => ({
+        ...strat,
+        positions: strat.positions.map(p => {
+          if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
+          // Find matching virtual slot in allAvailable
+          const slot = allAvailable.find(a =>
+            (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
+          );
+          if (slot && slot.id !== p.id) {
+            usedSlotIds.add(slot.id);
+            return { ...p, id: slot.id, quantity: slot.quantity };
+          }
+          return p;
+        }),
+      }));
+      
+      setStrategies(remappedStrategies);
+      setSelectedIdsByGroup(new Map());
+    });
   };
 
   const handleSave = async () => {
