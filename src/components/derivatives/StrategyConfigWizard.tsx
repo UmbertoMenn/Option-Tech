@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, startTransition } from 'react';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives, getCanonicalKey } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
@@ -470,8 +470,10 @@ export function StrategyConfigWizard({
   // Restore saved configs when wizard opens via prop
   useEffect(() => {
     if (open) {
-      const restored = restoreFromConfigs();
-      setStrategies(restored);
+      startTransition(() => {
+        const restored = restoreFromConfigs();
+        setStrategies(restored);
+      });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
@@ -541,29 +543,45 @@ export function StrategyConfigWizard({
     ));
   };
 
-  const handleAutoClassify = () => {
-    const auto = autoClassify(derivatives, allPositions);
-    
-    // Remap original stock IDs to virtual slot IDs
-    const usedSlotIds = new Set<string>();
-    const remappedStrategies = auto.map(strat => ({
-      ...strat,
-      positions: strat.positions.map(p => {
-        if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
-        // Find matching virtual slot in allAvailable
-        const slot = allAvailable.find(a =>
-          (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
-        );
-        if (slot && slot.id !== p.id) {
-          usedSlotIds.add(slot.id);
-          return { ...p, id: slot.id, quantity: slot.quantity };
-        }
-        return p;
-      }),
+  const addToStrategy = (groupKey: string, strategyId: string, groupPositions: Position[]) => {
+    const selectedSet = selectedIdsByGroup.get(groupKey);
+    if (!selectedSet || selectedSet.size === 0) return;
+    const toAdd = groupPositions.filter(p => !assignedIds.has(p.id) && selectedSet.has(p.id));
+    if (toAdd.length === 0) return;
+
+    setStrategies(prev => prev.map(st => {
+      if (st.id !== strategyId) return st;
+      const newPositions = [...st.positions, ...toAdd];
+      return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
     }));
-    
-    setStrategies(remappedStrategies);
-    setSelectedIdsByGroup(new Map());
+    setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(groupKey); return next; });
+  };
+
+  const handleAutoClassify = () => {
+    startTransition(() => {
+      const auto = autoClassify(derivatives, allPositions);
+      
+      // Remap original stock IDs to virtual slot IDs
+      const usedSlotIds = new Set<string>();
+      const remappedStrategies = auto.map(strat => ({
+        ...strat,
+        positions: strat.positions.map(p => {
+          if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
+          // Find matching virtual slot in allAvailable
+          const slot = allAvailable.find(a =>
+            (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
+          );
+          if (slot && slot.id !== p.id) {
+            usedSlotIds.add(slot.id);
+            return { ...p, id: slot.id, quantity: slot.quantity };
+          }
+          return p;
+        }),
+      }));
+      
+      setStrategies(remappedStrategies);
+      setSelectedIdsByGroup(new Map());
+    });
   };
 
   const handleSave = async () => {
@@ -801,9 +819,22 @@ export function StrategyConfigWizard({
                                   )}
                                 </div>
 
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(strategy.id)}>
-                                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                                </Button>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {selectedCount > 0 && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[11px] px-2"
+                                      onClick={() => addToStrategy(group.key, strategy.id, group.positions)}
+                                    >
+                                      <Plus className="w-3 h-3 mr-0.5" />
+                                      +{selectedCount}
+                                    </Button>
+                                  )}
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deleteStrategy(strategy.id)}>
+                                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                  </Button>
+                                </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {strategy.positions.map(p => (
