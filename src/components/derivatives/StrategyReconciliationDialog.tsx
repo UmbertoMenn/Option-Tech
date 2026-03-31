@@ -677,9 +677,27 @@ export function StrategyReconciliationDialog({
                                   )}
                                 </div>
 
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(key, strategy.id)}>
-                                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {(() => {
+                                    const selSet = selectedByGroup.get(key);
+                                    const selCount = selSet ? Array.from(selSet).filter(id => !assignedIds.has(id)).length : 0;
+                                    if (selCount === 0) return null;
+                                    return (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-[10px] px-2"
+                                        onClick={() => addToStrategy(key, strategy.id)}
+                                      >
+                                        <Plus className="w-3 h-3 mr-0.5" />
+                                        +{selCount}
+                                      </Button>
+                                    );
+                                  })()}
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(key, strategy.id)}>
+                                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                  </Button>
+                                </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {strategy.positions.map(p => (
