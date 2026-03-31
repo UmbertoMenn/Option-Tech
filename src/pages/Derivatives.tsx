@@ -39,7 +39,7 @@ function shouldShowOptionStaleIndicator(option: Position, ticker?: string): bool
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { reconcileConfigs } from '@/lib/strategyReconciliation';
 import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
@@ -78,7 +78,7 @@ import {
   buildOptionStratUrlFromOrders,
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
-import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { useStrategyConfigurations, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
 import { StrategyConfigWizard } from '@/components/derivatives/StrategyConfigWizard';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
@@ -108,6 +108,51 @@ export function Derivatives() {
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
+  
+  // Wrapper: save configs AND delete conflicting single overrides
+  const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
+    // Find all derivative position IDs covered by the new configs
+    const allDerivs = positions.filter(p => p.asset_type === 'derivative');
+    const coveredPositionIds = new Set<string>();
+    
+    for (const config of configs) {
+      const configKey = (config.underlying || '').toUpperCase().trim();
+      for (const d of allDerivs) {
+        const posUnderlying = (d.underlying || d.description || '').toUpperCase().trim();
+        if (!posUnderlying.includes(configKey) && !configKey.includes(posUnderlying)) continue;
+        // Check if this position matches any signature in the config
+        const sigs = config.position_signatures || [];
+        for (const sig of sigs) {
+          if (
+            (d.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
+            Math.abs((d.strike_price || 0) - sig.strike) < 0.01 &&
+            (d.expiry_date || '') === sig.expiry &&
+            (d.quantity >= 0 ? 1 : -1) === sig.quantity_sign
+          ) {
+            coveredPositionIds.add(d.id);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Delete conflicting single overrides for these positions
+    if (coveredPositionIds.size > 0 && portfolio?.id) {
+      const conflicting = overrides.filter(
+        o => o.override_type === 'single' && o.position_id && coveredPositionIds.has(o.position_id)
+      );
+      if (conflicting.length > 0) {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const ids = conflicting.map(o => o.id);
+        await supabase.from('derivative_overrides').delete().in('id', ids);
+        console.log(`[SaveConfigs] Deleted ${ids.length} conflicting single overrides`);
+      }
+    }
+    
+    // Save the configs
+    await upsertBatch(configs);
+  }, [positions, overrides, portfolio?.id, upsertBatch]);
+  
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
@@ -482,7 +527,7 @@ export function Derivatives() {
               derivatives={derivatives}
               allPositions={positions}
               existingConfigs={strategyConfigs}
-              onSave={upsertBatch}
+              onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
             />
           </ErrorBoundary>
@@ -497,7 +542,7 @@ export function Derivatives() {
               items={reconciliationItems}
               allConfigs={strategyConfigs}
               currentPositions={positions}
-              onSave={upsertBatch}
+              onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
             />
           </ErrorBoundary>

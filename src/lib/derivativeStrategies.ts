@@ -198,11 +198,30 @@ export function categorizeDerivatives(
   // Get all stock positions (NOT ETFs for matching)
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
   
+  // ============ PRE-COMPUTE: positions covered by strategy configs ============
+  // These positions must NOT be consumed by single overrides (Step 0).
+  const configCoveredIds = new Set<string>();
+  for (const config of strategyConfigs) {
+    const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+    if (sigs.length === 0) continue;
+    const candidates = filteredDerivatives.filter(d => {
+      const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+      return posKey === configKey;
+    });
+    const matched = filterBySignatures(candidates, sigs);
+    for (const m of matched) configCoveredIds.add(m.id);
+  }
+  
   // ============ STEP 0: Apply Manual Overrides ============
+  // Skip positions that are covered by a saved strategy configuration
   const singleOverrides = overrides.filter(o => o.override_type === 'single');
   
   for (const override of singleOverrides) {
     if (!override.position_id || !override.target_category) continue;
+    
+    // CRITICAL: if this position is covered by a strategy config, skip the override
+    if (configCoveredIds.has(override.position_id)) continue;
     
     const position = filteredDerivatives.find(d => d.id === override.position_id);
     if (!position) continue;
@@ -230,27 +249,19 @@ export function categorizeDerivatives(
         
       case 'protection':
         if (position.option_type === 'put' && position.quantity > 0) {
-          // Calculate if this is a partial protection
           let isPartial = false;
           
           if (linkedStock && linkedStock.quantity > 0) {
-            // Calculate if this is a partial protection
-            // Simple formula: shares/100 - Long PUT contracts > 0
-            const stockContracts = Math.floor(linkedStock.quantity / 100);
-            const longPutContracts = position.quantity; // This is the current Long PUT
-            
-            // Find other Long PUT positions on the same underlying (only bought, not sold)
             const underlyingKey = normalizeForMatching(position.underlying || position.description);
+            const stockContracts = Math.floor(linkedStock.quantity / 100);
+            const longPutContracts = position.quantity;
             const otherLongPuts = derivatives.filter(d => 
               d.id !== position.id &&
               d.option_type === 'put' &&
-              d.quantity > 0 && // Only bought PUTs
+              d.quantity > 0 &&
               normalizeForMatching(d.underlying || d.description) === underlyingKey
             );
-            
             const totalLongPutContracts = longPutContracts + otherLongPuts.reduce((sum, p) => sum + p.quantity, 0);
-            
-            // Partial if shares/100 - total Long PUT contracts > 0
             isPartial = stockContracts - totalLongPutContracts > 0;
           }
           
