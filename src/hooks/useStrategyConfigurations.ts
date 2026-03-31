@@ -128,6 +128,9 @@ export function useStrategyConfigurations() {
           existing.position_signatures = [...existing.position_signatures, ...c.position_signatures];
           if (c.is_synthetic) existing.is_synthetic = true;
           if (c.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = c.linked_stock_id;
+          // Merge slot ids uniquely
+          const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(c.linked_stock_slot_ids || [])]);
+          existing.linked_stock_slot_ids = Array.from(mergedSlots);
         } else {
           deduped.set(key, { ...c });
         }
