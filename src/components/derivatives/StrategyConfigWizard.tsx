@@ -470,8 +470,10 @@ export function StrategyConfigWizard({
   // Restore saved configs when wizard opens via prop
   useEffect(() => {
     if (open) {
-      const restored = restoreFromConfigs();
-      setStrategies(restored);
+      startTransition(() => {
+        const restored = restoreFromConfigs();
+        setStrategies(restored);
+      });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
