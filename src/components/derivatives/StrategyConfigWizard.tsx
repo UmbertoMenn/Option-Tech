@@ -574,7 +574,7 @@ export function StrategyConfigWizard({
       const remappedStrategies = auto.map(strat => ({
         ...strat,
         positions: strat.positions.map(p => {
-          if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
+          if (p.asset_type !== 'stock') return p;
           // Find matching virtual slot in allAvailable
           const slot = allAvailable.find(a =>
             (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
