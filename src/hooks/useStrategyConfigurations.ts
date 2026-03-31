@@ -140,6 +140,7 @@ export function useStrategyConfigurations() {
         position_signatures: c.position_signatures as any,
         is_synthetic: c.is_synthetic || false,
         linked_stock_id: c.linked_stock_id || null,
+        linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
       }));
       
       const { error } = await supabase.from('strategy_configurations').insert(rows);
