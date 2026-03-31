@@ -630,6 +630,7 @@ export function StrategyConfigWizard({
             position_signatures: existing.position_signatures,
             is_synthetic: existing.is_synthetic,
             linked_stock_id: existing.linked_stock_id,
+            linked_stock_slot_ids: existing.linked_stock_slot_ids || [],
           });
         }
       }
