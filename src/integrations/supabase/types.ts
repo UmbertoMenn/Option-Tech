@@ -1016,6 +1016,7 @@ export type Database = {
           id: string
           is_synthetic: boolean
           linked_stock_id: string | null
+          linked_stock_slot_ids: Json
           portfolio_id: string
           position_signatures: Json
           strategy_type: string
@@ -1027,6 +1028,7 @@ export type Database = {
           id?: string
           is_synthetic?: boolean
           linked_stock_id?: string | null
+          linked_stock_slot_ids?: Json
           portfolio_id: string
           position_signatures?: Json
           strategy_type: string
@@ -1038,6 +1040,7 @@ export type Database = {
           id?: string
           is_synthetic?: boolean
           linked_stock_id?: string | null
+          linked_stock_slot_ids?: Json
           portfolio_id?: string
           position_signatures?: Json
           strategy_type?: string

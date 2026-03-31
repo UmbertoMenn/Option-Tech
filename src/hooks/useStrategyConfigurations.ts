@@ -21,6 +21,7 @@ export interface StrategyConfiguration {
   position_signatures: PositionSignature[];
   is_synthetic: boolean;
   linked_stock_id: string | null;
+  linked_stock_slot_ids: string[];
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +32,7 @@ export interface UpsertConfigParams {
   position_signatures: PositionSignature[];
   is_synthetic?: boolean;
   linked_stock_id?: string | null;
+  linked_stock_slot_ids?: string[];
 }
 
 export const STRATEGY_TYPE_LABELS: Record<string, string> = {
@@ -93,6 +95,7 @@ export function useStrategyConfigurations() {
           position_signatures: params.position_signatures as any,
           is_synthetic: params.is_synthetic || false,
           linked_stock_id: params.linked_stock_id || null,
+          linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
         }, { onConflict: 'portfolio_id,underlying,strategy_type' })
         .select().single();
       if (error) throw error;
@@ -125,6 +128,9 @@ export function useStrategyConfigurations() {
           existing.position_signatures = [...existing.position_signatures, ...c.position_signatures];
           if (c.is_synthetic) existing.is_synthetic = true;
           if (c.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = c.linked_stock_id;
+          // Merge slot ids uniquely
+          const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(c.linked_stock_slot_ids || [])]);
+          existing.linked_stock_slot_ids = Array.from(mergedSlots);
         } else {
           deduped.set(key, { ...c });
         }
@@ -137,6 +143,7 @@ export function useStrategyConfigurations() {
         position_signatures: c.position_signatures as any,
         is_synthetic: c.is_synthetic || false,
         linked_stock_id: c.linked_stock_id || null,
+        linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
       }));
       
       const { error } = await supabase.from('strategy_configurations').insert(rows);

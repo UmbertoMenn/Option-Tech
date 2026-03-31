@@ -312,23 +312,26 @@ export function categorizeDerivatives(
 
     switch (config.strategy_type) {
       case 'covered_call': {
-        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        // STRICT: use only signature-matched positions
+        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+        const sigMatched = filterBySignatures(remaining, sigs);
         const stock = linkedStock || createDummyStock(config.underlying);
         
+        // Mark ALL signature-matched positions as used immediately
+        for (const m of sigMatched) usedDerivatives.add(m.id);
+        
+        const calls = sigMatched.filter(d => d.option_type === 'call' && d.quantity < 0);
+        
         if (config.is_synthetic) {
-          // Synthetic CC: pick the sold PUT with lowest strike (deep ITM) as stock replacement
-          const soldPuts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0)
+          const soldPuts = sigMatched.filter(d => d.option_type === 'put' && d.quantity < 0)
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
           const synPut = soldPuts[0];
-          
-          // Check for protective bought PUTs → auto-promote to De-Risking
-          const boughtPutsForPromotion = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
+          const boughtPutsForPromotion = sigMatched.filter(d => d.option_type === 'put' && d.quantity > 0);
           
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
             const protPut = boughtPutsForPromotion.shift();
             if (protPut) {
-              // Auto-promote to deRiskingCoveredCalls with all 3 legs visible
               const cc: CoveredCallPosition = {
                 option: call, underlying: stock, contractsCovered: contracts,
                 sharesCovered: contracts * 100, isFullyCovered: true,
@@ -337,7 +340,6 @@ export function categorizeDerivatives(
                 coveredCall: cc, protectionPut: protPut,
                 isSynthetic: true, syntheticPut: synPut,
               });
-              usedDerivatives.add(protPut.id);
             } else {
               coveredCalls.push({
                 option: call, underlying: stock, contractsCovered: contracts,
@@ -345,10 +347,7 @@ export function categorizeDerivatives(
                 isSynthetic: true, syntheticPut: synPut || undefined,
               });
             }
-            usedDerivatives.add(call.id);
           }
-          if (synPut) usedDerivatives.add(synPut.id);
-          for (const p of boughtPutsForPromotion) usedDerivatives.add(p.id);
         } else {
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
@@ -356,30 +355,29 @@ export function categorizeDerivatives(
               option: call, underlying: stock, contractsCovered: contracts,
               sharesCovered: contracts * 100, isFullyCovered: true,
             });
-            usedDerivatives.add(call.id);
           }
         }
-        // Only consume positions matching saved signatures (not all remaining)
-        const sigMatched_cc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_cc) usedDerivatives.add(opt.id);
         break;
       }
       case 'derisking_covered_call': {
-        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
+        // STRICT: use only signature-matched positions — no heuristic fallback
+        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+        const sigMatched = filterBySignatures(remaining, sigs);
         const stock = linkedStock || createDummyStock(config.underlying);
         
-        // If synthetic, pick the sold PUT with LOWEST strike (deep ITM) as stock replacement
+        // Mark ALL signature-matched positions as used immediately
+        for (const m of sigMatched) usedDerivatives.add(m.id);
+        
+        const calls = sigMatched.filter(d => d.option_type === 'call' && d.quantity < 0);
+        
         let syntheticPut: Position | undefined;
         if (config.is_synthetic) {
-          const soldPuts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0)
+          const soldPuts = sigMatched.filter(d => d.option_type === 'put' && d.quantity < 0)
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
           syntheticPut = soldPuts[0];
         }
         
-        // Bought PUTs (protective) — exclude the synthetic sold PUT
-        const boughtPuts = remaining.filter(d => 
-          d.option_type === 'put' && d.quantity > 0
-        );
+        const boughtPuts = [...sigMatched.filter(d => d.option_type === 'put' && d.quantity > 0)];
         
         for (const call of calls) {
           const contracts = Math.abs(call.quantity);
@@ -393,9 +391,7 @@ export function categorizeDerivatives(
               coveredCall: cc, protectionPut: protPut,
               isSynthetic: config.is_synthetic, syntheticPut,
             });
-            usedDerivatives.add(protPut.id);
           } else if (config.is_synthetic && syntheticPut) {
-            // No protection → falls back to CC with synthetic flag
             coveredCalls.push({
               option: call, underlying: stock, contractsCovered: contracts,
               sharesCovered: contracts * 100, isFullyCovered: true,
@@ -404,12 +400,7 @@ export function categorizeDerivatives(
           } else {
             coveredCalls.push(cc);
           }
-          usedDerivatives.add(call.id);
         }
-        if (syntheticPut) usedDerivatives.add(syntheticPut.id);
-        for (const p of boughtPuts) usedDerivatives.add(p.id);
-        const sigMatched_dcc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_dcc) usedDerivatives.add(opt.id);
         break;
       }
       case 'iron_condor': {

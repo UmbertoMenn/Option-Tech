@@ -448,8 +448,20 @@ export function StrategyConfigWizard({
         }
       }
 
-      // If linked_stock_id, try to find the stock slot
-      if (config.linked_stock_id) {
+      // Restore stock slots from linked_stock_slot_ids (preferred) or legacy linked_stock_id
+      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (savedSlotIds.length > 0) {
+        for (const slotId of savedSlotIds) {
+          const stockSlot = groupPositions.find(p =>
+            !usedIds.has(p.id) && p.asset_type === 'stock' && p.id === slotId
+          );
+          if (stockSlot) {
+            usedIds.add(stockSlot.id);
+            matched.push(stockSlot);
+          }
+        }
+      } else if (config.linked_stock_id) {
+        // Legacy fallback: try exact match or prefix match
         const stockSlot = groupPositions.find(p =>
           !usedIds.has(p.id) &&
           p.asset_type === 'stock' &&
@@ -607,8 +619,9 @@ export function StrategyConfigWizard({
     for (const strategy of strategies) {
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
         || strategy.positions[0]?.description || 'Unknown';
-      const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
-      const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
+      const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
+      const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
 
       rawConfigs.push({
         underlying,
@@ -616,6 +629,7 @@ export function StrategyConfigWizard({
         position_signatures: buildSignatures(strategy.positions),
         is_synthetic: strategy.isSynthetic,
         linked_stock_id: realStockId,
+        linked_stock_slot_ids: slotIds,
       });
     }
 
@@ -628,6 +642,7 @@ export function StrategyConfigWizard({
             position_signatures: existing.position_signatures,
             is_synthetic: existing.is_synthetic,
             linked_stock_id: existing.linked_stock_id,
+            linked_stock_slot_ids: existing.linked_stock_slot_ids || [],
           });
         }
       }
@@ -645,6 +660,8 @@ export function StrategyConfigWizard({
         ];
         if (cfg.is_synthetic) existing.is_synthetic = true;
         if (cfg.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = cfg.linked_stock_id;
+        const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(cfg.linked_stock_slot_ids || [])]);
+        existing.linked_stock_slot_ids = Array.from(mergedSlots);
       } else {
         deduped.set(key, { ...cfg });
       }
