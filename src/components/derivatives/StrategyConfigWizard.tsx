@@ -607,8 +607,9 @@ export function StrategyConfigWizard({
     for (const strategy of strategies) {
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
         || strategy.positions[0]?.description || 'Unknown';
-      const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
-      const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
+      const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
+      const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
 
       rawConfigs.push({
         underlying,
@@ -616,6 +617,7 @@ export function StrategyConfigWizard({
         position_signatures: buildSignatures(strategy.positions),
         is_synthetic: strategy.isSynthetic,
         linked_stock_id: realStockId,
+        linked_stock_slot_ids: slotIds,
       });
     }
 
