@@ -50,9 +50,16 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
     const nettingTotal = totalValue + nettingResult.totalNetting;
     const nettingExCCAndNP = totalValue + nettingResult.nettingExCCAndNP;
 
-    // 5. Compute equity exposure
+    // 5. Fetch strategy configurations
+    const { data: configsRaw } = await supabase
+      .from('strategy_configurations')
+      .select('*')
+      .eq('portfolio_id', portfolioId);
+    const strategyConfigs = (configsRaw || []) as any[];
+
+    // 6. Compute equity exposure
     const derivatives = positions.filter(p => p.asset_type === 'derivative');
-    const categories = categorizeDerivatives(derivatives, positions, overrides);
+    const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
     const riskAnalysis = analyzePortfolioRisk(positions, categories);
     const equityExposurePct = totalValue > 0
       ? Math.max(0, Math.min(1, riskAnalysis.grandTotal / totalValue))
