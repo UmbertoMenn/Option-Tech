@@ -234,7 +234,7 @@ export function Derivatives() {
 
       raw = merged;
     } else {
-      raw = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+      raw = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
     }
     
     return {

@@ -480,6 +480,19 @@ export function categorizeDerivatives(
     }
   }
 
+  // ============ CONFIG-ONLY MODE ============
+  // When configOnly is true, skip all auto-classification (Steps 1-6).
+  // All unmatched positions go directly to "Altre Strategie".
+  if (options?.configOnly) {
+    const orphans = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+    for (const opt of orphans) {
+      otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
+      usedDerivatives.add(opt.id);
+    }
+    const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  }
+
   // ============ STRICT CONFIG GUARD ============
   // When user has manual configurations, prevent auto-detection (STEPs 1-6) from
   // consuming positions whose underlying is already configured. Those unmatched
