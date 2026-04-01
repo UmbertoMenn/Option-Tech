@@ -881,10 +881,11 @@ export type Database = {
       }
       profiles: {
         Row: {
+          admin_contact_email: string | null
           admin_notify_email: boolean
           admin_notify_telegram: boolean
           created_at: string
-          email: string
+          email: string | null
           full_name: string | null
           id: string
           notify_email: boolean | null
@@ -892,12 +893,14 @@ export type Database = {
           telegram_chat_id: string | null
           updated_at: string
           user_id: string
+          username: string | null
         }
         Insert: {
+          admin_contact_email?: string | null
           admin_notify_email?: boolean
           admin_notify_telegram?: boolean
           created_at?: string
-          email: string
+          email?: string | null
           full_name?: string | null
           id?: string
           notify_email?: boolean | null
@@ -905,12 +908,14 @@ export type Database = {
           telegram_chat_id?: string | null
           updated_at?: string
           user_id: string
+          username?: string | null
         }
         Update: {
+          admin_contact_email?: string | null
           admin_notify_email?: boolean
           admin_notify_telegram?: boolean
           created_at?: string
-          email?: string
+          email?: string | null
           full_name?: string | null
           id?: string
           notify_email?: boolean | null
@@ -918,6 +923,7 @@ export type Database = {
           telegram_chat_id?: string | null
           updated_at?: string
           user_id?: string
+          username?: string | null
         }
         Relationships: []
       }
