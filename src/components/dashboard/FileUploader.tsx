@@ -120,7 +120,7 @@ export function FileUploader() {
       // If portfolio has derivatives, redirect to wizard for mandatory configuration
       const hasDerivatives = positions.some(p => p.asset_type === 'derivative');
       if (hasDerivatives) {
-        navigate('/derivatives?wizard=1');
+        navigate('/derivatives');
       }
     } catch (error) {
       console.error('Error parsing file:', error);

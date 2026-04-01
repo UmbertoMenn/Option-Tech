@@ -446,21 +446,13 @@ export function Derivatives() {
     return uncoveredCount > 0;
   }, [derivatives, hasConfigurations, strategyConfigs, archivedKeysSet]);
 
-  // Auto-open wizard when needed OR when ?wizard=1 is present
-  const wizardAutoOpenedRef = useRef(false);
+   // Clean up legacy ?wizard=1 param without opening wizard
   useEffect(() => {
-    if (wizardAutoOpenedRef.current) return;
-    if (isLoading) return;
-    if (wizardQueryParam || needsWizard) {
-      wizardAutoOpenedRef.current = true;
-      setWizardOpen(true);
-      // Clear the query param to avoid re-opening on navigation
-      if (wizardQueryParam) {
-        searchParams.delete('wizard');
-        setSearchParams(searchParams, { replace: true });
-      }
+    if (searchParams.get('wizard') === '1') {
+      searchParams.delete('wizard');
+      setSearchParams(searchParams, { replace: true });
     }
-  }, [isLoading, wizardQueryParam, needsWizard, searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams]);
 
   // Auto-open reconciliation dialog once per mount when discrepancies found
   // (only if wizard is NOT already open)
