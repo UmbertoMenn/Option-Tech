@@ -364,6 +364,13 @@ export function DerivativesSummaryCard({
         }
       });
       
+      categories.deRiskingCoveredCalls.forEach(dr => {
+        const drKey = getMatchingKey(dr.coveredCall.underlying.description || dr.coveredCall.option.underlying || '');
+        if (drKey === normalizedKey) {
+          soldCallContracts += dr.coveredCall.contractsCovered;
+        }
+      });
+      
       const available = potentialContracts - soldCallContracts;
       if (available >= 1) {
         result.push({
@@ -374,7 +381,7 @@ export function DerivativesSummaryCard({
     });
     
     return result.sort((a, b) => b.availableShares - a.availableShares);
-  }, [stockPositions, categories.coveredCalls]);
+  }, [stockPositions, categories.coveredCalls, categories.deRiskingCoveredCalls]);
   
   // ============ 8. Altre Strategie OOR/OOB ============
   const otherStrategiesOOROOB = useMemo(() => {
