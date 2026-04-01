@@ -111,8 +111,8 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as any[];
 
-    // 6. Categorize and save
-    const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+    // 6. Categorize (config-only: no orphan fallback) and save
+    const categories = categorizeDerivatives(activeDerivatives, positions, overrides, strategyConfigs, { configOnly: true });
     await saveStrategyCache(portfolioId, categories, underlyingPrices);
 
     console.log('[refreshStrategyCache] Cache refreshed for portfolio', portfolioId);
