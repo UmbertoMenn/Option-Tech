@@ -176,7 +176,8 @@ export function categorizeDerivatives(
   derivatives: Position[],
   allPositions: Position[],
   overrides: DerivativeOverride[] = [],
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  options?: { configOnly?: boolean }
 ): DerivativeCategories {
   // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
   const filteredDerivatives = derivatives.filter(d => {
