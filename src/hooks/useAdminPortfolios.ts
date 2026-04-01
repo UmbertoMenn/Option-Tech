@@ -60,6 +60,7 @@ export function useAdminPortfolios() {
         userId: key,
         email: portfolio.owner_email,
         name: portfolio.owner_name,
+        username: portfolio.owner_username || portfolio.owner_email?.replace('@internal.local', '') || null,
         portfolios: [],
       };
     }
