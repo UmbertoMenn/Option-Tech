@@ -36,6 +36,29 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       return;
     }
 
+    // 1b. Fetch archived underlyings for this portfolio (to exclude from cache)
+    const { data: archivedRaw } = await supabase
+      .from('archived_underlyings')
+      .select('underlying_key')
+      .eq('portfolio_id', portfolioId);
+    const archivedKeys = new Set(
+      (archivedRaw || []).map((a: any) => (a.underlying_key as string).toUpperCase().trim())
+    );
+
+    // Filter out archived derivatives
+    const activeDerivatives = archivedKeys.size > 0
+      ? derivatives.filter(d => {
+          const key = (d.underlying || d.description || '').toUpperCase().trim();
+          return !archivedKeys.has(key);
+        })
+      : derivatives;
+
+    if (activeDerivatives.length === 0) {
+      await supabase.from('strategy_cache').delete().eq('portfolio_id', portfolioId);
+      console.log('[refreshStrategyCache] All derivatives archived, cache cleared');
+      return;
+    }
+
     // 2. Fetch derivative overrides
     const { data: overridesRaw } = await supabase
       .from('derivative_overrides')

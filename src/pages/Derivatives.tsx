@@ -393,10 +393,26 @@ export function Derivatives() {
   const wizardQueryParam = searchParams.get('wizard') === '1';
 
   // Compute whether wizard is needed: derivatives exist but configs are missing or incomplete
+  // Build archived keys set for fast lookups
+  const archivedKeysSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of archivedItems) {
+      set.add(item.key.toUpperCase().trim());
+    }
+    return set;
+  }, [archivedItems]);
+
   const needsWizard = useMemo(() => {
     if (derivatives.length === 0) return false;
-    if (!hasConfigurations) return true;
-    // Check if any derivative is NOT matched by any saved configuration signature
+    if (!hasConfigurations) {
+      // Even without configs, if ALL derivatives are archived, no wizard needed
+      const nonArchived = derivatives.filter(d => {
+        const key = (d.underlying || d.description || '').toUpperCase().trim();
+        return !archivedKeysSet.has(key);
+      });
+      return nonArchived.length > 0;
+    }
+    // Check if any derivative is NOT matched by any saved configuration signature AND not archived
     const configuredIds = new Set<string>();
     for (const config of strategyConfigs) {
       const configKey = (config.underlying || '').toUpperCase().trim();
@@ -420,9 +436,15 @@ export function Derivatives() {
         }
       }
     }
-    const uncoveredCount = derivatives.filter(d => !configuredIds.has(d.id)).length;
+    // Exclude archived derivatives from uncovered count
+    const uncoveredCount = derivatives.filter(d => {
+      if (configuredIds.has(d.id)) return false;
+      const key = (d.underlying || d.description || '').toUpperCase().trim();
+      if (archivedKeysSet.has(key)) return false;
+      return true;
+    }).length;
     return uncoveredCount > 0;
-  }, [derivatives, hasConfigurations, strategyConfigs]);
+  }, [derivatives, hasConfigurations, strategyConfigs, archivedKeysSet]);
 
   // Auto-open wizard when needed OR when ?wizard=1 is present
   const wizardAutoOpenedRef = useRef(false);

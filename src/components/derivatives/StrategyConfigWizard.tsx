@@ -201,8 +201,16 @@ function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
   return stockNorm;
 }
 
-function autoClassify(derivatives: Position[], allPositions: Position[]): WizardStrategy[] {
-  const result = categorizeDerivatives(derivatives, allPositions, [], []);
+function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
+  // Filter out archived underlyings before auto-classifying
+  const archivedSet = new Set(archivedKeysToExclude.map(k => k.toUpperCase().trim()));
+  const filteredDerivs = archivedSet.size > 0
+    ? derivatives.filter(d => {
+        const key = (d.underlying || d.description || '').toUpperCase().trim();
+        return !archivedSet.has(key);
+      })
+    : derivatives;
+  const result = categorizeDerivatives(filteredDerivs, allPositions, [], []);
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
   const consumedIds = new Set<string>();

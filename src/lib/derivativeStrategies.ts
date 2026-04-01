@@ -482,13 +482,9 @@ export function categorizeDerivatives(
 
   // ============ CONFIG-ONLY MODE ============
   // When configOnly is true, skip all auto-classification (Steps 1-6).
-  // All unmatched positions go directly to "Altre Strategie".
+  // Orphans (unmatched positions) are DROPPED — they do NOT go to "Altre Strategie".
+  // "Altre Strategie" only contains positions explicitly mapped via a saved config with type 'other'.
   if (options?.configOnly) {
-    const orphans = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
-    for (const opt of orphans) {
-      otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
-      usedDerivatives.add(opt.id);
-    }
     const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
     return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
   }
