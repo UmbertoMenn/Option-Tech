@@ -44,6 +44,7 @@ export function useAdminPortfolios() {
         ...p,
         owner_email: profileMap.get(p.user_id)?.email || 'Email sconosciuta',
         owner_name: profileMap.get(p.user_id)?.name || null,
+        owner_username: profileMap.get(p.user_id)?.username || null,
       })) as PortfolioWithOwner[];
 
       return { portfolios: portfoliosWithOwner, profiles: profiles || [] };
