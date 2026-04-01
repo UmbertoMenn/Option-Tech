@@ -65,7 +65,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       ? Math.max(0, Math.min(1, riskAnalysis.grandTotal / totalValue))
       : 0.6;
 
-    // 6. Compute USD exposure
+    // 7. Compute USD exposure
     const currencyExposures = calculateCurrencyExposure(riskAnalysis);
     const totalExposure = currencyExposures.reduce((sum, c) => sum + c.totalRisk, 0);
     const usdExposure = currencyExposures.find(c => c.currency === 'USD');
