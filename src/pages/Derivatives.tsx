@@ -80,6 +80,7 @@ import {
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
 import { StrategyConfigWizard } from '@/components/derivatives/StrategyConfigWizard';
+import { useArchivedUnderlyings, useArchiveUnderlying, useUnarchiveUnderlying } from '@/hooks/useArchivedUnderlyings';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
@@ -108,6 +109,9 @@ export function Derivatives() {
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
+  const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
+  const archiveMutation = useArchiveUnderlying();
+  const unarchiveMutation = useUnarchiveUnderlying();
   
   // Wrapper: save configs AND delete conflicting single overrides
   const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
@@ -582,6 +586,18 @@ export function Derivatives() {
               existingConfigs={strategyConfigs}
               onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
+              archivedKeys={archivedItems.map(a => a.key)}
+              archivedItems={archivedItems}
+              onArchive={(key, displayName) => {
+                if (portfolio?.id) {
+                  archiveMutation.mutate({ portfolioId: portfolio.id, underlyingKey: key, displayName });
+                }
+              }}
+              onUnarchive={(key) => {
+                if (portfolio?.id) {
+                  unarchiveMutation.mutate({ portfolioId: portfolio.id, underlyingKey: key });
+                }
+              }}
             />
           </ErrorBoundary>
         )}

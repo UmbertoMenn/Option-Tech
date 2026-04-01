@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, Search, Trash2 } from 'lucide-react';
+import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Search, Trash2, Archive, RotateCcw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
@@ -40,6 +40,11 @@ interface WizardStrategy {
   suggestedType: string;
 }
 
+interface ArchivedItem {
+  key: string;
+  displayName: string;
+}
+
 interface StrategyConfigWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +54,10 @@ interface StrategyConfigWizardProps {
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
   filterUnderlyings?: string[];
+  archivedKeys?: string[];
+  archivedItems?: ArchivedItem[];
+  onArchive?: (key: string, displayName: string) => void;
+  onUnarchive?: (key: string) => void;
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
@@ -338,6 +347,10 @@ export function StrategyConfigWizard({
   onSave,
   isSaving,
   filterUnderlyings,
+  archivedKeys = [],
+  archivedItems = [],
+  onArchive,
+  onUnarchive,
 }: StrategyConfigWizardProps) {
   // Build all available positions (derivatives + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
@@ -673,11 +686,12 @@ export function StrategyConfigWizard({
 
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
 
-  // Filter groups by search
+  // Filter groups by search AND exclude archived
   const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return underlyingGroups;
+    let groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+    if (!searchQuery.trim()) return groups;
     const q = searchQuery.toLowerCase();
-    return underlyingGroups.filter(g =>
+    return groups.filter(g =>
       g.displayName.toLowerCase().includes(q) ||
       g.key.toLowerCase().includes(q) ||
       g.positions.some(p =>
@@ -685,7 +699,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery]);
+  }, [underlyingGroups, searchQuery, archivedKeys]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
@@ -694,7 +708,13 @@ export function StrategyConfigWizard({
   };
 
   const totalStrategies = strategies.length;
-  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id)).length;
+  const archivedPosIds = useMemo(() => {
+    const ids = new Set<string>();
+    underlyingGroups.filter(g => archivedKeys.includes(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
+    return ids;
+  }, [underlyingGroups, archivedKeys]);
+  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   if (allAvailable.length === 0) return null;
 
@@ -757,6 +777,20 @@ export function StrategyConfigWizard({
                               </Badge>
                             )}
                           </div>
+                          {groupStrategies.length === 0 && onArchive && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onArchive(group.key, group.displayName);
+                              }}
+                            >
+                              <Archive className="w-3.5 h-3.5 mr-1" />
+                              Archivia
+                            </Button>
+                          )}
                         </div>
                       </CardHeader>
                     </CollapsibleTrigger>
@@ -900,6 +934,34 @@ export function StrategyConfigWizard({
                 </Collapsible>
               );
             })}
+            {/* Archived section */}
+            {archivedItems.length > 0 && onUnarchive && (
+              <Collapsible open={archiveOpen} onOpenChange={setArchiveOpen}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  {archiveOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  <Archive className="w-4 h-4" />
+                  Archivio ({archivedItems.length} sottostant{archivedItems.length === 1 ? 'e' : 'i'})
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-1 pl-6 pt-1">
+                    {archivedItems.map(item => (
+                      <div key={item.key} className="flex items-center justify-between py-1.5 px-3 rounded-md border border-dashed border-border">
+                        <span className="text-xs font-medium uppercase">{item.displayName}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => onUnarchive(item.key)}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                          Ripristina
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </div>
 

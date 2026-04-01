@@ -192,6 +192,33 @@ export type Database = {
           },
         ]
       }
+      archived_underlyings: {
+        Row: {
+          created_at: string | null
+          display_name: string
+          id: string
+          portfolio_id: string
+          underlying_key: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          display_name: string
+          id?: string
+          portfolio_id: string
+          underlying_key: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          display_name?: string
+          id?: string
+          portfolio_id?: string
+          underlying_key?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       benchmark_prices: {
         Row: {
           close_price: number
