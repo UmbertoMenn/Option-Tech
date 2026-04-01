@@ -381,7 +381,7 @@ export function DerivativesSummaryCard({
     });
     
     return result.sort((a, b) => b.availableShares - a.availableShares);
-  }, [stockPositions, categories.coveredCalls]);
+  }, [stockPositions, categories.coveredCalls, categories.deRiskingCoveredCalls]);
   
   // ============ 8. Altre Strategie OOR/OOB ============
   const otherStrategiesOOROOB = useMemo(() => {
