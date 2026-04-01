@@ -686,11 +686,12 @@ export function StrategyConfigWizard({
 
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
 
-  // Filter groups by search
+  // Filter groups by search AND exclude archived
   const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return underlyingGroups;
+    let groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+    if (!searchQuery.trim()) return groups;
     const q = searchQuery.toLowerCase();
-    return underlyingGroups.filter(g =>
+    return groups.filter(g =>
       g.displayName.toLowerCase().includes(q) ||
       g.key.toLowerCase().includes(q) ||
       g.positions.some(p =>
@@ -698,7 +699,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery]);
+  }, [underlyingGroups, searchQuery, archivedKeys]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
