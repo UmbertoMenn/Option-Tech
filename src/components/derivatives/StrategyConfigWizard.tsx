@@ -777,6 +777,20 @@ export function StrategyConfigWizard({
                               </Badge>
                             )}
                           </div>
+                          {groupStrategies.length === 0 && onArchive && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onArchive(group.key, group.displayName);
+                              }}
+                            >
+                              <Archive className="w-3.5 h-3.5 mr-1" />
+                              Archivia
+                            </Button>
+                          )}
                         </div>
                       </CardHeader>
                     </CollapsibleTrigger>
