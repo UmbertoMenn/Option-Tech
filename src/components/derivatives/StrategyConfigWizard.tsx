@@ -708,7 +708,13 @@ export function StrategyConfigWizard({
   };
 
   const totalStrategies = strategies.length;
-  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id)).length;
+  const archivedPosIds = useMemo(() => {
+    const ids = new Set<string>();
+    underlyingGroups.filter(g => archivedKeys.includes(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
+    return ids;
+  }, [underlyingGroups, archivedKeys]);
+  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   if (allAvailable.length === 0) return null;
 
