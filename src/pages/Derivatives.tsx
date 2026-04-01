@@ -15,7 +15,7 @@ import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, C
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { isMarketOpen } from '@/lib/marketHours';
 
