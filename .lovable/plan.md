@@ -1,4 +1,5 @@
 
+
 ## Archivio Sottostanti nel Wizard Configurazione Strategie
 
 ### Problema
@@ -7,6 +8,23 @@ Il Wizard propone sempre tutti i sottostanti (es. Regulus, Bio-On) anche se il c
 ### Modifiche
 
 #### 1. Nuova tabella `archived_underlyings`
+Tabella per salvare i sottostanti archiviati per utente/portafoglio, con chiave univoca per evitare duplicati.
+
+#### 2. Nuovo hook `useArchivedUnderlyings`
+- Query per leggere i `underlying_key` archiviati
+- Mutation per archiviare e ripristinare
+
+#### 3. Wizard — UI archivia/ripristina
+- I gruppi archiviati vengono **nascosti** dalla lista principale
+- Ogni card senza strategie configurate mostra un bottone **"Archivia"** (icona Archive)
+- Sezione collassabile **"Archivio"** in fondo al dialog con bottone **"Ripristina"** per ciascun sottostante
+- Il conteggio "libere" esclude le posizioni archiviate
+
+#### 4. Derivatives.tsx — Collegamento
+- Importa il hook e passa le props al Wizard
+
+### Dettaglio tecnico
+
 ```sql
 CREATE TABLE public.archived_underlyings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,33 +35,33 @@ CREATE TABLE public.archived_underlyings (
   created_at timestamptz DEFAULT now(),
   UNIQUE (user_id, portfolio_id, underlying_key)
 );
-ALTER TABLE public.archived_underlyings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own archived underlyings" ON public.archived_underlyings
-  FOR ALL TO public USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Admins can manage all" ON public.archived_underlyings
-  FOR ALL TO public USING (has_role(auth.uid(), 'admin'));
+-- RLS: users manage own, admins manage all
 ```
 
-#### 2. Nuovo hook `src/hooks/useArchivedUnderlyings.ts`
-- `useArchivedUnderlyings(portfolioId)`: query che ritorna la lista di `underlying_key` archiviati
-- `useArchiveUnderlying()`: mutation per inserire
-- `useUnarchiveUnderlying()`: mutation per rimuovere
-
-#### 3. `src/components/derivatives/StrategyConfigWizard.tsx`
-- Riceve `archivedKeys: string[]`, `onArchive(key, displayName)`, `onUnarchive(key)` come props
-- **Filtra** i gruppi archiviati dalla lista principale (non li mostra)
-- Aggiunge un bottone **"Archivia"** (icona Archive) nell'header di ogni card sottostante (solo se il gruppo non ha strategie configurate)
-- Aggiunge una sezione collassabile **"Archivio"** in fondo alla lista, che mostra i sottostanti archiviati con un bottone **"Ripristina"** per ognuno
-- Il conteggio "libere" esclude le posizioni archiviate
-
-#### 4. `src/pages/Derivatives.tsx`
-- Importa e usa il nuovo hook
-- Passa le props di archiviazione al Wizard
+```text
+Wizard UI:
+┌─────────────────────────────────────┐
+│ ADOBE                    [Archivia] │
+│   posizioni disponibili...          │
+│   strategie configurate...          │
+├─────────────────────────────────────┤
+│ LULULEMON                           │  ← no archive button (has strategies)
+│   CC LULU V CALL 380 GIU/25        │
+├─────────────────────────────────────┤
+│ ...                                 │
+├─────────────────────────────────────┤
+│ ▶ Archivio (3 sottostanti)          │
+│   REGULUS THERAPEUTICS  [Ripristina]│
+│   BIO-ON               [Ripristina]│
+│   ...                               │
+└─────────────────────────────────────┘
+```
 
 ### File toccati
 | File | Modifica |
 |---|---|
-| Migration SQL | Nuova tabella `archived_underlyings` |
+| Migration SQL | Nuova tabella `archived_underlyings` con RLS |
 | `src/hooks/useArchivedUnderlyings.ts` | Nuovo hook CRUD |
 | `src/components/derivatives/StrategyConfigWizard.tsx` | UI archivia/ripristina, filtro gruppi |
 | `src/pages/Derivatives.tsx` | Collegamento hook → Wizard |
+
