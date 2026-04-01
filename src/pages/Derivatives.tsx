@@ -392,32 +392,34 @@ export function Derivatives() {
 
   // Compute whether wizard is needed: derivatives exist but configs are missing or incomplete
   // Build archived keys set for fast lookups
-  const archivedKeysSet = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of archivedItems) {
-      set.add(item.key.toUpperCase().trim());
-    }
-    return set;
+  // Build archived keys using normalizeForMatching for robust matching
+  const archivedNormalizedKeys = useMemo(() => {
+    return archivedItems.map(item => normalizeForMatching(item.key));
   }, [archivedItems]);
+
+  const isArchivedDerivative = useCallback((d: Position) => {
+    const key = normalizeForMatching(d.underlying || d.description || '');
+    if (!key) return false;
+    return archivedNormalizedKeys.some(ak =>
+      ak.length > 0 && (key.includes(ak) || ak.includes(key))
+    );
+  }, [archivedNormalizedKeys]);
 
   const needsWizard = useMemo(() => {
     if (derivatives.length === 0) return false;
     if (!hasConfigurations) {
       // Even without configs, if ALL derivatives are archived, no wizard needed
-      const nonArchived = derivatives.filter(d => {
-        const key = (d.underlying || d.description || '').toUpperCase().trim();
-        return !archivedKeysSet.has(key);
-      });
+      const nonArchived = derivatives.filter(d => !isArchivedDerivative(d));
       return nonArchived.length > 0;
     }
     // Check if any derivative is NOT matched by any saved configuration signature AND not archived
     const configuredIds = new Set<string>();
     for (const config of strategyConfigs) {
-      const configKey = (config.underlying || '').toUpperCase().trim();
+      const configKey = normalizeForMatching(config.underlying || '');
       const sigs = (config.position_signatures as unknown as import('@/hooks/useStrategyConfigurations').PositionSignature[]) || [];
       if (sigs.length === 0) continue;
       const candidates = derivatives.filter(d => {
-        const posUnderlying = (d.underlying || d.description || '').toUpperCase().trim();
+        const posUnderlying = normalizeForMatching(d.underlying || d.description || '');
         return posUnderlying.includes(configKey) || configKey.includes(posUnderlying);
       });
       for (const d of candidates) {
@@ -437,12 +439,11 @@ export function Derivatives() {
     // Exclude archived derivatives from uncovered count
     const uncoveredCount = derivatives.filter(d => {
       if (configuredIds.has(d.id)) return false;
-      const key = (d.underlying || d.description || '').toUpperCase().trim();
-      if (archivedKeysSet.has(key)) return false;
+      if (isArchivedDerivative(d)) return false;
       return true;
     }).length;
     return uncoveredCount > 0;
-  }, [derivatives, hasConfigurations, strategyConfigs, archivedKeysSet]);
+  }, [derivatives, hasConfigurations, strategyConfigs, isArchivedDerivative]);
 
    // Clean up legacy ?wizard=1 param without opening wizard
   useEffect(() => {
