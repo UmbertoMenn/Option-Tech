@@ -62,7 +62,7 @@ export function AdminNotificationSettings() {
     try {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('user_id, email, full_name, telegram_chat_id')
+        .select('user_id, email, full_name, telegram_chat_id, username')
         .neq('user_id', user!.id)
         .order('full_name');
 

@@ -145,10 +145,10 @@ export function PortfolioManager() {
                           <ChevronRight className="w-4 h-4" />
                         )}
                         <div>
-                          <span className="font-medium">{userGroup.name || userGroup.email}</span>
-                          {userGroup.name && (
+                          <span className="font-medium">{userGroup.name || userGroup.username || userGroup.email}</span>
+                          {userGroup.name && userGroup.username && (
                             <span className="text-muted-foreground text-sm ml-2">
-                              ({userGroup.email})
+                              @{userGroup.username}
                             </span>
                           )}
                         </div>
