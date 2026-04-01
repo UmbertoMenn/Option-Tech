@@ -372,16 +372,15 @@ serve(async (req: Request): Promise<Response> => {
           const shouldEmail = admin.admin_notify_email && (pref ? pref.notify_email : true);
           const shouldTelegram = admin.admin_notify_telegram && (pref ? pref.notify_telegram : true);
 
-          if (shouldEmail && admin.email) {
+          if (shouldEmail) {
             const adminEmail = (admin as any).admin_contact_email || admin.email;
-            await logNotification(
-              supabase,
-              alertData.alert_id,
-              admin.user_id,
-              "email",
-              emailResult.success ? "sent" : "failed",
-              emailResult.error
-            );
+            if (adminEmail) {
+              const emailResult = await sendEmail(adminEmail, alertData, true, userProfile.full_name || (userProfile as any).username || 'Utente');
+              await logNotification(
+                supabase, alertData.alert_id, admin.user_id, "email",
+                emailResult.success ? "sent" : "failed", emailResult.error
+              );
+            }
           }
           if (shouldTelegram && admin.telegram_chat_id) {
             const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
