@@ -384,14 +384,67 @@ export function Derivatives() {
     return reconcileConfigs(strategyConfigs, positions);
   }, [hasConfigurations, strategyConfigs, positions]);
 
+  // Read ?wizard=1 query param (set by FileUploader after upload with derivatives)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const wizardQueryParam = searchParams.get('wizard') === '1';
+
+  // Compute whether wizard is needed: derivatives exist but configs are missing or incomplete
+  const needsWizard = useMemo(() => {
+    if (derivatives.length === 0) return false;
+    if (!hasConfigurations) return true;
+    // Check if any derivative is NOT matched by any saved configuration signature
+    const configuredIds = new Set<string>();
+    for (const config of strategyConfigs) {
+      const configKey = (config.underlying || '').toUpperCase().trim();
+      const sigs = (config.position_signatures as unknown as import('@/hooks/useStrategyConfigurations').PositionSignature[]) || [];
+      if (sigs.length === 0) continue;
+      const candidates = derivatives.filter(d => {
+        const posUnderlying = (d.underlying || d.description || '').toUpperCase().trim();
+        return posUnderlying.includes(configKey) || configKey.includes(posUnderlying);
+      });
+      for (const d of candidates) {
+        for (const sig of sigs) {
+          if (
+            (d.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
+            Math.abs((d.strike_price || 0) - sig.strike) < 0.01 &&
+            (d.expiry_date || '') === sig.expiry &&
+            (d.quantity >= 0 ? 1 : -1) === sig.quantity_sign
+          ) {
+            configuredIds.add(d.id);
+            break;
+          }
+        }
+      }
+    }
+    const uncoveredCount = derivatives.filter(d => !configuredIds.has(d.id)).length;
+    return uncoveredCount > 0;
+  }, [derivatives, hasConfigurations, strategyConfigs]);
+
+  // Auto-open wizard when needed OR when ?wizard=1 is present
+  const wizardAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (wizardAutoOpenedRef.current) return;
+    if (isLoading) return;
+    if (wizardQueryParam || needsWizard) {
+      wizardAutoOpenedRef.current = true;
+      setWizardOpen(true);
+      // Clear the query param to avoid re-opening on navigation
+      if (wizardQueryParam) {
+        searchParams.delete('wizard');
+        setSearchParams(searchParams, { replace: true });
+      }
+    }
+  }, [isLoading, wizardQueryParam, needsWizard, searchParams, setSearchParams]);
+
   // Auto-open reconciliation dialog once per mount when discrepancies found
+  // (only if wizard is NOT already open)
   useEffect(() => {
     if (reconciliationCheckedRef.current) return;
-    if (reconciliationItems.length > 0 && !isLoading) {
+    if (reconciliationItems.length > 0 && !isLoading && !wizardOpen) {
       reconciliationCheckedRef.current = true;
       setReconciliationOpen(true);
     }
-  }, [reconciliationItems, isLoading]);
+  }, [reconciliationItems, isLoading, wizardOpen]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
