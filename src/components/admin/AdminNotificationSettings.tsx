@@ -82,7 +82,7 @@ export function AdminNotificationSettings() {
       setUserPrefs(
         (profiles || []).map((p) => {
           const pref = prefsMap.get(p.user_id);
-          const username = (p as any).username || p.email?.replace('@internal.local', '') || null;
+          const username = p.username || p.email?.replace('@internal.local', '') || null;
           return {
             user_id: p.user_id,
             username,
