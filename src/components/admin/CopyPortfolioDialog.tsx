@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface UserOption {
   userId: string;
-  email: string;
+  username: string | null;
   name: string | null;
 }
 
@@ -58,13 +58,11 @@ export function CopyPortfolioDialog({
 
       const targetUser = users.find(u => u.userId === targetUserId);
       toast.success('Portfolio copiato con successo!', {
-        description: `Copiato su ${targetUser?.name || targetUser?.email}`,
+        description: `Copiato su ${targetUser?.name || targetUser?.username}`,
       });
 
-      // Invalidate portfolio list so the new one appears in the selector
       queryClient.invalidateQueries({ queryKey: ['portfolios'] });
 
-      // If copied to self (admin), auto-select the new portfolio
       if (targetUserId === user?.id && data?.newPortfolioId) {
         selectPortfolio(data.newPortfolioId);
       }
@@ -106,8 +104,8 @@ export function CopyPortfolioDialog({
               <SelectContent>
                 {users.map((user) => (
                   <SelectItem key={user.userId} value={user.userId}>
-                    {user.name || user.email}
-                    {user.name && <span className="text-muted-foreground ml-2 text-xs">({user.email})</span>}
+                    {user.name || user.username || '—'}
+                    {user.name && user.username && <span className="text-muted-foreground ml-2 text-xs">(@{user.username})</span>}
                   </SelectItem>
                 ))}
               </SelectContent>

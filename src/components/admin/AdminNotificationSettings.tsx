@@ -4,16 +4,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Mail, MessageCircle, Loader2, Users } from 'lucide-react';
+import { Mail, MessageCircle, Loader2, Users, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface UserPref {
   user_id: string;
-  email: string;
+  username: string | null;
   full_name: string | null;
   telegram_chat_id: string | null;
-  notify_email: boolean;
   notify_telegram: boolean;
 }
 
@@ -22,6 +23,8 @@ export function AdminNotificationSettings() {
   const [loading, setLoading] = useState(true);
   const [adminNotifyEmail, setAdminNotifyEmail] = useState(true);
   const [adminNotifyTelegram, setAdminNotifyTelegram] = useState(true);
+  const [adminContactEmail, setAdminContactEmail] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
   const [userPrefs, setUserPrefs] = useState<UserPref[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
@@ -37,7 +40,7 @@ export function AdminNotificationSettings() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('admin_notify_email, admin_notify_telegram')
+        .select('admin_notify_email, admin_notify_telegram, admin_contact_email')
         .eq('user_id', user!.id)
         .single();
 
@@ -45,6 +48,7 @@ export function AdminNotificationSettings() {
       if (data) {
         setAdminNotifyEmail(data.admin_notify_email ?? true);
         setAdminNotifyTelegram(data.admin_notify_telegram ?? true);
+        setAdminContactEmail((data as any).admin_contact_email || '');
       }
     } catch (error) {
       console.error('Error loading admin notification settings:', error);
@@ -56,19 +60,17 @@ export function AdminNotificationSettings() {
   async function loadUserPrefs() {
     setLoadingUsers(true);
     try {
-      // Load profiles for all non-admin users
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('user_id, email, full_name, telegram_chat_id')
         .neq('user_id', user!.id)
-        .order('email');
+        .order('full_name');
 
       if (profilesError) throw profilesError;
 
-      // Load admin preferences from new table
       const { data: prefs, error: prefsError } = await supabase
         .from('admin_notification_preferences')
-        .select('target_user_id, notify_email, notify_telegram')
+        .select('target_user_id, notify_telegram')
         .eq('admin_user_id', user!.id);
 
       if (prefsError) throw prefsError;
@@ -80,12 +82,12 @@ export function AdminNotificationSettings() {
       setUserPrefs(
         (profiles || []).map((p) => {
           const pref = prefsMap.get(p.user_id);
+          const username = (p as any).username || p.email?.replace('@internal.local', '') || null;
           return {
             user_id: p.user_id,
-            email: p.email,
+            username,
             full_name: p.full_name,
             telegram_chat_id: p.telegram_chat_id,
-            notify_email: pref ? pref.notify_email : true,
             notify_telegram: pref ? pref.notify_telegram : true,
           };
         })
@@ -97,9 +99,26 @@ export function AdminNotificationSettings() {
     }
   }
 
+  async function saveAdminContactEmail() {
+    setSavingEmail(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ admin_contact_email: adminContactEmail.trim() || null } as any)
+        .eq('user_id', user!.id);
+
+      if (error) throw error;
+      toast.success('Email di contatto admin salvata');
+    } catch (error) {
+      console.error('Error saving admin contact email:', error);
+      toast.error('Errore salvataggio email');
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
   async function updateSetting(field: 'admin_notify_email' | 'admin_notify_telegram', value: boolean) {
     try {
-      // 1. Update admin's own toggle
       const { error } = await supabase
         .from('profiles')
         .update({ [field]: value })
@@ -110,26 +129,21 @@ export function AdminNotificationSettings() {
       if (field === 'admin_notify_email') setAdminNotifyEmail(value);
       else setAdminNotifyTelegram(value);
 
-      // 2. Propagate to all user overrides
-      const prefField = field === 'admin_notify_email' ? 'notify_email' : 'notify_telegram';
-      
-      if (userPrefs.length > 0) {
+      // Propagate to user overrides
+      if (field === 'admin_notify_telegram' && userPrefs.length > 0) {
         const rows = userPrefs.map((u) => ({
           admin_user_id: user!.id,
           target_user_id: u.user_id,
-          notify_email: prefField === 'notify_email' ? value : u.notify_email,
-          notify_telegram: prefField === 'notify_telegram' ? value : u.notify_telegram,
+          notify_email: true, // keep email default
+          notify_telegram: value,
         }));
 
-        const { error: upsertError } = await supabase
+        await supabase
           .from('admin_notification_preferences')
           .upsert(rows, { onConflict: 'admin_user_id,target_user_id' });
 
-        if (upsertError) throw upsertError;
-
-        // Update local state
         setUserPrefs((prev) =>
-          prev.map((p) => ({ ...p, [prefField]: value }))
+          prev.map((p) => ({ ...p, notify_telegram: value }))
         );
       }
 
@@ -142,7 +156,7 @@ export function AdminNotificationSettings() {
 
   async function updateUserSetting(
     targetUserId: string,
-    field: 'notify_email' | 'notify_telegram',
+    field: 'notify_telegram',
     value: boolean
   ) {
     try {
@@ -155,8 +169,8 @@ export function AdminNotificationSettings() {
           {
             admin_user_id: user!.id,
             target_user_id: targetUserId,
-            notify_email: field === 'notify_email' ? value : existing.notify_email,
-            notify_telegram: field === 'notify_telegram' ? value : existing.notify_telegram,
+            notify_email: true,
+            notify_telegram: value,
           },
           { onConflict: 'admin_user_id,target_user_id' }
         );
@@ -184,6 +198,36 @@ export function AdminNotificationSettings() {
 
   return (
     <div className="space-y-6">
+      {/* Admin contact email */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle>Email di Contatto Admin</CardTitle>
+          <CardDescription>
+            Indirizzo email dove riceverai le richieste di recupero password degli utenti e le copie degli avvisi.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2">
+            <Mail className="w-5 h-5 text-muted-foreground shrink-0" />
+            <Input
+              type="email"
+              placeholder="admin@esempio.it"
+              value={adminContactEmail}
+              onChange={(e) => setAdminContactEmail(e.target.value)}
+              className="bg-background-secondary border-border"
+            />
+            <Button
+              size="sm"
+              onClick={saveAdminContactEmail}
+              disabled={savingEmail}
+              className="shrink-0"
+            >
+              {savingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Admin own notification settings */}
       <Card className="border-border bg-card">
         <CardHeader>
@@ -197,7 +241,7 @@ export function AdminNotificationSettings() {
             <div className="flex items-center gap-3">
               <Mail className="w-5 h-5 text-muted-foreground" />
               <Label htmlFor="admin-email" className="cursor-pointer">
-                Email utenti
+                Email avvisi
                 <p className="text-xs text-muted-foreground font-normal mt-0.5">
                   Ricevi via email le copie degli avvisi degli utenti
                 </p>
@@ -237,7 +281,7 @@ export function AdminNotificationSettings() {
             <CardTitle>Notifiche per Utente</CardTitle>
           </div>
           <CardDescription>
-            Attiva o disattiva la ricezione delle copie per singolo utente.
+            Attiva o disattiva la ricezione delle copie Telegram per singolo utente.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -256,10 +300,10 @@ export function AdminNotificationSettings() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">
-                      {pref.full_name || pref.email}
+                      {pref.full_name || pref.username || '—'}
                     </p>
-                    {pref.full_name && (
-                      <p className="text-xs text-muted-foreground truncate">{pref.email}</p>
+                    {pref.full_name && pref.username && (
+                      <p className="text-xs text-muted-foreground truncate">@{pref.username}</p>
                     )}
                     {pref.telegram_chat_id && (
                       <Badge variant="outline" className="mt-1 text-xs">
@@ -269,25 +313,14 @@ export function AdminNotificationSettings() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-4 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <Mail className="w-4 h-4 text-muted-foreground" />
-                      <Switch
-                        checked={pref.notify_email}
-                        onCheckedChange={(val) =>
-                          updateUserSetting(pref.user_id, 'notify_email', val)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <MessageCircle className="w-4 h-4 text-muted-foreground" />
-                      <Switch
-                        checked={pref.notify_telegram}
-                        onCheckedChange={(val) =>
-                          updateUserSetting(pref.user_id, 'notify_telegram', val)
-                        }
-                      />
-                    </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <MessageCircle className="w-4 h-4 text-muted-foreground" />
+                    <Switch
+                      checked={pref.notify_telegram}
+                      onCheckedChange={(val) =>
+                        updateUserSetting(pref.user_id, 'notify_telegram', val)
+                      }
+                    />
                   </div>
                 </div>
               ))}

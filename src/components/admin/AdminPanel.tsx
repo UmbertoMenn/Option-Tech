@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell, Stethoscope } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell, Stethoscope, KeyRound, Copy, Check } from 'lucide-react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -23,10 +23,19 @@ import { ResolutionDiagnostics } from './ResolutionDiagnostics';
 
 interface UserWithRole {
   id: string;
-  email: string;
+  username: string | null;
   full_name: string | null;
   created_at: string;
   isAdmin: boolean;
+}
+
+function generatePassword(length = 12): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 export function AdminPanel() {
@@ -35,13 +44,20 @@ export function AdminPanel() {
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserName, setNewUserName] = useState('');
   
   // Delete confirmation state
   const [userToDelete, setUserToDelete] = useState<UserWithRole | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Reset password state
+  const [resetPasswordUser, setResetPasswordUser] = useState<UserWithRole | null>(null);
+  const [generatedPassword, setGeneratedPassword] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [passwordCopied, setPasswordCopied] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   useEffect(() => {
     if (isAdmin) {
@@ -56,7 +72,6 @@ export function AdminPanel() {
   async function loadUsers() {
     setLoading(true);
     try {
-      // Get profiles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
@@ -64,7 +79,6 @@ export function AdminPanel() {
 
       if (profilesError) throw profilesError;
 
-      // Get admin roles
       const { data: adminRoles, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id')
@@ -76,7 +90,7 @@ export function AdminPanel() {
 
       const usersWithRoles: UserWithRole[] = (profiles || []).map(profile => ({
         id: profile.user_id,
-        email: profile.email,
+        username: (profile as any).username || profile.email?.replace('@internal.local', '') || null,
         full_name: profile.full_name,
         created_at: profile.created_at,
         isAdmin: adminUserIds.has(profile.user_id),
@@ -94,23 +108,18 @@ export function AdminPanel() {
   async function handleToggleAdmin(userId: string, currentlyAdmin: boolean) {
     try {
       if (currentlyAdmin) {
-        // Remove admin role
         await supabase
           .from('user_roles')
           .delete()
           .eq('user_id', userId)
           .eq('role', 'admin');
-        
         toast.success('Ruolo admin rimosso');
       } else {
-        // Add admin role
         await supabase
           .from('user_roles')
           .insert({ user_id: userId, role: 'admin' });
-        
         toast.success('Ruolo admin aggiunto');
       }
-      
       loadUsers();
     } catch (error) {
       toast.error('Errore aggiornamento ruolo');
@@ -122,7 +131,7 @@ export function AdminPanel() {
     
     try {
       const { data, error } = await supabase.functions.invoke('admin-create-user', {
-        body: { email: newUserEmail, password: newUserPassword, full_name: newUserName },
+        body: { username: newUserUsername, password: newUserPassword, full_name: newUserName },
       });
 
       if (error) throw error;
@@ -130,17 +139,14 @@ export function AdminPanel() {
 
       toast.success('Utente creato!');
       setShowAddDialog(false);
-      setNewUserEmail('');
+      setNewUserUsername('');
       setNewUserPassword('');
       setNewUserName('');
       
-      // Wait a bit for the trigger to create the profile
       setTimeout(loadUsers, 1000);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
-      toast.error('Errore creazione utente', {
-        description: errorMessage,
-      });
+      toast.error('Errore creazione utente', { description: errorMessage });
     }
   }
 
@@ -149,26 +155,15 @@ export function AdminPanel() {
     
     setIsDeleting(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      
-      if (!token) {
-        toast.error('Sessione scaduta, effettua nuovamente il login');
-        return;
-      }
-
       const { data, error } = await supabase.functions.invoke('admin-delete-user', {
         body: { userId: userToDelete.id },
       });
 
       if (error) throw error;
-      
-      if (data?.error) {
-        throw new Error(data.error);
-      }
+      if (data?.error) throw new Error(data.error);
 
       toast.success('Utente eliminato con successo', {
-        description: `${userToDelete.full_name || userToDelete.email} è stato rimosso`,
+        description: `${userToDelete.full_name || userToDelete.username} è stato rimosso`,
       });
       
       setUserToDelete(null);
@@ -176,18 +171,50 @@ export function AdminPanel() {
     } catch (error: unknown) {
       console.error('Delete error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
-      toast.error('Errore eliminazione utente', {
-        description: errorMessage,
-      });
+      toast.error('Errore eliminazione utente', { description: errorMessage });
     } finally {
       setIsDeleting(false);
     }
   }
 
-  const canDeleteUser = (targetUser: UserWithRole) => {
-    // Cannot delete yourself
-    return targetUser.id !== user?.id;
-  };
+  function openResetPassword(targetUser: UserWithRole) {
+    const pwd = generatePassword();
+    setResetPasswordUser(targetUser);
+    setGeneratedPassword(pwd);
+    setResetDone(false);
+    setPasswordCopied(false);
+  }
+
+  async function handleResetPassword() {
+    if (!resetPasswordUser) return;
+    
+    setIsResetting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-reset-password', {
+        body: { userId: resetPasswordUser.id, newPassword: generatedPassword },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      setResetDone(true);
+      toast.success('Password reimpostata con successo');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
+      toast.error('Errore reset password', { description: errorMessage });
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
+  async function copyPassword() {
+    await navigator.clipboard.writeText(generatedPassword);
+    setPasswordCopied(true);
+    setTimeout(() => setPasswordCopied(false), 2000);
+  }
+
+  const canDeleteUser = (targetUser: UserWithRole) => targetUser.id !== user?.id;
+  const displayName = (u: UserWithRole) => u.full_name || u.username || 'N/A';
 
   return (
     <div className="min-h-screen bg-background">
@@ -283,12 +310,13 @@ export function AdminPanel() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="username">Nome utente</Label>
                     <Input
-                      id="email"
-                      type="email"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      id="username"
+                      type="text"
+                      placeholder="mario_rossi"
+                      value={newUserUsername}
+                      onChange={(e) => setNewUserUsername(e.target.value)}
                       className="bg-background-secondary border-border"
                       required
                     />
@@ -364,7 +392,7 @@ export function AdminPanel() {
                     <TableHeader>
                       <TableRow className="border-border hover:bg-background-tertiary">
                         <TableHead>Utente</TableHead>
-                        <TableHead>Email</TableHead>
+                        <TableHead>Username</TableHead>
                         <TableHead>Registrato</TableHead>
                         <TableHead>Ruolo</TableHead>
                         <TableHead className="text-right">Azioni</TableHead>
@@ -380,7 +408,7 @@ export function AdminPanel() {
                             )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {targetUser.email}
+                            {targetUser.username || '—'}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {formatDate(targetUser.created_at)}
@@ -397,6 +425,15 @@ export function AdminPanel() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openResetPassword(targetUser)}
+                                disabled={targetUser.id === user?.id}
+                                title="Reset Password"
+                              >
+                                <KeyRound className="w-4 h-4" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -454,7 +491,7 @@ export function AdminPanel() {
           <DialogHeader>
             <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Stai per eliminare definitivamente l'utente <strong className="text-foreground">{userToDelete?.full_name || userToDelete?.email}</strong>.
+              Stai per eliminare definitivamente l'utente <strong className="text-foreground">{displayName(userToDelete!)}</strong>.
               <br /><br />
               Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
               <br /><br />
@@ -487,6 +524,63 @@ export function AdminPanel() {
                 </>
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={!!resetPasswordUser} onOpenChange={(open) => !open && setResetPasswordUser(null)}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5" />
+              Reset Password
+            </DialogTitle>
+            <DialogDescription>
+              {resetDone
+                ? `La password di ${displayName(resetPasswordUser!)} è stata reimpostata. Comunicala all'utente.`
+                : `Reimposta la password per ${displayName(resetPasswordUser!)}.`
+              }
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Nuova password</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={generatedPassword}
+                  onChange={(e) => setGeneratedPassword(e.target.value)}
+                  className="bg-background-secondary border-border font-mono"
+                  readOnly={resetDone}
+                />
+                <Button variant="outline" size="icon" onClick={copyPassword}>
+                  {passwordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setResetPasswordUser(null)}>
+              {resetDone ? 'Chiudi' : 'Annulla'}
+            </Button>
+            {!resetDone && (
+              <Button
+                onClick={handleResetPassword}
+                disabled={isResetting || !generatedPassword}
+                className="bg-primary hover:bg-primary-glow"
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Reset in corso...
+                  </>
+                ) : (
+                  'Reimposta Password'
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
