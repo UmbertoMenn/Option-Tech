@@ -54,21 +54,24 @@ serve(async (req) => {
     }
 
     // 3. Parse body
-    const { email, password, full_name } = await req.json();
+    const { username, password, full_name } = await req.json();
 
-    if (!email || !password) {
+    if (!username || !password) {
       return new Response(
-        JSON.stringify({ error: "Email e password sono obbligatori" }),
+        JSON.stringify({ error: "Username e password sono obbligatori" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // Build internal email from username
+    const internalEmail = `${username.trim().toLowerCase()}@internal.local`;
+
     // 4. Create user via Admin API (no session change)
     const { data, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: internalEmail,
       password,
       email_confirm: true,
-      user_metadata: { full_name: full_name || "" },
+      user_metadata: { full_name: full_name || "", username: username.trim().toLowerCase() },
     });
 
     if (createError) {
@@ -79,10 +82,10 @@ serve(async (req) => {
       );
     }
 
-    console.log(`User ${data.user.id} created by admin ${caller.id}`);
+    console.log(`User ${data.user.id} created by admin ${caller.id} (username: ${username})`);
 
     return new Response(
-      JSON.stringify({ success: true, user: { id: data.user.id, email: data.user.email } }),
+      JSON.stringify({ success: true, user: { id: data.user.id, username } }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: unknown) {

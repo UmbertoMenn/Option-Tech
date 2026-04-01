@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
-import { Mail, Send, Copy, Check, RefreshCw, Unlink, Clock } from 'lucide-react';
+import { Send, Copy, Check, RefreshCw, Unlink, Clock } from 'lucide-react';
 
 export function NotificationSettings() {
   const {
@@ -69,7 +69,6 @@ export function NotificationSettings() {
         </CardHeader>
         <CardContent className="space-y-6">
           <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
           <Skeleton className="h-24 w-full" />
         </CardContent>
       </Card>
@@ -93,29 +92,6 @@ export function NotificationSettings() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Email Notifications */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-primary/10">
-              <Mail className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <Label htmlFor="notify-email" className="font-medium">
-                Notifiche Email
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                Ricevi avvisi via email
-              </p>
-            </div>
-          </div>
-          <Switch
-            id="notify-email"
-            checked={settings.notify_email}
-            onCheckedChange={(value) => updateSetting('notify_email', value)}
-            disabled={updating}
-          />
-        </div>
-
         {/* Telegram Notifications */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
