@@ -673,6 +673,22 @@ export function Derivatives() {
           </Card>
         )}
 
+        {/* Banner: pending unconfigured positions */}
+        {hasConfigurations && needsWizard && (
+          <Card className="border-warning/50 bg-warning/5">
+            <CardContent className="flex items-center justify-between py-3 px-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Info className="w-4 h-4 text-warning" />
+                <span>Ci sono posizioni derivati non ancora configurate.</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Configura
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Main content — only show when configurations exist */}
         {hasConfigurations && (<>
 
