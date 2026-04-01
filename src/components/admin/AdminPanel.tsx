@@ -486,104 +486,108 @@ export function AdminPanel() {
       </main>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Stai per eliminare definitivamente l'utente <strong className="text-foreground">{displayName(userToDelete!)}</strong>.
-              <br /><br />
-              Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
-              <br /><br />
-              <strong>Questa azione non può essere annullata.</strong>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button 
-              variant="outline" 
-              onClick={() => setUserToDelete(null)}
-              disabled={isDeleting}
-            >
-              Annulla
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDeleteUser}
-              disabled={isDeleting}
-              className="bg-loss hover:bg-loss/90"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Eliminazione...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Elimina Utente
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reset Password Dialog */}
-      <Dialog open={!!resetPasswordUser} onOpenChange={(open) => !open && setResetPasswordUser(null)}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5" />
-              Reset Password
-            </DialogTitle>
-            <DialogDescription>
-              {resetDone
-                ? `La password di ${displayName(resetPasswordUser!)} è stata reimpostata. Comunicala all'utente.`
-                : `Reimposta la password per ${displayName(resetPasswordUser!)}.`
-              }
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Nuova password</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={generatedPassword}
-                  onChange={(e) => setGeneratedPassword(e.target.value)}
-                  className="bg-background-secondary border-border font-mono"
-                  readOnly={resetDone}
-                />
-                <Button variant="outline" size="icon" onClick={copyPassword}>
-                  {passwordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setResetPasswordUser(null)}>
-              {resetDone ? 'Chiudi' : 'Annulla'}
-            </Button>
-            {!resetDone && (
-              <Button
-                onClick={handleResetPassword}
-                disabled={isResetting || !generatedPassword}
-                className="bg-primary hover:bg-primary-glow"
+      {userToDelete && (
+        <Dialog open onOpenChange={(open) => !open && setUserToDelete(null)}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
+              <DialogDescription className="text-muted-foreground">
+                Stai per eliminare definitivamente l'utente <strong className="text-foreground">{displayName(userToDelete)}</strong>.
+                <br /><br />
+                Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
+                <br /><br />
+                <strong>Questa azione non può essere annullata.</strong>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button 
+                variant="outline" 
+                onClick={() => setUserToDelete(null)}
+                disabled={isDeleting}
               >
-                {isResetting ? (
+                Annulla
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={handleDeleteUser}
+                disabled={isDeleting}
+                className="bg-loss hover:bg-loss/90"
+              >
+                {isDeleting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Reset in corso...
+                    Eliminazione...
                   </>
                 ) : (
-                  'Reimposta Password'
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Elimina Utente
+                  </>
                 )}
               </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Reset Password Dialog */}
+      {resetPasswordUser && (
+        <Dialog open onOpenChange={(open) => !open && setResetPasswordUser(null)}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5" />
+                Reset Password
+              </DialogTitle>
+              <DialogDescription>
+                {resetDone
+                  ? `La password di ${displayName(resetPasswordUser)} è stata reimpostata. Comunicala all'utente.`
+                  : `Reimposta la password per ${displayName(resetPasswordUser)}.`
+                }
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nuova password</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={generatedPassword}
+                    onChange={(e) => setGeneratedPassword(e.target.value)}
+                    className="bg-background-secondary border-border font-mono"
+                    readOnly={resetDone}
+                  />
+                  <Button variant="outline" size="icon" onClick={copyPassword}>
+                    {passwordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setResetPasswordUser(null)}>
+                {resetDone ? 'Chiudi' : 'Annulla'}
+              </Button>
+              {!resetDone && (
+                <Button
+                  onClick={handleResetPassword}
+                  disabled={isResetting || !generatedPassword}
+                  className="bg-primary hover:bg-primary-glow"
+                >
+                  {isResetting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Reset in corso...
+                    </>
+                  ) : (
+                    'Reimposta Password'
+                  )}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
