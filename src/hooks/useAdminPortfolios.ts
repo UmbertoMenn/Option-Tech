@@ -6,6 +6,7 @@ import { Portfolio } from '@/types/portfolio';
 export interface PortfolioWithOwner extends Portfolio {
   owner_email: string;
   owner_name: string | null;
+  owner_username: string | null;
 }
 
 export function useAdminPortfolios() {
