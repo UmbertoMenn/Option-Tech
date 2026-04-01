@@ -85,7 +85,11 @@ function AppRoutes() {
           } />
           <Route path="/derivatives" element={<Derivatives />} />
           <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
-          <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/admin" element={
+            <ErrorBoundary title="Errore nel caricamento del pannello admin">
+              <AdminPanel />
+            </ErrorBoundary>
+          } />
           <Route path="/simulator" element={<Simulator />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
