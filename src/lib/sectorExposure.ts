@@ -382,6 +382,7 @@ export interface SectorExposureOptions {
   includeStrategies?: boolean;   // default: true
   includeLeapCall?: boolean;     // default: true
   sectorMappings?: Record<string, SectorMapping>;
+  gpStockHoldings?: GPHoldingRow[];
 }
 
 export function calculateSectorExposure(
