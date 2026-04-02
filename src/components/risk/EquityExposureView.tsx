@@ -372,6 +372,18 @@ export function EquityExposureView({
                     Leap Call
                   </Label>
                 </div>
+                {gpStockHoldings.length > 0 && onIncludeGPChange && (
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      id="gp-equity-toggle"
+                      checked={includeGP}
+                      onCheckedChange={onIncludeGPChange}
+                    />
+                    <Label htmlFor="gp-equity-toggle" className="text-sm cursor-pointer">
+                      GP
+                    </Label>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
