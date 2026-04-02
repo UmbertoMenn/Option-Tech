@@ -472,7 +472,7 @@ serve(async (req) => {
                     portfolio_id: portfolioId,
                     alert_type: ALERT_TYPES.ACTION_COVERED_CALL_ITM,
                     ticker,
-                    strategy_type: 'Covered Call',
+                    strategy_type: strategyType,
                     direction: 'up',
                     current_value: underlyingPrice,
                     threshold_value: soldCallStrike,
