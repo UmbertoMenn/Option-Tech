@@ -2,6 +2,8 @@ import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { RiskAnalysis } from './riskCalculator';
 import { SectorMapping } from '@/hooks/useSectorMappings';
 import { normalizeForMatching, getCanonicalKey, SPECIAL_ALIASES } from './derivativeStrategies';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
+import { normalizeForMatching, getCanonicalKey, SPECIAL_ALIASES } from './derivativeStrategies';
 
 // Sector colors for charts
 export const SECTOR_COLORS: Record<string, string> = {
