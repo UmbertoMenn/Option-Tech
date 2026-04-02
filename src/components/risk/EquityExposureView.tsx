@@ -38,6 +38,7 @@ interface EquityExposureViewProps {
   portfolioTotalValue?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
+  gpStockValue?: number;
 }
 
 export function EquityExposureView({ 
