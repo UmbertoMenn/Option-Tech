@@ -1,33 +1,40 @@
 
 
-## Fix: "Posizioni da monitorare" e Alert Settings sempre visibili
+## Fix: alert Covered Call anche per De-Risking Covered Call
 
 ### Problema
 
-Il componente `DerivativesSummaryCard` restituisce `null` quando nessuna posizione richiede monitoraggio (`hasContent === false`, riga 542). Questo nasconde **entrambe** le card:
-1. **Posizioni da monitorare** — correttamente vuota se non ci sono criticità
-2. **Avvisi recenti (24h)** — che contiene anche il pulsante per accedere ad Alert Settings
+Le De-Risking Covered Call non vengono mai salvate nella `strategy_cache` (file `strategyCache.ts`), quindi la Edge Function `check-alerts` non le vede mai. Servono due modifiche:
 
-Risultato: quando tutte le posizioni sono sane, l'utente perde l'accesso agli avvisi recenti e alle impostazioni degli alert.
+### Correzioni
 
-### Correzione
+#### 1. `src/lib/strategyCache.ts` — salvare le De-Risking CC nel cache
 
-#### File: `src/components/derivatives/DerivativesSummaryCard.tsx`
+Dopo la sezione "1. Covered Calls" (riga 87), aggiungere una sezione per `categories.deRiskingCoveredCalls`. Per ogni De-Risking CC:
+- `strategy_type`: `'De-Risking Covered Call'`
+- `strategy_key`: `dcc_${underlying}_${strike}_${expiryKey}`
+- `sold_call_strike`: dallo strike della call venduta (`dcc.coveredCall.option.strike_price`)
+- `sold_call_expiry`: dalla scadenza della call venduta
+- `position_ids`: includere l'option ID della call venduta, la protection put, e l'eventuale synthetic put
+- Gli altri campi (`sold_put_strike`, `bought_put_strike`, ecc.) restano `null`
 
-1. **Separare la visibilità delle due card**
-   - La card "Posizioni da monitorare" può continuare a sparire quando `hasContent === false`
-   - La card "Avvisi recenti (24h)" deve essere **sempre visibile** quando ci sono configurazioni attive, indipendentemente dallo stato delle posizioni
+#### 2. `supabase/functions/check-alerts/index.ts` — estendere il blocco Covered Call
 
-2. **Rimuovere il `return null` globale**
-   - Invece di fare `if (!hasContent) return null`, rendere condizionale solo la card di sinistra
-   - Se `hasContent` è false, mostrare solo la card "Avvisi recenti" a larghezza piena (o con un messaggio "Tutto OK" nella card di sinistra)
+Alla riga 451, cambiare la condizione da:
+```
+if (strategyType === 'Covered Call')
+```
+a:
+```
+if (strategyType === 'Covered Call' || strategyType === 'De-Risking Covered Call')
+```
 
-3. **Approccio specifico:**
-   - Se `hasContent` è `true`: layout a 2 colonne come oggi (monitoring + avvisi)
-   - Se `hasContent` è `false`: mostrare la card "Posizioni da monitorare" con messaggio "Nessuna criticità" + la card "Avvisi recenti" normalmente
+Anche il `mapStrategyTypeToCategory` (riga 248-255) va aggiornato per mappare `'De-Risking Covered Call'` → `'covered_call'`, così il filtro override funziona correttamente.
 
-### Risultato atteso
-- La card "Avvisi recenti (24h)" con il pulsante Settings è sempre accessibile
-- La card "Posizioni da monitorare" mostra un messaggio rassicurante quando non ci sono criticità
-- L'utente può sempre accedere alle impostazioni degli alert
+I messaggi degli alert useranno il `strategyType` reale (es. "La De-Risking Covered Call è ITM") per distinguere visivamente il tipo.
+
+### Risultato
+- Le De-Risking CC vengono salvate nel cache come qualsiasi altra strategia
+- La Edge Function le monitora con la stessa logica di distanza e ITM delle Covered Call standard
+- I messaggi indicano chiaramente se l'alert è per una CC o una De-Risking CC
 
