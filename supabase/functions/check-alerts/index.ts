@@ -531,7 +531,7 @@ serve(async (req) => {
                     portfolio_id: portfolioId,
                     alert_type: ALERT_TYPES.DISTANCE_COVERED_CALL,
                     ticker,
-                    strategy_type: 'Covered Call',
+                    strategy_type: strategyType,
                     direction: 'up',
                     current_value: distancePct,
                     threshold_value: distConfig.threshold_pct,
