@@ -49,8 +49,20 @@ export function RiskAnalyzer() {
   const [sectorIncludeStrategies, setSectorIncludeStrategies] = useState(true);
   const [sectorIncludeLeapCall, setSectorIncludeLeapCall] = useState(true);
   
+  // GP toggles (one per view)
+  const [equityIncludeGP, setEquityIncludeGP] = useState(true);
+  const [currencyIncludeGP, setCurrencyIncludeGP] = useState(false);
+  const [sectorIncludeGP, setSectorIncludeGP] = useState(true);
+  
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
+  
+  // GP holdings
+  const { gpHoldings, gpSummary } = useGPHoldings();
+  const gpStockHoldings = useMemo(() => 
+    gpHoldings.filter(h => h.asset_type === 'stock'), 
+    [gpHoldings]
+  );
   const { summary } = usePortfolio();
   
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
