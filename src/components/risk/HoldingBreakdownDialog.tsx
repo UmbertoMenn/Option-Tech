@@ -236,6 +236,11 @@ export function HoldingBreakdownDialog({
                 Strategie: {formatEUR(holding.strategyRisk)}
               </Badge>
             )}
+            {holding.gpRisk > 0 && (
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                GP: {formatEUR(holding.gpRisk)}
+              </Badge>
+            )}
           </div>
         </div>
       </DialogContent>

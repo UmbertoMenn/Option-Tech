@@ -973,6 +973,7 @@ export function EquityExposureView({
                 const hasNakedPut = holding.nakedPutRisk > 0;
                 const hasLeapCall = holding.leapCallRisk > 0;
                 const hasStrategy = holding.strategyRisk > 0;
+                const hasGP = holding.gpRisk > 0;
                 const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
                 
                 return (
@@ -1020,6 +1021,11 @@ export function EquityExposureView({
                             {hasStrategy && (
                               <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-purple-500/10 text-purple-500 border-purple-500/30">
                                 Strategie: {formatEUR(holding.strategyRisk)}
+                              </Badge>
+                            )}
+                            {hasGP && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                                GP: {formatEUR(holding.gpRisk)}
                               </Badge>
                             )}
                           </div>

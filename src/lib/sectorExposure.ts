@@ -293,9 +293,10 @@ export interface ConsolidatedHolding {
   nakedPutRisk: number;          // Naked PUT risk (€)
   leapCallRisk: number;          // Leap Call risk - market value (€)
   strategyRisk: number;          // Strategy Max Loss (€)
+  gpRisk: number;                // GP stock risk (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
-    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy';
+    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy' | 'gp';
     name: string;
     exposure: number;
     percentage?: number;
@@ -884,6 +885,7 @@ export function calculateConsolidatedTopHoldings(
     nakedPutRisk: 0,
     leapCallRisk: 0,
     strategyRisk: 0,
+    gpRisk: 0,
     totalExposure: 0,
     sources: [],
     nakedPutDetails: [],
@@ -1018,22 +1020,11 @@ export function calculateConsolidatedTopHoldings(
     if (gp.market_value <= 0) continue;
     const name = gp.description || gp.ticker_code || 'Unknown';
     const holding = getOrCreateHolding(name);
-    holding.stockRisk += gp.market_value;
-    holding.stockRiskWithProtection += gp.market_value;
+    holding.gpRisk += gp.market_value;
     holding.sources.push({
-      type: 'stock',
+      type: 'gp',
       name: 'GP',
       exposure: gp.market_value,
-    });
-    holding.stockDetails.push({
-      quantity: gp.quantity,
-      price: gp.price || 0,
-      currency: gp.currency || 'EUR',
-      value: gp.market_value,
-      valueWithProtection: gp.market_value,
-      protectionContracts: 0,
-      protectionStrike: null,
-      hasProtection: false,
     });
   }
 
@@ -1055,7 +1046,8 @@ export function calculateConsolidatedTopHoldings(
     holding.totalExposure = stockPart + 
       (includeNakedPut ? holding.nakedPutRisk : 0) + 
       (includeLeapCall ? holding.leapCallRisk : 0) + 
-      (includeStrategies ? holding.strategyRisk : 0);
+      (includeStrategies ? holding.strategyRisk : 0) +
+      holding.gpRisk;
     
     // Sort sources by exposure
     holding.sources.sort((a, b) => b.exposure - a.exposure);
