@@ -6,27 +6,30 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 interface PositionsTableProps {
   positions: Position[];
+  gpHoldings?: GPHoldingRow[];
 }
 
-const assetTabs: { value: AssetType | 'all'; label: string }[] = [
+const assetTabs: { value: AssetType | 'all' | 'gp'; label: string }[] = [
   { value: 'all', label: 'Tutte' },
   { value: 'bond', label: 'Obbligazioni' },
   { value: 'stock', label: 'Azioni' },
   { value: 'etf', label: 'ETF' },
   { value: 'derivative', label: 'Derivati' },
   { value: 'commodity', label: 'Commodities' },
+  { value: 'gp', label: 'GP' },
 ];
 
-export function PositionsTable({ positions }: PositionsTableProps) {
-  const [selectedTab, setSelectedTab] = useState<AssetType | 'all'>('all');
+export function PositionsTable({ positions, gpHoldings = [] }: PositionsTableProps) {
+  const [selectedTab, setSelectedTab] = useState<AssetType | 'all' | 'gp'>('all');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' }>({ key: 'description', direction: 'asc' });
 
   const filteredPositions = selectedTab === 'all' 
     ? positions 
-    : positions.filter(p => p.asset_type === selectedTab);
+    : selectedTab === 'gp' ? [] : positions.filter(p => p.asset_type === selectedTab);
 
   const sortedPositions = [...filteredPositions].sort((a, b) => {
     const aVal = a[sortConfig.key];
