@@ -509,6 +509,65 @@ export type Database = {
         }
         Relationships: []
       }
+      gp_holdings: {
+        Row: {
+          asset_type: string
+          created_at: string | null
+          currency: string | null
+          description: string
+          exchange_rate: number | null
+          id: string
+          market_value: number
+          portfolio_id: string
+          price: number | null
+          price_date: string | null
+          quantity: number
+          ticker_code: string | null
+          updated_at: string | null
+          weight_pct: number | null
+        }
+        Insert: {
+          asset_type: string
+          created_at?: string | null
+          currency?: string | null
+          description: string
+          exchange_rate?: number | null
+          id?: string
+          market_value?: number
+          portfolio_id: string
+          price?: number | null
+          price_date?: string | null
+          quantity?: number
+          ticker_code?: string | null
+          updated_at?: string | null
+          weight_pct?: number | null
+        }
+        Update: {
+          asset_type?: string
+          created_at?: string | null
+          currency?: string | null
+          description?: string
+          exchange_rate?: number | null
+          id?: string
+          market_value?: number
+          portfolio_id?: string
+          price?: number | null
+          price_date?: string | null
+          quantity?: number
+          ticker_code?: string | null
+          updated_at?: string | null
+          weight_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gp_holdings_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       historical_data: {
         Row: {
           average_balance: number
@@ -707,6 +766,8 @@ export type Database = {
           cash_value: number | null
           created_at: string
           deposits: number | null
+          gp_cash_value: number | null
+          gp_total_value: number | null
           id: string
           initial_date: string | null
           initial_value: number | null
@@ -722,6 +783,8 @@ export type Database = {
           cash_value?: number | null
           created_at?: string
           deposits?: number | null
+          gp_cash_value?: number | null
+          gp_total_value?: number | null
           id?: string
           initial_date?: string | null
           initial_value?: number | null
@@ -737,6 +800,8 @@ export type Database = {
           cash_value?: number | null
           created_at?: string
           deposits?: number | null
+          gp_cash_value?: number | null
+          gp_total_value?: number | null
           id?: string
           initial_date?: string | null
           initial_value?: number | null
