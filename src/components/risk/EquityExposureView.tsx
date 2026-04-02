@@ -437,6 +437,7 @@ export function EquityExposureView({
                                            cat.color === 'bg-orange-500' ? '#f97316' :
                                            cat.color === 'bg-red-500' ? '#ef4444' :
                                            cat.color === 'bg-amber-500' ? '#f59e0b' :
+                                           cat.color === 'bg-emerald-500' ? '#10b981' :
                                            '#a855f7'
                         }}
                       />
