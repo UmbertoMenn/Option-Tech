@@ -189,8 +189,8 @@ export function EquityExposureView({
   const sortedConsolidatedHoldings = useMemo(() => 
     [...consolidatedHoldings].sort((a, b) => {
       // Use gross values for sorting: stockRisk (not with protection) + other components
-      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk + a.strategyRisk;
-      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk + b.strategyRisk;
+      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk + a.strategyRisk + a.gpRisk;
+      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk + b.strategyRisk + b.gpRisk;
       return grossB - grossA;
     }),
     [consolidatedHoldings]
