@@ -230,6 +230,11 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
       currentSection = 'commodity';
       isDerivativeSection = false;
       continue;
+    } else if (firstCell.includes('NON VALORIZZABIL')) {
+      currentSection = null;
+      isDerivativeSection = false;
+      console.log('[ExcelParser] Detected "TITOLI NON VALORIZZABILI" section — skipping all rows');
+      continue;
     }
     
     // Detect header row
