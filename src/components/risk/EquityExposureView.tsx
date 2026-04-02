@@ -46,6 +46,7 @@ export function EquityExposureView({
   portfolioTotalValue,
   etfAllocations = {},
   isLoadingETFData = false,
+  gpStockValue = 0,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
