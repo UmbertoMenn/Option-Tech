@@ -186,6 +186,8 @@ export function SectorAllocationView({
   onIncludeStrategiesChange,
   includeLeapCall,
   onIncludeLeapCallChange,
+  includeGP = true,
+  onIncludeGPChange,
   isResolvingSectors,
   resolvingCount,
   isAdmin = false,
