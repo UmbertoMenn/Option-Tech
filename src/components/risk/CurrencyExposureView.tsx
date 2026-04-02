@@ -163,8 +163,68 @@ export function CurrencyExposureView({
   includeStrategies,
   onIncludeStrategiesChange,
   includeLeapCall,
-  onIncludeLeapCallChange
+  onIncludeLeapCallChange,
+  gpStockHoldings = [],
+  includeGP = false,
+  onIncludeGPChange,
 }: CurrencyExposureViewProps) {
+  // Merge GP stock holdings into currency exposure when toggle is on
+  const mergedCurrencyExposure = useMemo(() => {
+    if (!includeGP || gpStockHoldings.length === 0) return currencyExposure;
+    
+    // Deep clone
+    const cloned = currencyExposure.map(c => ({
+      ...c,
+      breakdown: { ...c.breakdown },
+      instruments: [...c.instruments],
+    }));
+    const byCurrency = new Map(cloned.map(c => [c.currency, c]));
+    
+    for (const gp of gpStockHoldings) {
+      if (gp.market_value <= 0) continue;
+      const curr = gp.currency || 'EUR';
+      
+      if (!byCurrency.has(curr)) {
+        const newEntry: CurrencyExposure = {
+          currency: curr,
+          totalRisk: 0,
+          totalRiskOriginal: 0,
+          percentage: 0,
+          breakdown: { stocks: 0, bonds: 0, commodities: 0, protections: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
+          instruments: [],
+        };
+        byCurrency.set(curr, newEntry);
+        cloned.push(newEntry);
+      }
+      
+      const exposure = byCurrency.get(curr)!;
+      exposure.breakdown.stocks += gp.market_value;
+      exposure.totalRisk += gp.market_value;
+      exposure.totalRiskOriginal += gp.market_value * (gp.exchange_rate || 1);
+      exposure.instruments.push({
+        name: `${gp.description || gp.ticker_code || 'Unknown'} (GP)`,
+        riskEUR: gp.market_value,
+        riskOriginal: gp.market_value * (gp.exchange_rate || 1),
+        category: 'stocks',
+        details: `${gp.quantity} × ${(gp.price || 0).toFixed(2)}`,
+      });
+    }
+    
+    // Recalculate percentages
+    const total = cloned.reduce((sum, c) => sum + c.totalRisk, 0);
+    for (const c of cloned) {
+      c.percentage = total > 0 ? (c.totalRisk / total) * 100 : 0;
+    }
+    
+    // Re-sort
+    cloned.sort((a, b) => b.totalRisk - a.totalRisk);
+    return cloned;
+  }, [currencyExposure, gpStockHoldings, includeGP]);
+  
+  const effectiveGrandTotal = useMemo(() => 
+    mergedCurrencyExposure.reduce((sum, c) => sum + c.totalRisk, 0),
+    [mergedCurrencyExposure]
+  );
   const safeCurrencyExposure = currencyExposure.filter((c) => {
     return (
       typeof c.currency === 'string' &&
