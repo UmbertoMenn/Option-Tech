@@ -32,6 +32,7 @@ import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { calculateConsolidatedTopHoldings, ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
 import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
