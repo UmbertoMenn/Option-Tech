@@ -1014,6 +1014,30 @@ export function calculateConsolidatedTopHoldings(
     });
   }
   
+  // 6. Add GP stock holdings as individual entries
+  for (const gp of gpStockHoldings) {
+    if (gp.market_value <= 0) continue;
+    const name = gp.description || gp.ticker_code || 'Unknown';
+    const holding = getOrCreateHolding(name);
+    holding.stockRisk += gp.market_value;
+    holding.stockRiskWithProtection += gp.market_value;
+    holding.sources.push({
+      type: 'stock',
+      name: 'GP',
+      exposure: gp.market_value,
+    });
+    holding.stockDetails.push({
+      quantity: gp.quantity,
+      price: gp.price || 0,
+      currency: gp.currency || 'EUR',
+      value: gp.market_value,
+      valueWithProtection: gp.market_value,
+      protectionContracts: 0,
+      protectionStrike: null,
+      hasProtection: false,
+    });
+  }
+
   // Combine both maps
   const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
   

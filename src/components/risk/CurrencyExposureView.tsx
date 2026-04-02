@@ -364,6 +364,12 @@ export function CurrencyExposureView({
                   <Switch id="leap-call-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
                   <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">Leap Call</Label>
                 </div>
+                {gpStockHoldings.length > 0 && onIncludeGPChange && (
+                  <div className="flex items-center gap-2">
+                    <Switch id="gp-currency-toggle" checked={includeGP} onCheckedChange={onIncludeGPChange} />
+                    <Label htmlFor="gp-currency-toggle" className="text-sm cursor-pointer">GP</Label>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
