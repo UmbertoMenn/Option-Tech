@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
@@ -32,6 +33,9 @@ interface CurrencyExposureViewProps {
   onIncludeStrategiesChange: (value: boolean) => void;
   includeLeapCall: boolean;
   onIncludeLeapCallChange: (value: boolean) => void;
+  gpStockHoldings?: GPHoldingRow[];
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
 }
 
 const CATEGORY_CONFIG = {
