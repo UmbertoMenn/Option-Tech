@@ -152,9 +152,10 @@ export function RiskAnalyzer() {
       includeNakedPut: sectorIncludeNakedPut, 
       includeStrategies: sectorIncludeStrategies, 
       includeLeapCall: sectorIncludeLeapCall, 
-      sectorMappings 
+      sectorMappings,
+      gpStockHoldings: sectorIncludeGP ? gpStockHoldings : [],
     });
-  }, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings]);
+  }, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings, sectorIncludeGP, gpStockHoldings]);
   
   return (
     <div className="min-h-screen bg-background">
