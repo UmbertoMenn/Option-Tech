@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
@@ -32,6 +33,9 @@ interface CurrencyExposureViewProps {
   onIncludeStrategiesChange: (value: boolean) => void;
   includeLeapCall: boolean;
   onIncludeLeapCallChange: (value: boolean) => void;
+  gpStockHoldings?: GPHoldingRow[];
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
 }
 
 const CATEGORY_CONFIG = {
@@ -159,9 +163,69 @@ export function CurrencyExposureView({
   includeStrategies,
   onIncludeStrategiesChange,
   includeLeapCall,
-  onIncludeLeapCallChange
+  onIncludeLeapCallChange,
+  gpStockHoldings = [],
+  includeGP = false,
+  onIncludeGPChange,
 }: CurrencyExposureViewProps) {
-  const safeCurrencyExposure = currencyExposure.filter((c) => {
+  // Merge GP stock holdings into currency exposure when toggle is on
+  const mergedCurrencyExposure = useMemo(() => {
+    if (!includeGP || gpStockHoldings.length === 0) return currencyExposure;
+    
+    // Deep clone
+    const cloned = currencyExposure.map(c => ({
+      ...c,
+      breakdown: { ...c.breakdown },
+      instruments: [...c.instruments],
+    }));
+    const byCurrency = new Map(cloned.map(c => [c.currency, c]));
+    
+    for (const gp of gpStockHoldings) {
+      if (gp.market_value <= 0) continue;
+      const curr = gp.currency || 'EUR';
+      
+      if (!byCurrency.has(curr)) {
+        const newEntry: CurrencyExposure = {
+          currency: curr,
+          totalRisk: 0,
+          totalRiskOriginal: 0,
+          percentage: 0,
+          breakdown: { stocks: 0, bonds: 0, commodities: 0, protections: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
+          instruments: [],
+        };
+        byCurrency.set(curr, newEntry);
+        cloned.push(newEntry);
+      }
+      
+      const exposure = byCurrency.get(curr)!;
+      exposure.breakdown.stocks += gp.market_value;
+      exposure.totalRisk += gp.market_value;
+      exposure.totalRiskOriginal += gp.market_value * (gp.exchange_rate || 1);
+      exposure.instruments.push({
+        name: `${gp.description || gp.ticker_code || 'Unknown'} (GP)`,
+        riskEUR: gp.market_value,
+        riskOriginal: gp.market_value * (gp.exchange_rate || 1),
+        category: 'stocks',
+        details: `${gp.quantity} × ${(gp.price || 0).toFixed(2)}`,
+      });
+    }
+    
+    // Recalculate percentages
+    const total = cloned.reduce((sum, c) => sum + c.totalRisk, 0);
+    for (const c of cloned) {
+      c.percentage = total > 0 ? (c.totalRisk / total) * 100 : 0;
+    }
+    
+    // Re-sort
+    cloned.sort((a, b) => b.totalRisk - a.totalRisk);
+    return cloned;
+  }, [currencyExposure, gpStockHoldings, includeGP]);
+  
+  const effectiveGrandTotal = useMemo(() => 
+    mergedCurrencyExposure.reduce((sum, c) => sum + c.totalRisk, 0),
+    [mergedCurrencyExposure]
+  );
+  const safeCurrencyExposure = mergedCurrencyExposure.filter((c) => {
     return (
       typeof c.currency === 'string' &&
       Number.isFinite(c.totalRisk) &&
@@ -170,7 +234,7 @@ export function CurrencyExposureView({
     );
   });
 
-  const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
+  const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(effectiveGrandTotal) && effectiveGrandTotal > 0;
 
   const nonEurTotal = useMemo(() => {
     return safeCurrencyExposure
@@ -257,7 +321,7 @@ export function CurrencyExposureView({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                <div className="text-3xl font-bold text-primary">{formatEUR(effectiveGrandTotal)}</div>
                 {hasData && (
                   <div className="text-sm text-muted-foreground mt-1">
                     Non-EUR totale: <span className="font-medium text-foreground">{formatEUR(nonEurTotal)}</span>
@@ -300,6 +364,12 @@ export function CurrencyExposureView({
                   <Switch id="leap-call-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
                   <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">Leap Call</Label>
                 </div>
+                {gpStockHoldings.length > 0 && onIncludeGPChange && (
+                  <div className="flex items-center gap-2">
+                    <Switch id="gp-currency-toggle" checked={includeGP} onCheckedChange={onIncludeGPChange} />
+                    <Label htmlFor="gp-currency-toggle" className="text-sm cursor-pointer">GP</Label>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>

@@ -32,11 +32,20 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
 
     const positions = positionsRaw as unknown as Position[];
 
-    // 2. Calculate total_value (non-derivative snapshot values + cash)
+    // 2. Calculate total_value (non-derivative snapshot values + cash + GP)
     const positionsValue = positions
       .filter(p => p.asset_type !== 'derivative')
       .reduce((sum, p) => sum + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
-    const totalValue = positionsValue + cashValue;
+    
+    // Fetch GP total value
+    const { data: portfolioData } = await supabase
+      .from('portfolios')
+      .select('gp_total_value')
+      .eq('id', portfolioId)
+      .single();
+    const gpTotalValue = portfolioData?.gp_total_value || 0;
+    
+    const totalValue = positionsValue + cashValue + gpTotalValue;
 
     // 3. Fetch derivative overrides
     const { data: overridesRaw } = await supabase

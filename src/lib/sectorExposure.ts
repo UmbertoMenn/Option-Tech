@@ -2,6 +2,7 @@ import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { RiskAnalysis } from './riskCalculator';
 import { SectorMapping } from '@/hooks/useSectorMappings';
 import { normalizeForMatching, getCanonicalKey, SPECIAL_ALIASES } from './derivativeStrategies';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 // Sector colors for charts
 export const SECTOR_COLORS: Record<string, string> = {
@@ -380,6 +381,7 @@ export interface SectorExposureOptions {
   includeStrategies?: boolean;   // default: true
   includeLeapCall?: boolean;     // default: true
   sectorMappings?: Record<string, SectorMapping>;
+  gpStockHoldings?: GPHoldingRow[];
 }
 
 export function calculateSectorExposure(
@@ -391,7 +393,8 @@ export function calculateSectorExposure(
     includeNakedPut = true, 
     includeStrategies = true, 
     includeLeapCall = true, 
-    sectorMappings = {} 
+    sectorMappings = {},
+    gpStockHoldings = [],
   } = options;
   const bySector = new Map<string, SectorExposure>();
   
@@ -564,6 +567,23 @@ export function calculateSectorExposure(
         category: 'strategies',
       });
     }
+  }
+  
+  // Process GP stock holdings as individual instruments
+  for (const gp of gpStockHoldings) {
+    if (gp.market_value <= 0) continue;
+    const name = gp.description || gp.ticker_code || 'Unknown';
+    const sector = getStockSectorWithMapping(name, sectorMappings);
+    const sectorExposure = getOrCreateSector(sector);
+    sectorExposure.totalRisk += gp.market_value;
+    sectorExposure.breakdown.stocks += gp.market_value;
+    sectorExposure.instruments.push({
+      name: `${name} (GP)`,
+      riskEUR: gp.market_value,
+      isETF: false,
+      isFromETFDecomposition: false,
+      category: 'stocks',
+    });
   }
   
   // Calculate percentages and sort
@@ -838,7 +858,8 @@ export function calculateConsolidatedTopHoldings(
   analysis: RiskAnalysis,
   etfAllocations: Record<string, ETFAllocation>,
   options: ConsolidatedTopHoldingsOptions,
-  limit: number = 100 // Show all holdings by default
+  limit: number = 100, // Show all holdings by default
+  gpStockHoldings: GPHoldingRow[] = [],
 ): ConsolidatedHoldingWithDetails[] {
   // Key-based map for stable aggregation
   const holdingsByKey = new Map<string, ConsolidatedHoldingWithDetails>();
@@ -992,6 +1013,30 @@ export function calculateConsolidatedTopHoldings(
     });
   }
   
+  // 6. Add GP stock holdings as individual entries
+  for (const gp of gpStockHoldings) {
+    if (gp.market_value <= 0) continue;
+    const name = gp.description || gp.ticker_code || 'Unknown';
+    const holding = getOrCreateHolding(name);
+    holding.stockRisk += gp.market_value;
+    holding.stockRiskWithProtection += gp.market_value;
+    holding.sources.push({
+      type: 'stock',
+      name: 'GP',
+      exposure: gp.market_value,
+    });
+    holding.stockDetails.push({
+      quantity: gp.quantity,
+      price: gp.price || 0,
+      currency: gp.currency || 'EUR',
+      value: gp.market_value,
+      valueWithProtection: gp.market_value,
+      protectionContracts: 0,
+      protectionStrike: null,
+      hasProtection: false,
+    });
+  }
+
   // Combine both maps
   const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
   

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { useGPHoldings, GPHoldingRow } from '@/hooks/useGPHoldings';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { 
@@ -48,8 +49,20 @@ export function RiskAnalyzer() {
   const [sectorIncludeStrategies, setSectorIncludeStrategies] = useState(true);
   const [sectorIncludeLeapCall, setSectorIncludeLeapCall] = useState(true);
   
+  // GP toggles (one per view)
+  const [equityIncludeGP, setEquityIncludeGP] = useState(true);
+  const [currencyIncludeGP, setCurrencyIncludeGP] = useState(false);
+  const [sectorIncludeGP, setSectorIncludeGP] = useState(true);
+  
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
+  
+  // GP holdings
+  const { gpHoldings, gpSummary } = useGPHoldings();
+  const gpStockHoldings = useMemo(() => 
+    gpHoldings.filter(h => h.asset_type === 'stock'), 
+    [gpHoldings]
+  );
   const { summary } = usePortfolio();
   
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
@@ -71,7 +84,7 @@ export function RiskAnalyzer() {
     includeLeapCall: currencyIncludeLeapCall 
   });
   
-  // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
+  // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names + GP stocks
   const stocksForSectorMapping = useMemo(() => {
     const stocks: Array<{ isin: string; description: string }> = [];
     const names: string[] = []; // Derivative underlyings without ISIN
@@ -112,8 +125,17 @@ export function RiskAnalyzer() {
       }
     }
     
+    // 5. GP stock holdings (nome/ticker per risoluzione settore)
+    for (const gp of gpStockHoldings) {
+      const key = gp.ticker_code || gp.description;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        names.push(gp.description);
+      }
+    }
+    
     return { stocks, names };
-  }, [analysis]);
+  }, [analysis, gpStockHoldings]);
   
   // Fetch sector mappings when switching to sector view
   useEffect(() => {
@@ -130,9 +152,10 @@ export function RiskAnalyzer() {
       includeNakedPut: sectorIncludeNakedPut, 
       includeStrategies: sectorIncludeStrategies, 
       includeLeapCall: sectorIncludeLeapCall, 
-      sectorMappings 
+      sectorMappings,
+      gpStockHoldings: sectorIncludeGP ? gpStockHoldings : [],
     });
-  }, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings]);
+  }, [analysis, allocations, sectorIncludeNakedPut, sectorIncludeStrategies, sectorIncludeLeapCall, sectorMappings, sectorIncludeGP, gpStockHoldings]);
   
   return (
     <div className="min-h-screen bg-background">
@@ -258,6 +281,9 @@ export function RiskAnalyzer() {
                 portfolioTotalValue={summary?.totalValue}
                 etfAllocations={allocations}
                 isLoadingETFData={isETFDataLoading}
+                gpStockHoldings={gpStockHoldings}
+                includeGP={equityIncludeGP}
+                onIncludeGPChange={setEquityIncludeGP}
               />
             ) : viewMode === 'currency' ? (
               <ErrorBoundary title="Errore nella vista Currency Exposure">
@@ -275,6 +301,9 @@ export function RiskAnalyzer() {
                   onIncludeNakedPutChange={setCurrencyIncludeNakedPut}
                   includeStrategies={currencyIncludeStrategies}
                   onIncludeStrategiesChange={setCurrencyIncludeStrategies}
+                  gpStockHoldings={gpStockHoldings}
+                  includeGP={currencyIncludeGP}
+                  onIncludeGPChange={setCurrencyIncludeGP}
                   includeLeapCall={currencyIncludeLeapCall}
                   onIncludeLeapCallChange={setCurrencyIncludeLeapCall}
                 />
@@ -293,6 +322,8 @@ export function RiskAnalyzer() {
                   onIncludeStrategiesChange={setSectorIncludeStrategies}
                   includeLeapCall={sectorIncludeLeapCall}
                   onIncludeLeapCallChange={setSectorIncludeLeapCall}
+                  includeGP={sectorIncludeGP}
+                  onIncludeGPChange={setSectorIncludeGP}
                   isResolvingSectors={sectorMappingsLoading}
                   resolvingCount={resolvingCount}
                   isAdmin={isAdmin}

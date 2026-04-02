@@ -32,13 +32,16 @@ import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { calculateConsolidatedTopHoldings, ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
 import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
+import { GPHoldingRow } from '@/hooks/useGPHoldings';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
   portfolioTotalValue?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
-  gpStockValue?: number;
+  gpStockHoldings?: GPHoldingRow[];
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
 }
 
 export function EquityExposureView({ 
@@ -46,13 +49,14 @@ export function EquityExposureView({
   portfolioTotalValue,
   etfAllocations = {},
   isLoadingETFData = false,
-  gpStockValue = 0,
+  gpStockHoldings = [],
+  includeGP = true,
+  onIncludeGPChange,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
-  const [includeGP, setIncludeGP] = useState(true);
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
@@ -73,15 +77,15 @@ export function EquityExposureView({
     strategyDetails
   } = analysis;
   
-  // Calculate all consolidated holdings (no limit)
+  // Calculate all consolidated holdings (no limit) - include GP stocks
   const consolidatedHoldings = useMemo(() => {
     return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
       includeProtections,
       includeNakedPut,
       includeStrategies,
       includeLeapCall
-    });
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall]);
+    }, 100, includeGP ? gpStockHoldings : []);
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeGP, gpStockHoldings]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
@@ -101,6 +105,12 @@ export function EquityExposureView({
     };
   }, [stockDetails]);
 
+  // GP stock total value
+  const gpStockTotalValue = useMemo(() => 
+    gpStockHoldings.reduce((sum, h) => sum + h.market_value, 0),
+    [gpStockHoldings]
+  );
+
   // Dynamic grand total based on toggles
   const dynamicGrandTotal = useMemo(() => {
     const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
@@ -110,20 +120,23 @@ export function EquityExposureView({
       totalCommodityRisk + 
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
-      (includeStrategies ? totalStrategyRisk : 0)
+      (includeStrategies ? totalStrategyRisk : 0) +
+      (includeGP ? gpStockTotalValue : 0)
     );
   }, [
     includeProtections, 
     includeNakedPut, 
     includeLeapCall, 
     includeStrategies,
+    includeGP,
     totalETFRisk, 
     totalPureStockRisk, 
     grossPureStockRisk, 
     totalCommodityRisk, 
     totalNakedPutRisk, 
     totalLeapCallRisk, 
-    totalStrategyRisk
+    totalStrategyRisk,
+    gpStockTotalValue,
   ]);
 
   const getPercentage = (value: number) => dynamicGrandTotal > 0 ? (value / dynamicGrandTotal) * 100 : 0;
@@ -187,7 +200,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio ETF Azionari', 
       value: totalETFRisk, 
-      sortValue: totalETFRisk, // Fixed sort value
+      sortValue: totalETFRisk,
       percentage: getPercentage(totalETFRisk),
       color: 'bg-cyan-500',
       icon: TrendingUp,
@@ -198,7 +211,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Stocks', 
       value: displayedStockRisk, 
-      sortValue: grossPureStockRisk, // Always sort by gross value
+      sortValue: grossPureStockRisk,
       percentage: getPercentage(displayedStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
@@ -252,6 +265,17 @@ export function EquityExposureView({
       protectionSavings: 0,
       showProtectionSavings: false
     },
+    ...(gpStockHoldings.length > 0 ? [{
+      label: 'Rischio GP Azioni',
+      value: includeGP ? gpStockTotalValue : 0,
+      sortValue: gpStockTotalValue,
+      percentage: getPercentage(includeGP ? gpStockTotalValue : 0),
+      color: 'bg-emerald-500',
+      icon: Layers,
+      description: 'Azioni gestione patrimoniale',
+      protectionSavings: 0,
+      showProtectionSavings: false,
+    }] : []),
   ];
 
   const formatExpiry = (expiry: string) => {
@@ -348,6 +372,18 @@ export function EquityExposureView({
                     Leap Call
                   </Label>
                 </div>
+                {gpStockHoldings.length > 0 && onIncludeGPChange && (
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      id="gp-equity-toggle"
+                      checked={includeGP}
+                      onCheckedChange={onIncludeGPChange}
+                    />
+                    <Label htmlFor="gp-equity-toggle" className="text-sm cursor-pointer">
+                      GP
+                    </Label>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -380,6 +416,7 @@ export function EquityExposureView({
                                   entry.color === 'bg-orange-500' ? '#f97316' :
                                   entry.color === 'bg-red-500' ? '#ef4444' :
                                   entry.color === 'bg-amber-500' ? '#f59e0b' :
+                                  entry.color === 'bg-emerald-500' ? '#10b981' :
                                   '#a855f7'
                           }}
                         />
@@ -400,6 +437,7 @@ export function EquityExposureView({
                                            cat.color === 'bg-orange-500' ? '#f97316' :
                                            cat.color === 'bg-red-500' ? '#ef4444' :
                                            cat.color === 'bg-amber-500' ? '#f59e0b' :
+                                           cat.color === 'bg-emerald-500' ? '#10b981' :
                                            '#a855f7'
                         }}
                       />

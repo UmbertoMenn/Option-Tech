@@ -27,7 +27,16 @@ export async function computeAndUpsertStagingValues({ portfolioId, positions, ca
       const mv = p.snapshot_market_value ?? p.market_value ?? 0;
       return sum + mv;
     }, 0);
-    const totalValue = positionsValue + cashValue;
+    
+    // Fetch GP total value
+    const { data: portfolioData } = await supabase
+      .from('portfolios')
+      .select('gp_total_value')
+      .eq('id', portfolioId)
+      .single();
+    const gpTotalValue = portfolioData?.gp_total_value || 0;
+    
+    const totalValue = positionsValue + cashValue + gpTotalValue;
 
     // 2. Fetch derivative_overrides for this portfolio
     const { data: overridesData } = await supabase

@@ -41,6 +41,8 @@ interface SectorAllocationViewProps {
   onIncludeStrategiesChange: (value: boolean) => void;
   includeLeapCall: boolean;
   onIncludeLeapCallChange: (value: boolean) => void;
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
   isResolvingSectors?: boolean;
   resolvingCount?: number;
   isAdmin?: boolean;
@@ -184,6 +186,8 @@ export function SectorAllocationView({
   onIncludeStrategiesChange,
   includeLeapCall,
   onIncludeLeapCallChange,
+  includeGP = true,
+  onIncludeGPChange,
   isResolvingSectors,
   resolvingCount,
   isAdmin = false,
@@ -321,6 +325,12 @@ export function SectorAllocationView({
                   <Switch id="leap-call-sector-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
                   <Label htmlFor="leap-call-sector-toggle" className="text-sm cursor-pointer">Leap Call</Label>
                 </div>
+                {onIncludeGPChange && (
+                  <div className="flex items-center gap-2">
+                    <Switch id="gp-sector-toggle" checked={includeGP} onCheckedChange={onIncludeGPChange} />
+                    <Label htmlFor="gp-sector-toggle" className="text-sm cursor-pointer">GP</Label>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
