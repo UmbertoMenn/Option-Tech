@@ -293,7 +293,7 @@ export function DerivativesSummaryCard({
             
             if (!isInRange) {
               result.push({
-                ticker: group.underlying.split(' ')[0] || group.underlying,
+                ticker: getDisplayTicker(group.underlying, underlyingPrices),
                 isAlternative: true
               });
             }
