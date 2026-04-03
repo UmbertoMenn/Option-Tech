@@ -332,12 +332,13 @@ export function DerivativesSummaryCard({
     
     categories.nakedPuts.forEach(np => {
       const strikePrice = np.option.strike_price || 0;
+      const underlyingKey = np.option.underlying || np.option.description;
       const underlyingPrice = (np.option.underlying ? underlyingPrices[np.option.underlying]?.price : 0) || 0;
       const isITM = underlyingPrice > 0 && strikePrice > underlyingPrice;
       
       if (isITM) {
         result.push({
-          ticker: getTicker({ ticker: np.option.ticker, description: np.option.underlying || np.option.description }),
+          ticker: getDisplayTicker(underlyingKey, underlyingPrices, np.option.ticker),
           strike: strikePrice,
           contracts: np.contracts
         });
