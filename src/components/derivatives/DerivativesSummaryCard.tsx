@@ -146,55 +146,67 @@ export function DerivativesSummaryCard({
   const uncoveredCalls = useMemo(() => {
     const result: { ticker: string; uncoveredContracts: number; strategies: string[] }[] = [];
     
+    // Helper to resolve ticker for grouping
+    const resolveKey = (text: string): string => {
+      const resolved = resolveTickerFromPrices(text, underlyingPrices);
+      if (resolved) return resolved.toUpperCase();
+      return getMatchingKey(text);
+    };
+    
     const underlyingBalance = new Map<string, {
       owned: number;
       soldCalls: number;
       boughtCalls: number;
       strategies: Set<string>;
+      displayTicker: string;
     }>();
     
-    stockPositions.forEach(stock => {
-      const key = getMatchingKey(stock.description || '');
+    const ensureKey = (key: string, displayTicker?: string) => {
       if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
+        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set(), displayTicker: displayTicker || key });
       }
+    };
+    
+    stockPositions.forEach(stock => {
+      const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description || '');
+      ensureKey(key, stock.ticker || key);
       underlyingBalance.get(key)!.owned += stock.quantity;
     });
     
     categories.coveredCalls.forEach(cc => {
-      const key = getMatchingKey(cc.underlying.description || cc.option.underlying || '');
-      if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
-      }
+      const key = resolveKey(cc.option.underlying || cc.underlying.description || '');
+      ensureKey(key);
       underlyingBalance.get(key)!.soldCalls += cc.contractsCovered;
       underlyingBalance.get(key)!.strategies.add('Covered Call');
     });
     
+    // Include deRiskingCoveredCalls in the balance
+    categories.deRiskingCoveredCalls.forEach(dr => {
+      const key = resolveKey(dr.coveredCall.option.underlying || dr.coveredCall.underlying.description || '');
+      ensureKey(key);
+      underlyingBalance.get(key)!.soldCalls += dr.coveredCall.contractsCovered;
+      underlyingBalance.get(key)!.strategies.add('De-Risking CC');
+    });
+    
     categories.ironCondors.forEach(ic => {
-      const key = getMatchingKey(ic.underlying);
-      if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
-      }
+      const key = resolveKey(ic.underlying);
+      ensureKey(key);
       underlyingBalance.get(key)!.soldCalls += ic.contracts;
       underlyingBalance.get(key)!.boughtCalls += ic.contracts;
       underlyingBalance.get(key)!.strategies.add('Iron Condor');
     });
     
     categories.doubleDiagonals.forEach(dd => {
-      const key = getMatchingKey(dd.underlying);
-      if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
-      }
+      const key = resolveKey(dd.underlying);
+      ensureKey(key);
       underlyingBalance.get(key)!.soldCalls += dd.contracts;
       underlyingBalance.get(key)!.boughtCalls += dd.contracts;
       underlyingBalance.get(key)!.strategies.add('Double Diagonal');
     });
     
     categories.groupedOtherStrategies.forEach(group => {
-      const key = getMatchingKey(group.underlying);
-      if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
-      }
+      const key = resolveKey(group.underlying);
+      ensureKey(key);
       
       group.options.forEach(os => {
         if (os.option.option_type === 'call') {
@@ -211,23 +223,20 @@ export function DerivativesSummaryCard({
     });
     
     categories.leapCalls.forEach(lc => {
-      const key = getMatchingKey(lc.option.underlying || lc.option.description);
-      if (!underlyingBalance.has(key)) {
-        underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
-      }
+      const key = resolveKey(lc.option.underlying || lc.option.description);
+      ensureKey(key);
       underlyingBalance.get(key)!.boughtCalls += lc.contracts;
       underlyingBalance.get(key)!.strategies.add('Leap Call');
     });
     
-    for (const [key, data] of underlyingBalance) {
+    for (const [, data] of underlyingBalance) {
       const coveredContracts = Math.floor(data.owned / 100);
       const netSoldCalls = data.soldCalls - data.boughtCalls;
       
       if (netSoldCalls > coveredContracts) {
         const uncovered = netSoldCalls - coveredContracts;
-        const ticker = key.split(' ')[0] || key;
         result.push({
-          ticker,
+          ticker: data.displayTicker,
           uncoveredContracts: uncovered,
           strategies: Array.from(data.strategies)
         });
@@ -235,7 +244,7 @@ export function DerivativesSummaryCard({
     }
     
     return result.sort((a, b) => b.uncoveredContracts - a.uncoveredContracts);
-  }, [categories, stockPositions]);
+  }, [categories, stockPositions, underlyingPrices]);
   
   // ============ 2. Covered Call ITM ============
   const coveredCallsITM = useMemo(() => {
