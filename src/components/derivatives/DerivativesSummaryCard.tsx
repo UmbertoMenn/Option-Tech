@@ -357,8 +357,9 @@ export function DerivativesSummaryCard({
       const avgCost = lc.option.avg_cost || 0;
       
       if (avgCost > 0 && currentPrice > avgCost) {
+        const underlyingKey = lc.option.underlying || lc.option.description;
         result.push({
-          ticker: getTicker({ ticker: lc.option.ticker, description: lc.option.underlying || lc.option.description }),
+          ticker: getDisplayTicker(underlyingKey, underlyingPrices, lc.option.ticker),
           strike: lc.option.strike_price || 0,
           contracts: lc.contracts
         });
