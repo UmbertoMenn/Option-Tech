@@ -486,7 +486,7 @@ export function DerivativesSummaryCard({
         
         if (isInBadState) {
           result.push({
-            ticker: group.underlying.split(' ')[0] || group.underlying,
+            ticker: getDisplayTicker(group.underlying, underlyingPrices),
             strategyName: strategyName.replace('Alternative ', '').replace('Diagonal ', 'Diag. '),
             status
           });
