@@ -248,7 +248,7 @@ export function DerivativesSummaryCard({
   
   // ============ 2. Covered Call ITM ============
   const coveredCallsITM = useMemo(() => {
-    const result: { ticker: string; strike: number; contracts: number }[] = [];
+    const result: { ticker: string; strike: number; contracts: number; isDeRisking: boolean }[] = [];
     
     categories.coveredCalls.forEach(cc => {
       const strikePrice = cc.option.strike_price || 0;
@@ -259,13 +259,30 @@ export function DerivativesSummaryCard({
         result.push({
           ticker: getDisplayTicker(underlyingKey, underlyingPrices, cc.underlying.ticker),
           strike: strikePrice,
-          contracts: cc.contractsCovered
+          contracts: cc.contractsCovered,
+          isDeRisking: false
+        });
+      }
+    });
+
+    categories.deRiskingCoveredCalls.forEach(dr => {
+      const cc = dr.coveredCall;
+      const strikePrice = cc.option.strike_price || 0;
+      const underlyingKey = cc.option.underlying || '';
+      const underlyingPrice = (underlyingKey ? underlyingPrices[underlyingKey]?.price : 0) || 0;
+      
+      if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
+        result.push({
+          ticker: getDisplayTicker(underlyingKey, underlyingPrices, cc.underlying.ticker),
+          strike: strikePrice,
+          contracts: cc.contractsCovered,
+          isDeRisking: true
         });
       }
     });
     
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
-  }, [categories.coveredCalls, underlyingPrices]);
+  }, [categories.coveredCalls, categories.deRiskingCoveredCalls, underlyingPrices]);
   
   // ============ 3. Double Diagonal OOR ============
   const doubleDiagonalOOR = useMemo(() => {
@@ -525,7 +542,7 @@ export function DerivativesSummaryCard({
         title: 'Covered Call',
         emoji: 'amber',
         badge: 'ITM',
-        items: coveredCallsITM.map(cc => `${cc.ticker} $${cc.strike} ×${cc.contracts}`),
+        items: coveredCallsITM.map(cc => `${cc.isDeRisking ? 'DR ' : ''}${cc.ticker} $${cc.strike} ×${cc.contracts}`),
       });
     }
     if (doubleDiagonalOOR.length > 0) {
@@ -676,6 +693,7 @@ export function DerivativesSummaryCard({
                 variant="outline" 
                 className="text-xs bg-amber-500/10 border-amber-500/30"
               >
+                {cc.isDeRisking && <span className="font-semibold text-amber-400 mr-1">DR</span>}
                 {cc.ticker} ${cc.strike} ×{cc.contracts}
               </Badge>
             )}
