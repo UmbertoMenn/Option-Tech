@@ -318,9 +318,9 @@ export function categorizeDerivatives(
     });
     if (remaining.length === 0) continue;
 
-    const linkedStock = config.linked_stock_id 
+    const linkedStock = (config.linked_stock_id 
       ? allPositions.find(p => p.id === config.linked_stock_id) 
-      : findUnderlyingStock(remaining[0], stockPositions);
+      : null) || findUnderlyingStock(remaining[0], stockPositions);
 
     switch (config.strategy_type) {
       case 'covered_call': {
