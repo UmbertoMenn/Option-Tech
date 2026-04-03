@@ -693,6 +693,7 @@ export function DerivativesSummaryCard({
                 variant="outline" 
                 className="text-xs bg-amber-500/10 border-amber-500/30"
               >
+                {cc.isDeRisking && <span className="font-semibold text-amber-400 mr-1">DR</span>}
                 {cc.ticker} ${cc.strike} ×{cc.contracts}
               </Badge>
             )}
