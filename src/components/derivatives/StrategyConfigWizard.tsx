@@ -986,20 +986,37 @@ export function StrategyConfigWizard({
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {availablePositions.map(p => {
-                                const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const baseOptId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const baseStockId = p.id.replace(/__slot_\d+$/, '');
                                 const isOptSlot = /__opt_slot_\d+$/.test(p.id);
+                                const isStockSlot = /__slot_\d+$/.test(p.id);
                                 const isGroupedOption = p.asset_type === 'derivative' && Math.abs(p.quantity) > 1 && !isOptSlot;
-                                const isSplitOption = isOptSlot;
-                                // Show rejoin only on first slot of a split group
-                                const isFirstSlot = isSplitOption && p.id.endsWith('__opt_slot_0');
-                                // Count unassigned sibling slots for rejoin check
-                                const canRejoin = isFirstSlot && (() => {
+                                const isGroupedStock = (p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200 && !isStockSlot;
+                                const canSplit = isGroupedOption || isGroupedStock;
+                                
+                                // Show rejoin on first slot of a split group
+                                const isFirstOptSlot = isOptSlot && p.id.endsWith('__opt_slot_0');
+                                const isFirstStockSlot = isStockSlot && p.id.endsWith('__slot_0');
+                                const canRejoin = (isFirstOptSlot || isFirstStockSlot) && (() => {
+                                  const baseId = isOptSlot ? baseOptId : baseStockId;
                                   const origPos = allAvailable.find(ap => ap.id === baseId);
                                   if (!origPos) return false;
-                                  const absQty = Math.abs(origPos.quantity);
-                                  const slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  let slotIds: string[];
+                                  if (isOptSlot) {
+                                    const absQty = Math.abs(origPos.quantity);
+                                    slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  } else {
+                                    const slots = Math.floor(origPos.quantity / 100);
+                                    const hasRem = origPos.quantity % 100 > 0;
+                                    slotIds = Array.from({ length: slots + (hasRem ? 1 : 0) }, (_, i) => `${baseId}__slot_${i}`);
+                                  }
                                   return slotIds.every(id => !assignedIds.has(id));
                                 })();
+
+                                const splitTooltip = isGroupedOption
+                                  ? `Dividi in ${Math.abs(p.quantity)} contratti singoli`
+                                  : `Dividi in slot da 100 azioni`;
+                                const rejoinBaseId = isOptSlot ? baseOptId : baseStockId;
 
                                 return (
                                   <div key={p.id} className="inline-flex items-center gap-0.5">
@@ -1017,19 +1034,19 @@ export function StrategyConfigWizard({
                                       />
                                       {positionLabel(p)}
                                     </label>
-                                    {isGroupedOption && (
+                                    {canSplit && (
                                       <TooltipProvider delayDuration={200}>
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             <button
                                               className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                                              onClick={(e) => { e.preventDefault(); handleSplitOption(p.id); }}
+                                              onClick={(e) => { e.preventDefault(); handleSplitPosition(p.id); }}
                                             >
                                               <Scissors className="w-3.5 h-3.5" />
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="top" className="text-xs">
-                                            Dividi in {Math.abs(p.quantity)} contratti singoli
+                                            {splitTooltip}
                                           </TooltipContent>
                                         </Tooltip>
                                       </TooltipProvider>
@@ -1040,13 +1057,13 @@ export function StrategyConfigWizard({
                                           <TooltipTrigger asChild>
                                             <button
                                               className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                                              onClick={(e) => { e.preventDefault(); handleRejoinOption(baseId); }}
+                                              onClick={(e) => { e.preventDefault(); handleRejoinPosition(rejoinBaseId); }}
                                             >
                                               <Merge className="w-3.5 h-3.5" />
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="top" className="text-xs">
-                                            Riunisci contratti
+                                            Riunisci
                                           </TooltipContent>
                                         </Tooltip>
                                       </TooltipProvider>
