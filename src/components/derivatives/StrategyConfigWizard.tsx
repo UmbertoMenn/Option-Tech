@@ -442,14 +442,14 @@ export function StrategyConfigWizard({
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
     if (!open) return [];
     const groupMap = new Map<string, { displayName: string; positions: Position[] }>();
-    const derivsOnlyForGroups = allAvailable.filter(p => p.asset_type === 'derivative');
+    const derivsOnlyForGroups = effectivePositions.filter(p => p.asset_type === 'derivative');
     // Pre-compute underlying key map for O(n) total instead of O(n²)
     const keyMapForGroups = new Map<string, string>();
-    for (const p of allAvailable) {
+    for (const p of effectivePositions) {
       keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups));
     }
 
-    for (const p of allAvailable) {
+    for (const p of effectivePositions) {
       const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups);
       if (!groupMap.has(key)) {
         let display = key;
@@ -466,7 +466,7 @@ export function StrategyConfigWizard({
     return Array.from(groupMap.entries())
       .map(([key, { displayName, positions }]) => ({ key, displayName, positions }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [open, allAvailable]);
+  }, [open, effectivePositions]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
