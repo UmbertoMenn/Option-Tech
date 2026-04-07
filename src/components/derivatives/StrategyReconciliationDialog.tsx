@@ -101,14 +101,28 @@ function detectStrategyType(positions: Position[]): string {
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
-  return positions
-    .filter(p => p.asset_type === 'derivative')
-    .map(o => ({
-      option_type: o.option_type || 'unknown',
-      strike: o.strike_price || 0,
-      expiry: o.expiry_date || '',
-      quantity_sign: o.quantity >= 0 ? 1 : -1,
-    }));
+  const sigMap = new Map<string, PositionSignature & { count: number }>();
+  for (const o of positions) {
+    if (o.asset_type !== 'derivative') continue;
+    const baseId = o.id.replace(/__opt_slot_\d+$/, '');
+    const sigKey = `${baseId}::${(o.option_type || '').toLowerCase()}::${o.strike_price || 0}::${o.expiry_date || ''}::${o.quantity >= 0 ? 1 : -1}`;
+    if (sigMap.has(sigKey)) {
+      sigMap.get(sigKey)!.count++;
+    } else {
+      sigMap.set(sigKey, {
+        option_type: o.option_type || 'unknown',
+        strike: o.strike_price || 0,
+        expiry: o.expiry_date || '',
+        quantity_sign: o.quantity >= 0 ? 1 : -1,
+        quantity_abs: 1,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(sigMap.values()).map(({ count, ...sig }) => ({
+    ...sig,
+    quantity_abs: count,
+  }));
 }
 
 function normalizeUnderlying(text: string): string {
