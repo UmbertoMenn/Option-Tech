@@ -385,7 +385,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
-  // Build all available positions (derivatives as-is + split stocks) — skip when closed
+  // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
     const stocks = allPositions.filter(p => p.asset_type === 'stock');
@@ -397,22 +397,8 @@ export function StrategyConfigWizard({
     // Options enter the pool with their original quantity (no auto-splitting)
     const virtualDerivs: Position[] = [...derivs];
     
-    // Split stocks into 100-share virtual slots
-    const virtualStocks: Position[] = [];
-    for (const stock of stocks) {
-      if (stock.quantity >= 200) {
-        const slots = Math.floor(stock.quantity / 100);
-        for (let i = 0; i < slots; i++) {
-          virtualStocks.push({ ...stock, id: `${stock.id}__slot_${i}`, quantity: 100 });
-        }
-        const remainder = stock.quantity % 100;
-        if (remainder > 0) {
-          virtualStocks.push({ ...stock, id: `${stock.id}__slot_${slots}`, quantity: remainder });
-        }
-      } else {
-        virtualStocks.push(stock);
-      }
-    }
+    // Stocks enter the pool with original quantity (no auto-splitting)
+    const virtualStocks: Position[] = [...stocks];
     
     return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
