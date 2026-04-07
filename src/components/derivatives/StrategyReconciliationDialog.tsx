@@ -242,21 +242,13 @@ export function StrategyReconciliationDialog({
       itemsByKey.get(key)!.push(item);
     }
 
-    // Get all derivative positions grouped by underlying — split multi-contract into virtual slots
+    // Get all derivative positions grouped by underlying — keep as-is (no auto-splitting)
     const derivsByKey = new Map<string, Position[]>();
     for (const pos of currentPositions.filter(p => p.asset_type === 'derivative')) {
       const raw = pos.underlying || pos.description || '';
       const key = normalizeUnderlying(raw);
       if (!derivsByKey.has(key)) derivsByKey.set(key, []);
-      const absQty = Math.abs(pos.quantity);
-      if (absQty > 1) {
-        const sign = pos.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          derivsByKey.get(key)!.push({ ...pos, id: `${pos.id}__opt_slot_${i}`, quantity: sign * 1 });
-        }
-      } else {
-        derivsByKey.get(key)!.push(pos);
-      }
+      derivsByKey.get(key)!.push(pos);
     }
 
     // Also get stock positions by underlying key for the pool
