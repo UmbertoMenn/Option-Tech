@@ -950,23 +950,75 @@ export function StrategyConfigWizard({
                               )}
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {availablePositions.map(p => (
-                                <label
-                                  key={p.id}
-                                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
-                                    selectedSet.has(p.id)
-                                      ? 'bg-primary/10 border-primary'
-                                      : 'hover:bg-muted/50'
-                                  } ${positionBadgeClass(p)}`}
-                                >
-                                  <Checkbox
-                                    checked={selectedSet.has(p.id)}
-                                    onCheckedChange={() => toggleSelected(group.key, p.id)}
-                                    className="w-3.5 h-3.5"
-                                  />
-                                  {positionLabel(p)}
-                                </label>
-                              ))}
+                              {availablePositions.map(p => {
+                                const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const isOptSlot = /__opt_slot_\d+$/.test(p.id);
+                                const isGroupedOption = p.asset_type === 'derivative' && Math.abs(p.quantity) > 1 && !isOptSlot;
+                                const isSplitOption = isOptSlot;
+                                // Show rejoin only on first slot of a split group
+                                const isFirstSlot = isSplitOption && p.id.endsWith('__opt_slot_0');
+                                // Count unassigned sibling slots for rejoin check
+                                const canRejoin = isFirstSlot && (() => {
+                                  const origPos = allAvailable.find(ap => ap.id === baseId);
+                                  if (!origPos) return false;
+                                  const absQty = Math.abs(origPos.quantity);
+                                  const slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  return slotIds.every(id => !assignedIds.has(id));
+                                })();
+
+                                return (
+                                  <div key={p.id} className="inline-flex items-center gap-0.5">
+                                    <label
+                                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                                        selectedSet.has(p.id)
+                                          ? 'bg-primary/10 border-primary'
+                                          : 'hover:bg-muted/50'
+                                      } ${positionBadgeClass(p)}`}
+                                    >
+                                      <Checkbox
+                                        checked={selectedSet.has(p.id)}
+                                        onCheckedChange={() => toggleSelected(group.key, p.id)}
+                                        className="w-3.5 h-3.5"
+                                      />
+                                      {positionLabel(p)}
+                                    </label>
+                                    {isGroupedOption && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleSplitOption(p.id); }}
+                                            >
+                                              <Scissors className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Dividi in {Math.abs(p.quantity)} contratti singoli
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                    {canRejoin && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleRejoinOption(baseId); }}
+                                            >
+                                              <Merge className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Riunisci contratti
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
