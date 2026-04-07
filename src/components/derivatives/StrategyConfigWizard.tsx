@@ -385,7 +385,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
-  // Build all available positions (derivatives + split stocks) — skip when closed
+  // Build all available positions (derivatives as-is + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
     const stocks = allPositions.filter(p => p.asset_type === 'stock');
@@ -394,19 +394,8 @@ export function StrategyConfigWizard({
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
     
-    // Split derivative contracts with |quantity| > 1 into virtual single-contract slots
-    const virtualDerivs: Position[] = [];
-    for (const d of derivs) {
-      const absQty = Math.abs(d.quantity);
-      if (absQty > 1) {
-        const sign = d.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          virtualDerivs.push({ ...d, id: `${d.id}__opt_slot_${i}`, quantity: sign * 1 });
-        }
-      } else {
-        virtualDerivs.push(d);
-      }
-    }
+    // Options enter the pool with their original quantity (no auto-splitting)
+    const virtualDerivs: Position[] = [...derivs];
     
     // Split stocks into 100-share virtual slots
     const virtualStocks: Position[] = [];
@@ -427,6 +416,27 @@ export function StrategyConfigWizard({
     
     return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
+
+  // Track which option positions the user has manually split
+  const [splitOptionIds, setSplitOptionIds] = useState<Set<string>>(new Set());
+
+  // Derive effective positions: if an option is in splitOptionIds, expand into virtual slots
+  const effectivePositions = useMemo(() => {
+    if (splitOptionIds.size === 0) return allAvailable;
+    const result: Position[] = [];
+    for (const p of allAvailable) {
+      if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
+        const absQty = Math.abs(p.quantity);
+        const sign = p.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        result.push(p);
+      }
+    }
+    return result;
+  }, [allAvailable, splitOptionIds]);
 
   // Group all positions by normalized underlying — skip when closed
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
