@@ -259,19 +259,8 @@ export function StrategyReconciliationDialog({
     for (const pos of currentPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf')) {
       const key = getUnderlyingKeyForStock(pos, allDerivatives);
       if (!stocksByKey.has(key)) stocksByKey.set(key, []);
-      // Split stocks into 100-share slots
-      if (pos.quantity >= 200) {
-        const slots = Math.floor(pos.quantity / 100);
-        for (let i = 0; i < slots; i++) {
-          stocksByKey.get(key)!.push({ ...pos, id: `${pos.id}__slot_${i}`, quantity: 100 });
-        }
-        const remainder = pos.quantity % 100;
-        if (remainder > 0) {
-          stocksByKey.get(key)!.push({ ...pos, id: `${pos.id}__slot_${slots}`, quantity: remainder });
-        }
-      } else {
-        stocksByKey.get(key)!.push(pos);
-      }
+      // Stocks enter pool with original quantity (no auto-splitting)
+      stocksByKey.get(key)!.push(pos);
     }
 
     for (const [key, reconItems] of itemsByKey) {
