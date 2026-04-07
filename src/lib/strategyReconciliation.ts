@@ -36,25 +36,42 @@ function signaturesMatch(sig: PositionSignature, pos: Position): boolean {
 }
 
 /**
- * Match a signature against positions, consuming up to quantity_abs matches.
- * Returns matched positions (removed from pool via matchedSet).
+ * Match a signature against positions, consuming up to quantity_abs contracts.
+ * A single position row with |quantity| >= needed counts as a full match.
+ * usedQuantity tracks how many contracts have been consumed per position.
  */
 function matchSignatureMulti(
   sig: PositionSignature,
   pool: Position[],
   matchedSet: Set<string>,
-): Position[] {
+  usedQuantity: Map<string, number>,
+): { matched: Position[]; matchedCount: number } {
   const needed = sig.quantity_abs || 1;
-  const results: Position[] = [];
+  let remaining = needed;
+  const matched: Position[] = [];
+
   for (const p of pool) {
-    if (results.length >= needed) break;
+    if (remaining <= 0) break;
     if (matchedSet.has(p.id)) continue;
-    if (signaturesMatch(sig, p)) {
+    if (!signaturesMatch(sig, p)) continue;
+
+    const totalAvail = Math.abs(p.quantity);
+    const alreadyUsed = usedQuantity.get(p.id) || 0;
+    const available = totalAvail - alreadyUsed;
+    if (available <= 0) continue;
+
+    const take = Math.min(available, remaining);
+    usedQuantity.set(p.id, alreadyUsed + take);
+    remaining -= take;
+    matched.push(p);
+
+    // Mark fully consumed positions
+    if (alreadyUsed + take >= totalAvail) {
       matchedSet.add(p.id);
-      results.push(p);
     }
   }
-  return results;
+
+  return { matched, matchedCount: needed - remaining };
 }
 
 function formatSigLabel(sig: PositionSignature): string {
