@@ -479,9 +479,9 @@ export function StrategyConfigWizard({
     return ids;
   }, [strategies]);
 
-  const restoreFromConfigs = useCallback((): WizardStrategy[] => {
-    if (!existingConfigs || existingConfigs.length === 0) return [];
-    // Pre-compute key map once for O(n) lookups
+  const restoreFromConfigs = useCallback((): { strategies: WizardStrategy[], autoSplitIds: Set<string> } => {
+    if (!existingConfigs || existingConfigs.length === 0) return { strategies: [], autoSplitIds: new Set() };
+    // Work with allAvailable (non-split options) to detect which ones need splitting
     const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore = new Map<string, string>();
     for (const p of allAvailable) {
@@ -489,13 +489,63 @@ export function StrategyConfigWizard({
     }
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
+    const autoSplitIds = new Set<string>();
+
+    // First pass: detect which options need splitting
+    // An option needs splitting if a config uses quantity_abs < |original quantity|
+    for (const config of existingConfigs) {
+      const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
+      if (signatures.length === 0) continue;
+      const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+
+      for (const sig of signatures) {
+        const qtyNeeded = sig.quantity_abs || 1;
+        // Find the original (non-split) option in allAvailable
+        const originalOption = allAvailable.find(p => {
+          if (p.asset_type !== 'derivative') return false;
+          if (keyMapRestore.get(p.id) !== configUnderlyingKey) return false;
+          const optType = (p.option_type || '').toLowerCase();
+          const sigType = (sig.option_type || '').toLowerCase();
+          if (optType !== sigType) return false;
+          if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
+          if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
+          const posSign = p.quantity >= 0 ? 1 : -1;
+          if (posSign !== sig.quantity_sign) return false;
+          return true;
+        });
+        if (originalOption && Math.abs(originalOption.quantity) > 1 && qtyNeeded < Math.abs(originalOption.quantity)) {
+          autoSplitIds.add(originalOption.id);
+        }
+      }
+    }
+
+    // Build effective positions for restore (with splits applied)
+    const restorePositions: Position[] = [];
+    for (const p of allAvailable) {
+      if (p.asset_type === 'derivative' && autoSplitIds.has(p.id) && Math.abs(p.quantity) > 1) {
+        const absQty = Math.abs(p.quantity);
+        const sign = p.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        restorePositions.push(p);
+      }
+    }
+
+    // Re-compute key map for restore positions
+    const derivsOnlyRestore2 = restorePositions.filter(pp => pp.asset_type === 'derivative');
+    const keyMapRestore2 = new Map<string, string>();
+    for (const p of restorePositions) {
+      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2));
+    }
 
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
       if (signatures.length === 0) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-      const groupPositions = allAvailable.filter(p => keyMapRestore.get(p.id) === configUnderlyingKey);
+      const groupPositions = restorePositions.filter(p => keyMapRestore2.get(p.id) === configUnderlyingKey);
 
       const matched: Position[] = [];
 
@@ -534,7 +584,6 @@ export function StrategyConfigWizard({
           }
         }
       } else if (config.linked_stock_id) {
-        // Legacy fallback: try exact match or prefix match
         const stockSlot = groupPositions.find(p =>
           !usedIds.has(p.id) &&
           p.asset_type === 'stock' &&
@@ -566,7 +615,7 @@ export function StrategyConfigWizard({
       }
     }
 
-    return restored;
+    return { strategies: restored, autoSplitIds };
   }, [existingConfigs, allAvailable]);
 
   // Restore saved configs when wizard opens — use ref to avoid re-running on reactive updates
@@ -575,8 +624,9 @@ export function StrategyConfigWizard({
     if (open && !hasInitialized.current) {
       hasInitialized.current = true;
       startTransition(() => {
-        const restored = restoreFromConfigs();
+        const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
+        setSplitOptionIds(autoSplitIds);
       });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
