@@ -828,10 +828,29 @@ export function StrategyConfigWizard({
     underlyingGroups.filter(g => archivedKeys.includes(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
     return ids;
   }, [underlyingGroups, archivedKeys]);
-  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
+  const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
-  if (allAvailable.length === 0) return null;
+  // Split option handler
+  const handleSplitOption = (posId: string) => {
+    setSplitOptionIds(prev => new Set(prev).add(posId));
+  };
+
+  // Rejoin option handler — only if no slots are assigned
+  const handleRejoinOption = (posId: string) => {
+    // Check if any virtual slot of this position is assigned
+    const absQty = Math.abs(allAvailable.find(p => p.id === posId)?.quantity || 0);
+    const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+    const anyAssigned = slotIds.some(id => assignedIds.has(id));
+    if (anyAssigned) return; // can't rejoin if slots are assigned
+    setSplitOptionIds(prev => {
+      const next = new Set(prev);
+      next.delete(posId);
+      return next;
+    });
+  };
+
+  if (effectivePositions.length === 0) return null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
