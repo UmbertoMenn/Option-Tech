@@ -27,14 +27,34 @@ function signaturesMatch(sig: PositionSignature, pos: Position): boolean {
   const sigType = (sig.option_type || '').toLowerCase();
   if (optType !== sigType) return false;
   if (Math.abs((pos.strike_price || 0) - sig.strike) > 0.01) return false;
-  // Compare expiry by date string (YYYY-MM-DD)
   const posExpiry = pos.expiry_date || '';
   const sigExpiry = sig.expiry || '';
   if (posExpiry !== sigExpiry) return false;
-  // Compare quantity sign
   const posSign = pos.quantity >= 0 ? 1 : -1;
   if (posSign !== sig.quantity_sign) return false;
   return true;
+}
+
+/**
+ * Match a signature against positions, consuming up to quantity_abs matches.
+ * Returns matched positions (removed from pool via matchedSet).
+ */
+function matchSignatureMulti(
+  sig: PositionSignature,
+  pool: Position[],
+  matchedSet: Set<string>,
+): Position[] {
+  const needed = sig.quantity_abs || 1;
+  const results: Position[] = [];
+  for (const p of pool) {
+    if (results.length >= needed) break;
+    if (matchedSet.has(p.id)) continue;
+    if (signaturesMatch(sig, p)) {
+      matchedSet.add(p.id);
+      results.push(p);
+    }
+  }
+  return results;
 }
 
 function formatSigLabel(sig: PositionSignature): string {
@@ -102,23 +122,34 @@ export function reconcileConfigs(
       const legs: LegStatus[] = [];
       const matchedPositionIds = new Set<string>();
 
-      // Check each saved signature against current positions
+      // Check each saved signature against current positions (respecting quantity_abs)
       for (const sig of signatures) {
-        const matchingPos = currentPositionsForUnderlying.find(
-          p => !matchedPositionIds.has(p.id) && signaturesMatch(sig, p)
-        );
-        if (matchingPos) {
-          matchedPositionIds.add(matchingPos.id);
+        const matched = matchSignatureMulti(sig, currentPositionsForUnderlying, matchedPositionIds);
+        if (matched.length >= (sig.quantity_abs || 1)) {
+          // All contracts found
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig),
+            label: formatSigLabel(sig) + (matched.length > 1 ? ` ×${matched.length}` : ''),
             status: 'present',
-            position: matchingPos,
+            position: matched[0],
+          });
+        } else if (matched.length > 0) {
+          // Partial match — mark present for what we found, missing for the rest
+          legs.push({
+            signature: { ...sig, quantity_abs: matched.length },
+            label: formatSigLabel(sig) + ` ×${matched.length}`,
+            status: 'present',
+            position: matched[0],
+          });
+          legs.push({
+            signature: { ...sig, quantity_abs: (sig.quantity_abs || 1) - matched.length },
+            label: formatSigLabel(sig) + ` ×${(sig.quantity_abs || 1) - matched.length}`,
+            status: 'missing',
           });
         } else {
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig),
+            label: formatSigLabel(sig) + ((sig.quantity_abs || 1) > 1 ? ` ×${sig.quantity_abs}` : ''),
             status: 'missing',
           });
         }

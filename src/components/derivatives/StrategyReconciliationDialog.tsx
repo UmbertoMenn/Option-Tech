@@ -46,6 +46,11 @@ function positionLabel(p: Position): string {
   const type = p.option_type?.toUpperCase() || '?';
   const strike = p.strike_price || '?';
   const expiry = formatExpiryMMY(p.expiry_date);
+  const optSlotMatch = p.id.match(/__opt_slot_(\d+)$/);
+  if (optSlotMatch) {
+    const slotNum = parseInt(optSlotMatch[1]) + 1;
+    return `${prefix} ${side} ${type} ${strike} ${expiry} [${slotNum}]`;
+  }
   const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
   return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
 }
@@ -96,14 +101,28 @@ function detectStrategyType(positions: Position[]): string {
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
-  return positions
-    .filter(p => p.asset_type === 'derivative')
-    .map(o => ({
-      option_type: o.option_type || 'unknown',
-      strike: o.strike_price || 0,
-      expiry: o.expiry_date || '',
-      quantity_sign: o.quantity >= 0 ? 1 : -1,
-    }));
+  const sigMap = new Map<string, PositionSignature & { count: number }>();
+  for (const o of positions) {
+    if (o.asset_type !== 'derivative') continue;
+    const baseId = o.id.replace(/__opt_slot_\d+$/, '');
+    const sigKey = `${baseId}::${(o.option_type || '').toLowerCase()}::${o.strike_price || 0}::${o.expiry_date || ''}::${o.quantity >= 0 ? 1 : -1}`;
+    if (sigMap.has(sigKey)) {
+      sigMap.get(sigKey)!.count++;
+    } else {
+      sigMap.set(sigKey, {
+        option_type: o.option_type || 'unknown',
+        strike: o.strike_price || 0,
+        expiry: o.expiry_date || '',
+        quantity_sign: o.quantity >= 0 ? 1 : -1,
+        quantity_abs: 1,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(sigMap.values()).map(({ count, ...sig }) => ({
+    ...sig,
+    quantity_abs: count,
+  }));
 }
 
 function normalizeUnderlying(text: string): string {
@@ -221,13 +240,21 @@ export function StrategyReconciliationDialog({
       itemsByKey.get(key)!.push(item);
     }
 
-    // Get all derivative positions grouped by underlying
+    // Get all derivative positions grouped by underlying — split multi-contract into virtual slots
     const derivsByKey = new Map<string, Position[]>();
     for (const pos of currentPositions.filter(p => p.asset_type === 'derivative')) {
       const raw = pos.underlying || pos.description || '';
       const key = normalizeUnderlying(raw);
       if (!derivsByKey.has(key)) derivsByKey.set(key, []);
-      derivsByKey.get(key)!.push(pos);
+      const absQty = Math.abs(pos.quantity);
+      if (absQty > 1) {
+        const sign = pos.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          derivsByKey.get(key)!.push({ ...pos, id: `${pos.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        derivsByKey.get(key)!.push(pos);
+      }
     }
 
     // Also get stock positions by underlying key for the pool

@@ -11,6 +11,7 @@ export interface PositionSignature {
   strike: number;
   expiry: string; // YYYY-MM-DD
   quantity_sign: number; // 1 or -1
+  quantity_abs?: number; // number of contracts assigned (default 1)
 }
 
 export interface StrategyConfiguration {

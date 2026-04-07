@@ -61,14 +61,29 @@ interface StrategyConfigWizardProps {
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
-  return positions
-    .filter(p => p.asset_type === 'derivative')
-    .map(o => ({
-      option_type: o.option_type || 'unknown',
-      strike: o.strike_price || 0,
-      expiry: o.expiry_date || '',
-      quantity_sign: o.quantity >= 0 ? 1 : -1,
-    }));
+  // Group derivative slots by base ID to count quantity_abs per signature
+  const sigMap = new Map<string, PositionSignature & { count: number }>();
+  for (const o of positions) {
+    if (o.asset_type !== 'derivative') continue;
+    const baseId = o.id.replace(/__opt_slot_\d+$/, '');
+    const sigKey = `${baseId}::${(o.option_type || '').toLowerCase()}::${o.strike_price || 0}::${o.expiry_date || ''}::${o.quantity >= 0 ? 1 : -1}`;
+    if (sigMap.has(sigKey)) {
+      sigMap.get(sigKey)!.count++;
+    } else {
+      sigMap.set(sigKey, {
+        option_type: o.option_type || 'unknown',
+        strike: o.strike_price || 0,
+        expiry: o.expiry_date || '',
+        quantity_sign: o.quantity >= 0 ? 1 : -1,
+        quantity_abs: 1,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(sigMap.values()).map(({ count, ...sig }) => ({
+    ...sig,
+    quantity_abs: count,
+  }));
 }
 
 function positionLabel(p: Position): string {
@@ -85,6 +100,12 @@ function positionLabel(p: Position): string {
   const type = p.option_type?.toUpperCase() || '?';
   const strike = p.strike_price || '?';
   const expiry = formatExpiryMMY(p.expiry_date);
+  // Show slot label for split option contracts
+  const optSlotMatch = p.id.match(/__opt_slot_(\d+)$/);
+  if (optSlotMatch) {
+    const slotNum = parseInt(optSlotMatch[1]) + 1;
+    return `${prefix} ${side} ${type} ${strike} ${expiry} [${slotNum}]`;
+  }
   const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
   return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
 }
@@ -369,6 +390,20 @@ export function StrategyConfigWizard({
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
     
+    // Split derivative contracts with |quantity| > 1 into virtual single-contract slots
+    const virtualDerivs: Position[] = [];
+    for (const d of derivs) {
+      const absQty = Math.abs(d.quantity);
+      if (absQty > 1) {
+        const sign = d.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          virtualDerivs.push({ ...d, id: `${d.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        virtualDerivs.push(d);
+      }
+    }
+    
     // Split stocks into 100-share virtual slots
     const virtualStocks: Position[] = [];
     for (const stock of stocks) {
@@ -386,7 +421,7 @@ export function StrategyConfigWizard({
       }
     }
     
-    return [...derivs, ...virtualStocks];
+    return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
 
   // Group all positions by normalized underlying — skip when closed
@@ -451,21 +486,24 @@ export function StrategyConfigWizard({
       const matched: Position[] = [];
 
       for (const sig of signatures) {
-        const match = groupPositions.find(p => {
-          if (usedIds.has(p.id)) return false;
-          if (p.asset_type !== 'derivative') return false;
-          const optType = (p.option_type || '').toLowerCase();
-          const sigType = (sig.option_type || '').toLowerCase();
-          if (optType !== sigType) return false;
-          if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
-          if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
-          const posSign = p.quantity >= 0 ? 1 : -1;
-          if (posSign !== sig.quantity_sign) return false;
-          return true;
-        });
-        if (match) {
-          usedIds.add(match.id);
-          matched.push(match);
+        const qtyNeeded = sig.quantity_abs || 1;
+        for (let qi = 0; qi < qtyNeeded; qi++) {
+          const match = groupPositions.find(p => {
+            if (usedIds.has(p.id)) return false;
+            if (p.asset_type !== 'derivative') return false;
+            const optType = (p.option_type || '').toLowerCase();
+            const sigType = (sig.option_type || '').toLowerCase();
+            if (optType !== sigType) return false;
+            if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
+            if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
+            const posSign = p.quantity >= 0 ? 1 : -1;
+            if (posSign !== sig.quantity_sign) return false;
+            return true;
+          });
+          if (match) {
+            usedIds.add(match.id);
+            matched.push(match);
+          }
         }
       }
 
@@ -517,9 +555,11 @@ export function StrategyConfigWizard({
     return restored;
   }, [existingConfigs, allAvailable]);
 
-  // Restore saved configs when wizard opens via prop
+  // Restore saved configs when wizard opens — use ref to avoid re-running on reactive updates
+  const hasInitialized = useMemo(() => ({ current: false }), []);
   useEffect(() => {
-    if (open) {
+    if (open && !hasInitialized.current) {
+      hasInitialized.current = true;
       startTransition(() => {
         const restored = restoreFromConfigs();
         setStrategies(restored);
@@ -527,7 +567,10 @@ export function StrategyConfigWizard({
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
-  }, [open, restoreFromConfigs]);
+    if (!open) {
+      hasInitialized.current = false;
+    }
+  }, [open, restoreFromConfigs, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     onOpenChange(isOpen);
