@@ -490,16 +490,17 @@ export function StrategyConfigWizard({
     const restored: WizardStrategy[] = [];
     const autoSplitIds = new Set<string>();
 
-    // First pass: detect which options need splitting
+    // First pass: detect which positions need splitting
     // An option needs splitting if a config uses quantity_abs < |original quantity|
+    // A stock needs splitting if config has multiple linked_stock_slot_ids
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
       if (signatures.length === 0) continue;
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
 
+      // Check options
       for (const sig of signatures) {
         const qtyNeeded = sig.quantity_abs || 1;
-        // Find the original (non-split) option in allAvailable
         const originalOption = allAvailable.find(p => {
           if (p.asset_type !== 'derivative') return false;
           if (keyMapRestore.get(p.id) !== configUnderlyingKey) return false;
@@ -516,16 +517,42 @@ export function StrategyConfigWizard({
           autoSplitIds.add(originalOption.id);
         }
       }
+
+      // Check stocks: if config has multiple linked_stock_slot_ids, auto-split the stock
+      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (savedSlotIds.length > 1) {
+        // Find the base stock ID from the slot IDs
+        for (const slotId of savedSlotIds) {
+          const baseStockId = slotId.replace(/__slot_\d+$/, '');
+          const stock = allAvailable.find(p => p.id === baseStockId && (p.asset_type === 'stock' || p.asset_type === 'etf'));
+          if (stock && stock.quantity >= 200) {
+            autoSplitIds.add(stock.id);
+          }
+        }
+      }
     }
 
     // Build effective positions for restore (with splits applied)
     const restorePositions: Position[] = [];
     for (const p of allAvailable) {
-      if (p.asset_type === 'derivative' && autoSplitIds.has(p.id) && Math.abs(p.quantity) > 1) {
-        const absQty = Math.abs(p.quantity);
-        const sign = p.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+      if (autoSplitIds.has(p.id)) {
+        if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
+          const absQty = Math.abs(p.quantity);
+          const sign = p.quantity >= 0 ? 1 : -1;
+          for (let i = 0; i < absQty; i++) {
+            restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+          }
+        } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
+          const slots = Math.floor(p.quantity / 100);
+          for (let i = 0; i < slots; i++) {
+            restorePositions.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+          }
+          const remainder = p.quantity % 100;
+          if (remainder > 0) {
+            restorePositions.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+          }
+        } else {
+          restorePositions.push(p);
         }
       } else {
         restorePositions.push(p);
