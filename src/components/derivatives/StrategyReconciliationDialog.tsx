@@ -226,6 +226,7 @@ export function StrategyReconciliationDialog({
   const [underlyingStates, setUnderlyingStates] = useState<Map<string, UnderlyingReconciliation>>(new Map());
   const [selectedByGroup, setSelectedByGroup] = useState<Map<string, Set<string>>>(new Map());
   const [initialized, setInitialized] = useState(false);
+  const [splitOptionIds, setSplitOptionIds] = useState<Set<string>>(new Set());
 
   // Build initial state from reconciliation items
   const initStates = useCallback(() => {
