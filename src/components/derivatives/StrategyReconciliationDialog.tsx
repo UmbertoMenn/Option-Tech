@@ -37,8 +37,8 @@ function positionLabel(p: Position): string {
   if (p.asset_type === 'stock' || p.asset_type === 'etf') {
     const slotMatch = p.id.match(/__slot_(\d+)$/);
     if (slotMatch) {
-      const slotNum = parseInt(slotMatch[1]) + 1;
-      return `${p.description} (${p.quantity} azioni) [slot ${slotNum}]`;
+      const letter = String.fromCharCode(65 + parseInt(slotMatch[1]));
+      return `${p.description} (${p.quantity} azioni) (${letter})`;
     }
     return `${p.description} (${p.quantity} azioni)`;
   }
@@ -49,8 +49,8 @@ function positionLabel(p: Position): string {
   const expiry = formatExpiryMMY(p.expiry_date);
   const optSlotMatch = p.id.match(/__opt_slot_(\d+)$/);
   if (optSlotMatch) {
-    const slotNum = parseInt(optSlotMatch[1]) + 1;
-    return `${prefix} ${side} ${type} ${strike} ${expiry} [${slotNum}]`;
+    const letter = String.fromCharCode(65 + parseInt(optSlotMatch[1]));
+    return `${prefix} ${side} ${type} ${strike} ${expiry} (${letter})`;
   }
   const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
   return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
