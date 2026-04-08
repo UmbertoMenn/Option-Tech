@@ -122,24 +122,8 @@ export function useStrategyConfigurations() {
       
       if (configs.length === 0) return;
       
-      // Deduplicate by (underlying, strategy_type) as safety net
-      const deduped = new Map<string, UpsertConfigParams>();
-      for (const c of configs) {
-        const key = `${c.underlying}::${c.strategy_type}`;
-        if (deduped.has(key)) {
-          const existing = deduped.get(key)!;
-          existing.position_signatures = [...existing.position_signatures, ...c.position_signatures];
-          if (c.is_synthetic) existing.is_synthetic = true;
-          if (c.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = c.linked_stock_id;
-          // Merge slot ids uniquely
-          const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(c.linked_stock_slot_ids || [])]);
-          existing.linked_stock_slot_ids = Array.from(mergedSlots);
-        } else {
-          deduped.set(key, { ...c });
-        }
-      }
-      
-      const rows = Array.from(deduped.values()).map(c => ({
+      // Save each config as a separate row with sort_order — NO deduplication
+      const rows = configs.map((c, index) => ({
         portfolio_id: portfolioId,
         underlying: c.underlying,
         strategy_type: c.strategy_type,
@@ -147,6 +131,7 @@ export function useStrategyConfigurations() {
         is_synthetic: c.is_synthetic || false,
         linked_stock_id: c.linked_stock_id || null,
         linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
+        sort_order: c.sort_order ?? index,
       }));
       
       const { error } = await supabase.from('strategy_configurations').insert(rows);
