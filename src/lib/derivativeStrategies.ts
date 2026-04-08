@@ -311,38 +311,80 @@ export function categorizeDerivatives(
     }
   }
   
-  // ============ STEP 0.5: Apply Strategy Configurations ============
+  // ============ STEP 0.5: Apply Strategy Configurations (quantity-aware) ============
+  // Track consumed quantity per position across ALL configs so that multiple configs
+  // can share the same aggregated position row (e.g., CALL -2 → 1 for each config).
+  const configUsedQty = new Map<string, number>();
+
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-    const remaining = filteredDerivatives.filter(d => {
+    const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
+    if (sigs.length === 0) continue;
+
+    // Pool: derivatives for this underlying not fully consumed by overrides
+    const pool = filteredDerivatives.filter(d => {
       if (usedDerivatives.has(d.id)) return false;
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
     });
-    if (remaining.length === 0) continue;
 
-    const linkedStock = (config.linked_stock_id 
-      ? allPositions.find(p => p.id === config.linked_stock_id) 
-      : null) || findUnderlyingStock(remaining[0], stockPositions);
+    // Match each signature with quantity awareness — create virtual positions
+    const matchedVirtual: Position[] = [];
+    for (const sig of sigs) {
+      const needed = sig.quantity_abs || 1;
+      let rem = needed;
+
+      for (const p of pool) {
+        if (rem <= 0) break;
+        if ((p.option_type || '').toLowerCase() !== sig.option_type.toLowerCase()) continue;
+        if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) continue;
+        if ((p.expiry_date || '') !== (sig.expiry || '')) continue;
+        if ((p.quantity >= 0 ? 1 : -1) !== sig.quantity_sign) continue;
+
+        const totalAbs = Math.abs(p.quantity);
+        const alreadyUsed = configUsedQty.get(p.id) || 0;
+        const avail = totalAbs - alreadyUsed;
+        if (avail <= 0) continue;
+
+        const take = Math.min(avail, rem);
+        configUsedQty.set(p.id, alreadyUsed + take);
+        rem -= take;
+
+        // Virtual position with proportionally scaled aggregates
+        const sign = p.quantity >= 0 ? 1 : -1;
+        const ratio = take / totalAbs;
+        matchedVirtual.push({
+          ...p,
+          quantity: sign * take,
+          market_value: p.market_value != null ? p.market_value * ratio : null,
+          profit_loss: p.profit_loss != null ? p.profit_loss * ratio : null,
+          snapshot_market_value: p.snapshot_market_value != null ? p.snapshot_market_value * ratio : null,
+        });
+
+        // Mark fully consumed positions so later steps won't touch them
+        if (alreadyUsed + take >= totalAbs) {
+          usedDerivatives.add(p.id);
+        }
+      }
+    }
+
+    if (matchedVirtual.length === 0) continue;
+
+    const linkedStock = (config.linked_stock_id
+      ? allPositions.find(p => p.id === config.linked_stock_id)
+      : null) || findUnderlyingStock(matchedVirtual[0], stockPositions);
 
     switch (config.strategy_type) {
       case 'covered_call': {
-        // STRICT: use only signature-matched positions
-        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-        const sigMatched = filterBySignatures(remaining, sigs);
         const stock = linkedStock || createDummyStock(config.underlying);
-        
-        // Mark ALL signature-matched positions as used immediately
-        for (const m of sigMatched) usedDerivatives.add(m.id);
-        
-        const calls = sigMatched.filter(d => d.option_type === 'call' && d.quantity < 0);
-        
+        const calls = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+
         if (config.is_synthetic) {
-          const soldPuts = sigMatched.filter(d => d.option_type === 'put' && d.quantity < 0)
+          const soldPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
           const synPut = soldPuts[0];
-          const boughtPutsForPromotion = sigMatched.filter(d => d.option_type === 'put' && d.quantity > 0);
-          
+          const boughtPutsForPromotion = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
             const protPut = boughtPutsForPromotion.shift();
@@ -375,25 +417,18 @@ export function categorizeDerivatives(
         break;
       }
       case 'derisking_covered_call': {
-        // STRICT: use only signature-matched positions — no heuristic fallback
-        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-        const sigMatched = filterBySignatures(remaining, sigs);
         const stock = linkedStock || createDummyStock(config.underlying);
-        
-        // Mark ALL signature-matched positions as used immediately
-        for (const m of sigMatched) usedDerivatives.add(m.id);
-        
-        const calls = sigMatched.filter(d => d.option_type === 'call' && d.quantity < 0);
-        
+        const calls = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+
         let syntheticPut: Position | undefined;
         if (config.is_synthetic) {
-          const soldPuts = sigMatched.filter(d => d.option_type === 'put' && d.quantity < 0)
+          const soldPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
           syntheticPut = soldPuts[0];
         }
-        
-        const boughtPuts = [...sigMatched.filter(d => d.option_type === 'put' && d.quantity > 0)];
-        
+
+        const boughtPuts = [...matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0)];
+
         for (const call of calls) {
           const contracts = Math.abs(call.quantity);
           const cc: CoveredCallPosition = {
@@ -419,69 +454,60 @@ export function categorizeDerivatives(
         break;
       }
       case 'iron_condor': {
-        const sc = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
-        const bc = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
-        const sp = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
-        const bp = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
-        const ic = tryMatchIronCondor(sc, bc, sp, bp);
-        if (ic) {
-          ironCondors.push(ic.condor);
-          [ic.condor.soldCall, ic.condor.boughtCall, ic.condor.soldPut, ic.condor.boughtPut]
-            .forEach(leg => usedDerivatives.add(leg.id));
+        const sc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
+        const sp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0);
+        const bp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        if (sc.length > 0 && bc.length > 0 && sp.length > 0 && bp.length > 0) {
+          ironCondors.push({
+            underlying: config.underlying,
+            expiryDate: sc[0].expiry_date || '',
+            soldCall: sc[0], boughtCall: bc[0], soldPut: sp[0], boughtPut: bp[0],
+            contracts: Math.abs(sc[0].quantity),
+            totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
+            totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
+          });
         }
-        const sigMatched_ic = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_ic) usedDerivatives.add(opt.id);
         break;
       }
       case 'double_diagonal': {
-        const sc = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
-        const bc = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
-        const sp = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
-        const bp = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
-        const dd = tryMatchDoubleDiagonal(sc, bc, sp, bp);
-        if (dd) {
-          doubleDiagonals.push(dd.diagonal);
-          [dd.diagonal.soldCall, dd.diagonal.boughtCall, dd.diagonal.soldPut, dd.diagonal.boughtPut]
-            .forEach(leg => usedDerivatives.add(leg.id));
+        const sc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
+        const sp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0);
+        const bp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        if (sc.length > 0 && bc.length > 0 && sp.length > 0 && bp.length > 0) {
+          doubleDiagonals.push({
+            underlying: config.underlying,
+            soldExpiryDate: sc[0].expiry_date || '',
+            boughtExpiryDate: bc[0].expiry_date || '',
+            soldCall: sc[0], boughtCall: bc[0], soldPut: sp[0], boughtPut: bp[0],
+            contracts: Math.abs(sc[0].quantity),
+            totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
+            totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
+          });
         }
-        const sigMatched_dd = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_dd) usedDerivatives.add(opt.id);
         break;
       }
       case 'naked_put': {
-        const puts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0);
-        for (const put of puts) {
+        for (const put of matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)) {
           nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
-          usedDerivatives.add(put.id);
         }
-        const sigMatched_np = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_np) usedDerivatives.add(opt.id);
         break;
       }
       case 'leap_call': {
-        const calls = remaining.filter(d => d.option_type === 'call' && d.quantity > 0);
-        for (const call of calls) {
+        for (const call of matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0)) {
           leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
-          usedDerivatives.add(call.id);
         }
-        const sigMatched_lc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
-        for (const opt of sigMatched_lc) usedDerivatives.add(opt.id);
         break;
       }
       default: {
-        // 'other' or any custom strategy type — only consume signature-matched positions
-        const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-        const sigMatched_def = sigs.length > 0
-          ? filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), sigs)
-          : remaining.filter(d => !usedDerivatives.has(d.id));
+        // 'other', 'put_spread', 'diagonal_put_spread', etc.
         const configOptions: OtherStrategyPosition[] = [];
-        for (const opt of sigMatched_def) {
+        for (const opt of matchedVirtual) {
           const entry: OtherStrategyPosition = { option: opt, underlying: linkedStock || null };
           otherStrategies.push(entry);
           configOptions.push(entry);
-          usedDerivatives.add(opt.id);
         }
-        // Track per-config group (1 config = 1 group, never merged by underlying)
         if (configOptions.length > 0) {
           configOtherGroups.push({
             underlying: config.underlying,
