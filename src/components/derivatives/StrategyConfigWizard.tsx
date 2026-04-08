@@ -518,10 +518,12 @@ export function StrategyConfigWizard({
         }
       }
 
-      // Check stocks: if config has multiple linked_stock_slot_ids, auto-split the stock
+      // Check stocks: if ANY config references a __slot_ ID, auto-split the base stock
+      // This ensures that even a single slot reference triggers splitting so sibling configs
+      // can each claim their own slot.
       const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
-      if (savedSlotIds.length > 1) {
-        // Find the base stock ID from the slot IDs
+      const hasSlotRef = savedSlotIds.some(id => /__slot_\d+$/.test(id));
+      if (hasSlotRef) {
         for (const slotId of savedSlotIds) {
           const baseStockId = slotId.replace(/__slot_\d+$/, '');
           const stock = allAvailable.find(p => p.id === baseStockId && (p.asset_type === 'stock' || p.asset_type === 'etf'));
