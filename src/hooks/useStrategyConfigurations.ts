@@ -23,6 +23,7 @@ export interface StrategyConfiguration {
   is_synthetic: boolean;
   linked_stock_id: string | null;
   linked_stock_slot_ids: string[];
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
