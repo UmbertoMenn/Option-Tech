@@ -196,6 +196,7 @@ export function categorizeDerivatives(
   const nakedPuts: NakedPutPosition[] = [];
   const leapCalls: LeapCallPosition[] = [];
   const otherStrategies: OtherStrategyPosition[] = [];
+  const configOtherGroups: GroupedOtherStrategy[] = []; // Per-config groups for config-only mode
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions (NOT ETFs for matching)
