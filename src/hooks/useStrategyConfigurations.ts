@@ -72,7 +72,8 @@ export function useStrategyConfigurations() {
       if (isUserAggregated && userPortfolioIds.length > 0) {
         const { data, error } = await supabase
           .from('strategy_configurations').select('*')
-          .in('portfolio_id', userPortfolioIds);
+          .in('portfolio_id', userPortfolioIds)
+          .order('sort_order', { ascending: true });
         if (error) throw error;
         return (data || []) as unknown as StrategyConfiguration[];
       }
