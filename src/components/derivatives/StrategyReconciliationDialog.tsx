@@ -504,6 +504,7 @@ export function StrategyReconciliationDialog({
   const handleSave = async () => {
     const configs: UpsertConfigParams[] = [];
     const affectedUnderlyings = new Set<string>();
+    let sortIdx = 0;
 
     // Collect configs from reconciliation states
     for (const [, state] of underlyingStates) {
@@ -526,6 +527,7 @@ export function StrategyReconciliationDialog({
           is_synthetic: strategy.isSynthetic,
           linked_stock_id: realStockId,
           linked_stock_slot_ids: stockSlotIds,
+          sort_order: sortIdx++,
         });
       }
     }
@@ -540,6 +542,7 @@ export function StrategyReconciliationDialog({
         is_synthetic: config.is_synthetic,
         linked_stock_id: config.linked_stock_id,
         linked_stock_slot_ids: config.linked_stock_slot_ids || [],
+        sort_order: sortIdx++,
       });
     }
 
