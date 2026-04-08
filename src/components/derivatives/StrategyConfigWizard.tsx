@@ -770,7 +770,8 @@ export function StrategyConfigWizard({
   const handleSave = async () => {
     const rawConfigs: UpsertConfigParams[] = [];
 
-    for (const strategy of strategies) {
+    for (let i = 0; i < strategies.length; i++) {
+      const strategy = strategies[i];
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
         || strategy.positions[0]?.description || 'Unknown';
       const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
@@ -784,6 +785,7 @@ export function StrategyConfigWizard({
         is_synthetic: strategy.isSynthetic,
         linked_stock_id: realStockId,
         linked_stock_slot_ids: slotIds,
+        sort_order: i,
       });
     }
 
@@ -802,26 +804,8 @@ export function StrategyConfigWizard({
       }
     }
 
-    // Deduplicate: merge configs with same (underlying, strategy_type)
-    const deduped = new Map<string, UpsertConfigParams>();
-    for (const cfg of rawConfigs) {
-      const key = `${cfg.underlying}::${cfg.strategy_type}`;
-      if (deduped.has(key)) {
-        const existing = deduped.get(key)!;
-        existing.position_signatures = [
-          ...existing.position_signatures,
-          ...cfg.position_signatures,
-        ];
-        if (cfg.is_synthetic) existing.is_synthetic = true;
-        if (cfg.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = cfg.linked_stock_id;
-        const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(cfg.linked_stock_slot_ids || [])]);
-        existing.linked_stock_slot_ids = Array.from(mergedSlots);
-      } else {
-        deduped.set(key, { ...cfg });
-      }
-    }
-
-    await onSave(Array.from(deduped.values()));
+    // NO deduplication — each strategy is saved as a separate row
+    await onSave(rawConfigs);
     onOpenChange(false);
   };
 
