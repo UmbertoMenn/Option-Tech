@@ -413,41 +413,26 @@ export function Derivatives() {
   const needsWizard = useMemo(() => {
     if (derivatives.length === 0) return false;
     if (!hasConfigurations) {
-      // Even without configs, if ALL derivatives are archived, no wizard needed
       const nonArchived = derivatives.filter(d => !isArchivedDerivative(d));
       return nonArchived.length > 0;
     }
-    // Check if any derivative is NOT matched by any saved configuration signature AND not archived
-    const configuredIds = new Set<string>();
-    for (const config of strategyConfigs) {
-      const configKey = normalizeForMatching(config.underlying || '');
-      const sigs = (config.position_signatures as unknown as import('@/hooks/useStrategyConfigurations').PositionSignature[]) || [];
-      if (sigs.length === 0) continue;
-      const candidates = derivatives.filter(d => {
-        const posUnderlying = normalizeForMatching(d.underlying || d.description || '');
-        return posUnderlying.includes(configKey) || configKey.includes(posUnderlying);
-      });
-      for (const d of candidates) {
-        for (const sig of sigs) {
-          if (
-            (d.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
-            Math.abs((d.strike_price || 0) - sig.strike) < 0.01 &&
-            (d.expiry_date || '') === sig.expiry &&
-            (d.quantity >= 0 ? 1 : -1) === sig.quantity_sign
-          ) {
-            configuredIds.add(d.id);
-            break;
-          }
-        }
+    // Use resolvedConfigs from the shared resolver — same source of truth as the page
+    // A derivative is "covered" if it appears in any resolvedConfig's matchedPositions
+    const coveredPositionIds = new Set<string>();
+    for (const rc of categories.resolvedConfigs) {
+      for (const mp of rc.matchedPositions) {
+        // Virtual positions share the same base id as the real position
+        coveredPositionIds.add(mp.id);
       }
     }
-    // Exclude archived derivatives from uncovered count
+    // Also mark the real position IDs as covered (virtual IDs equal real IDs in our case)
     const uncoveredCount = derivatives.filter(d => {
-      if (configuredIds.has(d.id)) return false;
+      if (coveredPositionIds.has(d.id)) return false;
       if (isArchivedDerivative(d)) return false;
       return true;
     }).length;
     return uncoveredCount > 0;
+  }, [derivatives, hasConfigurations, categories.resolvedConfigs, isArchivedDerivative]);
   }, [derivatives, hasConfigurations, strategyConfigs, isArchivedDerivative]);
 
    // Clean up legacy ?wizard=1 param without opening wizard
