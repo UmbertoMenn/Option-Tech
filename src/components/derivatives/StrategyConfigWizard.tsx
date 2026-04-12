@@ -495,7 +495,8 @@ export function StrategyConfigWizard({
     // A stock needs splitting if config has multiple linked_stock_slot_ids
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      if (signatures.length === 0) continue;
+      const slotIdsForCheck = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (signatures.length === 0 && slotIdsForCheck.length === 0 && !config.linked_stock_id) continue;
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
 
       // Check options
@@ -570,7 +571,8 @@ export function StrategyConfigWizard({
 
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      if (signatures.length === 0) continue;
+      const savedSlotIdsForRestore = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (signatures.length === 0 && savedSlotIdsForRestore.length === 0 && !config.linked_stock_id) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
       const groupPositions = restorePositions.filter(p => keyMapRestore2.get(p.id) === configUnderlyingKey);
@@ -774,8 +776,10 @@ export function StrategyConfigWizard({
 
     for (let i = 0; i < strategies.length; i++) {
       const strategy = strategies[i];
-      const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
-        || strategy.positions[0]?.description || 'Unknown';
+      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+      const underlying = derivPos
+        ? (derivPos.underlying || derivPos.description || 'Unknown')
+        : (getCanonicalKey(strategy.positions[0]?.description || '') || getCanonicalKey(`${strategy.positions[0]?.description || ''} ${strategy.positions[0]?.ticker || ''}`) || strategy.positions[0]?.description || 'Unknown');
       const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
       const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
       const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
@@ -1129,21 +1133,58 @@ export function StrategyConfigWizard({
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
-                                {strategy.positions.map(p => (
-                                  <Badge
-                                    key={p.id}
-                                    variant="outline"
-                                    className={`text-xs pr-1 ${positionBadgeClass(p)}`}
-                                  >
-                                    {positionLabel(p)}
-                                    <button
-                                      className="ml-1 hover:text-destructive"
-                                      onClick={() => removeFromStrategy(strategy.id, p.id)}
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </Badge>
-                                ))}
+                                {strategy.positions.map(p => {
+                                  const isStockSlot = /__slot_\d+$/.test(p.id);
+                                  const isGroupedStock = (p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200 && !isStockSlot;
+                                  const canSplitInStrategy = isGroupedStock;
+
+                                  return (
+                                    <div key={p.id} className="inline-flex items-center gap-0.5">
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-xs pr-1 ${positionBadgeClass(p)}`}
+                                      >
+                                        {positionLabel(p)}
+                                        <button
+                                          className="ml-1 hover:text-destructive"
+                                          onClick={() => removeFromStrategy(strategy.id, p.id)}
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </Badge>
+                                      {canSplitInStrategy && (
+                                        <TooltipProvider delayDuration={200}>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <button
+                                                className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                                onClick={(e) => {
+                                                  e.preventDefault();
+                                                  // Split the stock: mark as split, replace in strategy with first slot only
+                                                  setSplitPositionIds(prev => new Set(prev).add(p.id));
+                                                  setStrategies(prev => prev.map(s => {
+                                                    if (s.id !== strategy.id) return s;
+                                                    const newPositions = s.positions.map(sp => {
+                                                      if (sp.id !== p.id) return sp;
+                                                      // Replace whole stock with first slot
+                                                      return { ...sp, id: `${sp.id}__slot_0`, quantity: 100 };
+                                                    });
+                                                    return { ...s, positions: newPositions };
+                                                  }));
+                                                }}
+                                              >
+                                                <Scissors className="w-3.5 h-3.5" />
+                                              </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="text-xs">
+                                              Dividi in slot da 100 azioni
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           );

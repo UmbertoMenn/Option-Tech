@@ -221,13 +221,14 @@ export function categorizeDerivatives(
   const precomputeUsedQty = new Map<string, number>();
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-    const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-    if (sigs.length === 0) continue;
+    const sigsForPrecompute = (config.position_signatures as unknown as PositionSignature[]) || [];
+    const stockSlotIdsForPrecompute = (config.linked_stock_slot_ids as unknown as string[]) || [];
+    if (sigsForPrecompute.length === 0 && stockSlotIdsForPrecompute.length === 0 && !config.linked_stock_id) continue;
     const candidates = filteredDerivatives.filter(d => {
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
     });
-    for (const sig of sigs) {
+    for (const sig of sigsForPrecompute) {
       const needed = sig.quantity_abs || 1;
       let rem = needed;
       for (const p of candidates) {
@@ -350,7 +351,8 @@ export function categorizeDerivatives(
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
     const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-    if (sigs.length === 0) continue;
+    const stockSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+    if (sigs.length === 0 && stockSlotIds.length === 0 && !config.linked_stock_id) continue;
 
     // Pool: derivatives for this underlying not fully consumed by overrides
     const pool = filteredDerivatives.filter(d => {
@@ -399,7 +401,24 @@ export function categorizeDerivatives(
       }
     }
 
-    if (matchedVirtual.length === 0) {
+    // Resolve linked stock from slot IDs or legacy linked_stock_id
+    let linkedStock: Position | null = null;
+    if (stockSlotIds.length > 0) {
+      // Find first matching stock by slot ID
+      for (const slotId of stockSlotIds) {
+        const baseId = slotId.replace(/__slot_\d+$/, '');
+        const stock = allPositions.find(p => p.id === baseId && (p.asset_type === 'stock' || p.asset_type === 'etf'));
+        if (stock) { linkedStock = stock; break; }
+      }
+    }
+    if (!linkedStock && config.linked_stock_id) {
+      linkedStock = allPositions.find(p => p.id === config.linked_stock_id) || null;
+    }
+    if (!linkedStock && matchedVirtual.length > 0) {
+      linkedStock = findUnderlyingStock(matchedVirtual[0], stockPositions);
+    }
+
+    if (matchedVirtual.length === 0 && !linkedStock) {
       console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): NO MATCH — 0 positions found for ${sigs.length} signatures`);
       resolvedConfigs.push({
         configId: config.id,
@@ -414,11 +433,7 @@ export function categorizeDerivatives(
       continue;
     }
 
-    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions`);
-
-    const linkedStock = (config.linked_stock_id
-      ? allPositions.find(p => p.id === config.linked_stock_id)
-      : null) || findUnderlyingStock(matchedVirtual[0], stockPositions);
+    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions, linkedStock: ${linkedStock?.description || 'none'}`);
 
     switch (config.strategy_type) {
       case 'covered_call': {
