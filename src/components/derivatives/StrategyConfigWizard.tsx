@@ -495,7 +495,8 @@ export function StrategyConfigWizard({
     // A stock needs splitting if config has multiple linked_stock_slot_ids
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      if (signatures.length === 0) continue;
+      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (signatures.length === 0 && savedSlotIds.length === 0 && !config.linked_stock_id) continue;
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
 
       // Check options
@@ -570,7 +571,8 @@ export function StrategyConfigWizard({
 
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      if (signatures.length === 0) continue;
+      const savedSlotIdsForRestore = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (signatures.length === 0 && savedSlotIdsForRestore.length === 0 && !config.linked_stock_id) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
       const groupPositions = restorePositions.filter(p => keyMapRestore2.get(p.id) === configUnderlyingKey);
