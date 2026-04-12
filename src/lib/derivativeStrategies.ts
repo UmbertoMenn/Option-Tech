@@ -399,7 +399,22 @@ export function categorizeDerivatives(
       }
     }
 
-    if (matchedVirtual.length === 0) continue;
+    if (matchedVirtual.length === 0) {
+      console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): NO MATCH — 0 positions found for ${sigs.length} signatures`);
+      resolvedConfigs.push({
+        configId: config.id,
+        strategyType: config.strategy_type,
+        underlying: config.underlying,
+        sortOrder: config.sort_order,
+        isSynthetic: config.is_synthetic,
+        linkedStock: null,
+        matchedPositions: [],
+        status: 'unmatched',
+      });
+      continue;
+    }
+
+    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions`);
 
     const linkedStock = (config.linked_stock_id
       ? allPositions.find(p => p.id === config.linked_stock_id)
