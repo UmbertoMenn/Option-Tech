@@ -10,6 +10,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
+import { calculateTimeWeightedAverage } from '@/lib/timeWeightedAverage';
 import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
@@ -493,10 +494,10 @@ export function PerformanceEvolutionChart({
       // P/L = current value - initial value - deposits in period
       const pl = value - initialValue - cumulativeDeposits;
 
-      // Use average balance from entry if available, otherwise use initial value + half deposits
-      const avgBalance = entry.average_balance > 0 
-        ? entry.average_balance 
-        : initialValue + cumulativeDeposits / 2;
+      // Time-weighted average balance from initial date to this snapshot
+      const avgBalance = calculateTimeWeightedAverage(
+        initialDate, snapshotDate, initialValue, sortedDeposits
+      ).average;
 
       // Return % = P/L / average balance * 100
       const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
@@ -529,7 +530,9 @@ export function PerformanceEvolutionChart({
         .reduce((sum, d) => sum + d.amount, 0);
 
       const pl = currentValue - initialValue - cumulativeDeposits;
-      const avgBalance = initialValue + cumulativeDeposits / 2;
+      const avgBalance = calculateTimeWeightedAverage(
+        initialDate, currentDateObj, initialValue, sortedDeposits
+      ).average;
       const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
 
       const bmCurrent = benchmarkByDate[currentDate];
