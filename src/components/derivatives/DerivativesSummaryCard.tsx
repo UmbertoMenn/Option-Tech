@@ -23,6 +23,7 @@ interface DerivativesSummaryCardProps {
   stockPositions: Position[];
   underlyingPrices: Record<string, UnderlyingPrice>;
   strategyConfigs: StrategyConfiguration[];
+  archivedKeys?: string[];
   missingCount?: number;
   isFetchingMissing?: boolean;
 }
