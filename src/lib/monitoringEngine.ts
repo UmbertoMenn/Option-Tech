@@ -82,12 +82,45 @@ function getMatchingKey(text: string): string {
   return getCanonicalKey(text) || normalizeForMatching(text);
 }
 
+/** Cache per evitare iterazioni ripetute su underlyingPrices */
+let _resolveCacheRef: WeakRef<Record<string, UnderlyingPrice>> | null = null;
+let _resolveCache = new Map<string, string | null>();
+
 function resolveTickerFromPrices(
-  underlyingOrDesc: string,
+  text: string,
   underlyingPrices: Record<string, UnderlyingPrice>
 ): string | null {
-  const priceData = underlyingPrices[underlyingOrDesc];
-  if (priceData?.ticker) return priceData.ticker;
+  // Invalidate cache if underlyingPrices object changed
+  if (!_resolveCacheRef || _resolveCacheRef.deref() !== underlyingPrices) {
+    _resolveCacheRef = new WeakRef(underlyingPrices);
+    _resolveCache = new Map();
+  }
+
+  if (_resolveCache.has(text)) return _resolveCache.get(text)!;
+
+  // 1. Exact lookup O(1)
+  if (underlyingPrices[text]?.ticker) {
+    _resolveCache.set(text, underlyingPrices[text].ticker);
+    return underlyingPrices[text].ticker;
+  }
+
+  // 2. Normalized fallback — handles broker prefixes (AZ.), name variations, aliases
+  const norm = normalizeForMatching(text);
+  const canon = getCanonicalKey(text);
+
+  for (const [key, data] of Object.entries(underlyingPrices)) {
+    if (!data.ticker) continue;
+    if (canon && getCanonicalKey(key) === canon) {
+      _resolveCache.set(text, data.ticker);
+      return data.ticker;
+    }
+    if (normalizeForMatching(key) === norm) {
+      _resolveCache.set(text, data.ticker);
+      return data.ticker;
+    }
+  }
+
+  _resolveCache.set(text, null);
   return null;
 }
 
