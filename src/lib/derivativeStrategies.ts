@@ -568,6 +568,18 @@ export function categorizeDerivatives(
         break;
       }
     }
+
+    // Track resolved config
+    resolvedConfigs.push({
+      configId: config.id,
+      strategyType: config.strategy_type,
+      underlying: config.underlying,
+      sortOrder: config.sort_order,
+      isSynthetic: config.is_synthetic,
+      linkedStock: linkedStock || null,
+      matchedPositions: matchedVirtual,
+      status: matchedVirtual.length === sigs.length ? 'matched' : 'partial',
+    });
   }
 
   // ============ CONFIG-ONLY MODE ============
@@ -575,7 +587,8 @@ export function categorizeDerivatives(
   // Orphans (unmatched positions) are DROPPED — they do NOT go to "Altre Strategie".
   // Use per-config groups to preserve separate strategies for the same underlying.
   if (options?.configOnly) {
-    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups };
+    console.log(`[ConfigOnly] resolvedConfigs: ${resolvedConfigs.length}, coveredCalls: ${coveredCalls.length}, deRisking: ${deRiskingCoveredCalls.length}, IC: ${ironCondors.length}, DD: ${doubleDiagonals.length}, NP: ${nakedPuts.length}, LC: ${leapCalls.length}, other: ${configOtherGroups.length}`);
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs };
   }
 
   // ============ STRICT CONFIG GUARD ============
