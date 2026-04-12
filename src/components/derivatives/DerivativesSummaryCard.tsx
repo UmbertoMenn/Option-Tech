@@ -112,6 +112,7 @@ export function DerivativesSummaryCard({
   stockPositions,
   underlyingPrices,
   strategyConfigs,
+  archivedKeys = [],
   missingCount = 0,
   isFetchingMissing = false,
 }: DerivativesSummaryCardProps) {
@@ -120,8 +121,8 @@ export function DerivativesSummaryCard({
   
   // ============ Single canonical monitoring computation ============
   const monitoring: MonitoringResult = useMemo(() => {
-    return computeMonitoring(categories, allPositions, stockPositions, underlyingPrices, strategyConfigs);
-  }, [categories, allPositions, stockPositions, underlyingPrices, strategyConfigs]);
+    return computeMonitoring(categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys);
+  }, [categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys]);
 
   // ============ Save monitoring snapshot ============
   useEffect(() => {
