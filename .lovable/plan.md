@@ -1,43 +1,47 @@
 
 
-## Fix: matching normalizzato universale in monitoringEngine
+## Fix: Archived filtering non funziona — chiavi incompatibili
 
-### Causa
+### Causa radice
 
-`resolveTickerFromPrices` fa un lookup **esatto** `underlyingPrices[text]`. Per maurog (broker Fineco), gli stock hanno prefisso `AZ.` nella description ma `underlyingPrices` è indicizzato sui nomi underlying dei derivati (senza `AZ.`). Il lookup fallisce, stock e derivati finiscono su chiavi diverse, tutti i conteggi saltano.
+Le `archivedKeys` sono stringhe come `"RAVE RESTAURANT GROUP RAVE"`, `"AQUESTIVE THERAPEUTICS AQST"`.
+Le chiavi nella balance map sono **ticker risolti** come `"RAVE"`, `"AQST"`.
 
-Per silvias funziona solo perché il suo broker non aggiunge prefissi — il codice non è robusto, ha funzionato per coincidenza.
+Il codice attuale confronta `normalizeForMatching("RAVE")` con `normalizeForMatching("RAVE RESTAURANT GROUP RAVE")` — non matchano mai, quindi il filtro non esclude nulla.
 
 ### Fix
 
-**File: `src/lib/monitoringEngine.ts`**
+**File: `src/lib/monitoringEngine.ts`** — funzione `computeAvailableCalls`
 
-Riscrivere `resolveTickerFromPrices` per fare matching normalizzato quando il lookup esatto fallisce:
-
-1. Lookup esatto (come oggi) — O(1)
-2. Se fallisce: normalizzare il testo con `normalizeForMatching` e `getCanonicalKey`, poi cercare tra tutte le chiavi di `underlyingPrices`
-3. Cache interna per evitare iterazioni ripetute
+Invece di normalizzare le archivedKeys e confrontarle con `normalizeForMatching(key)`, bisogna **risolvere le archivedKeys attraverso `resolveKey`** (la stessa funzione usata per stock e derivati), così entrambi i lati usano lo stesso tipo di chiave (il ticker).
 
 ```typescript
-function resolveTickerFromPrices(text, underlyingPrices) {
-  // 1. Exact
-  if (underlyingPrices[text]?.ticker) return underlyingPrices[text].ticker;
-  
-  // 2. Normalized fallback
-  const norm = normalizeForMatching(text);
-  const canon = getCanonicalKey(text);
-  for (const [key, data] of Object.entries(underlyingPrices)) {
-    if (!data.ticker) continue;
-    if (canon && getCanonicalKey(key) === canon) return data.ticker;
-    if (normalizeForMatching(key) === norm) return data.ticker;
-  }
-  return null;
-}
+// Prima (non funziona):
+const archivedSet = new Set(archivedKeys.map(k => normalizeForMatching(k)));
+// confronto: normalizeForMatching("RAVE") vs normalizeForMatching("RAVE RESTAURANT GROUP RAVE")
+
+// Dopo (corretto):
+const archivedSet = new Set(archivedKeys.map(k => resolveKey(k, underlyingPrices)));
+// confronto: "RAVE" vs "RAVE" ✓
 ```
 
-Questo fix è universale: funziona per qualsiasi prefisso broker (`AZ.`, o altri futuri) perché `normalizeForMatching` li rimuove.
+In più, aggiungere un fallback con `normalizeForMatching` per i casi in cui `resolveKey` non trova il ticker (archived key non presente in underlyingPrices):
+
+```typescript
+const archivedResolved = new Set<string>();
+for (const k of archivedKeys) {
+  archivedResolved.add(resolveKey(k, underlyingPrices));  // ticker se risolvibile
+  archivedResolved.add(normalizeForMatching(k));           // fallback normalizzato
+}
+
+// Nel loop: skip se key O normKey O normTicker è nel set
+```
 
 ### File da modificare
 
-1. `src/lib/monitoringEngine.ts` — riscrivere `resolveTickerFromPrices` con matching normalizzato e cache
+1. **`src/lib/monitoringEngine.ts`** — Riscrivere la costruzione di `archivedSet` in `computeAvailableCalls` per risolvere le chiavi tramite `resolveKey`
+
+### Risultato atteso
+
+I ticker archiviati (RAVE, AQST, INDI, HIVE, MARA, QS, SMR, AAPL, ARVN, TLRY, CAPR) scompaiono dalle "Call da rivendere" per maurog.
 
