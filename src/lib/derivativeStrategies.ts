@@ -215,9 +215,10 @@ export function categorizeDerivatives(
   // Get all stock positions (NOT ETFs for matching)
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
   
-  // ============ PRE-COMPUTE: positions covered by strategy configs ============
+  // ============ PRE-COMPUTE: positions covered by strategy configs (quantity-aware) ============
   // These positions must NOT be consumed by single overrides (Step 0).
   const configCoveredIds = new Set<string>();
+  const precomputeUsedQty = new Map<string, number>();
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
     const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
@@ -226,8 +227,25 @@ export function categorizeDerivatives(
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
     });
-    const matched = filterBySignatures(candidates, sigs);
-    for (const m of matched) configCoveredIds.add(m.id);
+    for (const sig of sigs) {
+      const needed = sig.quantity_abs || 1;
+      let rem = needed;
+      for (const p of candidates) {
+        if (rem <= 0) break;
+        if ((p.option_type || '').toLowerCase() !== sig.option_type.toLowerCase()) continue;
+        if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) continue;
+        if ((p.expiry_date || '') !== (sig.expiry || '')) continue;
+        if ((p.quantity >= 0 ? 1 : -1) !== sig.quantity_sign) continue;
+        const totalAbs = Math.abs(p.quantity);
+        const alreadyUsed = precomputeUsedQty.get(p.id) || 0;
+        const avail = totalAbs - alreadyUsed;
+        if (avail <= 0) continue;
+        const take = Math.min(avail, rem);
+        precomputeUsedQty.set(p.id, alreadyUsed + take);
+        rem -= take;
+        configCoveredIds.add(p.id);
+      }
+    }
   }
   
   // ============ STEP 0: Apply Manual Overrides ============
