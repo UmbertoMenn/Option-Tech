@@ -445,7 +445,13 @@ function computeAvailableCalls(
   configs: StrategyConfiguration[],
   archivedKeys?: string[],
 ): MonitoringAvailableCalls[] {
-  const archivedSet = new Set((archivedKeys || []).map(k => normalizeForMatching(k)));
+  // Build archived set using resolveKey for proper ticker matching
+  const archivedResolved = new Set<string>();
+  for (const k of (archivedKeys || [])) {
+    archivedResolved.add(resolveKey(k, underlyingPrices));
+    archivedResolved.add(normalizeForMatching(k));
+  }
+
   const balance = new Map<string, { owned: number; soldCalls: number; displayTicker: string }>();
 
   const ensure = (key: string, displayTicker?: string) => {
@@ -475,10 +481,8 @@ function computeAvailableCalls(
   const result: MonitoringAvailableCalls[] = [];
   for (const [key, data] of balance) {
     // Skip archived underlyings
-    if (archivedSet.size > 0) {
-      const normKey = normalizeForMatching(key);
-      const normTicker = normalizeForMatching(data.displayTicker);
-      if (archivedSet.has(normKey) || archivedSet.has(normTicker)) continue;
+    if (archivedResolved.size > 0) {
+      if (archivedResolved.has(key) || archivedResolved.has(normalizeForMatching(key)) || archivedResolved.has(normalizeForMatching(data.displayTicker))) continue;
     }
     const potential = Math.floor(data.owned / 100);
     const available = potential - data.soldCalls;
