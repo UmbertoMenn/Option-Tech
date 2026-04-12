@@ -112,6 +112,17 @@ export interface GroupedOtherStrategy {
   configStrategyType?: string;
 }
 
+export interface ResolvedConfig {
+  configId: string;
+  strategyType: string;
+  underlying: string;
+  sortOrder: number;
+  isSynthetic: boolean;
+  linkedStock: Position | null;
+  matchedPositions: Position[];  // virtual, quantity-scaled
+  status: 'matched' | 'partial' | 'unmatched';
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
@@ -122,6 +133,7 @@ export interface DerivativeCategories {
   leapCalls: LeapCallPosition[];
   otherStrategies: OtherStrategyPosition[];
   groupedOtherStrategies: GroupedOtherStrategy[];
+  resolvedConfigs: ResolvedConfig[];
 }
 
 /**
