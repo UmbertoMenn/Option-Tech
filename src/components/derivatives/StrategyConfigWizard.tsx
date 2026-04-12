@@ -774,8 +774,10 @@ export function StrategyConfigWizard({
 
     for (let i = 0; i < strategies.length; i++) {
       const strategy = strategies[i];
-      const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
-        || strategy.positions[0]?.description || 'Unknown';
+      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+      const underlying = derivPos
+        ? (derivPos.underlying || derivPos.description || 'Unknown')
+        : (getCanonicalKey(strategy.positions[0]?.description || '') || getCanonicalKey(`${strategy.positions[0]?.description || ''} ${strategy.positions[0]?.ticker || ''}`) || strategy.positions[0]?.description || 'Unknown');
       const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
       const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
       const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
