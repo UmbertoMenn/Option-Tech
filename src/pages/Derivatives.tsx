@@ -674,9 +674,10 @@ export function Derivatives() {
         {/* Summary Card */}
         <DerivativesSummaryCard
           categories={categories}
+          allPositions={positions}
           stockPositions={stockPositions}
           underlyingPrices={underlyingPrices}
-          totalCoveredCallContractsByUnderlying={totalCoveredCallContractsByUnderlying}
+          strategyConfigs={strategyConfigs}
           missingCount={missingCount}
           isFetchingMissing={isFetchingMissing}
         />
