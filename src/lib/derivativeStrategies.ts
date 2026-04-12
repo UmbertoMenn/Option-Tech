@@ -228,7 +228,7 @@ export function categorizeDerivatives(
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
     });
-    for (const sig of sigs) {
+    for (const sig of sigsForPrecompute) {
       const needed = sig.quantity_abs || 1;
       let rem = needed;
       for (const p of candidates) {
