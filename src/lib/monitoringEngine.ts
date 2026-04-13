@@ -141,6 +141,29 @@ function resolveKey(text: string, underlyingPrices: Record<string, UnderlyingPri
   return getMatchingKey(text);
 }
 
+/**
+ * Resolve a stock position to a canonical key + display ticker.
+ * Tries description first (handles AZ. prefix, SPECIAL_ALIASES), then ticker, then fallback.
+ */
+function resolveStockKey(
+  stock: Position,
+  underlyingPrices: Record<string, UnderlyingPrice>,
+): { key: string; display: string } {
+  // 1. Try description first (handles AZ. prefix, matches SPECIAL_ALIASES)
+  if (stock.description) {
+    const resolved = resolveTickerFromPrices(stock.description, underlyingPrices);
+    if (resolved) return { key: resolved.toUpperCase(), display: resolved };
+  }
+  // 2. Try ticker resolution (handles 9PDA.SG → PDD via canonical key)
+  if (stock.ticker) {
+    const resolved = resolveTickerFromPrices(stock.ticker, underlyingPrices);
+    if (resolved) return { key: resolved.toUpperCase(), display: resolved };
+  }
+  // 3. Fallback to raw ticker or description
+  const fallback = stock.ticker || stock.description?.split(' ')[0] || 'N/A';
+  return { key: fallback.toUpperCase(), display: fallback };
+}
+
 // ============ Engine ============
 
 /**
@@ -191,8 +214,8 @@ function computeUncoveredCalls(
 
   // Count shares
   for (const stock of stockPositions) {
-    const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description || '', underlyingPrices);
-    ensure(key, stock.ticker || key);
+    const { key, display } = resolveStockKey(stock, underlyingPrices);
+    ensure(key, display);
     balance.get(key)!.owned += stock.quantity;
   }
 
@@ -462,8 +485,8 @@ function computeAvailableCalls(
 
   // Count shares
   for (const stock of stockPositions) {
-    const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description || '', underlyingPrices);
-    ensure(key, stock.ticker || key);
+    const { key, display } = resolveStockKey(stock, underlyingPrices);
+    ensure(key, display);
     balance.get(key)!.owned += stock.quantity;
   }
 
