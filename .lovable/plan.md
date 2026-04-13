@@ -1,62 +1,43 @@
 
 
-## Fix: Stock con ticker europei non matchano con derivati nel monitoraggio
+## Fix: De-Risking Covered Call trattate come Covered Call nel Risk Analyzer
 
-### Problemi identificati
+### Causa radice del 659K
 
-**3 bug, 1 causa radice**: quando uno stock ha un ticker non-US (suffisso exchange europeo), il codice usa quel ticker direttamente come chiave nella balance map, senza tentare di risolverlo al ticker canonico US.
+Il config `derisking_covered_call` di SilviaS ha `quantity_abs` implicito = 1 per ogni firma. Ma molte posizioni hanno qty > 1 (es. NVIDIA CALL 185 qty=-2). Il config consuma 1 contratto, l'altro resta **orfano** → step 6.5 lo mette in `groupedOtherStrategies` → `calculateStrategyRisk` calcola il max loss → 659K.
 
-| Problema | Stock ticker | Chiave usata | Chiave derivati | Match? |
-|----------|-------------|-------------|----------------|--------|
-| HIVE 700 | `HIVE.V` | `HIVE.V` | (no derivati, ma archived) | ❌ archived non filtra |
-| 9PDA.SG | `9PDA.SG` | `9PDA.SG` | (nessun derivato PDD) | ❌ mostra ticker europeo |
-| B1C.DU | `B1C.DU` | `B1C.DU` | `BIDU` (da underlying BAIDU) | ❌ stock e derivati su chiavi diverse |
+Inoltre, la protezione put delle de-risking CC deve essere utilizzata come protezione stock, identicamente alle covered call normali.
 
-### Causa radice nel codice
+### Logica corretta
 
-In `computeAvailableCalls` e `computeUncoveredCalls`:
-```typescript
-// Riga problematica:
-const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description, underlyingPrices);
-```
-Se lo stock ha un ticker (anche europeo come `9PDA.SG`), viene usato direttamente senza mai provare a risolverlo tramite `underlyingPrices` o `SPECIAL_ALIASES`.
+Per il Risk Analyzer, le de-risking covered calls = covered calls:
+- **Stock risk**: il rischio è `qty × price`, ridotto dalla protezione put (il bought put della de-risking CC). Già funziona tramite scan di `allBoughtPuts` in `calculateStockRisk`.
+- **Strategy risk**: ZERO da de-risking CC. Le sold call sono coperture (cap al rialzo), non rischio aggiuntivo.
+- **Orphan sold calls**: se un underlying ha già una covered call O de-risking CC, le sold call orfane sullo stesso underlying sono semplicemente covered call aggiuntive → rischio ZERO.
 
-### Fix (2 file)
+### Fix (1 file)
 
-**1. `src/lib/derivativeStrategies.ts`** — Aggiungere BAIDU a SPECIAL_ALIASES:
-```typescript
-BAIDU: ['BAIDU', 'BIDU', 'BAIDU INC', 'BAIDU INC SPON ADR', 'BAIDU INC SPON ADR REP A'],
-```
+**`src/lib/riskCalculator.ts`** — funzione `calculateStrategyRisk`:
 
-**2. `src/lib/monitoringEngine.ts`** — Nuova funzione `resolveStockKey` che:
-1. Prova `resolveKey(stock.description)` prima (risolve `AZ.BAIDU INC - SPON ADR` → `BIDU` tramite normalizzazione e SPECIAL_ALIASES)
-2. Se la description non risolve, prova `resolveKey(stock.ticker)` 
-3. Solo come ultimo fallback usa `stock.ticker.toUpperCase()`
+1. Riceve `categories` completo (già lo riceve)
+2. Costruisce un `Set<string>` di underlying coperti: quelli presenti in `coveredCalls` o `deRiskingCoveredCalls`
+3. Filtra `groupedOtherStrategies`: se TUTTE le opzioni del gruppo sono sold calls su un underlying coperto, skip (rischio = 0, è una covered call extra)
+4. Per i gruppi misti, rimuove solo le sold calls coperte prima di calcolare il max loss
 
-Applicare `resolveStockKey` in entrambe le funzioni:
-- `computeAvailableCalls` (call da rivendere)
-- `computeUncoveredCalls` (call non coperte)
+```text
+coveredUnderlyings = Set of normalized underlyings from:
+  - categories.coveredCalls[].option.underlying
+  - categories.deRiskingCoveredCalls[].coveredCall.option.underlying
 
-```typescript
-function resolveStockKey(stock: Position, underlyingPrices: Record<string, UnderlyingPrice>): { key: string; display: string } {
-  // 1. Try description first (handles AZ. prefix, matches SPECIAL_ALIASES)
-  if (stock.description) {
-    const resolved = resolveTickerFromPrices(stock.description, underlyingPrices);
-    if (resolved) return { key: resolved.toUpperCase(), display: resolved };
-  }
-  // 2. Try ticker resolution (handles 9PDA.SG → PDD via canonical key)
-  if (stock.ticker) {
-    const resolved = resolveTickerFromPrices(stock.ticker, underlyingPrices);
-    if (resolved) return { key: resolved.toUpperCase(), display: resolved };
-  }
-  // 3. Fallback to raw ticker or description
-  const fallback = stock.ticker || stock.description?.split(' ')[0] || 'N/A';
-  return { key: fallback.toUpperCase(), display: fallback };
-}
+Per ogni groupedOtherStrategy:
+  Se underlying è in coveredUnderlyings:
+    → filtra le sold calls (sono covered)
+    → se restano altre gambe, calcola max loss solo su quelle
+    → se non restano gambe, skip intero gruppo
 ```
 
 ### Risultato atteso
-- **HIVE**: stock risolve a `HIVE` (non `HIVE.V`), archived key risolve a `HIVE` → match, filtrato
-- **9PDA.SG**: description `AZ.PDD HOLDINGS INC` → SPECIAL_ALIAS `PDD` → mostra `PDD`
-- **B1C.DU**: description `AZ.BAIDU INC - SPON ADR` → SPECIAL_ALIAS `BAIDU` → ticker `BIDU`, stessa chiave dei derivati
+- SilviaS: strategy risk = ~0 (tutte le sue strategie sono de-risking CC, le orphan calls sono covered)
+- Stock risk: invariato (protezione put già trovata tramite scan allPositions)
+- Nessun impatto su utenti senza de-risking CC
 
