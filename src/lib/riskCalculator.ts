@@ -463,18 +463,46 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     });
   }
   
+  // Build set of underlyings covered by Covered Calls or De-Risking Covered Calls
+  // Sold calls on these underlyings are simply additional covered calls → risk = 0
+  const coveredUnderlyings = new Set<string>();
+  for (const cc of categories.coveredCalls) {
+    const u = normalizeForMatching(cc.option.underlying || cc.option.description || '');
+    if (u) coveredUnderlyings.add(u);
+  }
+  for (const dr of categories.deRiskingCoveredCalls) {
+    const u = normalizeForMatching(dr.coveredCall.option.underlying || dr.coveredCall.option.description || '');
+    if (u) coveredUnderlyings.add(u);
+  }
+  
   // Grouped Other Strategies
   for (const group of categories.groupedOtherStrategies) {
     if (group.options.length === 0) continue;
     
-    const firstOption = group.options[0].option;
+    const groupUnderlying = normalizeForMatching(group.underlying);
+    const isCoveredUnderlying = coveredUnderlyings.has(groupUnderlying);
+    
+    // If underlying is covered, filter out sold calls (they are just extra covered calls)
+    let effectiveGroup = group;
+    if (isCoveredUnderlying) {
+      const nonSoldCallOptions = group.options.filter(o => {
+        const isSoldCall = o.option.option_type === 'call' && (o.option.quantity || 0) < 0;
+        return !isSoldCall;
+      });
+      // If all options were sold calls on a covered underlying → skip entirely
+      if (nonSoldCallOptions.length === 0) continue;
+      // Otherwise recalculate with remaining legs only
+      effectiveGroup = { ...group, options: nonSoldCallOptions };
+    }
+    
+    const firstOption = effectiveGroup.options[0].option;
     const exchangeRate = getEffectiveExchangeRate(firstOption);
     const currency = firstOption.currency || 'USD';
-    const { maxLoss, calculation, isUnlimited } = calculateGroupedStrategyMaxLoss(group);
+    const { maxLoss, calculation, isUnlimited } = calculateGroupedStrategyMaxLoss(effectiveGroup);
     
     result.push({
-      strategyName: group.strategyName || 'Strategia Complessa',
-      underlying: group.underlying,
+      strategyName: effectiveGroup.strategyName || 'Strategia Complessa',
+      underlying: effectiveGroup.underlying,
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
