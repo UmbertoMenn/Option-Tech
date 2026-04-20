@@ -15,7 +15,35 @@ export interface ReconciliationItem {
   strategyType: string;
   legs: LegStatus[];
   hasChanges: boolean;
+  /**
+   * True quando la configurazione è obsoleta:
+   * tutte le firme originali sono ora "missing" (la strategia non esiste più
+   * nel portafoglio). Esempio: IC META con 4 gambe → upload con 3 gambe.
+   */
+  isObsolete?: boolean;
+  /**
+   * True quando la configurazione è degradata: numero di leg presenti
+   * inferiore a quello atteso dal tipo di strategia (es. iron_condor con
+   * solo 3 gambe presenti su 4).
+   */
+  isDegraded?: boolean;
+  /** Numero di firme "missing" su totale */
+  missingCount?: number;
+  totalSignatures?: number;
 }
+
+/** Numero di gambe "essenziali" attese per ogni strategia */
+const EXPECTED_LEG_COUNTS: Record<string, number> = {
+  iron_condor: 4,
+  double_diagonal: 4,
+  put_spread: 2,
+  diagonal_put_spread: 2,
+  derisking_covered_call: 2,
+  covered_call: 1,
+  naked_put: 1,
+  leap_call: 1,
+  other: 1,
+};
 
 function normalizeUnderlying(text: string): string {
   return getCanonicalKey(text) || normalizeForMatching(text);
