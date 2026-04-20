@@ -338,7 +338,12 @@ export function useDerivativeNetting(
 
     if (!summary || positions.length === 0) return emptyResult;
 
-    if (isGlobalAggregate) {
+    // Split per portfolio in QUALSIASI vista aggregata (admin globale o utente).
+    // Rilevamento robusto: se le positions abbracciano più portfolio_id, è aggregata.
+    const distinctPortfolios = new Set(positions.map(p => p.portfolio_id));
+    const needsSplit = isAggregatedView || distinctPortfolios.size > 1;
+
+    if (needsSplit) {
       const byPortfolio = new Map<string, Position[]>();
       positions.forEach(p => {
         if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
@@ -399,7 +404,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
       breakdown: result.breakdown,
     };
-  }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs]);
+  }, [positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs]);
 }
 
 /**
