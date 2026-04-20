@@ -99,7 +99,7 @@ export function Dashboard() {
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
   
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs);
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs);
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,
