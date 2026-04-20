@@ -56,11 +56,195 @@ export const STRATEGY_SECTION_LABELS: Record<StrategySectionCategory, string> = 
   orphans: 'Posizioni Orfane',
 };
 
+const ALL_CATEGORIES: StrategySectionCategory[] = [
+  'covered_call', 'derisking_cc', 'iron_condor', 'double_diagonal',
+  'naked_put', 'put_spread', 'diagonal_put_spread', 'leap_call',
+  'long_put', 'other', 'orphans',
+];
+
 function getEffectiveExchangeRate(position: Position): number {
-  if (position.exchange_rate && position.exchange_rate > 0) {
-    return position.exchange_rate;
-  }
+  if (position.exchange_rate && position.exchange_rate > 0) return position.exchange_rate;
   return 1;
+}
+
+interface CanonicalLeg {
+  /** ID della posizione raw originale (per consumo quantità) */
+  sourceId: string;
+  /** Categoria di destinazione */
+  category: StrategySectionCategory;
+  /** Posizione virtuale (può avere quantity scalata) */
+  position: Position;
+  /** Riferimento alla posizione "underlying" associata (per CC/NP intrinsic) */
+  associatedUnderlying?: Position | null;
+}
+
+/**
+ * Costruisce la lista canonica di "gambe virtuali" classificate, usando
+ * ESATTAMENTE l'output di categorizeDerivatives({ configOnly: true }).
+ *
+ * Questa è la stessa fonte usata dalla pagina Strategie Derivati, garantendo
+ * coerenza 1:1 tra dashboard e pagina derivati.
+ */
+function buildCanonicalLegs(
+  derivatives: Position[],
+  positions: Position[],
+  overrides: DerivativeOverride[],
+  strategyConfigs: StrategyConfiguration[]
+): CanonicalLeg[] {
+  const categories = categorizeDerivatives(
+    derivatives, positions, overrides, strategyConfigs,
+    { configOnly: true }
+  );
+
+  const legs: CanonicalLeg[] = [];
+
+  // Covered Calls (standard + sintetiche): la sold call + eventuale syntheticPut
+  for (const cc of categories.coveredCalls) {
+    legs.push({
+      sourceId: stripVirtualSuffix(cc.option.id),
+      category: 'covered_call',
+      position: cc.option,
+      associatedUnderlying: cc.underlying,
+    });
+    if (cc.syntheticPut) {
+      legs.push({
+        sourceId: stripVirtualSuffix(cc.syntheticPut.id),
+        category: 'covered_call',
+        position: cc.syntheticPut,
+        associatedUnderlying: cc.underlying,
+      });
+    }
+  }
+
+  // De-Risking Covered Calls: sold call + protection put (+ syntheticPut)
+  for (const dcc of categories.deRiskingCoveredCalls) {
+    legs.push({
+      sourceId: stripVirtualSuffix(dcc.coveredCall.option.id),
+      category: 'derisking_cc',
+      position: dcc.coveredCall.option,
+      associatedUnderlying: dcc.coveredCall.underlying,
+    });
+    legs.push({
+      sourceId: stripVirtualSuffix(dcc.protectionPut.id),
+      category: 'derisking_cc',
+      position: dcc.protectionPut,
+      associatedUnderlying: dcc.coveredCall.underlying,
+    });
+    if (dcc.syntheticPut) {
+      legs.push({
+        sourceId: stripVirtualSuffix(dcc.syntheticPut.id),
+        category: 'derisking_cc',
+        position: dcc.syntheticPut,
+        associatedUnderlying: dcc.coveredCall.underlying,
+      });
+    }
+  }
+
+  // Iron Condors: 4 leg
+  for (const ic of categories.ironCondors) {
+    [ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall].forEach(p => {
+      legs.push({
+        sourceId: stripVirtualSuffix(p.id),
+        category: 'iron_condor',
+        position: p,
+      });
+    });
+  }
+
+  // Double Diagonals: 4 leg
+  for (const dd of categories.doubleDiagonals) {
+    [dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall].forEach(p => {
+      legs.push({
+        sourceId: stripVirtualSuffix(p.id),
+        category: 'double_diagonal',
+        position: p,
+      });
+    });
+  }
+
+  // Naked Puts
+  for (const np of categories.nakedPuts) {
+    legs.push({
+      sourceId: stripVirtualSuffix(np.option.id),
+      category: 'naked_put',
+      position: np.option,
+      associatedUnderlying: np.underlying,
+    });
+  }
+
+  // Long Puts (Protezioni)
+  for (const lp of categories.longPuts) {
+    legs.push({
+      sourceId: stripVirtualSuffix(lp.option.id),
+      category: 'long_put',
+      position: lp.option,
+      associatedUnderlying: lp.underlying,
+    });
+  }
+
+  // Leap Calls
+  for (const lc of categories.leapCalls) {
+    legs.push({
+      sourceId: stripVirtualSuffix(lc.option.id),
+      category: 'leap_call',
+      position: lc.option,
+      associatedUnderlying: lc.underlying,
+    });
+  }
+
+  // Put Spread / Diagonal Put Spread / Other (configOtherGroups)
+  for (const group of categories.groupedOtherStrategies) {
+    let cat: StrategySectionCategory = 'other';
+    if (group.configStrategyType === 'put_spread') cat = 'put_spread';
+    else if (group.configStrategyType === 'diagonal_put_spread') cat = 'diagonal_put_spread';
+
+    for (const opt of group.options) {
+      legs.push({
+        sourceId: stripVirtualSuffix(opt.option.id),
+        category: cat,
+        position: opt.option,
+        associatedUnderlying: opt.underlying,
+      });
+    }
+  }
+
+  // ============ ORFANI (quantity-aware) ============
+  // Calcolare quanto ogni raw position è stata consumata dalle config matchate.
+  const consumedByRaw = new Map<string, number>();
+  for (const leg of legs) {
+    const used = Math.abs(leg.position.quantity);
+    consumedByRaw.set(leg.sourceId, (consumedByRaw.get(leg.sourceId) || 0) + used);
+  }
+
+  // Per ogni derivato originale, calcolare residuo
+  for (const d of derivatives) {
+    const totalAbs = Math.abs(d.quantity);
+    const consumed = consumedByRaw.get(d.id) || 0;
+    const residual = totalAbs - consumed;
+    if (residual > 0.0001) {
+      const sign = d.quantity >= 0 ? 1 : -1;
+      const ratio = residual / totalAbs;
+      const virtualOrphan: Position = {
+        ...d,
+        quantity: sign * residual,
+        market_value: d.market_value != null ? d.market_value * ratio : null,
+        profit_loss: d.profit_loss != null ? d.profit_loss * ratio : null,
+        snapshot_market_value: d.snapshot_market_value != null ? d.snapshot_market_value * ratio : null,
+      };
+      legs.push({
+        sourceId: d.id,
+        category: 'orphans',
+        position: virtualOrphan,
+      });
+    }
+  }
+
+  return legs;
+}
+
+/** Rimuove i suffissi virtuali __opt_slot_N e __slot_N per risalire all'ID raw originale */
+function stripVirtualSuffix(id: string): string {
+  return id.replace(/__opt_slot_\d+$/, '').replace(/__slot_\d+$/, '');
 }
 
 interface CategoryAccumulator {
@@ -72,7 +256,7 @@ function makeAcc(): CategoryAccumulator {
   return { value: 0, details: [] };
 }
 
-/** Compute netting for a single portfolio's positions */
+/** Compute netting per un singolo portafoglio usando la fonte canonica */
 export function computeSinglePortfolioNetting(
   positions: Position[],
   overrides: DerivativeOverride[],
@@ -84,82 +268,9 @@ export function computeSinglePortfolioNetting(
     return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [] };
   }
 
-  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
+  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
 
-  // Build position ID → category sets
-  const positionCategory = new Map<string, StrategySectionCategory>();
-
-  // Covered Calls
-  for (const cc of categories.coveredCalls) {
-    positionCategory.set(cc.option.id, 'covered_call');
-    // synthetic put is part of CC too
-    if (cc.syntheticPut) positionCategory.set(cc.syntheticPut.id, 'covered_call');
-  }
-
-  // De-Risking Covered Calls
-  for (const dcc of categories.deRiskingCoveredCalls) {
-    positionCategory.set(dcc.coveredCall.option.id, 'derisking_cc');
-    positionCategory.set(dcc.protectionPut.id, 'derisking_cc');
-    if (dcc.syntheticPut) positionCategory.set(dcc.syntheticPut.id, 'derisking_cc');
-  }
-
-  // Iron Condors
-  for (const ic of categories.ironCondors) {
-    [ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall].forEach(p => positionCategory.set(p.id, 'iron_condor'));
-  }
-
-  // Double Diagonals
-  for (const dd of categories.doubleDiagonals) {
-    [dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall].forEach(p => positionCategory.set(p.id, 'double_diagonal'));
-  }
-
-  // Naked Puts
-  for (const np of categories.nakedPuts) {
-    positionCategory.set(np.option.id, 'naked_put');
-  }
-
-  // Long Puts (Protezioni)
-  for (const lp of categories.longPuts) {
-    positionCategory.set(lp.option.id, 'long_put');
-  }
-
-  // Leap Calls
-  for (const lc of categories.leapCalls) {
-    positionCategory.set(lc.option.id, 'leap_call');
-  }
-
-  // Put Spread & Diagonal Put Spread from groupedOtherStrategies
-  for (const group of categories.groupedOtherStrategies) {
-    const configMatch = strategyConfigs.find(c =>
-      c.underlying === group.underlying && (c.strategy_type === 'put_spread' || c.strategy_type === 'diagonal_put_spread')
-    );
-    let cat: StrategySectionCategory = 'other';
-    if (configMatch?.strategy_type === 'put_spread' || (!configMatch && group.strategyName === 'Put Spread')) {
-      cat = 'put_spread';
-    } else if (configMatch?.strategy_type === 'diagonal_put_spread' || (!configMatch && group.strategyName === 'Diagonal Put Spread')) {
-      cat = 'diagonal_put_spread';
-    }
-    for (const os of group.options) {
-      // Only set if not already assigned (avoid overwriting)
-      if (!positionCategory.has(os.option.id)) {
-        positionCategory.set(os.option.id, cat);
-      }
-    }
-  }
-
-  // Any remaining otherStrategies not yet assigned
-  for (const os of categories.otherStrategies) {
-    if (!positionCategory.has(os.option.id)) {
-      positionCategory.set(os.option.id, 'other');
-    }
-  }
-
-  // Build coveredCall and nakedPut maps for intrinsic value calculations
-  const coveredCallMap = new Map(categories.coveredCalls.map(cc => [cc.option.id, cc]));
-  const deRiskingCCMap = new Map(categories.deRiskingCoveredCalls.map(dcc => [dcc.coveredCall.option.id, dcc]));
-  const nakedPutMap = new Map(categories.nakedPuts.map(np => [np.option.id, np]));
-
-  // Accumulators per strategy section
+  // Accumulators per categoria
   const acc: Record<StrategySectionCategory, CategoryAccumulator> = {
     covered_call: makeAcc(),
     derisking_cc: makeAcc(),
@@ -174,130 +285,87 @@ export function computeSinglePortfolioNetting(
     orphans: makeAcc(),
   };
 
-  // Detect orphans: derivatives not classified into any of the 9 strategy buckets
-  const isOrphan = (id: string) => !positionCategory.has(id);
-  for (const d of derivatives) {
-    if (isOrphan(d.id)) {
-      positionCategory.set(d.id, 'orphans');
-    }
-  }
-
   let totalNetting = 0;
   let nettingExCoveredCall = 0;
   let nettingExCCAndNP = 0;
 
-  for (const derivative of derivatives) {
-    const price = derivative.snapshot_price ?? derivative.current_price ?? 0;
-    const quantity = derivative.quantity;
+  for (const leg of legs) {
+    const p = leg.position;
+    const cat = leg.category;
+    const price = p.snapshot_price ?? p.current_price ?? 0;
+    const quantity = p.quantity;
     const multiplier = 100;
-    const exchangeRate = getEffectiveExchangeRate(derivative);
+    const exchangeRate = getEffectiveExchangeRate(p);
     const nettingValue = (price * quantity * multiplier) / exchangeRate;
 
-    const ticker = derivative.underlying || derivative.ticker || derivative.description || '?';
+    const ticker = p.underlying || p.ticker || p.description || '?';
     const detail: NettingBreakdownDetail = {
-      positionId: derivative.id,
+      positionId: p.id,
       ticker,
-      description: derivative.description,
+      description: p.description,
       value: nettingValue,
-      strike: derivative.strike_price ?? undefined,
-      expiry: derivative.expiry_date ?? undefined,
+      strike: p.strike_price ?? undefined,
+      expiry: p.expiry_date ?? undefined,
     };
 
     totalNetting += nettingValue;
-
-    const cat = positionCategory.get(derivative.id) || 'other';
     acc[cat].value += nettingValue;
     acc[cat].details.push(detail);
 
+    // Risoluzione prezzo underlying per CC/NP (intrinsic value)
     const resolveUnderlyingPrice = (): number => {
-      const key = derivative.underlying || derivative.description || '';
-      // Try coveredCall underlying first
-      const cc = coveredCallMap.get(derivative.id);
-      if (cc) return cc.underlying.snapshot_price ?? cc.underlying.current_price ?? 0;
-      // Try derisking CC
-      const dcc = deRiskingCCMap.get(derivative.id);
-      if (dcc) return dcc.coveredCall.underlying.snapshot_price ?? dcc.coveredCall.underlying.current_price ?? 0;
-      // Try nakedPut underlying
-      const np = nakedPutMap.get(derivative.id);
-      if (np) {
-        let p = np.underlying?.snapshot_price ?? np.underlying?.current_price ?? 0;
-        if (p <= 0 && underlyingPrices) p = underlyingPrices[key]?.price ?? 0;
-        return p;
+      if (leg.associatedUnderlying) {
+        const up = leg.associatedUnderlying.snapshot_price ?? leg.associatedUnderlying.current_price ?? 0;
+        if (up > 0) return up;
       }
-      // Fallback
+      const key = p.underlying || p.description || '';
       if (underlyingPrices) return underlyingPrices[key]?.price ?? 0;
       return 0;
     };
 
-    // Calculate nettingExCoveredCall and nettingExCCAndNP
-    if (cat === 'covered_call') {
-      const cc = coveredCallMap.get(derivative.id);
-      if (cc) {
-        const strikePrice = derivative.strike_price ?? 0;
-        const underlyingPrice = cc.underlying.snapshot_price ?? cc.underlying.current_price ?? 0;
-        if (strikePrice < underlyingPrice) {
+    // Calcolo netting ex CC e netting ex CC&NP
+    if (cat === 'covered_call' || cat === 'derisking_cc') {
+      // Solo le sold CALL contribuiscono con perdita intrinseca; le altre gambe (put protezione,
+      // syntheticPut) contribuiscono a market value pieno
+      if (p.option_type === 'call' && quantity < 0) {
+        const strikePrice = p.strike_price ?? 0;
+        const underlyingPrice = resolveUnderlyingPrice();
+        if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
           const contracts = Math.abs(quantity);
           const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
-          nettingExCoveredCall -= intrinsicValue;
-          nettingExCCAndNP -= intrinsicValue;
+          // Cap: perdita intrinseca non può superare costo di chiusura
+          const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
+          nettingExCoveredCall += cappedIntrinsic;
+          nettingExCCAndNP += cappedIntrinsic;
         }
-        // OTM covered calls: no contribution to ex CC / ex CC&NP
+        // OTM: 0 contributo
       } else {
-        // synthetic put leg of CC - counts as full netting for ex calculations
-        nettingExCoveredCall += nettingValue;
-        nettingExCCAndNP += nettingValue;
-      }
-    } else if (cat === 'derisking_cc') {
-      const dcc = deRiskingCCMap.get(derivative.id);
-      if (dcc) {
-        // The sold call leg: same logic as covered call for ex CC calculations
-        const strikePrice = derivative.strike_price ?? 0;
-        const underlyingPrice = dcc.coveredCall.underlying.snapshot_price ?? dcc.coveredCall.underlying.current_price ?? 0;
-        if (strikePrice < underlyingPrice) {
-          const contracts = Math.abs(quantity);
-          const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
-          nettingExCoveredCall -= intrinsicValue;
-          nettingExCCAndNP -= intrinsicValue;
-        }
-      } else {
-        // Protection put or synthetic put legs — full market value
+        // protection put / synthetic put / etc → market value pieno
         nettingExCoveredCall += nettingValue;
         nettingExCCAndNP += nettingValue;
       }
     } else if (cat === 'naked_put') {
-      const np = nakedPutMap.get(derivative.id);
+      // ex CC: sempre market value
       nettingExCoveredCall += nettingValue;
-      if (np) {
-        const strikePrice = derivative.strike_price ?? 0;
-        const uprice = resolveUnderlyingPrice();
-        if (uprice > 0 && strikePrice < uprice) {
-          // OTM naked put: no contribution to ex CC&NP
-        } else if (uprice > 0 && strikePrice >= uprice) {
-          const contracts = Math.abs(quantity);
-          const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
-          // Cap: intrinsic loss cannot exceed market value (cost to close)
-          const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
-          nettingExCCAndNP += cappedIntrinsic;
-        } else {
-          nettingExCCAndNP += nettingValue;
-        }
-      } else {
-        nettingExCCAndNP += nettingValue;
+      // ex CC&NP: solo perdita intrinseca ITM
+      const strikePrice = p.strike_price ?? 0;
+      const uprice = resolveUnderlyingPrice();
+      if (uprice > 0 && strikePrice >= uprice) {
+        const contracts = Math.abs(quantity);
+        const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
+        const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
+        nettingExCCAndNP += cappedIntrinsic;
       }
+      // OTM: 0 contributo per ex CC&NP
     } else {
-      // All other categories: full market value
+      // Tutte le altre categorie + orphans: market value pieno per entrambe
       nettingExCoveredCall += nettingValue;
       nettingExCCAndNP += nettingValue;
     }
   }
 
-  // Aggregate details by ticker within each category
-  const allCategories: StrategySectionCategory[] = [
-    'covered_call', 'derisking_cc', 'iron_condor', 'double_diagonal',
-    'naked_put', 'put_spread', 'diagonal_put_spread', 'leap_call', 'long_put', 'other', 'orphans'
-  ];
-
-  for (const cat of allCategories) {
+  // Aggrega dettagli per ticker dentro ogni categoria
+  for (const cat of ALL_CATEGORIES) {
     const byTicker = new Map<string, NettingBreakdownDetail>();
     for (const d of acc[cat].details) {
       const key = d.ticker;
@@ -312,7 +380,7 @@ export function computeSinglePortfolioNetting(
   }
 
   const breakdown: NettingBreakdownItem[] = [];
-  for (const cat of allCategories) {
+  for (const cat of ALL_CATEGORIES) {
     const a = acc[cat];
     if (Math.abs(a.value) > 0.01 || a.details.length > 0) {
       breakdown.push({
@@ -395,7 +463,7 @@ export function useDerivativeNetting(
         nettingTotal: summary.totalValue + mergedTotalNetting,
         nettingExCoveredCall: summary.totalValue + mergedNettingExCC,
         nettingExCCAndNP: summary.totalValue + mergedNettingExCCAndNP,
-        breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01),
+        breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01 || b.details.length > 0),
       };
     }
 
@@ -411,8 +479,9 @@ export function useDerivativeNetting(
 }
 
 /**
- * Filters breakdown items based on the view mode and recalculates values
- * for categories that use intrinsic value instead of market value.
+ * Per il view mode, il breakdown già contiene i valori CORRETTI a market value.
+ * Per netting_ex_cc / netting_ex_cc_np dobbiamo ricalcolare CC/DCC/NP usando
+ * la fonte canonica (stessa logica di computeSinglePortfolioNetting).
  */
 export function getBreakdownForViewMode(
   breakdown: NettingBreakdownItem[],
@@ -426,145 +495,124 @@ export function getBreakdownForViewMode(
   const baseValue = summary?.totalValue ?? 0;
 
   if (viewMode === 'netting_total') {
-    const items = breakdown.filter(b => Math.abs(b.value) > 0.01);
+    const items = breakdown.filter(b => Math.abs(b.value) > 0.01 || b.details.length > 0);
     const finalValue = baseValue + items.reduce((sum, b) => sum + b.value, 0);
     return { items, finalValue };
   }
 
-  // For netting_ex_cc_np: recalculate covered_call, derisking_cc, naked_put with intrinsic values
+  // Per netting_ex_cc e netting_ex_cc_np: ricalcola usando la fonte canonica.
+  // Costruisci breakdown alternativo con valori intrinseci/market a seconda della categoria.
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
-  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
-  const coveredCallMap = new Map(categories.coveredCalls.map(cc => [cc.option.id, cc]));
-  const deRiskingCCMap = new Map(categories.deRiskingCoveredCalls.map(dcc => [dcc.coveredCall.option.id, dcc]));
-  const nakedPutMap = new Map(categories.nakedPuts.map(np => [np.option.id, np]));
+  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
 
-  const result: NettingBreakdownItem[] = [];
-  let nettingSum = 0;
+  const acc: Record<StrategySectionCategory, CategoryAccumulator> = {
+    covered_call: makeAcc(),
+    derisking_cc: makeAcc(),
+    iron_condor: makeAcc(),
+    double_diagonal: makeAcc(),
+    naked_put: makeAcc(),
+    put_spread: makeAcc(),
+    diagonal_put_spread: makeAcc(),
+    leap_call: makeAcc(),
+    long_put: makeAcc(),
+    other: makeAcc(),
+    orphans: makeAcc(),
+  };
 
-  for (const item of breakdown) {
-    // For covered_call and derisking_cc: show only intrinsic value of ITM options
-    if (item.category === 'covered_call' || item.category === 'derisking_cc') {
-      const lookupMap = item.category === 'covered_call' ? coveredCallMap : null;
-      const dccMap = item.category === 'derisking_cc' ? deRiskingCCMap : null;
+  for (const leg of legs) {
+    const p = leg.position;
+    const cat = leg.category;
+    const price = p.snapshot_price ?? p.current_price ?? 0;
+    const quantity = p.quantity;
+    const multiplier = 100;
+    const exchangeRate = getEffectiveExchangeRate(p);
+    const nettingValue = (price * quantity * multiplier) / exchangeRate;
 
-      let intrinsicTotal = 0;
-      const intrinsicDetails: NettingBreakdownDetail[] = [];
+    const ticker = p.underlying || p.ticker || p.description || '?';
 
-      // We need to go through original positions for this category
-      for (const det of item.details) {
-        // For aggregated details (by ticker), we need to recalculate from source
-        // Find all CC/DCC entries matching this ticker
-        let tickerIntrinsic = 0;
+    const resolveUnderlyingPrice = (): number => {
+      if (leg.associatedUnderlying) {
+        const up = leg.associatedUnderlying.snapshot_price ?? leg.associatedUnderlying.current_price ?? 0;
+        if (up > 0) return up;
+      }
+      const key = p.underlying || p.description || '';
+      if (underlyingPrices) return underlyingPrices[key]?.price ?? 0;
+      return 0;
+    };
 
-        if (lookupMap) {
-          for (const [posId, ccEntry] of lookupMap) {
-            const posTicker = ccEntry.option.underlying || ccEntry.option.ticker || ccEntry.option.description || '?';
-            if (posTicker !== det.ticker) continue;
-            const strike = ccEntry.option.strike_price ?? 0;
-            const underlyingPrice = ccEntry.underlying.snapshot_price ?? ccEntry.underlying.current_price ?? 0;
-            if (strike < underlyingPrice) {
-              const contracts = Math.abs(ccEntry.option.quantity);
-              const exchangeRate = getEffectiveExchangeRate(ccEntry.option);
-              tickerIntrinsic += -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
-            }
-          }
-        }
-        if (dccMap) {
-          for (const [posId, dccEntry] of dccMap) {
-            const posTicker = dccEntry.coveredCall.option.underlying || dccEntry.coveredCall.option.ticker || dccEntry.coveredCall.option.description || '?';
-            if (posTicker !== det.ticker) continue;
-            const strike = dccEntry.coveredCall.option.strike_price ?? 0;
-            const underlyingPrice = dccEntry.coveredCall.underlying.snapshot_price ?? dccEntry.coveredCall.underlying.current_price ?? 0;
-            if (strike < underlyingPrice) {
-              const contracts = Math.abs(dccEntry.coveredCall.option.quantity);
-              const exchangeRate = getEffectiveExchangeRate(dccEntry.coveredCall.option);
-              tickerIntrinsic += -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
-            }
-          }
-          // Also include market value of protection put and synthetic put legs for this ticker
-          for (const [, dccEntry] of dccMap) {
-            const posTicker = dccEntry.protectionPut.underlying || dccEntry.protectionPut.ticker || dccEntry.protectionPut.description || '?';
-            if (posTicker !== det.ticker) continue;
-            const price = dccEntry.protectionPut.snapshot_price ?? dccEntry.protectionPut.current_price ?? 0;
-            const exchangeRate = getEffectiveExchangeRate(dccEntry.protectionPut);
-            tickerIntrinsic += (price * dccEntry.protectionPut.quantity * 100) / exchangeRate;
-          }
-        }
+    let contribValue = nettingValue;
 
-        // Cap: intrinsic cannot exceed market value in absolute terms
-        if (tickerIntrinsic < det.value) {
-          tickerIntrinsic = det.value;
-        }
-        if (Math.abs(tickerIntrinsic) > 0.01) {
-          intrinsicDetails.push({ ...det, value: tickerIntrinsic });
-          intrinsicTotal += tickerIntrinsic;
+    if (cat === 'covered_call' || cat === 'derisking_cc') {
+      if (p.option_type === 'call' && quantity < 0) {
+        const strikePrice = p.strike_price ?? 0;
+        const underlyingPrice = resolveUnderlyingPrice();
+        if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
+          const contracts = Math.abs(quantity);
+          const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
+          contribValue = Math.max(-intrinsicValue, nettingValue);
+        } else {
+          contribValue = 0; // OTM: nessun contributo
         }
       }
-
-      if (Math.abs(intrinsicTotal) > 0.01) {
-        result.push({
-          ...item,
-          label: `${STRATEGY_SECTION_LABELS[item.category as StrategySectionCategory]} (intrinseco)`,
-          value: intrinsicTotal,
-          color: 'cost',
-          details: intrinsicDetails,
-        });
-        nettingSum += intrinsicTotal;
+      // protection put / synthetic put → market value pieno (contribValue rimane = nettingValue)
+    } else if (cat === 'naked_put') {
+      if (viewMode === 'netting_ex_cc_np') {
+        const strikePrice = p.strike_price ?? 0;
+        const uprice = resolveUnderlyingPrice();
+        if (uprice > 0 && strikePrice >= uprice) {
+          const contracts = Math.abs(quantity);
+          const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
+          contribValue = Math.max(-intrinsicValue, nettingValue);
+        } else {
+          contribValue = 0;
+        }
       }
-      continue;
+      // viewMode === 'netting_ex_cc' → market value pieno
     }
+    // Tutte le altre categorie + orphans: contribValue = nettingValue (market value)
 
-    // For naked_put: show only intrinsic ITM value
-    if (viewMode === 'netting_ex_cc_np' && item.category === 'naked_put') {
-      let intrinsicTotal = 0;
-      const intrinsicDetails: NettingBreakdownDetail[] = [];
-
-      for (const det of item.details) {
-        let tickerIntrinsic = 0;
-        for (const [, npEntry] of nakedPutMap) {
-          const posTicker = npEntry.option.underlying || npEntry.option.ticker || npEntry.option.description || '?';
-          if (posTicker !== det.ticker) continue;
-          const strike = npEntry.option.strike_price ?? 0;
-          let underlyingPrice = npEntry.underlying?.snapshot_price ?? npEntry.underlying?.current_price ?? 0;
-          if (underlyingPrice <= 0 && underlyingPrices) {
-            const key = npEntry.option.underlying || npEntry.option.description || '';
-            underlyingPrice = underlyingPrices[key]?.price ?? 0;
-          }
-          const exchangeRate = getEffectiveExchangeRate(npEntry.option);
-          if (underlyingPrice > 0 && strike >= underlyingPrice) {
-            const contracts = Math.abs(npEntry.option.quantity);
-            tickerIntrinsic += -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
-          }
-        }
-        // Cap: intrinsic cannot exceed market value in absolute terms
-        if (tickerIntrinsic < det.value) {
-          tickerIntrinsic = det.value;
-        }
-        if (Math.abs(tickerIntrinsic) > 0.01) {
-          intrinsicDetails.push({ ...det, value: tickerIntrinsic });
-          intrinsicTotal += tickerIntrinsic;
-        }
-      }
-
-      if (Math.abs(intrinsicTotal) > 0.01) {
-        result.push({
-          ...item,
-          label: 'Naked Put (intrinseco)',
-          value: intrinsicTotal,
-          color: 'cost',
-          details: intrinsicDetails,
-        });
-        nettingSum += intrinsicTotal;
-      }
-      continue;
-    }
-
-    // All other categories: keep market value
-    if (Math.abs(item.value) > 0.01) {
-      result.push(item);
-      nettingSum += item.value;
+    if (Math.abs(contribValue) > 0.0001) {
+      acc[cat].value += contribValue;
+      acc[cat].details.push({
+        positionId: p.id,
+        ticker,
+        description: p.description,
+        value: contribValue,
+        strike: p.strike_price ?? undefined,
+        expiry: p.expiry_date ?? undefined,
+      });
     }
   }
 
-  return { items: result, finalValue: baseValue + nettingSum };
+  // Aggrega dettagli per ticker
+  for (const cat of ALL_CATEGORIES) {
+    const byTicker = new Map<string, NettingBreakdownDetail>();
+    for (const d of acc[cat].details) {
+      const existing = byTicker.get(d.ticker);
+      if (existing) existing.value += d.value;
+      else byTicker.set(d.ticker, { ...d, strike: undefined, expiry: undefined });
+    }
+    acc[cat].details = [...byTicker.values()];
+  }
+
+  const items: NettingBreakdownItem[] = [];
+  for (const cat of ALL_CATEGORIES) {
+    const a = acc[cat];
+    if (Math.abs(a.value) > 0.01 || a.details.length > 0) {
+      const isIntrinsic = (cat === 'covered_call' || cat === 'derisking_cc') ||
+        (viewMode === 'netting_ex_cc_np' && cat === 'naked_put');
+      items.push({
+        category: cat,
+        label: isIntrinsic
+          ? `${STRATEGY_SECTION_LABELS[cat]} (intrinseco)`
+          : STRATEGY_SECTION_LABELS[cat],
+        value: a.value,
+        color: a.value < 0 ? 'cost' : (a.value > 0 ? 'gain' : 'cost'),
+        details: a.details,
+      });
+    }
+  }
+
+  const finalValue = baseValue + items.reduce((sum, b) => sum + b.value, 0);
+  return { items, finalValue };
 }
