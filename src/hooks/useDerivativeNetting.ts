@@ -325,7 +325,7 @@ export function useDerivativeNetting(
   summary: PortfolioSummary | null,
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  isGlobalAggregate: boolean = false,
+  isAggregatedView: boolean = false,
   strategyConfigs: StrategyConfiguration[] = []
 ): NettingResult {
   return useMemo(() => {
