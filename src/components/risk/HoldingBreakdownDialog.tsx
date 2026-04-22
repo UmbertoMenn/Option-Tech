@@ -44,7 +44,7 @@ export function HoldingBreakdownDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary" />
-            Breakdown: {holding.name}
+            Breakdown: {holding.ticker ? `${holding.ticker} — ${holding.name}` : holding.name}
           </DialogTitle>
         </DialogHeader>
 

@@ -133,6 +133,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       stockDetails: [
         {
           underlying: 'AZ.ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           isin: 'US01609W1027',
           stockQuantity: 100,
           stockPrice: 175,
@@ -154,6 +155,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       nakedPutDetails: [
         {
           underlying: 'ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           contracts: 1,
           strike: 165,
           expiry: '2025-06-20',
@@ -164,6 +166,7 @@ describe('calculateConsolidatedTopHoldings', () => {
         },
         {
           underlying: 'ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           contracts: 1,
           strike: 170,
           expiry: '2025-06-20',
@@ -174,6 +177,7 @@ describe('calculateConsolidatedTopHoldings', () => {
         },
         {
           underlying: 'XYZ HOLDINGS LTD',
+          tickerKey: 'NAME:XYZ HOLDINGS LTD',
           contracts: 5,
           strike: 100,
           expiry: '2025-06-20',
@@ -237,6 +241,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       stockDetails: [
         {
           underlying: 'AZ.ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           isin: 'US01609W1027',
           stockQuantity: 100,
           stockPrice: 175,
@@ -258,6 +263,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       nakedPutDetails: [
         {
           underlying: 'ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           contracts: 1,
           strike: 165,
           expiry: '2025-06-20',
@@ -268,6 +274,7 @@ describe('calculateConsolidatedTopHoldings', () => {
         },
         {
           underlying: 'ALIBABA GROUP HOLDING LTD',
+          tickerKey: 'BABA',
           contracts: 1,
           strike: 170,
           expiry: '2025-06-20',
