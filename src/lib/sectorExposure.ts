@@ -360,6 +360,8 @@ export interface TopHolding {
 // Interface for Consolidated Top 10 Holdings
 export interface ConsolidatedHolding {
   name: string;
+  ticker: string | null;         // Canonical ticker for display (null if name fallback)
+  tickerKey: string;             // Internal aggregation key (uppercased ticker or NAME:...)
   stockRisk: number;             // Direct stock risk WITHOUT protections (€)
   stockRiskWithProtection: number; // Direct stock risk WITH protections (€)
   nakedPutRisk: number;          // Naked PUT risk (€)
