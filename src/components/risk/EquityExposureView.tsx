@@ -988,7 +988,17 @@ export function EquityExposureView({
                           {index + 1}.
                         </span>
                         <div className="flex flex-col min-w-0 flex-1">
-                          <span className="font-medium truncate">{holding.name}</span>
+                          <span className="font-medium truncate">
+                            {holding.ticker ? (
+                              <>
+                                <span className="text-primary font-bold">{holding.ticker}</span>
+                                <span className="text-muted-foreground"> — </span>
+                                <span>{holding.name}</span>
+                              </>
+                            ) : (
+                              holding.name
+                            )}
+                          </span>
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {hasStock && (
                               <Badge 

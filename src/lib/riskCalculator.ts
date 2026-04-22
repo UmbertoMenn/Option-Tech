@@ -15,9 +15,11 @@ import {
   positionsToLegs,
   OptionLeg 
 } from './universalMaxLoss';
+import { resolveTickerKey } from './sectorExposure';
 
 export interface StockRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation (e.g. "NVDA")
   stockValue: number;           // Valore azioni in valuta originale
   stockQuantity: number;        // Numero azioni
   stockPrice: number;           // Prezzo azione
@@ -36,6 +38,7 @@ export interface StockRiskDetail {
 
 export interface NakedPutRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   strike: number;
   contracts: number;
   expiry: string;
@@ -47,6 +50,7 @@ export interface NakedPutRiskDetail {
 
 export interface LeapCallRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   strike: number;
   contracts: number;
   avgCost: number;
@@ -61,6 +65,7 @@ export interface LeapCallRiskDetail {
 export interface StrategyRiskDetail {
   strategyName: string;
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   maxLoss: number;              // In valuta originale
   maxLossEUR: number;
   currency: string;
@@ -269,6 +274,7 @@ export function calculateStockRisk(
     
     result.push({
       underlying: stock.ticker || stock.description,
+      tickerKey: resolveTickerKey(stock.description, stock.ticker),
       stockValue,
       stockQuantity,
       stockPrice,
@@ -301,9 +307,11 @@ export function calculateNakedPutRisk(
     const contracts = np.contracts;
     const exchangeRate = getEffectiveExchangeRate(np.option);
     const riskOriginal = strike * contracts * 100;
+    const underlying = np.option.underlying || np.option.description;
     
     return {
-      underlying: np.option.underlying || np.option.description,
+      underlying,
+      tickerKey: resolveTickerKey(underlying, np.option.ticker),
       strike,
       contracts,
       expiry: np.option.expiry_date || '',
@@ -328,9 +336,11 @@ export function calculateLeapCallRisk(
     const marketPrice = lc.option.current_price || avgCost; // Fallback to avgCost if no market price
     const exchangeRate = getEffectiveExchangeRate(lc.option);
     const marketValue = contracts * marketPrice * 100;
+    const underlying = lc.option.underlying || lc.option.description;
     
     return {
-      underlying: lc.option.underlying || lc.option.description,
+      underlying,
+      tickerKey: resolveTickerKey(underlying, lc.option.ticker),
       strike: lc.option.strike_price || 0,
       contracts,
       avgCost,
@@ -436,6 +446,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: 'Iron Condor',
       underlying: ic.underlying,
+      tickerKey: resolveTickerKey(ic.underlying, ic.soldPut.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -454,6 +465,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: 'Double Diagonal',
       underlying: dd.underlying,
+      tickerKey: resolveTickerKey(dd.underlying, dd.soldPut.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -503,6 +515,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: effectiveGroup.strategyName || 'Strategia Complessa',
       underlying: effectiveGroup.underlying,
+      tickerKey: resolveTickerKey(effectiveGroup.underlying, firstOption.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
