@@ -1,211 +1,85 @@
 
 
-## Fix definitivo: GOOGLE non deve finire in Posizioni Orfane
+## Fix Holding Consolidate: aggregazione per TICKER
 
-### Perché succede ancora
+### Problema attuale
 
-Ho trovato due problemi reali nel codice attuale, non uno solo.
+`calculateConsolidatedTopHoldings` in `src/lib/sectorExposure.ts` aggrega per **descrizione testuale** tramite `getHoldingKey()` + stopwords + alias. Risultato:
+- doppie posizioni per lo stesso titolo (es. "AZ.NVIDIA CORP" vs "NVIDIA" vs "NVDA" non sempre matchano)
+- alcune posizioni mancano perché finiscono in chiavi diverse
+- la fallback per nomi senza token significativi crea ulteriori duplicati nella `holdingsByExactName`
 
-#### 1) Il netting non usa davvero la stessa fonte della pagina Strategie Derivati
-In `src/hooks/useDerivativeNetting.ts`, `buildCanonicalLegs()` ricostruisce le gambe leggendo:
-- `coveredCalls`
-- `deRiskingCoveredCalls`
-- `ironCondors`
-- `doubleDiagonals`
-- `nakedPuts`
-- `longPuts`
-- `leapCalls`
-- `groupedOtherStrategies`
+I dati sorgente (`StockRiskDetail`, `NakedPutRiskDetail`, `LeapCallRiskDetail`, `StrategyRiskDetail`) **già contengono** il campo `underlying` o un ticker risolvibile, ma il consolidamento ignora questa informazione e usa solo il testo libero.
 
-Ma la fonte più affidabile della pagina Derivati è `resolvedConfigs[].matchedPositions` dentro `categorizeDerivatives(...)`.
+### Soluzione: chiave canonica = TICKER
 
-Questo conta perché una config può avere `matchedVirtual` corretti, ma non entrare nelle sezioni finali per le regole di costruzione della categoria. In quel caso:
-- la pagina/config sa che la strategia esiste
-- il netting non prende quei `matchedPositions`
-- la quantità resta “non consumata”
-- il residuo finisce in `orphans`
+#### A. Estendere i RiskDetail con `tickerKey`
 
-È esattamente il tipo di bug che spiega GOOGLE o MU nelle orfane pur essendo configurati.
+**File:** `src/lib/riskCalculator.ts`
 
-#### 2) La dashboard non tratta correttamente l’aggregato utente
-La pagina Derivati, quando `isAggregatedView` è true, categorizza **per portfolio** e poi mergea i risultati.
-La dashboard invece passa a `useDerivativeNetting(...)` solo `isGlobalAggregate`, quindi fa lo split per portfolio solo nell’aggregato globale admin, non nell’aggregato utente.
+Per ogni dettaglio prodotto (`stockDetails`, `nakedPutDetails`, `leapCallDetails`, `strategyDetails`) aggiungere un campo `tickerKey: string` calcolato in modo deterministico:
 
-Quindi su “Il Mio Aggregato” il netting può mischiare:
-- posizioni di portfolio A
-- config di portfolio B
+1. Per **stock**: usa `stock.ticker` se presente, altrimenti risolvi via `resolveUnderlyingTicker(underlying, ISIN)` (sistema già presente in `tech/market-data/ticker-resolution-system`)
+2. Per **opzioni** (naked put, leap call, strategy): usa il ticker risolto dal sottostante via `resolveUnderlyingTicker(underlying)` o, se l'opzione ha già un `ticker` cleaned (es. "NVDA"), preferiscilo
+3. Normalizzazione finale: uppercase, trim, rimozione suffissi `.MI`, `.DE`, `:US`, ecc.
+4. Fallback: se nessun ticker risolvibile → `tickerKey = NORMALIZED_NAME` (così le aggregazioni residue mantengono comunque coerenza)
 
-Questo crea falsi residui e quindi falsi orfani.
+#### B. Riscrivere `calculateConsolidatedTopHoldings` per usare `tickerKey`
 
----
+**File:** `src/lib/sectorExposure.ts`
 
-## Cosa implementare
+Sostituire `holdingsByKey` + `holdingsByExactName` + `getHoldingKey` + `normalizeHoldingName` con un singolo `Map<tickerKey, ConsolidatedHoldingWithDetails>`.
 
-### A. Rifare il netting partendo da `resolvedConfigs.matchedPositions`
-**File:** `src/hooks/useDerivativeNetting.ts`
-
-Sostituire l’attuale `buildCanonicalLegs()` con una costruzione canonica basata su:
-- `categorizeDerivatives(..., { configOnly: true })`
-- `categories.resolvedConfigs`
-
-Per ogni `resolvedConfig`:
-- usare **direttamente** `matchedPositions`
-- mappare la `strategyType` alla categoria netting:
-  - `covered_call` → `covered_call`
-  - `derisking_covered_call` → `derisking_cc`
-  - `iron_condor` → `iron_condor`
-  - `double_diagonal` → `double_diagonal`
-  - `naked_put` → `naked_put`
-  - `put_spread` → `put_spread`
-  - `diagonal_put_spread` → `diagonal_put_spread`
-  - `leap_call` → `leap_call`
-  - `other` → `other`
-
-Per CC / De-Risking / Naked Put mantenere il riferimento a `linkedStock` del `resolvedConfig` per i calcoli intrinseci.
-
-Questo elimina la dipendenza dalle sezioni display e usa la vera sorgente configurata.
-
----
-
-### B. Calcolare gli orfani solo come residui veri
-Sempre in `src/hooks/useDerivativeNetting.ts`:
-
-Per ogni derivato originale:
-- sommare quanta quantità è stata consumata dai `matchedPositions` delle config
-- usare `sourceId` = id raw senza suffissi virtuali
-- creare orfano solo se:
 ```text
-residuo = |qty originale| - qty consumata > 0
+per ogni stock/np/leap/strategy:
+  key = detail.tickerKey   // già pronto
+  holding = map.get(key) || createHolding(displayName)
+  // accumula stockRisk / nakedPutRisk / leapCallRisk / strategyRisk
+  // preferisci come displayName la versione più pulita (ticker se nome troppo lungo)
 ```
 
-Il residuo va creato proporzionalmente su:
-- `quantity`
-- `market_value`
-- `snapshot_market_value`
-- `profit_loss`
+Per i **GP holdings** (stock GP): risolvi anch'essi via `resolveUnderlyingTicker(description, ticker_code)` per allinearli alle stesse chiavi.
 
-Così GOOGLE finisce in orfani solo se resta davvero una parte non assegnata alla config.
+#### C. Display name canonico
 
----
+Mantenere un campo `ticker` esplicito su `ConsolidatedHoldingWithDetails` e mostrarlo nella UI (`EquityExposureView.tsx`) accanto al nome esteso, formato:
+```
+NVDA — NVIDIA Corp
+```
+Così l'utente vede subito che il consolidamento ha funzionato.
 
-### C. Separare SEMPRE per portfolio nelle viste aggregate
-**File:** `src/hooks/useDerivativeNetting.ts`
+#### D. Rimuovere logica obsoleta
 
-L’hook deve smettere di usare il solo booleano `isGlobalAggregate`.
-Va introdotta la logica “aggregated view” coerente con la pagina Derivati:
-- raggruppare sempre per `portfolio_id` quando sono presenti più portfolio nella vista
-- applicare `computeSinglePortfolioNetting(...)` separatamente per ogni portfolio
-- poi fare merge del breakdown
+- `getHoldingKey`, `isSameHolding`, `CORPORATE_STOPWORDS`, `SPECIAL_ALIASES` (per holdings) → marcate `@deprecated` ma mantenute solo per back-compat dei test esistenti
+- Aggiornare i test in `src/test/holdingMatching.test.ts` per riflettere il nuovo schema basato su ticker (es. `tickerKey: 'BABA'` per tutte le varianti ALIBABA)
 
-Questo rende coerente dashboard e pagina Derivati sia per:
-- aggregato globale admin
-- aggregato utente
+### File da modificare
 
----
+1. `src/lib/riskCalculator.ts` — aggiungere `tickerKey` a tutti i RiskDetail
+2. `src/lib/sectorExposure.ts` — riscrivere `calculateConsolidatedTopHoldings` per chiave-ticker
+3. `src/components/risk/EquityExposureView.tsx` — mostrare `ticker — name`
+4. `src/components/risk/HoldingBreakdownDialog.tsx` — header dialog con ticker
+5. `src/test/holdingMatching.test.ts` — aggiornare assertion ai nuovi key ticker
 
-### D. Non derivare più il breakdown “ex CC / ex CC&NP” dalle sezioni visuali
-**File:** `src/hooks/useDerivativeNetting.ts`
+### Risultato atteso
 
-Anche `getBreakdownForViewMode(...)` deve usare la stessa lista canonica di leg costruita da `resolvedConfigs + residui`, non le categorie ricostruite.
+- **Una sola riga per NVIDIA** anche con descrizioni miste ("AZ.NVIDIA CORP", "NVIDIA", opzioni con underlying "NVDA")
+- **Una sola riga per ALPHABET/GOOGLE** unificata via ticker risolto (`GOOGL` o `GOOG`)
+- **Una sola riga per ALIBABA** anche con prefissi italiani
+- Posizioni che prima sparivano (perché finivano in chiavi diverse) ora compaiono raggruppate correttamente
+- Holding consolidate finalmente coerenti con ciò che si vede nelle altre sezioni del Risk Analyzer
 
-Regole:
-- `netting_total`: market value pieno
-- `netting_ex_cc`: per `covered_call` e `derisking_cc` usare solo perdita intrinseca ITM della sold call, con cap al costo di chiusura
-- `netting_ex_cc_np`: stessa regola + naked put ITM intrinseca capped
-- tutte le altre categorie, inclusi `orphans`: market value pieno
-
----
-
-### E. Rendere visibile la differenza tra config matchata e config degradata
-**File:** `src/lib/derivativeStrategies.ts`
-
-Nel ramo `configOnly`, oltre a `resolvedConfigs`, rendere esplicito quando una config è:
-- `matched`
-- `partial`
-- `unmatched`
-
-e usare questi stati nel netting:
-- `matched` / `partial`: i `matchedPositions` vanno comunque consumati
-- `unmatched`: nessun consumo, tutto residuo → `orphans`
-
-Questo evita che una config parzialmente riconosciuta venga persa completamente.
-
----
-
-### F. Sistemare il bug delle config rimaste con tipo sbagliato dopo variazione gambe
-**Problema esempio:** META era Iron Condor, poi resta a 3 gambe, ma nel DB la config è ancora `iron_condor`.
-
-#### Fix
-**File:** `src/lib/strategyReconciliation.ts`  
-**File:** `src/components/derivatives/StrategyReconciliationDialog.tsx`
-
-Estendere la riconciliazione in modo che:
-- una config con leg mancanti sia marcata `isDegraded`
-- se il set di leg residuo corrisponde a un altro tipo rilevabile, venga proposta una conversione suggerita
-- al salvataggio, la nuova config sostituisca quella obsoleta
-
-Esempio:
-- META 4 leg → 3 leg
-- non deve più essere considerata iron condor valida
-- non deve sparire nel nulla
-- fino a riconfigurazione, le gambe effettivamente matchate/non matchate devono ricadere correttamente negli orfani/residui
-- nel dialogo va proposta la correzione o rimozione
-
----
-
-## File da modificare
-
-1. `src/hooks/useDerivativeNetting.ts`
-   - rifare `buildCanonicalLegs()` usando `resolvedConfigs.matchedPositions`
-   - consumo quantity-aware dai `resolvedConfigs`
-   - split per portfolio in tutte le viste aggregate
-   - allineare anche `getBreakdownForViewMode()`
-
-2. `src/lib/derivativeStrategies.ts`
-   - esporre meglio i `resolvedConfigs` come fonte canonica del match
-   - mantenere `status` affidabile per matched/partial/unmatched
-
-3. `src/lib/strategyReconciliation.ts`
-   - rafforzare detection config degrade/obsolete
-
-4. `src/components/derivatives/StrategyReconciliationDialog.tsx`
-   - proporre pulizia/correzione delle config degradate
-
----
-
-## Risultato atteso
-
-Per GOOGLE:
-- se è davvero dentro una covered call sintetica/de-risking configurata, non apparirà più in `Posizioni Orfane`
-
-Per MU:
-- se è configurata come Double Diagonal e i `matchedPositions` esistono, resterà in Double Diagonal
-
-Per META degradata:
-- non verrà mostrata come Iron Condor valida
-- le gambe residue finiranno correttamente tra i residui/orfani finché non viene riconfigurata
-- la UI proporrà la correzione della config
-
-Per la home:
-- il netting userà finalmente la stessa base logica della pagina Strategie Derivati
-- niente più casi in cui una posizione configurata sparisce dalla sezione giusta e riappare negli orfani
-
-## Dettagli tecnici
+### Dettagli tecnici
 
 ```text
-Nuova sorgente canonica netting:
-categorizeDerivatives(..., { configOnly: true })
-  -> resolvedConfigs[]
-     -> matchedPositions[]
+Sorgente unica della chiave: ticker risolto via
+  resolveUnderlyingTicker(underlying, isin?) -> "NVDA" | "BABA" | ...
 
-Orfani:
-raw derivative qty
-- somma qty matchedPositions con stesso sourceId
-= residuo reale
+Aggregazione:
+  Map<tickerKey, ConsolidatedHolding>
+  no più stopwords, no più jaccard, no più alias map
 
-Aggregato:
-group by portfolio_id
-computeSinglePortfolioNetting per portfolio
-merge breakdown finale
+Display:
+  ticker (chiave) + name (descrizione più pulita disponibile)
 ```
 
