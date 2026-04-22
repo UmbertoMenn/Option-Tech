@@ -15,6 +15,7 @@ import {
   positionsToLegs,
   OptionLeg 
 } from './universalMaxLoss';
+import { resolveTickerKey } from './sectorExposure';
 
 export interface StockRiskDetail {
   underlying: string;
