@@ -446,6 +446,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: 'Iron Condor',
       underlying: ic.underlying,
+      tickerKey: resolveTickerKey(ic.underlying, ic.soldPut.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -464,6 +465,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: 'Double Diagonal',
       underlying: dd.underlying,
+      tickerKey: resolveTickerKey(dd.underlying, dd.soldPut.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -513,6 +515,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     result.push({
       strategyName: effectiveGroup.strategyName || 'Strategia Complessa',
       underlying: effectiveGroup.underlying,
+      tickerKey: resolveTickerKey(effectiveGroup.underlying, firstOption.ticker),
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
