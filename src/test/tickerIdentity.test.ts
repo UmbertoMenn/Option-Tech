@@ -82,5 +82,28 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(resolveUnderlyingIdentity({ rawName: 'STELLANTIS' }).tickerKey).toBe('STLA');
     expect(resolveUnderlyingIdentity({ rawName: 'DEUTSCHE POST AG' }).tickerKey).toBe('DPW');
     expect(resolveUnderlyingIdentity({ rawName: 'DIR-TELECOM ITALIA SPA' }).tickerKey).toBe('TIT');
+
+  it('Dynamic backend mapping resolves Celestica/CEG/APP/RDDT', () => {
+    const { buildDynamicAliasMap } = require('@/lib/tickerIdentity');
+    const dyn = buildDynamicAliasMap([
+      { underlying: 'Celestica Inc', ticker: 'CLS' },
+      { underlying: 'Constellation Energy Corporation', ticker: 'CEG' },
+      { underlying: 'AppLovin Corp', ticker: 'APP' },
+      { underlying: 'Redditi INC', ticker: 'RDDT' },
+    ]);
+    expect(resolveUnderlyingIdentity({ rawName: 'Celestica Inc' }, { dynamicAliases: dyn }).tickerKey).toBe('CLS');
+    expect(resolveUnderlyingIdentity({ underlyingName: 'Constellation Energy Corporation' }, { dynamicAliases: dyn }).tickerKey).toBe('CEG');
+    expect(resolveUnderlyingIdentity({ rawName: 'AppLovin Corp' }, { dynamicAliases: dyn }).tickerKey).toBe('APP');
+    expect(resolveUnderlyingIdentity({ description: 'Redditi INC OPTION PUT 195 SEP/26' }, { dynamicAliases: dyn }).tickerKey).toBe('RDDT');
+  });
+
+  it('Dynamic mapping wins over fallback even when name is unknown to static map', () => {
+    const { buildDynamicAliasMap } = require('@/lib/tickerIdentity');
+    const dyn = buildDynamicAliasMap([
+      { underlying: 'Some Brand New Company', ticker: 'SBNC' },
+    ]);
+    const r = resolveUnderlyingIdentity({ rawName: 'Some Brand New Company' }, { dynamicAliases: dyn });
+    expect(r.tickerKey).toBe('SBNC');
+    expect(r.source).toBe('alias_map');
   });
 });
