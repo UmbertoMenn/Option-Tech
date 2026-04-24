@@ -1058,7 +1058,7 @@ export function calculateConsolidatedTopHoldings(
       rawTicker: gp.ticker_code,
       rawName: name,
       description: name,
-    });
+    }, { dynamicAliases });
     const holding = getOrCreateHolding(name, identity.tickerKey);
     holding.gpRisk += gp.market_value;
     holding.sources.push({
@@ -1066,6 +1066,45 @@ export function calculateConsolidatedTopHoldings(
       name: 'GP',
       exposure: gp.market_value,
     });
+  }
+
+  // 5.5 Late re-canonicalization: any holding still in NAME:* fallback
+  // gets a second chance using the dynamic alias map (backend underlying_mappings).
+  // This handles cases where the per-detail `tickerKey` was computed upstream
+  // before dynamicAliases were available (e.g. risk calculator).
+  if (dynamicAliases && dynamicAliases.size > 0) {
+    const { resolveUnderlyingIdentity, normalizeText } = require('./tickerIdentity') as typeof import('./tickerIdentity');
+    const fallbackKeys = Array.from(holdingsByTicker.keys()).filter(k => k.startsWith('NAME:'));
+    for (const oldKey of fallbackKeys) {
+      const holding = holdingsByTicker.get(oldKey);
+      if (!holding) continue;
+      // Try resolving using the holding name + dynamicAliases
+      const reResolved = resolveUnderlyingIdentity(
+        { rawName: holding.name, description: holding.name, underlyingName: holding.name },
+        { dynamicAliases },
+      );
+      if (reResolved.tickerKey === oldKey || reResolved.tickerKey.startsWith('NAME:')) continue;
+      // Merge into existing canonical holding if any, otherwise rekey
+      const target = holdingsByTicker.get(reResolved.tickerKey);
+      if (target) {
+        target.stockRisk += holding.stockRisk;
+        target.stockRiskWithProtection += holding.stockRiskWithProtection;
+        target.nakedPutRisk += holding.nakedPutRisk;
+        target.leapCallRisk += holding.leapCallRisk;
+        target.strategyRisk += holding.strategyRisk;
+        target.gpRisk += holding.gpRisk;
+        target.sources.push(...holding.sources);
+        target.nakedPutDetails.push(...holding.nakedPutDetails);
+        target.leapCallDetails.push(...holding.leapCallDetails);
+        target.stockDetails.push(...holding.stockDetails);
+        target.strategyDetails.push(...holding.strategyDetails);
+      } else {
+        holding.tickerKey = reResolved.tickerKey;
+        holding.ticker = getDisplayTicker(reResolved.tickerKey);
+        holdingsByTicker.set(reResolved.tickerKey, holding);
+      }
+      holdingsByTicker.delete(oldKey);
+    }
   }
 
   // Calculate total exposure based on toggles
