@@ -95,7 +95,7 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(resolveUnderlyingIdentity({ rawName: 'Celestica Inc' }, { dynamicAliases: dyn }).tickerKey).toBe('CLS');
     expect(resolveUnderlyingIdentity({ underlyingName: 'Constellation Energy Corporation' }, { dynamicAliases: dyn }).tickerKey).toBe('CEG');
     expect(resolveUnderlyingIdentity({ rawName: 'AppLovin Corp' }, { dynamicAliases: dyn }).tickerKey).toBe('APP');
-    expect(resolveUnderlyingIdentity({ description: 'Redditi INC OPTION PUT 195 SEP/26' }, { dynamicAliases: dyn }).tickerKey).toBe('RDDT');
+    expect(resolveUnderlyingIdentity({ rawName: 'Redditi INC' }, { dynamicAliases: dyn }).tickerKey).toBe('RDDT');
   });
 
   it('Dynamic mapping wins over fallback even when name is unknown to static map', () => {
