@@ -82,6 +82,7 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(resolveUnderlyingIdentity({ rawName: 'STELLANTIS' }).tickerKey).toBe('STLA');
     expect(resolveUnderlyingIdentity({ rawName: 'DEUTSCHE POST AG' }).tickerKey).toBe('DPW');
     expect(resolveUnderlyingIdentity({ rawName: 'DIR-TELECOM ITALIA SPA' }).tickerKey).toBe('TIT');
+  });
 
   it('Dynamic backend mapping resolves Celestica/CEG/APP/RDDT', () => {
     const { buildDynamicAliasMap } = require('@/lib/tickerIdentity');
