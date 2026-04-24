@@ -36,6 +36,17 @@ export interface IdentityInput {
   isin?: string | null;
 }
 
+export interface ResolveOptions {
+  /**
+   * Dynamic alias map derived from the backend (e.g. `underlying_mappings`).
+   * Keys MUST be already normalized via `normalizeText(...)`. Values are
+   * canonical tickers (e.g. "CEG", "APP", "RDDT", "CLS").
+   * Checked AFTER linkedStock/rawTicker but BEFORE the static alias map,
+   * so the backend wins over hardcoded aliases when both exist.
+   */
+  dynamicAliases?: Map<string, string> | Record<string, string>;
+}
+
 // ============================================================================
 // 1. Unified canonical map. Add new aliases here (single source of truth).
 // ============================================================================
