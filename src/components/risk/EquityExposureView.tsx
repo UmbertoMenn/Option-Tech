@@ -995,9 +995,24 @@ export function EquityExposureView({
                                 <span className="text-muted-foreground"> — </span>
                                 <span>{holding.name}</span>
                               </>
-                            ) : (
-                              holding.name
-                            )}
+                            ) : (() => {
+                              // Fallback: derive a presumed ticker from the first significant token
+                              const cleaned = (holding.name || '')
+                                .replace(/^AZ\./i, '')
+                                .replace(/[-_,.]/g, ' ')
+                                .trim();
+                              const firstToken = cleaned.split(/\s+/)[0]?.toUpperCase() || '';
+                              const presumed = /^[A-Z][A-Z0-9]{1,5}$/.test(firstToken) ? firstToken : null;
+                              return presumed ? (
+                                <>
+                                  <span className="text-muted-foreground font-bold">{presumed}</span>
+                                  <span className="text-muted-foreground"> — </span>
+                                  <span>{holding.name}</span>
+                                </>
+                              ) : (
+                                holding.name
+                              );
+                            })()}
                           </span>
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {hasStock && (

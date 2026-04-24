@@ -67,4 +67,20 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(r.tickerKey).toBe('LULU');
     expect(r.source).toBe('linked_stock');
   });
+
+  it('European / HK exchange-suffixed tickers map to canonical', () => {
+    expect(resolveUnderlyingIdentity({ rawTicker: '1211.HK', rawName: 'BYD CO LTD' }).tickerKey).toBe('BYD');
+    expect(resolveUnderlyingIdentity({ rawTicker: '9PDA.SG', rawName: 'PDD HOLDINGS INC' }).tickerKey).toBe('PDD');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'RACE.MI', rawName: 'FERRARI NV' }).tickerKey).toBe('RACE');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'SAP.DE', rawName: 'SAP SE' }).tickerKey).toBe('SAP');
+  });
+
+  it('Name-only resolution for European stocks without ticker', () => {
+    expect(resolveUnderlyingIdentity({ rawName: 'MERCEDES-BENZ GROUP AG' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ rawName: 'FORTINET INC' }).tickerKey).toBe('FTNT');
+    expect(resolveUnderlyingIdentity({ rawName: 'AZ.FORTINET INC' }).tickerKey).toBe('FTNT');
+    expect(resolveUnderlyingIdentity({ rawName: 'STELLANTIS' }).tickerKey).toBe('STLA');
+    expect(resolveUnderlyingIdentity({ rawName: 'DEUTSCHE POST AG' }).tickerKey).toBe('DPW');
+    expect(resolveUnderlyingIdentity({ rawName: 'DIR-TELECOM ITALIA SPA' }).tickerKey).toBe('TIT');
+  });
 });

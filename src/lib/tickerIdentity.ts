@@ -147,6 +147,60 @@ const CANONICAL_UNDERLYINGS: Record<string, string[]> = {
   CCJ: ['CCJ', 'CAMECO', 'CAMECO CORP'],
   UEC: ['UEC', 'URANIUM ENERGY'],
   LEU: ['LEU', 'CENTRUS', 'CENTRUS ENERGY'],
+  DNN: ['DNN', 'DENISON', 'DENISON MINES'],
+  NXE: ['NXE', 'NEXGEN', 'NEXGEN ENERGY'],
+
+  // === Cybersecurity / cloud / SaaS (extra) ===
+  FTNT: ['FTNT', 'FORTINET', 'FORTINET INC'],
+  CRWD: ['CRWD', 'CROWDSTRIKE', 'CROWDSTRIKE HOLDINGS'],
+  ZS: ['ZS', 'ZSCALER', 'ZSCALER INC'],
+  NET: ['NET', 'CLOUDFLARE', 'CLOUDFLARE INC'],
+  SNOW: ['SNOW', 'SNOWFLAKE', 'SNOWFLAKE INC'],
+  DDOG: ['DDOG', 'DATADOG', 'DATADOG INC'],
+  MDB: ['MDB', 'MONGODB', 'MONGODB INC'],
+  DOCU: ['DOCU', 'DOCUSIGN', 'DOCUSIGN INC'],
+  TWLO: ['TWLO', 'TWILIO', 'TWILIO INC'],
+  OKTA: ['OKTA', 'OKTA INC'],
+  U: ['U', 'UNITY', 'UNITY SOFTWARE'],
+
+  // === European stocks (cross-listed / local exchanges) ===
+  RACE: ['RACE', 'FERRARI', 'FERRARI NV', 'FERRARI N V'],
+  STLA: ['STLA', 'STELLANTIS', 'STELLANTIS NV', 'STELLANTIS N V'],
+  MBG: ['MBG', 'MERCEDES', 'MERCEDES BENZ', 'MERCEDES BENZ GROUP', 'MERCEDES BENZ GROUP AG'],
+  DPW: ['DPW', 'DEUTSCHE POST', 'DEUTSCHE POST AG', 'DHL GROUP'],
+  SAP: ['SAP', 'SAP SE', 'SAP AG'],
+  TIT: ['TIT', 'TELECOM ITALIA', 'TELECOM ITALIA SPA', 'DIR TELECOM ITALIA', 'DIR TELECOM ITALIA SPA'],
+  ISP: ['ISP', 'INTESA', 'INTESA SANPAOLO', 'INTESA SANPAOLO SPA'],
+  UCG: ['UCG', 'UNICREDIT', 'UNICREDIT SPA'],
+  G: ['G', 'GENERALI', 'ASSICURAZIONI GENERALI', 'GENERALI ASSICURAZIONI'],
+
+  // === HK / China dual-listings ===
+  BYD: ['BYD', 'BYD CO', 'BYD CO LTD', 'BYD COMPANY'],
+};
+
+/**
+ * Mapping from non-US/exchange-suffixed raw tickers to canonical underlying.
+ * Used when a raw ticker like "1211.HK", "9PDA.SG", "RACE.MI" cannot be
+ * cleaned to a normal symbol but corresponds to a known underlying.
+ * Keys must be uppercased exactly as they appear after AZ. prefix stripping.
+ */
+const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
+  '1211.HK': 'BYD',
+  '9PDA.SG': 'PDD',
+  'RACE.MI': 'RACE',
+  'STLA.MI': 'STLA',
+  'STLAM.MI': 'STLA',
+  'MBG.DE': 'MBG',
+  'MBG.F': 'MBG',
+  'DHL.DE': 'DPW',
+  'DPW.DE': 'DPW',
+  'SAP.DE': 'SAP',
+  'SAP.F': 'SAP',
+  'TIT.MI': 'TIT',
+  'ISP.MI': 'ISP',
+  'UCG.MI': 'UCG',
+  'G.MI': 'G',
+  'ENI.MI': 'ENI',
 };
 
 // ============================================================================
@@ -259,6 +313,22 @@ function pickCanonicalName(input: IdentityInput, ticker: string): string {
  *   5. Fallback: NAME:... key (deterministic)
  */
 export function resolveUnderlyingIdentity(input: IdentityInput): UnderlyingIdentity {
+  // 0. Exchange-suffixed raw ticker → canonical (highest priority for non-US tickers)
+  const rawTickerExchangeKey = (input.rawTicker || input.linkedStock?.ticker || '')
+    .trim()
+    .toUpperCase()
+    .replace(/^AZ\./, '');
+  if (rawTickerExchangeKey && EXCHANGE_TICKER_TO_CANONICAL[rawTickerExchangeKey]) {
+    const canonical = EXCHANGE_TICKER_TO_CANONICAL[rawTickerExchangeKey];
+    return {
+      tickerKey: canonical,
+      displayTicker: canonical,
+      canonicalName: pickCanonicalName(input, canonical),
+      source: 'alias_map',
+      confidence: 'high',
+    };
+  }
+
   // 1. linkedStock wins
   if (input.linkedStock) {
     const stk = input.linkedStock;
