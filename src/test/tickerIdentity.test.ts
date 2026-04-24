@@ -85,7 +85,7 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   });
 
   it('Dynamic backend mapping resolves Celestica/CEG/APP/RDDT', () => {
-    const { buildDynamicAliasMap } = require('@/lib/tickerIdentity');
+    
     const dyn = buildDynamicAliasMap([
       { underlying: 'Celestica Inc', ticker: 'CLS' },
       { underlying: 'Constellation Energy Corporation', ticker: 'CEG' },
@@ -99,7 +99,7 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   });
 
   it('Dynamic mapping wins over fallback even when name is unknown to static map', () => {
-    const { buildDynamicAliasMap } = require('@/lib/tickerIdentity');
+    
     const dyn = buildDynamicAliasMap([
       { underlying: 'Some Brand New Company', ticker: 'SBNC' },
     ]);
