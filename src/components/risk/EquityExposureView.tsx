@@ -33,6 +33,8 @@ import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { calculateConsolidatedTopHoldings, ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
 import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
 import { GPHoldingRow } from '@/hooks/useGPHoldings';
+import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
