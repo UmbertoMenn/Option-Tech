@@ -516,8 +516,11 @@ export function PerformanceEvolutionChart({
       };
     });
 
-    // Add current point ONLY if it's newer than the latest saved snapshot and not a duplicate
-    if (canAppendCurrent && currentDate && !data.some(d => d.date === currentDate)) {
+    // Reflect the current live point on the chart whenever available:
+    // - if a snapshot already exists for the same date, OVERRIDE its value/return
+    //   with the live one (snapshot may be stale, e.g. saved before GP/prices update)
+    // - otherwise append a new point if it's the most recent date
+    if (hasLiveCurrent && currentDate) {
       const currentDateObj = new Date(currentDate);
       const cumulativeDeposits = sortedDeposits
         .filter((d) => {
@@ -533,20 +536,38 @@ export function PerformanceEvolutionChart({
       const returnPct = avgBalance > 0 ? (pl / avgBalance) * 100 : 0;
 
       const bmCurrent = benchmarkByDate[currentDate];
-      data.push({
-        date: currentDate,
-        timestamp: new Date(currentDate).getTime(),
-        formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
-        value: currentValue,
-        returnPct,
-        cumulativeDeposits,
+      const liveBenchmark = {
         benchmarkReturn: bmCurrent?.scaledReturn,
         benchmarkEquityReturn: bmCurrent?.equityReturn,
         benchmarkBondReturn: bmCurrent?.bondReturn,
         benchmarkEquityPctUsed: bmCurrent?.equityPctUsed,
         benchmarkEurusdVariation: bmCurrent?.eurusdVariation,
         benchmarkUsdPctUsed: bmCurrent?.usdPctUsed,
-      });
+      };
+
+      const existingIdx = data.findIndex(d => d.date === currentDate);
+      if (existingIdx >= 0) {
+        data[existingIdx] = {
+          ...data[existingIdx],
+          value: currentValue,
+          returnPct,
+          cumulativeDeposits,
+          ...liveBenchmark,
+        };
+      } else {
+        const isNewest = !latestSnapshotDate || new Date(currentDate) >= latestSnapshotDate;
+        if (isNewest) {
+          data.push({
+            date: currentDate,
+            timestamp: currentDateObj.getTime(),
+            formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
+            value: currentValue,
+            returnPct,
+            cumulativeDeposits,
+            ...liveBenchmark,
+          });
+        }
+      }
     }
 
     // Ensure chronological order as a safety measure
@@ -561,7 +582,7 @@ export function PerformanceEvolutionChart({
       : 24; // 3Y, MAX, YTD
     const preserveTs = currentDate ? new Date(currentDate).getTime() : undefined;
     return downsampleData(data, maxPoints, preserveTs);
-  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, canAppendCurrent]);
+  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, benchmarkReturns, timeRange, hasLiveCurrent, latestSnapshotDate]);
 
   if (chartData.length === 0) {
     return (
