@@ -1,241 +1,55 @@
-## Verifica approfondita: sì, ci sono ancora bug residui nella risoluzione ticker delle holdings consolidate
+## Problema
 
-Ho controllato il codice attuale e anche i dati reali dell’utente Mauro G. Il problema che segnali è reale: **Celestica, Constellation Energy, AppLovin e Redditi INC stanno ancora finendo nel fallback `NAME:`**, quindi la UI mostra la descrizione completa invece del ticker.
+Per SilviaS la card "Netting ex CC e NP" e il punto odierno sul grafico mostrano valori diversi perché lo snapshot in `historical_data` viene salvato anche quando si carica solo la **Gestione Patrimoniale (GP)**, mentre il portafoglio "vero" (file Excel principale) non è stato ricaricato. Il risultato:
 
-### Cosa ho verificato
+- la card ricalcola live sui dati attuali del portafoglio,
+- il grafico legge lo snapshot salvato dall'upload GP, che è disallineato rispetto al portafoglio principale.
 
-#### 1. Nei dati reali di Mauro G questi sottostanti esistono solo come derivati, senza ticker valorizzato
-Dalle posizioni del portfolio risultano righe come:
-- `Celestica Inc` con `ticker = null`
-- `Constellation Energy Corporation` con `ticker = null`
-- `AppLovin Corp` con `ticker = null`
-- `Redditi INC` con `ticker = null`
+## Regola desiderata
 
-Quindi, per questi casi, il sistema **non può appoggiarsi al raw ticker della posizione** e deve necessariamente risolvere dal nome.
+1. Lo snapshot in `historical_data` deve essere salvato **solo** quando viene caricato un nuovo file Portafoglio (non GP).
+2. Quando si carica solo la GP, lo snapshot **non** deve essere creato/aggiornato.
+3. Se l'utente carica per prima la GP (e non c'è un portafoglio principale recente per quella data), mostrare un banner/alert che avvisa: "Lo snapshot storico non verrà aggiornato finché non carichi un nuovo file Portafoglio".
 
-#### 2. Nel backend esistono già mapping corretti per questi nomi
-In `underlying_mappings` ci sono già mapping validi:
-- `Celestica Inc -> CLS`
-- `Constellation Energy Corporation -> CEG`
-- `AppLovin Corp -> APP`
-- `Redditi INC -> RDDT`
+## Modifiche
 
-Quindi il problema **non è che il ticker non esiste nel backend**.
+### 1. `src/components/dashboard/FileUploader.tsx`
 
-#### 3. Il resolver canonico attuale NON usa `underlying_mappings`
-In `src/lib/tickerIdentity.ts`, `resolveUnderlyingIdentity(...)` oggi usa solo:
-1. `linkedStock`
-2. `rawTicker`
-3. alias statici in `CANONICAL_UNDERLYINGS`
-4. fallback `NAME:...`
+**Rimuovere** la chiamata a `upsertUploadSnapshot` dal blocco `onDropGP`:
 
-Non interroga né riceve:
-- `underlying_mappings`
-- `useUnderlyingPrices`
-- una cache centralizzata dei mapping backend
+- Eliminare le righe che invocano `upsertUploadSnapshot` dopo il caricamento GP (incluso il refetch di `historical-data`).
+- Mantenere invece l'aggiornamento di `gp_total_value` / `gp_cash_value` e l'invalidate di `gp-holdings`/`portfolios`.
 
-Quindi, se il nome non è presente nella mappa hardcoded, cade nel fallback.
+Il caricamento Portafoglio (`onDropPortfolio`) continua a chiamare `upsertUploadSnapshot` come oggi: lo snapshot resta legato esclusivamente all'upload del portafoglio principale.
 
-#### 4. I casi che segnali sono proprio fuori dalla mappa statica
-Nel file `src/lib/tickerIdentity.ts` attuale **non vedo alias canonici** per:
-- `Celestica / CLS`
-- `Constellation Energy / CEG`
-- `AppLovin / APP`
-- `Reddit / RDDT`
+### 2. Banner di avviso post-upload GP
 
-Per questo oggi il resolver non riesce a trasformarli in ticker.
+Dopo un caricamento GP riuscito, valutare se mostrare un banner persistente:
 
-#### 5. La UI conferma il fallback, non un semplice problema di render
-In `EquityExposureView.tsx`, quando `holding.ticker` è `null`, la UI:
-- prova a mostrare un “presumed ticker” derivato dal primo token del nome
-- se non riesce, mostra direttamente la descrizione
+- Condizione: esiste almeno un record GP per il portafoglio ma **non** esiste un record `historical_data` con `snapshot_date == portfolios.snapshot_date`, **oppure** il `portfolios.snapshot_date` è più vecchio della data più recente di aggiornamento GP.
+- Aggiungere un nuovo componente `GpSnapshotMissingBanner` (in `src/components/dashboard/`) che:
+  - mostri un `Alert` (variant warning) sopra la sezione "Carica Portfolio" nella `Dashboard`,
+  - testo: "Hai caricato una Gestione Patrimoniale, ma lo snapshot storico verrà aggiornato solo dopo aver caricato un nuovo file Portafoglio."
+  - sia chiudibile per sessione (state locale, niente persistenza DB).
+- Integrare il banner in `src/components/dashboard/Dashboard.tsx` nella colonna destra della grid principale, sopra `FileUploader`.
 
-In `HoldingBreakdownDialog.tsx` inoltre compare il badge `fallback name` quando `tickerKey` inizia con `NAME:`.
+In aggiunta, mostrare un `toast.warning` immediato dopo l'upload GP riuscito con lo stesso messaggio breve, così l'utente non lo manca.
 
-Quindi non è solo un problema estetico: **la holding è davvero arrivata senza ticker canonico**.
+### 3. Nessuna modifica a `uploadSnapshot.ts`
 
-### Perché succede ancora
+La funzione resta invariata. Cambia solo chi la chiama.
 
-Perché oggi convivono due sistemi:
+### 4. Verifica manuale
 
-```text
-Backend / prezzi / monitoraggio:
-  usa underlying_mappings + prezzi sottostanti
+Per SilviaS, dopo il deploy:
 
-Holdings consolidate / risk analyzer:
-  usa resolver statico locale (tickerIdentity.ts)
-```
+1. Ricaricare il portafoglio principale → la card e il punto odierno del grafico devono coincidere (lo snapshot viene riallineato).
+2. Caricare solo la GP → nessuna scrittura su `historical_data`, banner visibile, card e grafico restano coerenti tra loro (entrambi basati sul vecchio snapshot del portafoglio principale, finché non se ne carica uno nuovo).
 
-Questa è l’incongruenza principale.
+## File toccati
 
-Finché il Risk Analyzer si appoggia a una mappa hardcoded separata, continueranno a comparire casi non coperti appena entra un nome nuovo o leggermente diverso.
+- `src/components/dashboard/FileUploader.tsx` (rimozione chiamata snapshot in GP, toast warning)
+- `src/components/dashboard/Dashboard.tsx` (inserimento banner)
+- `src/components/dashboard/GpSnapshotMissingBanner.tsx` (nuovo)
 
-## Soluzione definitiva proposta
-
-### Obiettivo
-Far sì che la risoluzione ticker delle holdings consolidate usi una **sorgente canonica dinamica**, non solo alias hardcoded.
-
-### A. Unificare la risoluzione ticker con i mapping backend
-
-**File:** `src/lib/tickerIdentity.ts`
-
-Estendere il resolver per accettare una mappa opzionale di override dinamici:
-
-```ts
-resolveUnderlyingIdentity(input, options?: {
-  dynamicMappings?: Record<string, string>
-})
-```
-
-Ordine di priorità nuovo:
-1. `linkedStock`
-2. `rawTicker` valido
-3. `dynamicMappings` (derivati da `underlying_mappings`)
-4. alias statici `CANONICAL_UNDERLYINGS`
-5. fallback `NAME:`
-
-Così:
-- `Constellation Energy Corporation` → `CEG`
-- `AppLovin Corp` → `APP`
-- `Celestica Inc` → `CLS`
-- `Redditi INC` → `RDDT`
-
-anche se non esistono nella mappa hardcoded.
-
-### B. Costruire una mappa dinamica nel Risk Analyzer
-
-**File:** `src/components/risk/EquityExposureView.tsx` oppure hook dedicato
-
-Usare i mapping già disponibili nel backend (`underlying_mappings`) per costruire una mappa:
-
-```text
-normalized underlying -> ticker
-```
-
-poi passarla a `calculateConsolidatedTopHoldings(...)`.
-
-### C. Far ricevere i dynamic mappings al consolidamento
-
-**File:** `src/lib/sectorExposure.ts`
-
-Estendere `calculateConsolidatedTopHoldings(...)` con un parametro opzionale:
-
-```ts
-calculateConsolidatedTopHoldings(
-  analysis,
-  etfAllocations,
-  options,
-  limit,
-  gpStockHoldings,
-  dynamicMappings?
-)
-```
-
-Per ogni holding che oggi usa `tickerKey` già precomputato, se il dettaglio arriva ancora in fallback `NAME:`, tentare una **seconda canonizzazione** con `dynamicMappings` prima di creare la riga finale.
-
-Questo è importante perché:
-- stock/NP/LEAP/strategy potrebbero aver generato `tickerKey` troppo presto
-- il consolidamento è l’ultimo punto utile per correggere i fallback residui
-
-### D. Allineare anche il Risk Calculator
-
-**File:** `src/lib/riskCalculator.ts`
-
-Dove oggi viene chiamato `resolveUnderlyingIdentity(...)`, prevedere il passaggio della mappa dinamica, così i `tickerKey` nascono già corretti a monte.
-
-Questo evita che una stessa società produca:
-- una voce `NAME:CONSTELLATION ENERGY CORPORATION`
-- una voce `CEG`
-
-in punti diversi del flusso.
-
-### E. Tenere la mappa statica come fallback, non come sorgente primaria
-
-La mappa hardcoded resta utile per:
-- mega-cap frequenti
-- alias noti
-- casi offline
-
-ma non deve più essere l’unica fonte.
-
-### F. Aggiungere test reali per i casi Mauro G
-
-**File:** `src/test/tickerIdentity.test.ts`
-
-Aggiungere test specifici per:
-- `Celestica Inc -> CLS`
-- `Constellation Energy Corporation -> CEG`
-- `AppLovin Corp -> APP`
-- `Redditi INC -> RDDT`
-
-sia in modalità:
-- alias statico assente
-- mapping dinamico presente
-
-### G. Diagnostica più esplicita nella UI
-
-**File:** `src/components/risk/HoldingBreakdownDialog.tsx`
-
-Quando una holding è ancora `NAME:...`, mostrare anche la causa:
-- `fallback name`
-- `nessun mapping dinamico trovato`
-
-Così i casi residui diventano immediatamente auditabili.
-
-## File da modificare
-
-1. `src/lib/tickerIdentity.ts`
-   - supporto a `dynamicMappings`
-   - priorità dinamica prima degli alias statici
-
-2. `src/lib/riskCalculator.ts`
-   - passare la mappa dinamica quando crea `tickerKey`
-
-3. `src/lib/sectorExposure.ts`
-   - seconda canonizzazione dei fallback `NAME:` nel consolidamento
-   - supporto parametro `dynamicMappings`
-
-4. `src/components/risk/EquityExposureView.tsx`
-   - caricare/derivare i mapping backend e passarli al consolidamento
-
-5. `src/components/risk/HoldingBreakdownDialog.tsx`
-   - diagnostica fallback più chiara
-
-6. `src/test/tickerIdentity.test.ts`
-   - aggiungere casi Celestica / CEG / APP / RDDT
-
-## Risultato atteso
-
-- nelle holdings consolidate non vedrai più:
-  - `Celestica Inc`
-  - `Constellation Energy Corporation`
-  - `AppLovin Corp`
-  - `Redditi INC`
-  come voci “senza ticker”
-- vedrai invece:
-  - `CLS — Celestica Inc`
-  - `CEG — Constellation Energy Corporation`
-  - `APP — AppLovin Corp`
-  - `RDDT — Redditi INC`
-- il sistema diventa robusto anche per nuovi sottostanti futuri già presenti nei mapping backend, senza dover aggiornare a mano la mappa statica ogni volta
-
-## Dettagli tecnici
-
-```text
-Problema attuale:
-positions -> riskCalculator -> resolveUnderlyingIdentity(static aliases only)
-         -> fallback NAME:* -> holdings consolidate senza ticker
-
-Pipeline corretta:
-positions -> dynamic underlying_mappings + static aliases
-         -> resolveUnderlyingIdentity(dynamic first)
-         -> canonical tickerKey
-         -> holdings consolidate con ticker sempre mostrabile
-```
-
-```text
-Bug confermati:
-- il resolver canonico non usa underlying_mappings
-- la mappa hardcoded non copre Celestica / CEG / APP / RDDT
-- la UI mostra descrizione completa perché riceve davvero holding.ticker = null
-```
+Nessuna modifica a DB/RLS.

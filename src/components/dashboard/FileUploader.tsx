@@ -219,24 +219,18 @@ export function FileUploader() {
       await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       await queryClient.invalidateQueries({ queryKey: ['gp-holdings'] });
 
-      // Re-compute and save historical snapshot using portfolio's snapshot date
-      const portfolioSnapshotDate = portfolio?.snapshot_date;
-      if (portfolioSnapshotDate) {
-        try {
-          await upsertUploadSnapshot({
-            portfolioId: targetPortfolioId,
-            snapshotDate: portfolioSnapshotDate,
-            cashValue: portfolio?.cash_value || 0,
-          });
-          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
-        } catch (snapErr) {
-          console.error('[FileUploader] GP snapshot update failed:', snapErr);
-        }
-      }
+      // NB: lo snapshot storico NON viene aggiornato qui.
+      // Lo snapshot in historical_data è legato esclusivamente all'upload del
+      // file Portafoglio principale, per evitare disallineamenti tra le card
+      // (ricalcolate live) e i grafici storici (basati sullo snapshot DB).
 
       setUploadGPSuccess(true);
       toast.success('Gestione Patrimoniale caricata!', {
         description: `${holdings.length} posizioni importate.`,
+      });
+      toast.warning('Snapshot storico non aggiornato', {
+        description: 'Lo snapshot storico verrà aggiornato solo dopo aver caricato un nuovo file Portafoglio.',
+        duration: 8000,
       });
     } catch (error) {
       console.error('Error parsing GP file:', error);
