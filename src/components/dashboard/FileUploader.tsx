@@ -140,7 +140,13 @@ export function FileUploader() {
             snapshotDate,
             cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
           });
-          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
+            queryClient.invalidateQueries({ queryKey: ['positions'] }),
+            queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+            queryClient.invalidateQueries({ queryKey: ['gp-holdings'] }),
+            queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] }),
+          ]);
         } catch (snapErr) {
           console.error('[FileUploader] Snapshot save failed:', snapErr);
         }
