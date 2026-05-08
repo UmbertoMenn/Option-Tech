@@ -89,51 +89,55 @@ export function RiskAnalyzer() {
     const stocks: Array<{ isin: string; description: string }> = [];
     const names: string[] = []; // Derivative underlyings without ISIN
     const seen = new Set<string>();
-    
+
+    const stockDetails = analysis.stockDetails ?? [];
+    const nakedPutDetails = analysis.nakedPutDetails ?? [];
+    const leapCallDetails = analysis.leapCallDetails ?? [];
+    const strategyDetails = analysis.strategyDetails ?? [];
+
     // 1. Stock diretti (con ISIN) - use isETF flag instead of pattern matching
-    for (const stock of analysis.stockDetails) {
-      if (stock.isin && !seen.has(stock.isin)) {
+    for (const stock of stockDetails) {
+      if (stock?.isin && !seen.has(stock.isin)) {
         seen.add(stock.isin);
-        // Only include non-ETF stocks (use the flag from riskCalculator)
         if (!stock.isETF) {
           stocks.push({ isin: stock.isin, description: stock.underlying });
         }
       }
     }
-    
+
     // 2. Naked PUTs (solo nome sottostante)
-    for (const np of analysis.nakedPutDetails) {
-      if (!seen.has(np.underlying)) {
+    for (const np of nakedPutDetails) {
+      if (np?.underlying && !seen.has(np.underlying)) {
         seen.add(np.underlying);
         names.push(np.underlying);
       }
     }
-    
+
     // 3. Leap CALLs (solo nome sottostante)
-    for (const lc of analysis.leapCallDetails) {
-      if (!seen.has(lc.underlying)) {
+    for (const lc of leapCallDetails) {
+      if (lc?.underlying && !seen.has(lc.underlying)) {
         seen.add(lc.underlying);
         names.push(lc.underlying);
       }
     }
-    
+
     // 4. Strategie (solo nome sottostante)
-    for (const strat of analysis.strategyDetails) {
-      if (!seen.has(strat.underlying)) {
+    for (const strat of strategyDetails) {
+      if (strat?.underlying && !seen.has(strat.underlying)) {
         seen.add(strat.underlying);
         names.push(strat.underlying);
       }
     }
-    
+
     // 5. GP stock holdings (nome/ticker per risoluzione settore)
-    for (const gp of gpStockHoldings) {
-      const key = gp.ticker_code || gp.description;
+    for (const gp of (gpStockHoldings ?? [])) {
+      const key = gp?.ticker_code || gp?.description;
       if (key && !seen.has(key)) {
         seen.add(key);
         names.push(gp.description);
       }
     }
-    
+
     return { stocks, names };
   }, [analysis, gpStockHoldings]);
   
