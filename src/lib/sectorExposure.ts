@@ -53,8 +53,7 @@ function normalizeTickerSymbol(raw: string): string {
  * Always delegates to the canonical resolver to keep aggregation consistent.
  */
 export function resolveTickerKey(name: string | null | undefined, ticker?: string | null): string {
-  // Lazy import to avoid circular dependency at module load
-  const { resolveUnderlyingIdentity } = require('./tickerIdentity') as typeof import('./tickerIdentity');
+  // Delegates to the canonical resolver to keep aggregation consistent.
   return resolveUnderlyingIdentity({
     rawTicker: ticker,
     rawName: name,
@@ -1053,8 +1052,6 @@ export function calculateConsolidatedTopHoldings(
   for (const gp of gpStockHoldings) {
     if (gp.market_value <= 0) continue;
     const name = gp.description || gp.ticker_code || 'Unknown';
-    // Lazy require to keep module load order safe
-    const { resolveUnderlyingIdentity } = require('./tickerIdentity') as typeof import('./tickerIdentity');
     const identity = resolveUnderlyingIdentity({
       rawTicker: gp.ticker_code,
       rawName: name,
@@ -1074,7 +1071,6 @@ export function calculateConsolidatedTopHoldings(
   // This handles cases where the per-detail `tickerKey` was computed upstream
   // before dynamicAliases were available (e.g. risk calculator).
   if (dynamicAliases && dynamicAliases.size > 0) {
-    const { resolveUnderlyingIdentity, normalizeText } = require('./tickerIdentity') as typeof import('./tickerIdentity');
     const fallbackKeys = Array.from(holdingsByTicker.keys()).filter(k => k.startsWith('NAME:'));
     for (const oldKey of fallbackKeys) {
       const holding = holdingsByTicker.get(oldKey);
