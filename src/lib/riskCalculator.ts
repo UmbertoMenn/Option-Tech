@@ -37,6 +37,11 @@ export interface StockRiskDetail {
   hasProtection: boolean;
   isin?: string;                // ISIN for ETF lookups
   isETF: boolean;               // Flag per distinguere ETF da azioni
+  // Optional CC/DR-CC ITM caps (for tooltip details)
+  ccCappedShares?: number;
+  ccCapStrike?: number | null;
+  drccCappedShares?: number;
+  drccCapPerShare?: number | null;
 }
 
 export interface NakedPutRiskDetail {
