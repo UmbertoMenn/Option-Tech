@@ -7,6 +7,8 @@ import {
   IronCondorPosition,
   DoubleDiagonalPosition,
   GroupedOtherStrategy,
+  CoveredCallPosition,
+  DeRiskingCoveredCallPosition,
   normalizeForMatching,
   getCanonicalKey
 } from './derivativeStrategies';
