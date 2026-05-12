@@ -7,6 +7,8 @@ import {
   IronCondorPosition,
   DoubleDiagonalPosition,
   GroupedOtherStrategy,
+  CoveredCallPosition,
+  DeRiskingCoveredCallPosition,
   normalizeForMatching,
   getCanonicalKey
 } from './derivativeStrategies';
@@ -35,6 +37,11 @@ export interface StockRiskDetail {
   hasProtection: boolean;
   isin?: string;                // ISIN for ETF lookups
   isETF: boolean;               // Flag per distinguere ETF da azioni
+  // Optional CC/DR-CC ITM caps (for tooltip details)
+  ccCappedShares?: number;
+  ccCapStrike?: number | null;
+  drccCappedShares?: number;
+  drccCapPerShare?: number | null;
 }
 
 export interface NakedPutRiskDetail {
@@ -197,6 +204,8 @@ function matchesUnderlying(option: Position, stock: Position): boolean {
 export function calculateStockRisk(
   stocks: Position[],
   longPuts: LongPutPosition[],
+  coveredCalls: CoveredCallPosition[],
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[],
   allPositions: Position[]
 ): StockRiskDetail[] {
   const result: StockRiskDetail[] = [];
@@ -261,13 +270,59 @@ export function calculateStockRisk(
     
     // Calculate protected vs unprotected shares
     const protectedShares = Math.min(protectionContracts * 100, stockQuantity);
-    const unprotectedShares = stockQuantity - protectedShares;
+    let unprotectedShares = stockQuantity - protectedShares;
+    
+    // ===== CC / DR-CC ITM cap on unprotected shares =====
+    // DR-CC has priority over plain CC for the same shares.
+    const drccItm = deRiskingCoveredCalls.filter(dr => {
+      const callStrike = dr.coveredCall.option.strike_price || 0;
+      return matchesUnderlying(dr.coveredCall.option, stock) && callStrike > 0 && callStrike < stockPrice;
+    });
+    const ccItm = coveredCalls.filter(cc => {
+      const callStrike = cc.option.strike_price || 0;
+      return matchesUnderlying(cc.option, stock) && callStrike > 0 && callStrike < stockPrice;
+    });
+    // Exclude CCs already part of a DR-CC to avoid double-counting
+    const drccCcIds = new Set(drccItm.map(dr => dr.coveredCall.option.id));
+    const ccItmOnly = ccItm.filter(cc => !drccCcIds.has(cc.option.id));
+    
+    let drccShares = 0;
+    let drccPerShareWeighted = 0;
+    for (const dr of drccItm) {
+      const sh = (dr.coveredCall.contractsCovered || 0) * 100;
+      const callStrike = dr.coveredCall.option.strike_price || 0;
+      const putStrike = dr.protectionPut.strike_price || 0;
+      const perShare = Math.max(0, callStrike - putStrike);
+      drccShares += sh;
+      drccPerShareWeighted += perShare * sh;
+    }
+    
+    let ccShares = 0;
+    let ccStrikeWeighted = 0;
+    for (const cc of ccItmOnly) {
+      const sh = (cc.contractsCovered || 0) * 100;
+      const strike = cc.option.strike_price || 0;
+      ccShares += sh;
+      ccStrikeWeighted += strike * sh;
+    }
+    
+    // Cap to available unprotected shares (DR-CC priority)
+    drccShares = Math.min(drccShares, unprotectedShares);
+    const remainingAfterDrcc = unprotectedShares - drccShares;
+    ccShares = Math.min(ccShares, remainingAfterDrcc);
+    const fullyUnprotectedShares = unprotectedShares - drccShares - ccShares;
+    
+    const drccPerShare = drccShares > 0 ? drccPerShareWeighted / Math.max(1, drccItm.reduce((s, dr) => s + (dr.coveredCall.contractsCovered || 0) * 100, 0)) : 0;
+    const ccCapStrike = ccShares > 0 ? ccStrikeWeighted / Math.max(1, ccItmOnly.reduce((s, cc) => s + (cc.contractsCovered || 0) * 100, 0)) : 0;
     
     // Formula corretta per protezione parziale:
     // Risk = (Azioni_non_protette × Prezzo) + (Azioni_protette × max(0, Prezzo - Strike))
-    const unprotectedRisk = unprotectedShares * stockPrice;
+    //      + cap CC ITM (strike × shares) + cap DR-CC ITM ((call-put) × shares)
+    const unprotectedRisk = fullyUnprotectedShares * stockPrice;
     const protectedRisk = protectedShares * Math.max(0, stockPrice - avgStrike);
-    const riskOriginal = unprotectedRisk + protectedRisk;
+    const ccCapRisk = ccShares * ccCapStrike;
+    const drccCapRisk = drccShares * drccPerShare;
+    const riskOriginal = unprotectedRisk + protectedRisk + ccCapRisk + drccCapRisk;
     const riskEUR = riskOriginal / exchangeRate;
     
     // For UI compatibility, protectedValue represents the floor value
@@ -296,7 +351,11 @@ export function calculateStockRisk(
       exchangeRate,
       hasProtection: protectionContracts > 0,
       isin: stock.isin || undefined,
-      isETF: stock.asset_type === 'etf'
+      isETF: stock.asset_type === 'etf',
+      ccCappedShares: ccShares > 0 ? ccShares : undefined,
+      ccCapStrike: ccShares > 0 ? ccCapStrike : null,
+      drccCappedShares: drccShares > 0 ? drccShares : undefined,
+      drccCapPerShare: drccShares > 0 ? drccPerShare : null,
     });
   }
   
@@ -615,7 +674,7 @@ export function analyzePortfolioRisk(
   
   // Calculate each risk category
   // Pass allPositions to calculateStockRisk for direct PUT lookup
-  const stockDetails = calculateStockRisk(stocks, categories.longPuts, positions);
+  const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
   

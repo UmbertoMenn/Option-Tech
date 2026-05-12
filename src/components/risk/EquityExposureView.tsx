@@ -590,6 +590,17 @@ export function EquityExposureView({
                           </>
                         )}
                       </div>
+                      {(stock.ccCappedShares || stock.drccCappedShares) && (
+                        <div className="text-xs text-muted-foreground">
+                          {stock.ccCappedShares ? (
+                            <span>Cap CC ITM: {formatNumber(stock.ccCappedShares)} az. @ strike {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
+                          ) : null}
+                          {stock.ccCappedShares && stock.drccCappedShares ? ' • ' : ''}
+                          {stock.drccCappedShares ? (
+                            <span>Cap DR-CC ITM: {formatNumber(stock.drccCappedShares)} az. @ {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
+                          ) : null}
+                        </div>
+                      )}
                       
                       {/* Protection Bar */}
                       <div className="h-3 rounded-full overflow-hidden flex">
@@ -693,6 +704,17 @@ export function EquityExposureView({
                           </>
                         )}
                       </div>
+                      {(stock.ccCappedShares || stock.drccCappedShares) && (
+                        <div className="text-xs text-muted-foreground">
+                          {stock.ccCappedShares ? (
+                            <span>Cap CC ITM: {formatNumber(stock.ccCappedShares)} az. @ strike {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
+                          ) : null}
+                          {stock.ccCappedShares && stock.drccCappedShares ? ' • ' : ''}
+                          {stock.drccCappedShares ? (
+                            <span>Cap DR-CC ITM: {formatNumber(stock.drccCappedShares)} az. @ {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
+                          ) : null}
+                        </div>
+                      )}
                       
                       {/* Protection Bar */}
                       <div className="h-3 rounded-full overflow-hidden flex">
