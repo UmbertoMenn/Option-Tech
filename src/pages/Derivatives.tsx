@@ -1445,9 +1445,9 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
     ? !ccLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
     : false;
 
-  // Protection PUT details
-  const protPutPrice = protectionPut.current_price || 0;
-  const protPutAvgCost = protectionPut.avg_cost || 0;
+  // Protection PUT details (may be absent for synthetic DR-CC with bought CALL)
+  const protPutPrice = protectionPut?.current_price || 0;
+  const protPutAvgCost = protectionPut?.avg_cost || 0;
   const protPutChangePct = protPutAvgCost > 0 ? ((protPutPrice - protPutAvgCost) / protPutAvgCost) * 100 : null;
 
   return (
