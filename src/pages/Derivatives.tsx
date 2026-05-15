@@ -1640,7 +1640,13 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
                 <p className="text-muted-foreground text-xs">Sottostante</p>
                 <p className="font-medium">{underlying.description}</p>
                 {!isSynthetic && <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>}
-                {isSynthetic && <p className="text-xs text-orange-400">Sintetico (PUT venduta deep ITM)</p>}
+                {isSynthetic && (
+                  <p className="text-xs text-orange-400">
+                    {syntheticCall
+                      ? 'Sintetico (CALL acquistata deep ITM)'
+                      : 'Sintetico (PUT venduta deep ITM)'}
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-muted-foreground text-xs">Strike CALL</p>
