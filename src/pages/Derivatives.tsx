@@ -1445,9 +1445,9 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
     ? !ccLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
     : false;
 
-  // Protection PUT details
-  const protPutPrice = protectionPut.current_price || 0;
-  const protPutAvgCost = protectionPut.avg_cost || 0;
+  // Protection PUT details (may be absent for synthetic DR-CC with bought CALL)
+  const protPutPrice = protectionPut?.current_price || 0;
+  const protPutAvgCost = protectionPut?.avg_cost || 0;
   const protPutChangePct = protPutAvgCost > 0 ? ((protPutPrice - protPutAvgCost) / protPutAvgCost) * 100 : null;
 
   return (
@@ -1662,36 +1662,37 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               </div>
             </div>
             
-            {/* Protection PUT */}
-            <div className="pt-2 border-t border-border/30">
-              <p className="text-xs text-emerald-500 font-medium mb-2">🛡️ PUT Protettiva</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground text-xs">Strike PUT</p>
-                  <p className="font-medium">{protectionPut.strike_price}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Scadenza PUT</p>
-                  <p className="font-medium">{formatExpiryMMY(protectionPut.expiry_date)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">PMC PUT</p>
-                  <p className="font-medium">{formatCurrency(protPutAvgCost, getOptionCurrency(protectionPut))}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Prezzo PUT</p>
-                  <div className="flex items-center gap-1">
-                    <span className="font-medium">{formatCurrency(protPutPrice, getOptionCurrency(protectionPut))}</span>
-                    {protPutChangePct !== null && (
-                      <span className={`text-xs font-medium ${protPutChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {protPutChangePct >= 0 ? '+' : ''}{protPutChangePct.toFixed(1)}%
-                      </span>
-                    )}
+            {/* Protection PUT (only when present) */}
+            {protectionPut && (
+              <div className="pt-2 border-t border-border/30">
+                <p className="text-xs text-emerald-500 font-medium mb-2">🛡️ PUT Protettiva</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground text-xs">Strike PUT</p>
+                    <p className="font-medium">{protectionPut.strike_price}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Scadenza PUT</p>
+                    <p className="font-medium">{formatExpiryMMY(protectionPut.expiry_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">PMC PUT</p>
+                    <p className="font-medium">{formatCurrency(protPutAvgCost, getOptionCurrency(protectionPut))}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Prezzo PUT</p>
+                    <div className="flex items-center gap-1">
+                      <span className="font-medium">{formatCurrency(protPutPrice, getOptionCurrency(protectionPut))}</span>
+                      {protPutChangePct !== null && (
+                        <span className={`text-xs font-medium ${protPutChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {protPutChangePct >= 0 ? '+' : ''}{protPutChangePct.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-            
+            )}
             {/* Synthetic PUT if present */}
             {(syntheticCall || syntheticPut) && (() => {
               const sp = (syntheticCall || syntheticPut)!;

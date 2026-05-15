@@ -280,7 +280,8 @@ function autoClassify(derivatives: Position[], allPositions: Position[], archive
     const key = normalizeForMatching(drcc.coveredCall.option.underlying || drcc.coveredCall.option.description || '');
     if (!drccByUnderlying.has(key)) drccByUnderlying.set(key, { positions: [], isSynthetic: false });
     const entry = drccByUnderlying.get(key)!;
-    entry.positions.push(drcc.coveredCall.option, drcc.protectionPut);
+    entry.positions.push(drcc.coveredCall.option);
+    if (drcc.protectionPut) entry.positions.push(drcc.protectionPut);
     if (drcc.coveredCall.underlying) entry.positions.push(drcc.coveredCall.underlying);
     if (drcc.syntheticPut) entry.positions.push(drcc.syntheticPut);
     if (drcc.syntheticCall) entry.positions.push(drcc.syntheticCall);

@@ -42,6 +42,9 @@ export interface StockRiskDetail {
   ccCapStrike?: number | null;
   drccCappedShares?: number;
   drccCapPerShare?: number | null;
+  // Synthetic CC/DR-CC entry (no real underlying stock)
+  isSynthetic?: boolean;
+  syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
 }
 
 export interface NakedPutRiskDetail {
@@ -656,6 +659,104 @@ function isEuroforexInstrument(name: string | undefined | null): boolean {
 }
 
 /**
+ * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
+ *
+ * Formulas (in option currency, then /exchangeRate):
+ * - CC sintetica with syntheticPut: strike_put × |qty_put| × 100
+ * - CC sintetica with syntheticCall: current_price_call × qty_call × 100 (market value)
+ * - DR-CC sintetica with syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
+ * - DR-CC sintetica with syntheticCall: current_price_synCall × qty_synCall × 100
+ */
+export function calculateSyntheticCcDrccRisk(
+  coveredCalls: CoveredCallPosition[],
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[]
+): StockRiskDetail[] {
+  const result: StockRiskDetail[] = [];
+
+  // Avoid double-counting: skip plain CCs whose option is already part of a DR-CC
+  const drccCcOptionIds = new Set(deRiskingCoveredCalls.map(dr => dr.coveredCall.option.id));
+
+  const buildEntry = (
+    refPosition: Position,
+    underlyingName: string,
+    riskOriginal: number,
+    syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call'
+  ): StockRiskDetail => {
+    const exchangeRate = getEffectiveExchangeRate(refPosition);
+    const currency = refPosition.currency || 'USD';
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: refPosition.ticker,
+      rawName: underlyingName,
+      underlyingName,
+      description: refPosition.description,
+    });
+    return {
+      underlying: underlyingName,
+      tickerKey: identity.tickerKey,
+      stockValue: 0,
+      stockQuantity: 0,
+      stockPrice: 0,
+      protectionStrike: null,
+      protectionContracts: 0,
+      protectionOptionPrice: null,
+      protectedValue: 0,
+      riskOriginal,
+      riskEUR: riskOriginal / exchangeRate,
+      currency,
+      exchangeRate,
+      hasProtection: false,
+      isETF: false,
+      isSynthetic: true,
+      syntheticType,
+    };
+  };
+
+  // Synthetic Covered Calls
+  for (const cc of coveredCalls) {
+    if (!cc.isSynthetic) continue;
+    if (drccCcOptionIds.has(cc.option.id)) continue; // Will be counted in DR-CC
+
+    const contracts = cc.contractsCovered || 0;
+    const underlyingName = cc.option.underlying || cc.option.description || '';
+
+    if (cc.syntheticCall) {
+      const qty = cc.syntheticCall.quantity || 0;
+      const px = cc.syntheticCall.current_price ?? cc.syntheticCall.avg_cost ?? 0;
+      const riskOriginal = px * qty * 100;
+      result.push(buildEntry(cc.syntheticCall, underlyingName, riskOriginal, 'cc_call'));
+    } else if (cc.syntheticPut) {
+      const qty = Math.abs(cc.syntheticPut.quantity || 0);
+      const strike = cc.syntheticPut.strike_price || 0;
+      const riskOriginal = strike * qty * 100;
+      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put'));
+    }
+  }
+
+  // Synthetic De-Risking Covered Calls
+  for (const dr of deRiskingCoveredCalls) {
+    if (!dr.isSynthetic) continue;
+
+    const contracts = dr.coveredCall.contractsCovered || 0;
+    const underlyingName = dr.coveredCall.option.underlying || dr.coveredCall.option.description || '';
+
+    if (dr.syntheticCall) {
+      const qty = dr.syntheticCall.quantity || 0;
+      const px = dr.syntheticCall.current_price ?? dr.syntheticCall.avg_cost ?? 0;
+      const riskOriginal = px * qty * 100;
+      result.push(buildEntry(dr.syntheticCall, underlyingName, riskOriginal, 'drcc_call'));
+    } else if (dr.syntheticPut) {
+      const synStrike = dr.syntheticPut.strike_price || 0;
+      const protStrike = dr.protectionPut?.strike_price || 0;
+      const perShare = Math.max(0, synStrike - protStrike);
+      const riskOriginal = perShare * contracts * 100;
+      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put'));
+    }
+  }
+
+  return result;
+}
+
+/**
  * Main function: analyze portfolio risk across all categories.
  */
 export function analyzePortfolioRisk(
@@ -674,7 +775,9 @@ export function analyzePortfolioRisk(
   
   // Calculate each risk category
   // Pass allPositions to calculateStockRisk for direct PUT lookup
-  const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const baseStockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const syntheticDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls);
+  const stockDetails = [...baseStockDetails, ...syntheticDetails];
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
   

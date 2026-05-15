@@ -90,8 +90,10 @@ export async function saveStrategyCache(
   (categories.deRiskingCoveredCalls || []).forEach((dcc) => {
     const underlying = dcc.coveredCall.option.underlying || dcc.coveredCall.option.description || '';
     const ticker = resolveTicker(underlying, underlyingPrices);
-    const posIds = [dcc.coveredCall.option.id, dcc.protectionPut.id];
+    const posIds = [dcc.coveredCall.option.id];
+    if (dcc.protectionPut) posIds.push(dcc.protectionPut.id);
     if (dcc.syntheticPut) posIds.push(dcc.syntheticPut.id);
+    if (dcc.syntheticCall) posIds.push(dcc.syntheticCall.id);
     
     records.push({
       portfolio_id: portfolioId,
