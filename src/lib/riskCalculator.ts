@@ -775,7 +775,9 @@ export function analyzePortfolioRisk(
   
   // Calculate each risk category
   // Pass allPositions to calculateStockRisk for direct PUT lookup
-  const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const baseStockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const syntheticDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls);
+  const stockDetails = [...baseStockDetails, ...syntheticDetails];
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
   
