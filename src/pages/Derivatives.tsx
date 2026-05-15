@@ -1362,14 +1362,17 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 P/L: {formatPercentage(adjustedProfitLossPct)}
               </div>
             )}
-            {coveredCall.isSynthetic && coveredCall.syntheticPut && (() => {
-              const sp = coveredCall.syntheticPut!;
+            {coveredCall.isSynthetic && (coveredCall.syntheticCall || coveredCall.syntheticPut) && (() => {
+              const sp = (coveredCall.syntheticCall || coveredCall.syntheticPut)!;
+              const isCall = !!coveredCall.syntheticCall;
               const spPrice = sp.current_price || 0;
               const spAvgCost = sp.avg_cost || 0;
               const spChangePct = spAvgCost > 0 ? ((spPrice - spAvgCost) / spAvgCost) * 100 : null;
               return (
                 <div className="pt-2 border-t border-border/30">
-                  <p className="text-xs text-orange-400 font-medium mb-2">📌 PUT Sintetica (venduta deep ITM)</p>
+                  <p className="text-xs text-orange-400 font-medium mb-2">
+                    📌 {isCall ? 'CALL Sintetica (acquistata deep ITM)' : 'PUT Sintetica (venduta deep ITM)'}
+                  </p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground text-xs">Strike</p>
