@@ -665,6 +665,11 @@ export function EquityExposureView({
                         <div>
                           <div className="font-semibold flex items-center gap-2">
                             {stock.underlying}
+                            {stock.isSynthetic && (
+                              <Badge variant="outline" className="text-amber-500 border-amber-500">
+                                Sintetica {stock.syntheticType?.startsWith('drcc') ? 'DR-CC' : 'CC'}
+                              </Badge>
+                            )}
                             {stock.hasProtection && (
                               <Badge variant="outline" className="text-green-600 border-green-600">
                                 <Shield className="w-3 h-3 mr-1" />
@@ -672,9 +677,11 @@ export function EquityExposureView({
                               </Badge>
                             )}
                           </div>
-                          <div className="text-sm text-muted-foreground">
-                            {formatNumber(stock.stockQuantity)} azioni @ {stock.currency} {formatNumber(stock.stockPrice, 2)}
-                          </div>
+                          {!stock.isSynthetic && (
+                            <div className="text-sm text-muted-foreground">
+                              {formatNumber(stock.stockQuantity)} azioni @ {stock.currency} {formatNumber(stock.stockPrice, 2)}
+                            </div>
+                          )}
                         </div>
                         <div className="text-right">
                           <div className="font-semibold text-blue-500">
