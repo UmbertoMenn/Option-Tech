@@ -266,6 +266,7 @@ function autoClassify(derivatives: Position[], allPositions: Position[], archive
     entry.positions.push(cc.option);
     if (cc.underlying) entry.positions.push(cc.underlying);
     if (cc.syntheticPut) entry.positions.push(cc.syntheticPut);
+    if (cc.syntheticCall) entry.positions.push(cc.syntheticCall);
     if (cc.isSynthetic) entry.isSynthetic = true;
   }
   for (const [, { positions, isSynthetic }] of ccByUnderlying) {
@@ -282,6 +283,7 @@ function autoClassify(derivatives: Position[], allPositions: Position[], archive
     entry.positions.push(drcc.coveredCall.option, drcc.protectionPut);
     if (drcc.coveredCall.underlying) entry.positions.push(drcc.coveredCall.underlying);
     if (drcc.syntheticPut) entry.positions.push(drcc.syntheticPut);
+    if (drcc.syntheticCall) entry.positions.push(drcc.syntheticCall);
     if (drcc.isSynthetic) entry.isSynthetic = true;
   }
   for (const [, { positions, isSynthetic }] of drccByUnderlying) {

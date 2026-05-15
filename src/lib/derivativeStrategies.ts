@@ -36,6 +36,7 @@ export interface CoveredCallPosition {
   isFullyCovered: boolean;
   isSynthetic?: boolean;
   syntheticPut?: Position;
+  syntheticCall?: Position; // Deep ITM bought CALL acting as stock
 }
 
 export interface LongPutPosition {
@@ -98,6 +99,7 @@ export interface DeRiskingCoveredCallPosition {
   protectionPut: Position;
   isSynthetic: boolean;
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
+  syntheticCall?: Position; // Deep ITM bought CALL acting as stock
 }
 
 // SyntheticCoveredCallPosition removed - synthetic CCs are now in coveredCalls with isSynthetic flag
@@ -438,12 +440,18 @@ export function categorizeDerivatives(
     switch (config.strategy_type) {
       case 'covered_call': {
         const stock = linkedStock || createDummyStock(config.underlying);
-        const calls = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const allCalls = matchedVirtual.filter(d => d.option_type === 'call');
+        const boughtCalls = allCalls.filter(d => d.quantity > 0)
+          .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
+        const calls = allCalls.filter(d => d.quantity < 0);
 
         if (config.is_synthetic) {
+          // Prefer bought CALL deep ITM (lowest strike) as synthetic underlying.
+          // Fallback to sold PUT deep ITM.
+          const synCall = boughtCalls[0];
           const soldPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
-          const synPut = soldPuts[0];
+          const synPut = synCall ? undefined : soldPuts[0];
           const boughtPutsForPromotion = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
 
           for (const call of calls) {
@@ -456,13 +464,13 @@ export function categorizeDerivatives(
               };
               deRiskingCoveredCalls.push({
                 coveredCall: cc, protectionPut: protPut,
-                isSynthetic: true, syntheticPut: synPut,
+                isSynthetic: true, syntheticPut: synPut, syntheticCall: synCall,
               });
             } else {
               coveredCalls.push({
                 option: call, underlying: stock, contractsCovered: contracts,
                 sharesCovered: contracts * 100, isFullyCovered: true,
-                isSynthetic: true, syntheticPut: synPut || undefined,
+                isSynthetic: true, syntheticPut: synPut, syntheticCall: synCall,
               });
             }
           }
@@ -479,13 +487,20 @@ export function categorizeDerivatives(
       }
       case 'derisking_covered_call': {
         const stock = linkedStock || createDummyStock(config.underlying);
-        const calls = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const allCalls = matchedVirtual.filter(d => d.option_type === 'call');
+        const boughtCalls = allCalls.filter(d => d.quantity > 0)
+          .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
+        const calls = allCalls.filter(d => d.quantity < 0);
 
         let syntheticPut: Position | undefined;
+        let syntheticCall: Position | undefined;
         if (config.is_synthetic) {
-          const soldPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)
-            .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
-          syntheticPut = soldPuts[0];
+          syntheticCall = boughtCalls[0];
+          if (!syntheticCall) {
+            const soldPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)
+              .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
+            syntheticPut = soldPuts[0];
+          }
         }
 
         const boughtPuts = [...matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0)];
@@ -500,13 +515,13 @@ export function categorizeDerivatives(
           if (protPut) {
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: protPut,
-              isSynthetic: config.is_synthetic, syntheticPut,
+              isSynthetic: config.is_synthetic, syntheticPut, syntheticCall,
             });
-          } else if (config.is_synthetic && syntheticPut) {
+          } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
             coveredCalls.push({
               option: call, underlying: stock, contractsCovered: contracts,
               sharesCovered: contracts * 100, isFullyCovered: true,
-              isSynthetic: true, syntheticPut,
+              isSynthetic: true, syntheticPut, syntheticCall,
             });
           } else {
             coveredCalls.push(cc);
