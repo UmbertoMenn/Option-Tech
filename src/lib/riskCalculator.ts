@@ -42,6 +42,9 @@ export interface StockRiskDetail {
   ccCapStrike?: number | null;
   drccCappedShares?: number;
   drccCapPerShare?: number | null;
+  // Synthetic CC/DR-CC entry (no real underlying stock)
+  isSynthetic?: boolean;
+  syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
 }
 
 export interface NakedPutRiskDetail {
