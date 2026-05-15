@@ -1416,7 +1416,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
 function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPosition, underlyingPrices, getPremiumByTickerAndSymbol }: { deRiskingCC: DeRiskingCoveredCallPosition; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
-  const { coveredCall, protectionPut, isSynthetic, syntheticPut } = deRiskingCC;
+  const { coveredCall, protectionPut, isSynthetic, syntheticPut, syntheticCall } = deRiskingCC;
   const { option, underlying, contractsCovered } = coveredCall;
 
   // ITM/OTM for the sold CALL
