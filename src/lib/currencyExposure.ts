@@ -109,21 +109,27 @@ export function calculateCurrencyExposure(
     const curr = stock.currency || 'OTHER';
     const exposure = getOrCreateCurrency(byCurrency, curr);
     
-    // Use gross value (stockValue / exchangeRate) instead of net riskEUR
-    const grossValueEUR = stock.stockValue / stock.exchangeRate;
+    // Synthetic CC/DR-CC entries have stockValue=0; use riskEUR directly.
+    const isSynth = !!stock.isSynthetic;
+    const grossValueEUR = isSynth
+      ? stock.riskEUR
+      : stock.stockValue / stock.exchangeRate;
+    const grossValueOriginal = isSynth
+      ? stock.riskEUR * stock.exchangeRate
+      : stock.stockValue;
     
     exposure.breakdown.stocks += grossValueEUR;
     exposure.totalRisk += grossValueEUR;
-    exposure.totalRiskOriginal += stock.stockValue;
+    exposure.totalRiskOriginal += grossValueOriginal;
     
     // Use the isETF flag from StockRiskDetail (set in riskCalculator based on asset_type)
     const isETF = stock.isETF;
     exposure.instruments.push({
       name: stock.underlying,
       riskEUR: grossValueEUR,
-      riskOriginal: stock.stockValue,
+      riskOriginal: grossValueOriginal,
       category: 'stocks',
-      details: `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
+      details: isSynth ? 'Sintetica CC/DR-CC' : `${stock.stockQuantity} × ${stock.stockPrice.toFixed(2)}`,
       isin: stock.isin,
       isETF
     });
