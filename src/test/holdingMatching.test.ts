@@ -128,7 +128,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       totalBondRisk: 100000,
       totalNakedPutRisk: 50000,
       totalLeapCallRisk: 0,
-      totalStrategyRisk: 0,
+      totalStrategyRisk: 0, totalSyntheticCcDrccRisk: 0, syntheticCcDrccDetails: [],
       grandTotal: 65000,
       stockDetails: [
         {
@@ -236,7 +236,7 @@ describe('calculateConsolidatedTopHoldings', () => {
       totalBondRisk: 100000,
       totalNakedPutRisk: 28000,
       totalLeapCallRisk: 0,
-      totalStrategyRisk: 0,
+      totalStrategyRisk: 0, totalSyntheticCcDrccRisk: 0, syntheticCcDrccDetails: [],
       grandTotal: 43000,
       stockDetails: [
         {
