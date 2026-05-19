@@ -28,8 +28,9 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     const empty: RiskAnalysis = {
       totalStockRisk: 0, totalETFRisk: 0, totalPureStockRisk: 0,
       totalCommodityRisk: 0, totalBondRisk: 0, totalNakedPutRisk: 0,
-      totalLeapCallRisk: 0, totalStrategyRisk: 0, grandTotal: 0,
-      stockDetails: [], commodityDetails: [], bondDetails: [],
+      totalLeapCallRisk: 0, totalStrategyRisk: 0, totalSyntheticCcDrccRisk: 0,
+      grandTotal: 0,
+      stockDetails: [], syntheticCcDrccDetails: [], commodityDetails: [], bondDetails: [],
       nakedPutDetails: [], leapCallDetails: [], strategyDetails: []
     };
 
