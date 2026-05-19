@@ -73,8 +73,10 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
         merged.totalNakedPutRisk += result.totalNakedPutRisk;
         merged.totalLeapCallRisk += result.totalLeapCallRisk;
         merged.totalStrategyRisk += result.totalStrategyRisk;
+        merged.totalSyntheticCcDrccRisk += result.totalSyntheticCcDrccRisk;
         merged.grandTotal += result.grandTotal;
         merged.stockDetails.push(...result.stockDetails);
+        merged.syntheticCcDrccDetails.push(...result.syntheticCcDrccDetails);
         merged.commodityDetails.push(...result.commodityDetails);
         merged.bondDetails.push(...result.bondDetails);
         merged.nakedPutDetails.push(...result.nakedPutDetails);
