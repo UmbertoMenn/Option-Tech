@@ -1029,6 +1029,29 @@ export function calculateConsolidatedTopHoldings(
     });
   }
 
+  // 1b. Synthetic CC/DR-CC exposures (treated as direct stock-equivalents by underlying)
+  for (const s of analysis.syntheticCcDrccDetails || []) {
+    const holding = getOrCreateHolding(s.underlying, s.tickerKey);
+    holding.stockRisk += s.riskEUR;
+    holding.stockRiskWithProtection += s.riskEUR;
+    holding.sources.push({
+      type: 'stock',
+      name: 'Sintetica CC/DR-CC',
+      exposure: s.riskEUR,
+    });
+    holding.stockDetails.push({
+      quantity: s.stockQuantity,
+      price: s.stockPrice,
+      currency: s.currency,
+      value: s.riskEUR,
+      valueWithProtection: s.riskEUR,
+      protectionContracts: s.protectionContracts || 0,
+      protectionStrike: s.protectionStrike ?? null,
+      hasProtection: s.hasProtection || false,
+      isSynthetic: true,
+    });
+  }
+
   // 2. Naked PUT risk
   for (const np of analysis.nakedPutDetails) {
     const holding = getOrCreateHolding(np.underlying, np.tickerKey);
