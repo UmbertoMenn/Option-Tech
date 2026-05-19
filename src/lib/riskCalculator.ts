@@ -112,16 +112,18 @@ export interface RiskAnalysis {
   // Totali EUR
   totalStockRisk: number;       // Rischio totale Azioni + ETF (per retrocompatibilità)
   totalETFRisk: number;         // Rischio solo ETF
-  totalPureStockRisk: number;   // Rischio solo Azioni (no ETF)
+  totalPureStockRisk: number;   // Rischio solo Azioni (no ETF, no sintetiche)
   totalCommodityRisk: number;
   totalBondRisk: number;
   totalNakedPutRisk: number;
   totalLeapCallRisk: number;
   totalStrategyRisk: number;
+  totalSyntheticCcDrccRisk: number; // Rischio CC e DR-CC sintetiche
   grandTotal: number;
   
   // Dettagli
-  stockDetails: StockRiskDetail[];
+  stockDetails: StockRiskDetail[];           // SOLO stock/ETF reali
+  syntheticCcDrccDetails: StockRiskDetail[]; // SOLO sintetiche CC/DR-CC
   commodityDetails: CommodityRiskDetail[];
   bondDetails: BondRiskDetail[];
   nakedPutDetails: NakedPutRiskDetail[];
