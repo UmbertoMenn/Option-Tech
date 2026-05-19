@@ -551,6 +551,30 @@ export function calculateSectorExposure(
     }
   }
   
+  // Synthetic CC/DR-CC: treated as single-stock exposures by underlying
+  for (const s of analysis.syntheticCcDrccDetails || []) {
+    if (isEuroforex(s.underlying)) continue;
+    const grossValueEUR = s.riskEUR;
+    if (grossValueEUR <= 0) continue;
+    let sector: string;
+    if (s.isin && sectorMappings[s.isin]?.sector) {
+      sector = normalizeSectorName(sectorMappings[s.isin].sector);
+    } else {
+      sector = getStockSector(s.underlying);
+    }
+    const sectorExposure = getOrCreateSector(sector);
+    sectorExposure.totalRisk += grossValueEUR;
+    sectorExposure.breakdown.stocks += grossValueEUR;
+    sectorExposure.instruments.push({
+      name: s.underlying,
+      riskEUR: grossValueEUR,
+      isETF: false,
+      isFromETFDecomposition: false,
+      category: 'stocks',
+    });
+  }
+  
+  
   // Process derivatives with granular toggles - USES DYNAMIC MAPPINGS + EUROFOREX FILTER
   
   // Naked PUTs - assign by underlying sector using dynamic mappings
