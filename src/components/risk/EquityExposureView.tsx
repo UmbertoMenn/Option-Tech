@@ -286,6 +286,17 @@ export function EquityExposureView({
       protectionSavings: 0,
       showProtectionSavings: false
     },
+    { 
+      label: 'Rischio CC e DR-CC sintetiche', 
+      value: includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0, 
+      sortValue: totalSyntheticCcDrccRisk,
+      percentage: getPercentage(includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0),
+      color: 'bg-fuchsia-500',
+      icon: Layers,
+      description: 'Sintetiche: long CALL + short CALL / short PUT ITM + short CALL [+ protezione]',
+      protectionSavings: 0,
+      showProtectionSavings: false
+    },
     ...(gpStockHoldings.length > 0 ? [{
       label: 'Rischio GP Azioni',
       value: includeGP ? gpStockTotalValue : 0,
