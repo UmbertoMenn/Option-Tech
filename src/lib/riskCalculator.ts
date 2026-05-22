@@ -682,12 +682,14 @@ export type SpotResolver = (underlyingName: string, optionTicker?: string | null
  * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
  *
  * Formulas (in option currency, then /exchangeRate):
+ * - CC sintetica con syntheticCall (Long CALL ITM + Short CALL):
+ *     spot >  strike_shortCall → PMC_longCall (avg_cost) × qty × 100
+ *     spot <= strike_shortCall → mkt_longCall (current_price) × qty × 100
+ *     spot ignoto              → fallback mkt_longCall (o avg_cost) × qty × 100
+ *   NOTA: anche le DR-CC sintetiche con syntheticCall ricadono qui (la protezione PUT
+ *   è irrilevante quando la long CALL ITM funge da sottostante).
  * - CC sintetica con syntheticPut:                          strike_PUT × |qty_PUT| × 100
- * - CC sintetica con syntheticCall:
- *     spot ≥ strike_callVenduta → (strike_callVenduta - strike_callComprata) × qty × 100
- *     spot <  strike_callVenduta → price_callComprata × qty × 100  (fallback se spot ignoto)
  * - DR-CC sintetica con syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
- * - DR-CC sintetica con syntheticCall:                price_callComprata × qty × 100
  */
 export function calculateSyntheticCcDrccRisk(
   coveredCalls: CoveredCallPosition[],
@@ -736,6 +738,44 @@ export function calculateSyntheticCcDrccRisk(
     };
   };
 
+  // Shared helper for CC syntheticCall logic (also used by DR-CC syntheticCall)
+  const buildCallBasedEntry = (
+    longCall: Position,
+    shortStrike: number,
+    underlyingName: string,
+    shortCallTicker: string | null,
+    protectionPutStrike: number | null
+  ): StockRiskDetail => {
+    const qty = longCall.quantity || 0;
+    const longStrike = longCall.strike_price || 0;
+    const pmc = longCall.avg_cost || 0;
+    const mkt = longCall.current_price ?? pmc;
+    const spot = spotResolver
+      ? spotResolver(underlyingName, longCall.ticker ?? shortCallTicker ?? null)
+      : null;
+
+    let pricePerShare: number;
+    let priceLabel: string;
+    if (spot != null && spot > shortStrike) {
+      pricePerShare = pmc;
+      priceLabel = `PMC ${pmc.toFixed(2)}`;
+    } else if (spot != null) {
+      pricePerShare = mkt;
+      priceLabel = `mkt ${mkt.toFixed(2)}`;
+    } else {
+      pricePerShare = mkt;
+      priceLabel = `mkt ${mkt.toFixed(2)}`;
+    }
+
+    const riskOriginal = pricePerShare * qty * 100;
+    const spotPart = spot != null ? ` (spot ${spot.toFixed(2)})` : '';
+    const protPart = protectionPutStrike != null && protectionPutStrike > 0
+      ? ` + Protezione PUT ${protectionPutStrike}`
+      : '';
+    const composition = `Long CALL ${longStrike} ITM (${priceLabel}) + Short CALL ${shortStrike}${spotPart}${protPart}`;
+    return buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition);
+  };
+
   // Synthetic Covered Calls
   for (const cc of coveredCalls) {
     if (!cc.isSynthetic) continue;
@@ -746,26 +786,7 @@ export function calculateSyntheticCcDrccRisk(
     const underlyingName = shortCall.underlying || shortCall.description || '';
 
     if (cc.syntheticCall) {
-      const longCall = cc.syntheticCall;
-      const qty = longCall.quantity || 0;
-      const longStrike = longCall.strike_price || 0;
-      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
-      const spot = spotResolver
-        ? spotResolver(underlyingName, longCall.ticker ?? shortCall.ticker ?? null)
-        : null;
-
-      let riskOriginal: number;
-      let composition: string;
-      if (spot != null && spot >= shortStrike) {
-        riskOriginal = Math.max(0, shortStrike - longStrike) * qty * 100;
-        composition = `Long CALL ${longStrike} ITM + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`;
-      } else {
-        riskOriginal = longPx * qty * 100;
-        composition = spot != null
-          ? `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`
-          : `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike}`;
-      }
-      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition));
+      result.push(buildCallBasedEntry(cc.syntheticCall, shortStrike, underlyingName, shortCall.ticker ?? null, null));
     } else if (cc.syntheticPut) {
       const qty = Math.abs(cc.syntheticPut.quantity || 0);
       const strike = cc.syntheticPut.strike_price || 0;
@@ -786,13 +807,15 @@ export function calculateSyntheticCcDrccRisk(
     const protStrike = dr.protectionPut?.strike_price || 0;
 
     if (dr.syntheticCall) {
-      const longCall = dr.syntheticCall;
-      const qty = longCall.quantity || 0;
-      const longStrike = longCall.strike_price || 0;
-      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
-      const riskOriginal = longPx * qty * 100;
-      const composition = `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
-      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'drcc_call', composition));
+      // Per spec: Long CALL ITM + Short CALL è SEMPRE trattata come CC sintetica,
+      // anche se in DB esiste una protection PUT (irrilevante in questa configurazione).
+      result.push(buildCallBasedEntry(
+        dr.syntheticCall,
+        shortStrike,
+        underlyingName,
+        shortCall.ticker ?? null,
+        protStrike > 0 ? protStrike : null
+      ));
     } else if (dr.syntheticPut) {
       const synStrike = dr.syntheticPut.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
@@ -804,6 +827,7 @@ export function calculateSyntheticCcDrccRisk(
 
   return result;
 }
+
 
 /**
  * Main function: analyze portfolio risk across all categories.
