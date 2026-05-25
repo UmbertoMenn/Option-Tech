@@ -904,9 +904,10 @@ export function analyzePortfolioRisk(
       const d = (s.description || '').toUpperCase();
       return (t && target.includes(t)) || (d && (target.includes(d) || d.includes(target)));
     });
-    if (!match) return null;
+    if (!match) return { spot: null, source: 'none', tickerUsed: null };
     const px = (match as any).snapshot_price ?? match.current_price ?? null;
-    return typeof px === 'number' && px > 0 ? px : null;
+    if (typeof px !== 'number' || px <= 0) return { spot: null, source: 'none', tickerUsed: null };
+    return { spot: px, source: 'portfolio', tickerUsed: match.ticker ?? null };
   });
 
   const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
