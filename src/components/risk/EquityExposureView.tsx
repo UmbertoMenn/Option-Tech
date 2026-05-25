@@ -68,6 +68,94 @@ function CalcInfo({ children, className = 'w-3.5 h-3.5' }: { children: React.Rea
   );
 }
 
+const SYNTH_HEADER_TOOLTIP = `Posizioni SINTETICHE CC / DR-CC
+===============================
+Combinazione di sole opzioni che replica un'esposizione equity
+SENZA possedere il sottostante. Il rischio è calcolato in valuta
+locale e poi convertito: riskEUR = riskOriginal / exchangeRate.
+
+4 VARIANTI
+
+1) CC sintetica CALL  (Long CALL ITM + Short CALL)
+   La long CALL ITM funge da "sottostante" per la call venduta.
+   • spot > strike_shortCall → long CALL sarà esercitata
+       rischio = PMC_longCall × qty × 100
+   • spot ≤ strike_shortCall → upside trattenuto dalla call corta
+       rischio = mkt_longCall × qty × 100
+   • spot ignoto → fallback mkt × qty × 100
+
+2) CC sintetica PUT  (Short PUT ITM + Short CALL)
+   Rischio di assegnazione al prezzo dello strike PUT:
+       rischio = strike_PUT × |qty_PUT| × 100
+
+3) DR-CC sintetica CALL  (Long CALL ITM + Short CALL [+ Prot PUT])
+   Stessa formula della CC sintetica CALL: la protezione PUT è
+   irrilevante perché il "sottostante" è la long CALL ITM.
+
+4) DR-CC sintetica PUT  (Short PUT ITM + Short CALL + Protezione PUT)
+   Perdita massima = spread tra strike sintetica e protezione:
+       rischio = max(0, strike_synPut − strike_protPut) × contracts × 100
+
+Conversione finale: riskEUR = riskOriginal / exchangeRate`;
+
+function buildSynthTooltip(s: {
+  syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
+  underlying: string;
+  composition?: string;
+  currency: string;
+  riskOriginal: number;
+  exchangeRate: number;
+  riskEUR: number;
+}): string {
+  const t = s.syntheticType;
+  const isDrcc = t?.startsWith('drcc');
+  const variant = t?.endsWith('call') ? 'CALL' : 'PUT';
+  const label = `${isDrcc ? 'DR-CC' : 'CC'} sintetica (${variant})`;
+
+  let theory = '';
+  let formula = '';
+  if (t === 'cc_call' || t === 'drcc_call') {
+    theory =
+      'La long CALL ITM funge da sottostante per la call venduta.\n' +
+      'Se spot > strike_shortCall → la long sarà esercitata, rischio = PMC.\n' +
+      'Se spot ≤ strike_shortCall → resta il valore di mercato della long.';
+    formula =
+      'rischio = price_per_share × qty × 100\n' +
+      '  price_per_share = PMC  se spot > strike_shortCall\n' +
+      '                  = mkt  se spot ≤ strike_shortCall (o spot ignoto)';
+    if (t === 'drcc_call') {
+      theory += '\nLa Protezione PUT è ininfluente in questa configurazione.';
+    }
+  } else if (t === 'cc_put') {
+    theory =
+      'Short PUT ITM = rischio di assegnazione al prezzo dello strike.\n' +
+      'La Short CALL non aggiunge perdita massima (premio incassato).';
+    formula = 'rischio = strike_PUT × |qty_PUT| × 100';
+  } else if (t === 'drcc_put') {
+    theory =
+      'La Protezione PUT lunga limita la perdita: la massima è lo spread\n' +
+      'tra lo strike della PUT venduta sintetica e quello della PUT protezione.';
+    formula = 'rischio = max(0, strike_synPut − strike_protPut) × contracts × 100';
+  }
+
+  return [
+    `${label} — ${s.underlying}`,
+    '='.repeat(40),
+    s.composition ? `Composizione:\n${s.composition}` : '',
+    '',
+    `Teoria:\n${theory}`,
+    '',
+    `Formula:\n${formula}`,
+    '',
+    'Calcolo:',
+    `  riskOriginal = ${s.currency} ${formatNumber(s.riskOriginal, 0)}`,
+    `  exchangeRate = ${s.exchangeRate.toFixed(4)} (${s.currency}/EUR)`,
+    `  riskEUR = riskOriginal / exchangeRate = ${formatEUR(s.riskEUR)}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function EquityExposureView({ 
   analysis, 
   portfolioTotalValue,
