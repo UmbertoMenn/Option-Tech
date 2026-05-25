@@ -46,6 +46,22 @@ export interface StockRiskDetail {
   isSynthetic?: boolean;
   syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
   composition?: string;         // Composizione strategia sintetica (UI)
+  syntheticBreakdown?: {
+    qty?: number;
+    longStrike?: number;
+    shortStrike?: number;
+    pmc?: number;
+    mkt?: number;
+    spot?: number | null;
+    pricePerShare?: number;
+    priceSource?: 'PMC' | 'mkt';
+    putStrike?: number;
+    putQty?: number;
+    synPutStrike?: number;
+    protPutStrike?: number;
+    contracts?: number;
+    perShare?: number;
+  };
 }
 
 export interface NakedPutRiskDetail {
@@ -706,7 +722,8 @@ export function calculateSyntheticCcDrccRisk(
     underlyingName: string,
     riskOriginal: number,
     syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call',
-    composition: string
+    composition: string,
+    syntheticBreakdown?: StockRiskDetail['syntheticBreakdown']
   ): StockRiskDetail => {
     const exchangeRate = getEffectiveExchangeRate(refPosition);
     const currency = refPosition.currency || 'USD';
@@ -735,6 +752,7 @@ export function calculateSyntheticCcDrccRisk(
       isSynthetic: true,
       syntheticType,
       composition,
+      syntheticBreakdown,
     };
   };
 
@@ -756,15 +774,19 @@ export function calculateSyntheticCcDrccRisk(
 
     let pricePerShare: number;
     let priceLabel: string;
+    let priceSource: 'PMC' | 'mkt';
     if (spot != null && spot > shortStrike) {
       pricePerShare = pmc;
       priceLabel = `PMC ${pmc.toFixed(2)}`;
+      priceSource = 'PMC';
     } else if (spot != null) {
       pricePerShare = mkt;
       priceLabel = `mkt ${mkt.toFixed(2)}`;
+      priceSource = 'mkt';
     } else {
       pricePerShare = mkt;
       priceLabel = `mkt ${mkt.toFixed(2)}`;
+      priceSource = 'mkt';
     }
 
     const riskOriginal = pricePerShare * qty * 100;
@@ -773,7 +795,17 @@ export function calculateSyntheticCcDrccRisk(
       ? ` + Protezione PUT ${protectionPutStrike}`
       : '';
     const composition = `Long CALL ${longStrike} ITM (${priceLabel}) + Short CALL ${shortStrike}${spotPart}${protPart}`;
-    return buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition);
+    return buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition, {
+      qty,
+      longStrike,
+      shortStrike,
+      pmc,
+      mkt,
+      spot,
+      pricePerShare,
+      priceSource,
+      protPutStrike: protectionPutStrike ?? undefined,
+    });
   };
 
   // Synthetic Covered Calls
@@ -792,7 +824,11 @@ export function calculateSyntheticCcDrccRisk(
       const strike = cc.syntheticPut.strike_price || 0;
       const riskOriginal = strike * qty * 100;
       const composition = `Short PUT ${strike} ITM + Short CALL ${shortStrike}`;
-      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition));
+      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition, {
+        putStrike: strike,
+        putQty: qty,
+        shortStrike,
+      }));
     }
   }
 
@@ -821,9 +857,16 @@ export function calculateSyntheticCcDrccRisk(
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
       const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
-      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition));
+      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition, {
+        synPutStrike: synStrike,
+        protPutStrike: protStrike,
+        shortStrike,
+        contracts,
+        perShare,
+      }));
     }
   }
+
 
   return result;
 }
