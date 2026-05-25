@@ -7,13 +7,30 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
-import { TrendingDown, TrendingUp, BarChart3, AlertTriangle } from 'lucide-react';
+import { TrendingDown, TrendingUp, BarChart3, AlertTriangle, Info } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+
+function CalcInfo({ children }: { children: React.ReactNode }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="inline-flex items-center text-muted-foreground hover:text-foreground">
+            <Info className="w-3.5 h-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm">
+          <div className="text-xs font-mono whitespace-pre-wrap leading-relaxed">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 interface HoldingBreakdownDialogProps {
   holding: ConsolidatedHoldingWithDetails | null;
@@ -92,8 +109,22 @@ export function HoldingBreakdownDialog({
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-blue-500">
+                      <div className="font-medium text-blue-500 flex items-center justify-end gap-1.5">
                         {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
+                        <CalcInfo>
+                          {stock.isSynthetic
+                            ? (stock.composition
+                                ? `Posizione sintetica\n${stock.composition}\nRischio EUR = ${formatEUR(stock.value)}`
+                                : `Posizione sintetica CC/DR-CC\nRischio EUR = ${formatEUR(stock.value)}`)
+                            : (() => {
+                                const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
+                                if (includeProtections && stock.hasProtection && stock.protectionStrike != null) {
+                                  const protLine = `− ${stock.protectionContracts} PUT × strike ${formatNumber(stock.protectionStrike, 0)} × 100`;
+                                  return `Stock (lordo):\n${gross}\nProtezione:\n${protLine}\n= ${formatEUR(stock.valueWithProtection)}`;
+                                }
+                                return `Stock:\n${gross}`;
+                              })()}
+                        </CalcInfo>
                       </div>
                       {includeProtections && stock.hasProtection && stock.valueWithProtection < stock.value && (
                         <div className="text-xs text-green-500">
@@ -132,8 +163,11 @@ export function HoldingBreakdownDialog({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-red-500">
+                      <div className="font-medium text-red-500 flex items-center justify-end gap-1.5">
                         {formatEUR(put.riskEUR)}
+                        <CalcInfo>
+                          {`Naked PUT (rischio assegnazione):\n${put.contracts} × strike ${formatNumber(put.strike)} × 100\n→ convertito in EUR = ${formatEUR(put.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>
@@ -165,8 +199,11 @@ export function HoldingBreakdownDialog({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-amber-500">
+                      <div className="font-medium text-amber-500 flex items-center justify-end gap-1.5">
                         {formatEUR(lc.marketValue)}
+                        <CalcInfo>
+                          {`Leap Call (valore di mercato):\n${lc.contracts} × Mkt ${formatNumber(lc.marketPrice, 2)} × 100\n→ convertito in EUR = ${formatEUR(lc.marketValue)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>
@@ -211,8 +248,11 @@ export function HoldingBreakdownDialog({
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-purple-500">
+                      <div className="font-medium text-purple-500 flex items-center justify-end gap-1.5">
                         {formatEUR(strat.maxLossEUR)}
+                        <CalcInfo>
+                          {`Strategia: ${strat.strategyName}\nMax Loss calcolato sul payoff matematico a scadenza.${strat.hasUnlimitedRisk ? '\n⚠️ Lato CALL con rischio teoricamente illimitato: il valore mostra solo il lato PUT (definito).' : ''}\nValore = ${formatEUR(strat.maxLossEUR)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>

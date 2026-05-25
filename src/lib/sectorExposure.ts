@@ -907,6 +907,7 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     protectionStrike: number | null;
     hasProtection: boolean;
     isSynthetic?: boolean;
+    composition?: string;
   }>;
   strategyDetails: Array<{
     strategyName: string;
@@ -1049,6 +1050,7 @@ export function calculateConsolidatedTopHoldings(
       protectionStrike: s.protectionStrike ?? null,
       hasProtection: s.hasProtection || false,
       isSynthetic: true,
+      composition: (s as any).composition,
     });
   }
 
