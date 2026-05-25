@@ -60,7 +60,7 @@ function CalcInfo({ children, className = 'w-3.5 h-3.5' }: { children: React.Rea
             <Info className={className} />
           </button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-sm">
+        <TooltipContent className="max-w-sm max-h-[70vh] overflow-y-auto" collisionPadding={16}>
           <div className="text-xs whitespace-pre-wrap leading-relaxed font-mono">{children}</div>
         </TooltipContent>
       </Tooltip>
