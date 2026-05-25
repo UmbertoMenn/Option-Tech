@@ -1,22 +1,31 @@
-Sposto le icone (i) con tooltip nel posto giusto: `src/components/risk/EquityExposureView.tsx`, accanto al valore EUR di ogni riga di dettaglio di ogni categoria.
+Migliorare i tooltip della sezione **Dettaglio CC e DR-CC sintetiche** in `src/components/risk/EquityExposureView.tsx` (lines ~833-892), con spiegazioni teoriche e formule precise per ogni variante.
 
-## File da modificare
+## Modifica unica
 
-### `src/components/risk/EquityExposureView.tsx` (unico file)
+### 1) Tooltip header "Dettaglio CC e DR-CC sintetiche"
+Sostituire l'attuale testo breve con una spiegazione metodologica dettagliata che copra:
+- **Cos'è una posizione sintetica**: combinazione di sole opzioni che replica un'esposizione equity senza possedere il sottostante.
+- **Le 4 varianti supportate** (`cc_call`, `cc_put`, `drcc_call`, `drcc_put`) con le rispettive formule di rischio (in valuta locale, poi convertite via `/exchangeRate` in EUR):
+  - **CC sintetica CALL** = Long CALL ITM + Short CALL.
+    - Se `spot > strike_shortCall` → la long CALL verrà esercitata: rischio = `PMC_longCall × qty × 100` (costo già pagato e perso al netto della call corta che assorbe l'upside).
+    - Se `spot ≤ strike_shortCall` → rischio = `mkt_longCall × qty × 100` (valore di mercato corrente residuo).
+    - Se spot non disponibile → fallback `mkt × qty × 100`.
+  - **CC sintetica PUT** = Short PUT ITM + Short CALL. Formula: `strike_PUT × |qty_PUT| × 100` (rischio di assegnazione al prezzo dello strike).
+  - **DR-CC sintetica CALL** = Long CALL ITM + Short CALL (+ Protezione PUT ininfluente). Stessa formula della CC sintetica CALL: la protezione PUT non riduce il rischio perché la long CALL ITM funge da sottostante effettivo.
+  - **DR-CC sintetica PUT** = Short PUT ITM + Short CALL + Protezione PUT. Formula: `max(0, strike_synPut − strike_protPut) × contracts × 100` (lo spread tra strike sintetica e protezione = perdita massima).
+- **Conversione finale**: `riskEUR = riskOriginal / exchangeRate`.
 
-Aggiungere un piccolo componente locale `CalcInfo` (icona `Info` di lucide-react come trigger di un Tooltip già importato in questo file) e inserirlo accanto a `formatEUR(...)` in ogni riga delle 7 sezioni di dettaglio dell'Equity Exposure:
+### 2) Tooltip per ogni riga di posizione (accanto a `Rischio: {formatEUR(s.riskEUR)}`)
+Costruire un testo tooltip dinamico in base a `s.syntheticType`. Per ogni variante mostrare:
+1. **Titolo**: tipo (CC/DR-CC) + variante (CALL/PUT) + sottostante.
+2. **Composizione** (`s.composition`, già contiene strike, PMC/mkt, spot, eventuale protezione).
+3. **Teoria**: spiegazione di una riga sul perché il rischio è così definito (es. per `cc_call`: "il rischio è il capitale impiegato nella long CALL ITM, che diventa PMC o mkt a seconda della relazione spot vs strike call venduta").
+4. **Formula simbolica** specifica della variante.
+5. **Calcolo numerico**: `riskOriginal` in valuta originale (s.currency + numero) + conversione `÷ exchangeRate` → `riskEUR`.
 
-1. **Dettaglio ETF Azionari** (`sortedETFDetails.map`, riga "Rischio: {formatEUR(stock.riskEUR)}") — tooltip: `qty × prezzo × FX = valore lordo` + eventuale `− contratti × strike × 100 × FX` per protezione, con risultato finale `riskEUR`.
-2. **Dettaglio Stocks** (`sortedPureStockDetails.map`) — stesso schema; per `isSynthetic` mostrare la stringa `composition` se disponibile e nota "rischio CC/DR-CC sintetica".
-3. **Dettaglio CC e DR-CC sintetiche** (`sortedSyntheticCcDrccDetails.map`) — tooltip: variante (CC/DR-CC, lato CALL/PUT) + `composition` + valuta originale `riskOriginal × 1/FX → riskEUR`.
-4. **Dettaglio Commodities** (`sortedCommodityDetails.map`) — tooltip: `quantità × prezzo × FX = riskEUR`.
-5. **Dettaglio Naked PUT** (`sortedNakedPutDetails.map`) — tooltip: `contratti × strike × 100 × FX = riskEUR` (rischio di assegnazione).
-6. **Dettaglio Leap Call** (`sortedLeapCallDetails.map`) — tooltip: `contratti × marketPrice × 100 × FX = riskEUR` (valore di mercato).
-7. **Dettaglio Strategie** (`sortedStrategyDetails.map`) — tooltip: `strategyName` + `strat.calculation` (campo già esistente) + nota su `hasUnlimitedRisk` se presente; valore = `maxLossEUR`.
+Le informazioni granulari (strike, PMC, mkt, spot, contracts) sono già contenute in `s.composition` (string costruita in `riskCalculator.ts`), quindi non serve passare nuovi dati: il tooltip mostra `composition` integrale + la formula generica della variante + i numeri aggregati disponibili (`riskOriginal`, `exchangeRate`, `riskEUR`).
 
-Inoltre: aggiungere la (i) anche nelle **righe-intestazione** di ogni accordion delle sezioni di dettaglio (accanto a "Rischio totale: …"), con la spiegazione metodologica della categoria.
-
-Nessun cambio a backend, RLS, calcoli o altre view. È puramente UI: icona `Info` + Tooltip.
-
-## Nota
-Le icone aggiunte in precedenza in `SectorAllocationView.tsx` e `CurrencyExposureView.tsx` restano (non disturbano e sono coerenti), ma il fix richiesto è qui.
+## Note
+- Solo UI: nessun cambio a `riskCalculator.ts`, hook, RLS, backend.
+- Usa `whitespace-pre-wrap` (già di default in `CalcInfo`) per mantenere la formattazione multi-riga.
+- Helper locale `buildSynthTooltip(s)` per evitare JSX troppo lungo inline.
