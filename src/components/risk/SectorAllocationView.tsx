@@ -114,8 +114,11 @@ function InstrumentRow({ instrument, sectorName, isAdmin, onOverrideClick }: Ins
           </Badge>
         )}
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         <span className="text-sm font-medium">{formatEUR(instrument.riskEUR)}</span>
+        <CalcInfoIcon>
+          {`${config.label} — ${instrument.name}\nValore: ${formatEUR(instrument.riskEUR)}\n\n${CATEGORY_EXPLANATION[instrument.category]}`}
+        </CalcInfoIcon>
         {isAdmin && !instrument.isFromETFDecomposition && (
           <Button
             variant="ghost"
