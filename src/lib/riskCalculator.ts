@@ -53,6 +53,8 @@ export interface StockRiskDetail {
     pmc?: number;
     mkt?: number;
     spot?: number | null;
+    spotSource?: 'portfolio' | 'ticker_cache' | 'none';
+    spotTickerUsed?: string | null;
     pricePerShare?: number;
     priceSource?: 'PMC' | 'mkt';
     putStrike?: number;
