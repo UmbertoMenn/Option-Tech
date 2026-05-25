@@ -50,6 +50,38 @@ const CATEGORY_CONFIG = {
 
 type CategoryKey = keyof typeof CATEGORY_CONFIG;
 
+const CATEGORY_EXPLANATION: Record<CategoryKey, string> = {
+  stocks: 'Stocks & ETF: valore di mercato della posizione (quantità × prezzo), convertito in EUR. Per gli ETF il valore è scomposto sulle componenti sottostanti in base al peso (%).',
+  bonds: 'Obbligazioni: valore nominale/di mercato della posizione obbligazionaria, convertito in EUR.',
+  commodities: 'Commodities: valore di mercato della posizione su commodity, convertito in EUR.',
+  protections: 'Protezioni (Long Put): valore di mercato della put lunga (prezzo × contratti × 100), convertito in EUR. Riduce l\'esposizione dello stock se il toggle "Includi protezioni" è attivo.',
+  nakedPuts: 'Naked Put: rischio di assegnazione = strike × contratti × 100, convertito in EUR. Rappresenta il capitale potenzialmente impegnato se la put viene esercitata.',
+  leapCalls: 'Leap Call: valore di mercato = prezzo opzione × contratti × 100, convertito in EUR. Rappresenta il capitale a rischio sulla call lunga.',
+  strategies: 'Strategie: Max Loss calcolato sul payoff matematico a scadenza della combinazione (es. CC sintetica, DR-CC, spread). Strategie con rischio illimitato vengono segnalate.',
+};
+
+function CalcInfoIcon({ children, className = 'w-3 h-3' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center text-muted-foreground hover:text-foreground"
+            aria-label="Spiegazione calcolo"
+          >
+            <Info className={className} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          <div className="text-xs whitespace-pre-wrap leading-relaxed">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
   const config = CATEGORY_CONFIG[instrument.category];
   const Icon = config.icon;
@@ -76,8 +108,11 @@ function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
           <span className="text-xs text-muted-foreground truncate">{instrument.details}</span>
         </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         <span className="font-medium text-sm">{formatEUR(instrument.riskEUR)}</span>
+        <CalcInfoIcon>
+          {`${config.label} — ${instrument.name}\nValore: ${formatEUR(instrument.riskEUR)}${instrument.details ? `\n${instrument.details}` : ''}\n\n${CATEGORY_EXPLANATION[instrument.category]}`}
+        </CalcInfoIcon>
         {instrument.isETF && (
           <Button
             variant="ghost"
@@ -125,6 +160,9 @@ function CategoryBreakdown({
             {categoryInstruments.length}
           </Badge>
           <span className="font-medium text-sm">{formatEUR(total)}</span>
+          <CalcInfoIcon className="w-3.5 h-3.5">
+            {`Dettaglio ${config.label}\nTotale: ${formatEUR(total)}\n\n${CATEGORY_EXPLANATION[category]}`}
+          </CalcInfoIcon>
         </div>
       </AccordionTrigger>
       <AccordionContent className="pt-1 pb-2 px-2">

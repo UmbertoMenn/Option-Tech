@@ -1,29 +1,20 @@
-# Tooltip (i) di spiegazione calcolo nel dettaglio del Risk Analyzer
+Correggo l’implementazione mettendo la (i) dove serve davvero: nei pannelli di dettaglio categorie del Risk Analyzer, accanto ai valori EUR.
 
-## Obiettivo
-Nel dialog "Breakdown" del Risk Analyzer, aggiungere accanto a ogni riga (Stock, PUT, LEAP, Strategie, Sintetiche CC/DR-CC) un'icona (i) che, al hover, mostra la formula con cui è stato calcolato il rischio, usando i numeri reali della posizione.
+## Modifiche da fare
 
-## Approccio (minimale)
-Le formule per Stock, Naked PUT, LEAP Call e Strategie sono ricostruibili nel dialog dai campi già presenti (`quantity`, `price`, `strike`, `contracts`, `marketPrice`, `protectionStrike`, `protectionContracts`). Nessuna modifica al calcolo del rischio. Per le sintetiche CC/DR-CC riutilizziamo la stringa `composition` già prodotta da `calculateSyntheticCcDrccRisk` nel piano precedente: va solo propagata fino al dialog.
+### `src/components/risk/SectorAllocationView.tsx`
+- Aggiungere una piccola icona `Info` cliccabile/hoverabile accanto al valore EUR:
+  - nella riga intestazione categoria, es. `Dettaglio Strategie`, `Dettaglio Naked Put`, `Dettaglio Leap Call`, `Stocks & ETF`;
+  - in ogni riga strumento sotto la categoria, accanto al valore EUR della singola posizione.
+- Il tooltip mostrerà una spiegazione coerente con la categoria:
+  - `Naked Put`: rischio assegnazione calcolato su strike × contratti × 100, convertito in EUR;
+  - `Leap Call`: valore di mercato della call, convertito in EUR;
+  - `Strategie`: max loss calcolato sul payoff a scadenza, con nota per rischio illimitato se disponibile nei dati;
+  - `Stocks & ETF`: valore esposizione posizione / quota ETF.
 
-## File da modificare
+### `src/components/risk/CurrencyExposureView.tsx`
+- Applicare la stessa logica anche al dettaglio per valuta, perché è un altro dettaglio del Risk Analyzer con categorie e valori EUR.
+- Aggiungere la (i) accanto al valore EUR totale categoria e al valore EUR di ogni riga strumento.
 
-### `src/components/risk/HoldingBreakdownDialog.tsx` (modifica principale)
-- Importare `Info` da `lucide-react` (Tooltip già importato).
-- Aggiungere accanto al valore EUR di ogni riga un `<Info className="w-3.5 h-3.5 text-muted-foreground" />` come trigger di tooltip.
-- Contenuto del tooltip costruito inline per ciascun tipo:
-  - **Stock**: `qty × price × FX = value` (+ riga `− contracts × strike × 100 × FX` se protetto).
-  - **Sintetica CC/DR-CC**: mostra `composition` propagata.
-  - **Naked PUT**: `contracts × strike × 100 × FX = riskEUR`.
-  - **LEAP Call**: `contracts × marketPrice × 100 × FX = marketValue`.
-  - **Strategia**: testo `Max Loss universale calcolato sul payoff a scadenza` + nota se `hasUnlimitedRisk`.
-- Formula renderizzata con classe `font-mono text-xs`.
-
-### `src/lib/sectorExposure.ts` (solo propagazione)
-- Aggiungere campo opzionale `composition?: string` all'interfaccia di `stockDetails` in `ConsolidatedHoldingWithDetails`.
-- Passare `s.composition` quando viene fatto il push del dettaglio sintetico (sezione 1b, da `syntheticCcDrccDetails`).
-
-## Note
-- Zero modifiche a database, RLS, edge functions, o logica di calcolo.
-- `riskCalculator.ts` non viene toccato: `composition` è già emesso dal piano precedente.
-- Valori formattati con i formatter esistenti (`formatNumber`, `formatEUR`).
+## Nota
+Non tocco la logica di calcolo del rischio, database o funzioni backend: è solo una correzione di UI/tooltip nella posizione richiesta.
