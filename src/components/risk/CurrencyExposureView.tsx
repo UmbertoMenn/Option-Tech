@@ -160,6 +160,9 @@ function CategoryBreakdown({
             {categoryInstruments.length}
           </Badge>
           <span className="font-medium text-sm">{formatEUR(total)}</span>
+          <CalcInfoIcon className="w-3.5 h-3.5">
+            {`Dettaglio ${config.label}\nTotale: ${formatEUR(total)}\n\n${CATEGORY_EXPLANATION[category]}`}
+          </CalcInfoIcon>
         </div>
       </AccordionTrigger>
       <AccordionContent className="pt-1 pb-2 px-2">
