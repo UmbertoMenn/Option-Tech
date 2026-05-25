@@ -46,6 +46,22 @@ export interface StockRiskDetail {
   isSynthetic?: boolean;
   syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
   composition?: string;         // Composizione strategia sintetica (UI)
+  syntheticBreakdown?: {
+    qty?: number;
+    longStrike?: number;
+    shortStrike?: number;
+    pmc?: number;
+    mkt?: number;
+    spot?: number | null;
+    pricePerShare?: number;
+    priceSource?: 'PMC' | 'mkt';
+    putStrike?: number;
+    putQty?: number;
+    synPutStrike?: number;
+    protPutStrike?: number;
+    contracts?: number;
+    perShare?: number;
+  };
 }
 
 export interface NakedPutRiskDetail {
