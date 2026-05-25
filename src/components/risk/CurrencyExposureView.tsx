@@ -108,8 +108,11 @@ function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
           <span className="text-xs text-muted-foreground truncate">{instrument.details}</span>
         </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         <span className="font-medium text-sm">{formatEUR(instrument.riskEUR)}</span>
+        <CalcInfoIcon>
+          {`${config.label} — ${instrument.name}\nValore: ${formatEUR(instrument.riskEUR)}${instrument.details ? `\n${instrument.details}` : ''}\n\n${CATEGORY_EXPLANATION[instrument.category]}`}
+        </CalcInfoIcon>
         {instrument.isETF && (
           <Button
             variant="ghost"
