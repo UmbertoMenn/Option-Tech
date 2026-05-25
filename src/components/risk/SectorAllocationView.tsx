@@ -56,6 +56,35 @@ const CATEGORY_CONFIG: Record<SectorInstrumentCategory, { label: string; icon: R
   strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
 };
 
+const CATEGORY_EXPLANATION: Record<SectorInstrumentCategory, string> = {
+  stocks: 'Stocks & ETF: valore di mercato della posizione (quantità × prezzo), convertito in EUR. Per gli ETF il valore è scomposto sulle componenti sottostanti in base al peso (%).',
+  nakedPuts: 'Naked Put: rischio di assegnazione = strike × contratti × 100, convertito in EUR. Rappresenta il capitale potenzialmente impegnato se la put viene esercitata.',
+  leapCalls: 'Leap Call: valore di mercato = prezzo opzione × contratti × 100, convertito in EUR. Rappresenta il capitale a rischio sulla call lunga.',
+  strategies: 'Strategie: Max Loss calcolato sul payoff matematico a scadenza della combinazione (es. CC sintetica, DR-CC, spread). Strategie con rischio illimitato vengono segnalate.',
+};
+
+function CalcInfoIcon({ children, className = 'w-3 h-3' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center text-muted-foreground hover:text-foreground"
+            aria-label="Spiegazione calcolo"
+          >
+            <Info className={className} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          <div className="text-xs whitespace-pre-wrap leading-relaxed">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface InstrumentRowProps {
   instrument: SectorInstrument;
   sectorName: string;
