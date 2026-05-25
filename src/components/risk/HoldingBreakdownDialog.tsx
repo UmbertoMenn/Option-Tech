@@ -199,8 +199,11 @@ export function HoldingBreakdownDialog({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-amber-500">
+                      <div className="font-medium text-amber-500 flex items-center justify-end gap-1.5">
                         {formatEUR(lc.marketValue)}
+                        <CalcInfo>
+                          {`Leap Call (valore di mercato):\n${lc.contracts} × Mkt ${formatNumber(lc.marketPrice, 2)} × 100\n→ convertito in EUR = ${formatEUR(lc.marketValue)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>
@@ -245,8 +248,11 @@ export function HoldingBreakdownDialog({
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-purple-500">
+                      <div className="font-medium text-purple-500 flex items-center justify-end gap-1.5">
                         {formatEUR(strat.maxLossEUR)}
+                        <CalcInfo>
+                          {`Strategia: ${strat.strategyName}\nMax Loss calcolato sul payoff matematico a scadenza.${strat.hasUnlimitedRisk ? '\n⚠️ Lato CALL con rischio teoricamente illimitato: il valore mostra solo il lato PUT (definito).' : ''}\nValore = ${formatEUR(strat.maxLossEUR)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>
