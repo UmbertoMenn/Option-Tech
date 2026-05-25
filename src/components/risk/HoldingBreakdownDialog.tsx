@@ -7,13 +7,30 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
-import { TrendingDown, TrendingUp, BarChart3, AlertTriangle } from 'lucide-react';
+import { TrendingDown, TrendingUp, BarChart3, AlertTriangle, Info } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+
+function CalcInfo({ children }: { children: React.ReactNode }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="inline-flex items-center text-muted-foreground hover:text-foreground">
+            <Info className="w-3.5 h-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm">
+          <div className="text-xs font-mono whitespace-pre-wrap leading-relaxed">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 interface HoldingBreakdownDialogProps {
   holding: ConsolidatedHoldingWithDetails | null;
