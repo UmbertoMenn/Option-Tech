@@ -46,6 +46,28 @@ interface EquityExposureViewProps {
   onIncludeGPChange?: (value: boolean) => void;
 }
 
+function CalcInfo({ children, className = 'w-3.5 h-3.5' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center align-middle text-muted-foreground hover:text-foreground"
+            aria-label="Spiegazione calcolo"
+          >
+            <Info className={className} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm">
+          <div className="text-xs whitespace-pre-wrap leading-relaxed font-mono">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export function EquityExposureView({ 
   analysis, 
   portfolioTotalValue,
