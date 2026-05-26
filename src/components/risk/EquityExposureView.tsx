@@ -365,12 +365,14 @@ export function EquityExposureView({
     [syntheticCcDrccDetails]
   );
 
-  // Sort by totalExposure (already accounts for active toggles) in descending order
+  // Sort by totalExposure in descending order. Include all toggles in deps so
+  // l'ordine si aggiorna ogni volta che cambia uno dei toggle che influenza
+  // totalExposure (Protezioni, Naked Put, Strategie, LEAP, Sintetiche, GP).
   const sortedConsolidatedHoldings = useMemo(() => 
-    [...consolidatedHoldings].sort((a, b) => {
-      return Math.abs(b.totalExposure) - Math.abs(a.totalExposure);
-    }),
-    [consolidatedHoldings]
+    [...consolidatedHoldings].sort((a, b) => 
+      Math.abs(b.totalExposure) - Math.abs(a.totalExposure)
+    ),
+    [consolidatedHoldings, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, includeGP]
   );
 
   const riskCategories = [
