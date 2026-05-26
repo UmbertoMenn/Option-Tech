@@ -963,6 +963,7 @@ export function calculateConsolidatedTopHoldings(
     nakedPutRisk: 0,
     leapCallRisk: 0,
     strategyRisk: 0,
+    syntheticRisk: 0,
     gpRisk: 0,
     totalExposure: 0,
     sources: [],
@@ -970,6 +971,7 @@ export function calculateConsolidatedTopHoldings(
     leapCallDetails: [],
     stockDetails: [],
     strategyDetails: [],
+    syntheticDetails: [],
   });
 
   // Pick the most descriptive name across sources for the same tickerKey.
