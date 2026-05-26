@@ -214,7 +214,7 @@ export function EquityExposureView({
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
-  const [includeSynthCcDrcc, setIncludeSynthCcDrcc] = useState(true);
+  const includeSynthCcDrcc = true;
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
@@ -558,16 +558,6 @@ export function EquityExposureView({
                   />
                   <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">
                     Leap Call
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch 
-                    id="synth-cc-drcc-toggle"
-                    checked={includeSynthCcDrcc}
-                    onCheckedChange={setIncludeSynthCcDrcc}
-                  />
-                  <Label htmlFor="synth-cc-drcc-toggle" className="text-sm cursor-pointer">
-                    CC/DR-CC sint.
                   </Label>
                 </div>
                 {gpStockHoldings.length > 0 && onIncludeGPChange && (
@@ -1392,6 +1382,11 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                             {hasStrategy && (
                               <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-purple-500/10 text-purple-500 border-purple-500/30">
                                 Strategie: {formatEUR(holding.strategyRisk)}
+                              </Badge>
+                            )}
+                            {holding.syntheticRisk > 0 && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30">
+                                Sint. CC/DR-CC: {formatEUR(holding.syntheticRisk)}
                               </Badge>
                             )}
                             {hasGP && (
