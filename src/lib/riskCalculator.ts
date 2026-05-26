@@ -26,19 +26,19 @@ export interface StockRiskDetail {
   stockValue: number;           // Valore azioni in valuta originale
   stockQuantity: number;        // Numero azioni
   stockPrice: number;           // Prezzo azione
-  protectionStrike: number | null;
-  protectionContracts: number;
-  protectionOptionPrice: number | null; // Prezzo opzione (mkt se disponibile, fallback avg_cost)
+  protectionStrike: number | null;       // Strike medio Long PUT pure (Protezione pura)
+  protectionContracts: number;           // Contratti Long PUT pure
+  protectionOptionPrice: number | null;  // Prezzo opzione (mkt se disponibile, fallback avg_cost)
   protectedValue: number;       // Valore protetto in valuta originale
-  riskOriginal: number;         // Rischio in valuta originale
-  riskEUR: number;              // Rischio convertito in EUR
-  riskOriginalWithoutProtection?: number; // Rischio lordo se si ignorano le PUT di protezione
-  riskEURWithoutProtection?: number;      // Rischio lordo convertito in EUR
-  protectionSavingsOriginal?: number;
-  protectionSavingsEUR?: number;
+  riskOriginal: number;         // Rischio in valuta originale (NETTO: con protezioni applicate)
+  riskEUR: number;              // Rischio convertito in EUR (NETTO)
+  riskOriginalWithoutProtection?: number; // Rischio LORDO: rimuove SOLO la PUT di DR-CC e le Long PUT pure (mantiene cap CC/DR-CC)
+  riskEURWithoutProtection?: number;      // Rischio LORDO convertito in EUR
+  protectionSavingsOriginal?: number;     // Risparmio totale da protezioni (DR-CC PUT + Long PUT pure)
+  protectionSavingsEUR?: number;          // Risparmio in EUR
   currency: string;
   exchangeRate: number;
-  hasProtection: boolean;
+  hasProtection: boolean;       // true se Long PUT pure OPPURE DR-CC con protectionPut
   isin?: string;                // ISIN for ETF lookups
   isETF: boolean;               // Flag per distinguere ETF da azioni
   // Optional CC/DR-CC ITM caps (for tooltip details)
@@ -46,6 +46,9 @@ export interface StockRiskDetail {
   ccCapStrike?: number | null;
   drccCappedShares?: number;
   drccCapPerShare?: number | null;
+  // Info Protezione DR-CC (long PUT all'interno di una DR-CC reale)
+  drccProtectionStrike?: number | null;   // Strike medio delle PUT di protezione DR-CC
+  drccProtectionContracts?: number;       // Contratti totali delle PUT di protezione DR-CC
   // Synthetic CC/DR-CC entry (no real underlying stock)
   isSynthetic?: boolean;
   syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
@@ -69,6 +72,7 @@ export interface StockRiskDetail {
     perShare?: number;
   };
 }
+
 
 export interface NakedPutRiskDetail {
   underlying: string;
