@@ -1029,7 +1029,11 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                         <div className="text-right shrink-0">
                           <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(includeProtections ? s.riskEUR : (s.riskEURWithoutProtection ?? s.riskEUR))}
-                            <CalcInfo>{buildSynthTooltip(s)}</CalcInfo>
+                            <CalcInfo>
+                              {`${buildSynthTooltip(s)}${!includeProtections && (s.riskEURWithoutProtection ?? s.riskEUR) > s.riskEUR
+                                ? `\n\nToggle Protezioni OFF:\nRischio lordo = ${formatEUR(s.riskEURWithoutProtection ?? s.riskEUR)}`
+                                : ''}`}
+                            </CalcInfo>
                           </div>
                           {includeProtections && (s.riskEURWithoutProtection ?? s.riskEUR) > s.riskEUR && (
                             <div className="text-xs text-green-500">
