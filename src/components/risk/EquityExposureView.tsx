@@ -39,6 +39,7 @@ import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
   portfolioTotalValue?: number;
+  portfolioNettingTotal?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
   gpStockHoldings?: GPHoldingRow[];
