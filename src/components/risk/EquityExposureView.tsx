@@ -1324,6 +1324,9 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                 const hasStrategy = holding.strategyRisk > 0;
                 const hasGP = holding.gpRisk > 0;
                 const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
+                const syntheticValue = includeProtections
+                  ? holding.syntheticRisk
+                  : holding.syntheticRiskWithoutProtection;
                 
                 return (
                   <div
@@ -1397,9 +1400,16 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                                 Strategie: {formatEUR(holding.strategyRisk)}
                               </Badge>
                             )}
-                            {holding.syntheticRisk > 0 && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30">
-                                Sint. CC/DR-CC: {formatEUR(holding.syntheticRisk)}
+                            {syntheticValue > 0 && (
+                              <Badge variant="outline" className={`text-xs px-1.5 py-0 h-5 ${
+                                includeProtections && holding.syntheticRisk < holding.syntheticRiskWithoutProtection
+                                  ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                                  : 'bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30'
+                              }`}>
+                                Sint. CC/DR-CC: {formatEUR(syntheticValue)}
+                                {includeProtections && holding.syntheticRisk < holding.syntheticRiskWithoutProtection && (
+                                  <Shield className="w-3 h-3 ml-1" />
+                                )}
                               </Badge>
                             )}
                             {hasGP && (
