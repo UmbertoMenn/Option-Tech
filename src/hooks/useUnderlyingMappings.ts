@@ -89,17 +89,11 @@ export function useUnderlyingMappings() {
       
       if (mappingsError) throw mappingsError;
       
-      // Normalizza per confronto
-      const normalize = (s: string) =>
-        s.toUpperCase()
-          .replace(/[.,]+/g, ' ')
-          .replace(/\s+/g, ' ')
-          .replace(/\b(INC|CORP|LTD|LLC|PLC|CO|THE)\b/g, '')
-          .replace(/[^A-Z0-9]/g, '');
-      const mappedNormalized = new Set(mappings?.map(m => normalize(m.underlying)));
+      // Normalizza per confronto (usa l'helper canonico esportato)
+      const mappedNormalized = new Set(mappings?.map(m => normalizeUnderlying(m.underlying)));
       
       // Trova quelli non risolti (confronto normalizzato)
-      return allCandidates.filter(u => !mappedNormalized.has(normalize(u))).sort();
+      return allCandidates.filter(u => !mappedNormalized.has(normalizeUnderlying(u))).sort();
     },
   });
 
