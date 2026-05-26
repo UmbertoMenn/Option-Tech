@@ -866,6 +866,7 @@ export function calculateSyntheticCcDrccRisk(
       const synStrike = dr.syntheticPut.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
+      const riskOriginalWithoutProtection = synStrike * contracts * 100;
       const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
       result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition, {
         synPutStrike: synStrike,
@@ -873,7 +874,7 @@ export function calculateSyntheticCcDrccRisk(
         shortStrike,
         contracts,
         perShare,
-      }));
+      }, riskOriginalWithoutProtection, protStrike, contracts));
     }
   }
 
