@@ -45,15 +45,19 @@ export function ResolutionDiagnostics() {
     const { positions, mappings, prices, isinMappings } = data;
 
     // Unique underlyings from derivative positions
+    // NOTA: usiamo lo stesso filtro asset_type del Ticker Manager per coerenza.
     const derivativeUnderlyings = new Set(
       positions
-        .filter(p => p.asset_type === 'derivative' && p.underlying)
+        .filter(p => 
+          p.underlying && 
+          ['OPTION', 'WARRANT', 'derivative'].includes(p.asset_type as string)
+        )
         .map(p => p.underlying as string)
     );
 
-    // Mapping lookup
-    const normalize = (s: string) => s.toUpperCase().replace(/[.,]+/g, ' ').replace(/\s+/g, ' ').trim();
-    const mappedUnderlyings = new Set(mappings.map(m => normalize(m.underlying)));
+    // Mapping lookup — usa la normalizzazione canonica (stessa del Ticker Manager)
+    // per evitare falsi positivi su suffissi societari (INC, CORP, HOLDINGS, ...).
+    const mappedUnderlyings = new Set(mappings.map(m => normalizeUnderlying(m.underlying)));
     const mappedTickers = new Set(mappings.map(m => m.ticker));
 
     // Price lookup
@@ -65,7 +69,7 @@ export function ResolutionDiagnostics() {
     );
 
     // 1. Underlying senza mapping (causano edge function AI lenta)
-    const noMapping = [...derivativeUnderlyings].filter(u => !mappedUnderlyings.has(normalize(u))).sort();
+    const noMapping = [...derivativeUnderlyings].filter(u => !mappedUnderlyings.has(normalizeUnderlying(u))).sort();
 
     // 2. Underlying con mapping ma senza prezzo
     const noPrice = mappings
