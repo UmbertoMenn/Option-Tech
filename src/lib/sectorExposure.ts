@@ -906,12 +906,16 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     value: number;
     valueWithProtection: number;
     // Protection info
-    protectionContracts: number;
-    protectionStrike: number | null;
+    protectionContracts: number;          // Long PUT pure (Protezione pura)
+    protectionStrike: number | null;      // Strike Long PUT pure
+    drccProtectionContracts?: number;     // PUT di protezione interne a DR-CC
+    drccProtectionStrike?: number | null; // Strike PUT di protezione DR-CC
+    protectionSavingsEUR?: number;        // Saving totale (DR-CC PUT + Long PUT pure)
     hasProtection: boolean;
     isSynthetic?: boolean;
     composition?: string;
   }>;
+
   strategyDetails: Array<{
     strategyName: string;
     maxLossEUR: number;
