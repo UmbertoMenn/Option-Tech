@@ -270,12 +270,18 @@ export function calculateStockRisk(
     const ccOnly = ccMatched.filter(cc => !drccCcIds.has(cc.option.id));
 
     // ===== Step 1: DR-CC shares & risk (priority over plain CC and protection PUTs) =====
-    // Per share:
+    // Per share (con PUT di protezione):
     //   - spot ≥ strikeCall → max(0, strikeCall - strikeProtPut) × shares
     //   - spot <  strikeCall → max(0, spot      - strikeProtPut) × shares
+    // Per share (senza PUT di protezione, cioè comportamento CC pura):
+    //   - spot ≥ strikeCall → strikeCall × shares
+    //   - spot <  strikeCall → spot       × shares
     let drccSharesRequested = 0;
     let drccRiskRequested = 0;
+    let drccRiskRequestedNoProt = 0;
     let drccPerShareWeightedSum = 0;
+    let drccProtPutContracts = 0;
+    let drccProtPutStrikeWeightedSum = 0;
     for (const dr of drccMatched) {
       const callStrike = dr.coveredCall.option.strike_price || 0;
       const putStrike = dr.protectionPut?.strike_price || 0;
@@ -283,17 +289,30 @@ export function calculateStockRisk(
       const perShare = stockPrice >= callStrike
         ? Math.max(0, callStrike - putStrike)
         : Math.max(0, stockPrice - putStrike);
+      const perShareNoProt = stockPrice >= callStrike
+        ? callStrike
+        : stockPrice;
       drccSharesRequested += sh;
       drccRiskRequested += perShare * sh;
+      drccRiskRequestedNoProt += perShareNoProt * sh;
       drccPerShareWeightedSum += perShare * sh;
+      // Track DR-CC protection PUT info (for hasProtection flag & tooltips)
+      if (dr.protectionPut && putStrike > 0) {
+        const protContracts = Math.abs(dr.protectionPut.quantity || 0);
+        drccProtPutContracts += protContracts;
+        drccProtPutStrikeWeightedSum += putStrike * protContracts;
+      }
     }
     const drccShares = Math.min(drccSharesRequested, stockQuantity);
-    const drccRisk = drccSharesRequested > 0
-      ? drccRiskRequested * (drccShares / drccSharesRequested)
-      : 0;
+    const drccScale = drccSharesRequested > 0 ? (drccShares / drccSharesRequested) : 0;
+    const drccRisk = drccRiskRequested * drccScale;
+    const drccRiskNoProt = drccRiskRequestedNoProt * drccScale;
     const drccPerShare = drccSharesRequested > 0
       ? drccPerShareWeightedSum / drccSharesRequested
       : 0;
+    const drccProtectionStrike = drccProtPutContracts > 0
+      ? drccProtPutStrikeWeightedSum / drccProtPutContracts
+      : null;
     let remainingShares = stockQuantity - drccShares;
 
     // ===== Step 2: CC ITM cap (only OTM falls through to unprotected at spot × shares) =====
@@ -353,8 +372,21 @@ export function calculateStockRisk(
     const riskOriginal = drccRisk + ccCapRisk + protectedRisk + unprotectedRisk;
     const riskEUR = riskOriginal / exchangeRate;
 
+    // ===== Step 5: Calcolo LORDO (senza protezioni PUT)  =====
+    // Sostituiamo drccRisk con drccRiskNoProt e protectedRisk con protectedShares * stockPrice.
+    // Manteniamo ccCapRisk e unprotectedRisk identici (il cap CC non è una protezione).
+    const longPutSavingsOriginal = protectedShares * Math.min(stockPrice, avgStrike);
+    const drccProtSavingsOriginal = drccRiskNoProt - drccRisk;
+    const protectionSavingsOriginal = drccProtSavingsOriginal + longPutSavingsOriginal;
+    const riskOriginalWithoutProtection = riskOriginal + protectionSavingsOriginal;
+    const riskEURWithoutProtection = riskOriginalWithoutProtection / exchangeRate;
+    const protectionSavingsEUR = protectionSavingsOriginal / exchangeRate;
+
     // protectedValue still represents the long-PUT floor (used by some UI badges)
     const protectedValue = protectedShares * avgStrike;
+
+    const hasDrccProtection = drccProtPutContracts > 0 && drccProtSavingsOriginal > 0;
+    const hasProtection = protectionContracts > 0 || hasDrccProtection;
 
     const stockIdentity = resolveUnderlyingIdentity({
       rawTicker: stock.ticker,
@@ -375,20 +407,27 @@ export function calculateStockRisk(
       protectedValue,
       riskOriginal,
       riskEUR,
+      riskOriginalWithoutProtection,
+      riskEURWithoutProtection,
+      protectionSavingsOriginal,
+      protectionSavingsEUR,
       currency,
       exchangeRate,
-      hasProtection: protectionContracts > 0,
+      hasProtection,
       isin: stock.isin || undefined,
       isETF: stock.asset_type === 'etf',
       ccCappedShares: ccShares > 0 ? ccShares : undefined,
       ccCapStrike: ccShares > 0 ? ccCapStrike : null,
       drccCappedShares: drccShares > 0 ? drccShares : undefined,
       drccCapPerShare: drccShares > 0 ? drccPerShare : null,
+      drccProtectionStrike,
+      drccProtectionContracts: drccProtPutContracts,
     });
   }
   
   return result;
 }
+
 
 /**
  * Calculate naked put risk.
