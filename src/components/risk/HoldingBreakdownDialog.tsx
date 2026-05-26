@@ -95,9 +95,14 @@ export function HoldingBreakdownDialog({
                       <div className="text-sm">
                         {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
                       </div>
-                      {stock.hasProtection && stock.protectionContracts > 0 && (
+                      {stock.protectionContracts > 0 && stock.protectionStrike != null && (
                         <div className="text-xs text-green-600 mt-1">
-                          🛡️ Protetto: {stock.protectionContracts} PUT × Strike {formatNumber(stock.protectionStrike || 0, 0)}
+                          🛡️ Long PUT (pura): {stock.protectionContracts} × strike {formatNumber(stock.protectionStrike, 0)}
+                        </div>
+                      )}
+                      {(stock.drccProtectionContracts ?? 0) > 0 && stock.drccProtectionStrike != null && (
+                        <div className="text-xs text-green-600 mt-1">
+                          🛡️ Protezione DR-CC: {stock.drccProtectionContracts} PUT × strike {formatNumber(stock.drccProtectionStrike, 0)}
                         </div>
                       )}
                     </div>
@@ -107,9 +112,15 @@ export function HoldingBreakdownDialog({
                         <CalcInfo>
                           {(() => {
                             const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
-                            if (includeProtections && stock.hasProtection && stock.protectionStrike != null) {
-                              const protLine = `− ${stock.protectionContracts} PUT × strike ${formatNumber(stock.protectionStrike, 0)} × 100`;
-                              return `Stock (lordo):\n${gross}\nProtezione:\n${protLine}\n= ${formatEUR(stock.valueWithProtection)}`;
+                            if (includeProtections && stock.hasProtection && (stock.protectionSavingsEUR ?? 0) > 0) {
+                              const parts: string[] = [];
+                              if (stock.protectionContracts > 0 && stock.protectionStrike != null) {
+                                parts.push(`− Long PUT: ${stock.protectionContracts} × strike ${formatNumber(stock.protectionStrike, 0)} × 100`);
+                              }
+                              if ((stock.drccProtectionContracts ?? 0) > 0 && stock.drccProtectionStrike != null) {
+                                parts.push(`− DR-CC PUT: ${stock.drccProtectionContracts} × strike ${formatNumber(stock.drccProtectionStrike, 0)} × 100`);
+                              }
+                              return `Stock (lordo):\n${gross}\nProtezioni:\n${parts.join('\n')}\nRisparmio totale: −${formatEUR(stock.protectionSavingsEUR ?? 0)}\n= ${formatEUR(stock.valueWithProtection)}`;
                             }
                             return `Stock:\n${gross}`;
                           })()}
