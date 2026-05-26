@@ -531,6 +531,24 @@ export function categorizeDerivatives(
         }
         break;
       }
+      case 'protection': {
+        // Pure long PUT protection declared as a standalone strategy
+        const boughtPuts = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const stockContracts = linkedStock && linkedStock.quantity > 0
+          ? Math.floor(linkedStock.quantity / 100)
+          : 0;
+        const totalLongPutContracts = boughtPuts.reduce((s, p) => s + p.quantity, 0);
+        const isPartial = stockContracts > 0 && stockContracts - totalLongPutContracts > 0;
+        for (const put of boughtPuts) {
+          longPuts.push({
+            option: put,
+            underlying: linkedStock || null,
+            contracts: put.quantity,
+            isPartial,
+          });
+        }
+        break;
+      }
       case 'iron_condor': {
         const sc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
         const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);

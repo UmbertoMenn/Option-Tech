@@ -41,6 +41,7 @@ export interface UpsertConfigParams {
 export const STRATEGY_TYPE_LABELS: Record<string, string> = {
   covered_call: 'Covered Call',
   derisking_covered_call: 'De-Risking Covered Call',
+  protection: 'Protezione pura (long PUT)',
   iron_condor: 'Iron Condor',
   double_diagonal: 'Double Diagonal',
   naked_put: 'Naked Put',

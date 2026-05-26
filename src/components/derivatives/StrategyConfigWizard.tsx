@@ -24,6 +24,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 const STRATEGY_OPTIONS = [
   { value: 'covered_call', label: 'Covered Call' },
   { value: 'derisking_covered_call', label: 'De-Risking Covered Call' },
+  { value: 'protection', label: 'Protezione pura (long PUT)' },
   { value: 'iron_condor', label: 'Iron Condor' },
   { value: 'double_diagonal', label: 'Double Diagonal' },
   { value: 'naked_put', label: 'Naked Put' },
