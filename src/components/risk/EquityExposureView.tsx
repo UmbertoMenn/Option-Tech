@@ -214,7 +214,7 @@ export function EquityExposureView({
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
-  const [includeSynthCcDrcc, setIncludeSynthCcDrcc] = useState(true);
+  const includeSynthCcDrcc = true;
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
