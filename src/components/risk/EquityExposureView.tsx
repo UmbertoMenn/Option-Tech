@@ -279,6 +279,15 @@ export function EquityExposureView({
     [gpStockHoldings]
   );
 
+  const totalSyntheticCcDrccRiskWithoutProtection = useMemo(() =>
+    syntheticCcDrccDetails.reduce((sum, s) => sum + (s.riskEURWithoutProtection ?? s.riskEUR), 0),
+    [syntheticCcDrccDetails]
+  );
+  const displayedSyntheticCcDrccRisk = includeProtections
+    ? totalSyntheticCcDrccRisk
+    : totalSyntheticCcDrccRiskWithoutProtection;
+  const syntheticProtectionSavings = Math.max(0, totalSyntheticCcDrccRiskWithoutProtection - totalSyntheticCcDrccRisk);
+
   // Dynamic grand total based on toggles
   const dynamicGrandTotal = useMemo(() => {
     const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
@@ -289,7 +298,7 @@ export function EquityExposureView({
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
       (includeStrategies ? totalStrategyRisk : 0) +
-      (includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0) +
+      (includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0) +
       (includeGP ? gpStockTotalValue : 0)
     );
   }, [
@@ -306,7 +315,7 @@ export function EquityExposureView({
     totalNakedPutRisk, 
     totalLeapCallRisk, 
     totalStrategyRisk,
-    totalSyntheticCcDrccRisk,
+    displayedSyntheticCcDrccRisk,
     gpStockTotalValue,
   ]);
 
@@ -446,14 +455,16 @@ export function EquityExposureView({
     },
     { 
       label: 'Rischio CC e DR-CC sintetiche', 
-      value: includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0, 
-      sortValue: totalSyntheticCcDrccRisk,
-      percentage: getPercentage(includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0),
+      value: includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0, 
+      sortValue: totalSyntheticCcDrccRiskWithoutProtection,
+      percentage: getPercentage(includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0),
       color: 'bg-fuchsia-500',
       icon: Layers,
-      description: 'Sintetiche: long CALL + short CALL / short PUT ITM + short CALL [+ protezione]',
-      protectionSavings: 0,
-      showProtectionSavings: false
+      description: includeProtections
+        ? 'Sintetiche: CC / DR-CC al netto delle PUT di protezione'
+        : 'Sintetiche: CC / DR-CC al lordo delle PUT di protezione',
+      protectionSavings: includeProtections ? syntheticProtectionSavings : 0,
+      showProtectionSavings: includeProtections && syntheticProtectionSavings > 0
     },
     ...(gpStockHoldings.length > 0 ? [{
       label: 'Rischio GP Azioni',
