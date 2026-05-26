@@ -317,35 +317,22 @@ export function calculateStockRisk(
     const classifiedPuts = longPuts.filter(lp =>
       matchesUnderlying(lp.option, stock) && !drccProtPutIds.has(lp.option.id)
     );
-    const classifiedPutIds = new Set(classifiedPuts.map(lp => lp.option.id));
-    const additionalPuts = allBoughtPuts.filter(p =>
-      matchesUnderlying(p, stock) && !drccProtPutIds.has(p.id) && !classifiedPutIds.has(p.id)
-    );
 
-    const contractsFromClassified = classifiedPuts.reduce((sum, lp) => sum + lp.contracts, 0);
-    const contractsFromPositions = additionalPuts.reduce((sum, p) => sum + (p.quantity || 0), 0);
-    const protectionContracts = contractsFromClassified + contractsFromPositions;
+    const protectionContracts = classifiedPuts.reduce((sum, lp) => sum + lp.contracts, 0);
 
     let avgStrike = 0;
     let avgOptionPrice = 0;
     if (protectionContracts > 0) {
-      const classifiedWeightedSum = classifiedPuts.reduce((sum, lp) =>
+      const strikeWeightedSum = classifiedPuts.reduce((sum, lp) =>
         sum + (lp.option.strike_price || 0) * lp.contracts, 0
       );
-      const positionsWeightedSum = additionalPuts.reduce((sum, p) =>
-        sum + (p.strike_price || 0) * (p.quantity || 0), 0
-      );
-      avgStrike = (classifiedWeightedSum + positionsWeightedSum) / protectionContracts;
+      avgStrike = strikeWeightedSum / protectionContracts;
 
-      const classifiedPriceWeightedSum = classifiedPuts.reduce((sum, lp) => {
+      const priceWeightedSum = classifiedPuts.reduce((sum, lp) => {
         const px = (lp.option.current_price ?? lp.option.avg_cost ?? 0);
         return sum + px * lp.contracts;
       }, 0);
-      const positionsPriceWeightedSum = additionalPuts.reduce((sum, p) => {
-        const px = (p.current_price ?? p.avg_cost ?? 0);
-        return sum + px * (p.quantity || 0);
-      }, 0);
-      avgOptionPrice = (classifiedPriceWeightedSum + positionsPriceWeightedSum) / protectionContracts;
+      avgOptionPrice = priceWeightedSum / protectionContracts;
     }
 
     const protectedShares = Math.min(protectionContracts * 100, remainingShares);
