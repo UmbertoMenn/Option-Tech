@@ -92,16 +92,9 @@ export function HoldingBreakdownDialog({
                 {holding.stockDetails.map((stock, i) => (
                   <div key={i} className="p-3 flex justify-between items-center">
                     <div>
-                      {stock.isSynthetic ? (
-                        <div className="text-sm font-medium text-amber-500">
-                          Posizione Sintetica CC/DR-CC
-                        </div>
-                      ) : (
-                        <div className="text-sm">
-                          {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
-                        </div>
-                      )}
-                      {/* Show protection info if present */}
+                      <div className="text-sm">
+                        {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
+                      </div>
                       {stock.hasProtection && stock.protectionContracts > 0 && (
                         <div className="text-xs text-green-600 mt-1">
                           🛡️ Protetto: {stock.protectionContracts} PUT × Strike {formatNumber(stock.protectionStrike || 0, 0)}
@@ -112,18 +105,14 @@ export function HoldingBreakdownDialog({
                       <div className="font-medium text-blue-500 flex items-center justify-end gap-1.5">
                         {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
                         <CalcInfo>
-                          {stock.isSynthetic
-                            ? (stock.composition
-                                ? `Posizione sintetica\n${stock.composition}\nRischio EUR = ${formatEUR(stock.value)}`
-                                : `Posizione sintetica CC/DR-CC\nRischio EUR = ${formatEUR(stock.value)}`)
-                            : (() => {
-                                const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
-                                if (includeProtections && stock.hasProtection && stock.protectionStrike != null) {
-                                  const protLine = `− ${stock.protectionContracts} PUT × strike ${formatNumber(stock.protectionStrike, 0)} × 100`;
-                                  return `Stock (lordo):\n${gross}\nProtezione:\n${protLine}\n= ${formatEUR(stock.valueWithProtection)}`;
-                                }
-                                return `Stock:\n${gross}`;
-                              })()}
+                          {(() => {
+                            const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
+                            if (includeProtections && stock.hasProtection && stock.protectionStrike != null) {
+                              const protLine = `− ${stock.protectionContracts} PUT × strike ${formatNumber(stock.protectionStrike, 0)} × 100`;
+                              return `Stock (lordo):\n${gross}\nProtezione:\n${protLine}\n= ${formatEUR(stock.valueWithProtection)}`;
+                            }
+                            return `Stock:\n${gross}`;
+                          })()}
                         </CalcInfo>
                       </div>
                       {includeProtections && stock.hasProtection && stock.valueWithProtection < stock.value && (
