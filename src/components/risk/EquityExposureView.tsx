@@ -279,6 +279,15 @@ export function EquityExposureView({
     [gpStockHoldings]
   );
 
+  const totalSyntheticCcDrccRiskWithoutProtection = useMemo(() =>
+    syntheticCcDrccDetails.reduce((sum, s) => sum + (s.riskEURWithoutProtection ?? s.riskEUR), 0),
+    [syntheticCcDrccDetails]
+  );
+  const displayedSyntheticCcDrccRisk = includeProtections
+    ? totalSyntheticCcDrccRisk
+    : totalSyntheticCcDrccRiskWithoutProtection;
+  const syntheticProtectionSavings = Math.max(0, totalSyntheticCcDrccRiskWithoutProtection - totalSyntheticCcDrccRisk);
+
   // Dynamic grand total based on toggles
   const dynamicGrandTotal = useMemo(() => {
     const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
@@ -289,7 +298,7 @@ export function EquityExposureView({
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
       (includeStrategies ? totalStrategyRisk : 0) +
-      (includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0) +
+      (includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0) +
       (includeGP ? gpStockTotalValue : 0)
     );
   }, [
@@ -306,7 +315,7 @@ export function EquityExposureView({
     totalNakedPutRisk, 
     totalLeapCallRisk, 
     totalStrategyRisk,
-    totalSyntheticCcDrccRisk,
+    displayedSyntheticCcDrccRisk,
     gpStockTotalValue,
   ]);
 
@@ -446,14 +455,16 @@ export function EquityExposureView({
     },
     { 
       label: 'Rischio CC e DR-CC sintetiche', 
-      value: includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0, 
-      sortValue: totalSyntheticCcDrccRisk,
-      percentage: getPercentage(includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0),
+      value: includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0, 
+      sortValue: totalSyntheticCcDrccRiskWithoutProtection,
+      percentage: getPercentage(includeSynthCcDrcc ? displayedSyntheticCcDrccRisk : 0),
       color: 'bg-fuchsia-500',
       icon: Layers,
-      description: 'Sintetiche: long CALL + short CALL / short PUT ITM + short CALL [+ protezione]',
-      protectionSavings: 0,
-      showProtectionSavings: false
+      description: includeProtections
+        ? 'Sintetiche: CC / DR-CC al netto delle PUT di protezione'
+        : 'Sintetiche: CC / DR-CC al lordo delle PUT di protezione',
+      protectionSavings: includeProtections ? syntheticProtectionSavings : 0,
+      showProtectionSavings: includeProtections && syntheticProtectionSavings > 0
     },
     ...(gpStockHoldings.length > 0 ? [{
       label: 'Rischio GP Azioni',
@@ -967,7 +978,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                 <div className="text-left">
                   <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>{SYNTH_HEADER_TOOLTIP}</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
-                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
+                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(displayedSyntheticCcDrccRisk)}
                   </div>
                 </div>
               </div>
@@ -1017,11 +1028,20 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                         </div>
                         <div className="text-right shrink-0">
                           <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
-                            Rischio: {formatEUR(s.riskEUR)}
-                            <CalcInfo>{buildSynthTooltip(s)}</CalcInfo>
+                            Rischio: {formatEUR(includeProtections ? s.riskEUR : (s.riskEURWithoutProtection ?? s.riskEUR))}
+                            <CalcInfo>
+                              {`${buildSynthTooltip(s)}${!includeProtections && (s.riskEURWithoutProtection ?? s.riskEUR) > s.riskEUR
+                                ? `\n\nToggle Protezioni OFF:\nRischio lordo = ${formatEUR(s.riskEURWithoutProtection ?? s.riskEUR)}`
+                                : ''}`}
+                            </CalcInfo>
                           </div>
+                          {includeProtections && (s.riskEURWithoutProtection ?? s.riskEUR) > s.riskEUR && (
+                            <div className="text-xs text-green-500">
+                              Protezione: -{formatEUR((s.riskEURWithoutProtection ?? s.riskEUR) - s.riskEUR)}
+                            </div>
+                          )}
                           <div className="text-xs text-muted-foreground">
-                            {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
+                            {s.currency} {formatNumber(includeProtections ? s.riskOriginal : (s.riskOriginalWithoutProtection ?? s.riskOriginal), 0)} / {s.exchangeRate.toFixed(4)}
                           </div>
                         </div>
                       </div>
@@ -1313,6 +1333,9 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                 const hasStrategy = holding.strategyRisk > 0;
                 const hasGP = holding.gpRisk > 0;
                 const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
+                const syntheticValue = includeProtections
+                  ? holding.syntheticRisk
+                  : holding.syntheticRiskWithoutProtection;
                 
                 return (
                   <div
@@ -1386,9 +1409,16 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                                 Strategie: {formatEUR(holding.strategyRisk)}
                               </Badge>
                             )}
-                            {holding.syntheticRisk > 0 && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30">
-                                Sint. CC/DR-CC: {formatEUR(holding.syntheticRisk)}
+                            {syntheticValue > 0 && (
+                              <Badge variant="outline" className={`text-xs px-1.5 py-0 h-5 ${
+                                includeProtections && holding.syntheticRisk < holding.syntheticRiskWithoutProtection
+                                  ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                                  : 'bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30'
+                              }`}>
+                                Sint. CC/DR-CC: {formatEUR(syntheticValue)}
+                                {includeProtections && holding.syntheticRisk < holding.syntheticRiskWithoutProtection && (
+                                  <Shield className="w-3 h-3 ml-1" />
+                                )}
                               </Badge>
                             )}
                             {hasGP && (

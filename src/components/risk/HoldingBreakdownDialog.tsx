@@ -266,12 +266,17 @@ export function HoldingBreakdownDialog({
                   <div key={i} className="p-3 flex justify-between items-start gap-3">
                     <div className="text-xs text-muted-foreground leading-relaxed flex-1">
                       {syn.composition}
+                      {includeProtections && syn.hasProtection && syn.protectionSavingsEUR > 0 && (
+                        <div className="text-green-600 mt-1">
+                          Protezione: -{formatEUR(syn.protectionSavingsEUR)}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-medium text-fuchsia-500 flex items-center justify-end gap-1.5">
-                        {formatEUR(syn.riskEUR)}
+                        {formatEUR(includeProtections ? syn.riskEUR : syn.riskEURWithoutProtection)}
                         <CalcInfo>
-                          {`Posizione sintetica (${syn.syntheticType})\n${syn.composition}\nRischio in valuta originale convertito in EUR\n= ${formatEUR(syn.riskEUR)}`}
+                          {`Posizione sintetica (${syn.syntheticType})\n${syn.composition}\n${includeProtections && syn.hasProtection ? `Rischio lordo: ${formatEUR(syn.riskEURWithoutProtection)}\nProtezione: -${formatEUR(syn.protectionSavingsEUR)}\n` : ''}Rischio convertito in EUR\n= ${formatEUR(includeProtections ? syn.riskEUR : syn.riskEURWithoutProtection)}`}
                         </CalcInfo>
                       </div>
                     </div>
@@ -280,7 +285,7 @@ export function HoldingBreakdownDialog({
               </div>
               <div className="text-right text-sm font-medium">
                 Subtotale Sintetiche:{' '}
-                <span className="text-fuchsia-500">{formatEUR(holding.syntheticRisk)}</span>
+                <span className="text-fuchsia-500">{formatEUR(includeProtections ? holding.syntheticRisk : holding.syntheticRiskWithoutProtection)}</span>
               </div>
             </div>
           )}
@@ -309,7 +314,7 @@ export function HoldingBreakdownDialog({
             )}
             {holding.syntheticRisk > 0 && (
               <Badge variant="outline" className="bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30">
-                Sintetiche: {formatEUR(holding.syntheticRisk)}
+                Sintetiche: {formatEUR(includeProtections ? holding.syntheticRisk : holding.syntheticRiskWithoutProtection)}
               </Badge>
             )}
             {holding.gpRisk > 0 && (

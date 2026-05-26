@@ -335,6 +335,7 @@ export interface ConsolidatedHolding {
   leapCallRisk: number;          // Leap Call risk - market value (€)
   strategyRisk: number;          // Strategy Max Loss (€)
   syntheticRisk: number;         // Synthetic CC/DR-CC risk (€)
+  syntheticRiskWithoutProtection: number; // Synthetic CC/DR-CC gross risk before protection PUT (€)
   gpRisk: number;                // GP stock risk (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
@@ -920,6 +921,9 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     syntheticType: string;
     composition: string;
     riskEUR: number;
+    riskEURWithoutProtection: number;
+    protectionSavingsEUR: number;
+    hasProtection: boolean;
     currency: string;
   }>;
 }
@@ -964,6 +968,7 @@ export function calculateConsolidatedTopHoldings(
     leapCallRisk: 0,
     strategyRisk: 0,
     syntheticRisk: 0,
+    syntheticRiskWithoutProtection: 0,
     gpRisk: 0,
     totalExposure: 0,
     sources: [],
@@ -1053,17 +1058,22 @@ export function calculateConsolidatedTopHoldings(
   // 1b. Synthetic CC/DR-CC exposures: prima classe, separate dallo Stock Diretto.
   for (const s of analysis.syntheticCcDrccDetails || []) {
     const holding = getOrCreateHolding(s.underlying, s.tickerKey);
+    const grossSyntheticRisk = s.riskEURWithoutProtection ?? s.riskEUR;
     holding.syntheticRisk += s.riskEUR;
+    holding.syntheticRiskWithoutProtection += grossSyntheticRisk;
     const composition = (s as any).composition || 'Sintetica CC/DR-CC';
     holding.sources.push({
       type: 'synthetic',
       name: composition,
-      exposure: s.riskEUR,
+      exposure: options.includeProtections ? s.riskEUR : grossSyntheticRisk,
     });
     holding.syntheticDetails.push({
       syntheticType: (s as any).syntheticType || 'synthetic',
       composition,
       riskEUR: s.riskEUR,
+      riskEURWithoutProtection: grossSyntheticRisk,
+      protectionSavingsEUR: s.protectionSavingsEUR ?? Math.max(0, grossSyntheticRisk - s.riskEUR),
+      hasProtection: s.hasProtection || grossSyntheticRisk > s.riskEUR,
       currency: s.currency,
     });
   }
@@ -1163,6 +1173,7 @@ export function calculateConsolidatedTopHoldings(
         target.leapCallRisk += holding.leapCallRisk;
         target.strategyRisk += holding.strategyRisk;
         target.syntheticRisk += holding.syntheticRisk;
+        target.syntheticRiskWithoutProtection += holding.syntheticRiskWithoutProtection;
         target.gpRisk += holding.gpRisk;
         target.sources.push(...holding.sources);
         target.nakedPutDetails.push(...holding.nakedPutDetails);
@@ -1199,7 +1210,7 @@ export function calculateConsolidatedTopHoldings(
       (includeNakedPut ? holding.nakedPutRisk : 0) +
       (includeLeapCall ? holding.leapCallRisk : 0) +
       (includeStrategies ? holding.strategyRisk : 0) +
-      (includeSynthCcDrcc ? holding.syntheticRisk : 0) +
+      (includeSynthCcDrcc ? (options.includeProtections ? holding.syntheticRisk : holding.syntheticRiskWithoutProtection) : 0) +
       holding.gpRisk;
 
     holding.sources.sort((a, b) => b.exposure - a.exposure);

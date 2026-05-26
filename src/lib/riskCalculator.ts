@@ -32,6 +32,10 @@ export interface StockRiskDetail {
   protectedValue: number;       // Valore protetto in valuta originale
   riskOriginal: number;         // Rischio in valuta originale
   riskEUR: number;              // Rischio convertito in EUR
+  riskOriginalWithoutProtection?: number; // Rischio lordo se si ignorano le PUT di protezione
+  riskEURWithoutProtection?: number;      // Rischio lordo convertito in EUR
+  protectionSavingsOriginal?: number;
+  protectionSavingsEUR?: number;
   currency: string;
   exchangeRate: number;
   hasProtection: boolean;
@@ -715,10 +719,17 @@ export function calculateSyntheticCcDrccRisk(
     riskOriginal: number,
     syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call',
     composition: string,
-    syntheticBreakdown?: StockRiskDetail['syntheticBreakdown']
+    syntheticBreakdown?: StockRiskDetail['syntheticBreakdown'],
+    riskOriginalWithoutProtection?: number,
+    protectionStrike?: number | null,
+    protectionContracts?: number
   ): StockRiskDetail => {
     const exchangeRate = getEffectiveExchangeRate(refPosition);
     const currency = refPosition.currency || 'USD';
+    const grossRiskOriginal = riskOriginalWithoutProtection ?? riskOriginal;
+    const savingsOriginal = Math.max(0, grossRiskOriginal - riskOriginal);
+    const effectiveProtectionContracts = protectionContracts ?? 0;
+    const effectiveProtectionStrike = protectionStrike && protectionStrike > 0 ? protectionStrike : null;
     const identity = resolveUnderlyingIdentity({
       rawTicker: refPosition.ticker,
       rawName: underlyingName,
@@ -731,15 +742,19 @@ export function calculateSyntheticCcDrccRisk(
       stockValue: 0,
       stockQuantity: 0,
       stockPrice: 0,
-      protectionStrike: null,
-      protectionContracts: 0,
+      protectionStrike: effectiveProtectionStrike,
+      protectionContracts: effectiveProtectionContracts,
       protectionOptionPrice: null,
-      protectedValue: 0,
+      protectedValue: effectiveProtectionStrike ? effectiveProtectionStrike * effectiveProtectionContracts * 100 : 0,
       riskOriginal,
       riskEUR: riskOriginal / exchangeRate,
+      riskOriginalWithoutProtection: grossRiskOriginal,
+      riskEURWithoutProtection: grossRiskOriginal / exchangeRate,
+      protectionSavingsOriginal: savingsOriginal,
+      protectionSavingsEUR: savingsOriginal / exchangeRate,
       currency,
       exchangeRate,
-      hasProtection: false,
+      hasProtection: effectiveProtectionContracts > 0,
       isETF: false,
       isSynthetic: true,
       syntheticType,
@@ -851,6 +866,7 @@ export function calculateSyntheticCcDrccRisk(
       const synStrike = dr.syntheticPut.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
+      const riskOriginalWithoutProtection = synStrike * contracts * 100;
       const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
       result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition, {
         synPutStrike: synStrike,
@@ -858,7 +874,7 @@ export function calculateSyntheticCcDrccRisk(
         shortStrike,
         contracts,
         perShare,
-      }));
+      }, riskOriginalWithoutProtection, protStrike, contracts));
     }
   }
 
