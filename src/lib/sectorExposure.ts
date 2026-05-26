@@ -334,10 +334,11 @@ export interface ConsolidatedHolding {
   nakedPutRisk: number;          // Naked PUT risk (€)
   leapCallRisk: number;          // Leap Call risk - market value (€)
   strategyRisk: number;          // Strategy Max Loss (€)
+  syntheticRisk: number;         // Synthetic CC/DR-CC risk (€)
   gpRisk: number;                // GP stock risk (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
-    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy' | 'gp';
+    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy' | 'gp' | 'synthetic';
     name: string;
     exposure: number;
     percentage?: number;
@@ -878,6 +879,7 @@ export interface ConsolidatedTopHoldingsOptions {
   includeNakedPut?: boolean;
   includeStrategies?: boolean;
   includeLeapCall?: boolean;
+  includeSynthCcDrcc?: boolean;
 }
 
 // Extended interface to include source details for breakdown
@@ -913,6 +915,12 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     strategyName: string;
     maxLossEUR: number;
     hasUnlimitedRisk: boolean;
+  }>;
+  syntheticDetails: Array<{
+    syntheticType: string;
+    composition: string;
+    riskEUR: number;
+    currency: string;
   }>;
 }
 
@@ -955,6 +963,7 @@ export function calculateConsolidatedTopHoldings(
     nakedPutRisk: 0,
     leapCallRisk: 0,
     strategyRisk: 0,
+    syntheticRisk: 0,
     gpRisk: 0,
     totalExposure: 0,
     sources: [],
@@ -962,6 +971,7 @@ export function calculateConsolidatedTopHoldings(
     leapCallDetails: [],
     stockDetails: [],
     strategyDetails: [],
+    syntheticDetails: [],
   });
 
   // Pick the most descriptive name across sources for the same tickerKey.
@@ -996,25 +1006,20 @@ export function calculateConsolidatedTopHoldings(
     return holding;
   };
 
-  // 1. Direct stock risk (skip ETFs)
+  // 1. Direct stock risk (skip ETFs). NOTE: synth CC/DR-CC are NOT in stockDetails — handled in 1b.
   for (const stock of analysis.stockDetails) {
     const isETF = stock.isETF || ETF_PATTERN.test(stock.underlying);
     if (isETF) continue;
 
     const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
 
-    // Synthetic CC/DR-CC: stockValue=0, but riskEUR is the actual exposure.
-    // Treat as non-reducible by protections (both stockRisk and stockRiskWithProtection = riskEUR).
-    const isSynth = !!stock.isSynthetic;
-    const stockValueEUR = isSynth
-      ? stock.riskEUR
-      : stock.stockValue / stock.exchangeRate;
+    const stockValueEUR = stock.stockValue / stock.exchangeRate;
     holding.stockRisk += stockValueEUR;
     holding.stockRiskWithProtection += stock.riskEUR;
 
     holding.sources.push({
       type: 'stock',
-      name: isSynth ? 'Sintetica CC/DR-CC' : 'Diretto',
+      name: 'Diretto',
       exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
     });
     holding.stockDetails.push({
@@ -1026,33 +1031,28 @@ export function calculateConsolidatedTopHoldings(
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
       hasProtection: stock.hasProtection || false,
-      isSynthetic: isSynth,
+      isSynthetic: false,
     });
   }
 
-  // 1b. Synthetic CC/DR-CC exposures (treated as direct stock-equivalents by underlying)
+  // 1b. Synthetic CC/DR-CC exposures: prima classe, separate dallo Stock Diretto.
   for (const s of analysis.syntheticCcDrccDetails || []) {
     const holding = getOrCreateHolding(s.underlying, s.tickerKey);
-    holding.stockRisk += s.riskEUR;
-    holding.stockRiskWithProtection += s.riskEUR;
+    holding.syntheticRisk += s.riskEUR;
+    const composition = (s as any).composition || 'Sintetica CC/DR-CC';
     holding.sources.push({
-      type: 'stock',
-      name: 'Sintetica CC/DR-CC',
+      type: 'synthetic',
+      name: composition,
       exposure: s.riskEUR,
     });
-    holding.stockDetails.push({
-      quantity: s.stockQuantity,
-      price: s.stockPrice,
+    holding.syntheticDetails.push({
+      syntheticType: (s as any).syntheticType || 'synthetic',
+      composition,
+      riskEUR: s.riskEUR,
       currency: s.currency,
-      value: s.riskEUR,
-      valueWithProtection: s.riskEUR,
-      protectionContracts: s.protectionContracts || 0,
-      protectionStrike: s.protectionStrike ?? null,
-      hasProtection: s.hasProtection || false,
-      isSynthetic: true,
-      composition: (s as any).composition,
     });
   }
+
 
   // 2. Naked PUT risk
   for (const np of analysis.nakedPutDetails) {
@@ -1147,12 +1147,14 @@ export function calculateConsolidatedTopHoldings(
         target.nakedPutRisk += holding.nakedPutRisk;
         target.leapCallRisk += holding.leapCallRisk;
         target.strategyRisk += holding.strategyRisk;
+        target.syntheticRisk += holding.syntheticRisk;
         target.gpRisk += holding.gpRisk;
         target.sources.push(...holding.sources);
         target.nakedPutDetails.push(...holding.nakedPutDetails);
         target.leapCallDetails.push(...holding.leapCallDetails);
         target.stockDetails.push(...holding.stockDetails);
         target.strategyDetails.push(...holding.strategyDetails);
+        target.syntheticDetails.push(...holding.syntheticDetails);
       } else {
         holding.tickerKey = reResolved.tickerKey;
         holding.ticker = getDisplayTicker(reResolved.tickerKey);
@@ -1167,6 +1169,7 @@ export function calculateConsolidatedTopHoldings(
     includeNakedPut = true,
     includeStrategies = true,
     includeLeapCall = true,
+    includeSynthCcDrcc = true,
   } = options;
 
   const allHoldings = Array.from(holdingsByTicker.values());
@@ -1181,6 +1184,7 @@ export function calculateConsolidatedTopHoldings(
       (includeNakedPut ? holding.nakedPutRisk : 0) +
       (includeLeapCall ? holding.leapCallRisk : 0) +
       (includeStrategies ? holding.strategyRisk : 0) +
+      (includeSynthCcDrcc ? holding.syntheticRisk : 0) +
       holding.gpRisk;
 
     holding.sources.sort((a, b) => b.exposure - a.exposure);

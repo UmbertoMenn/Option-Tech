@@ -250,9 +250,10 @@ export function EquityExposureView({
       includeProtections,
       includeNakedPut,
       includeStrategies,
-      includeLeapCall
+      includeLeapCall,
+      includeSynthCcDrcc,
     }, 100, includeGP ? gpStockHoldings : [], dynamicAliases);
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeGP, gpStockHoldings, dynamicAliases]);
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, includeGP, gpStockHoldings, dynamicAliases]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
