@@ -18,6 +18,7 @@ const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then(m =
 const AdminPanel = lazy(() => import("@/components/admin/AdminPanel").then(m => ({ default: m.AdminPanel })));
 const Derivatives = lazy(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
 const RiskAnalyzer = lazy(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
+const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ default: m.RiskSimulator })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazy(() => import("@/pages/Simulator"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -91,6 +92,11 @@ function AppRoutes() {
           <Route path="/risk-analyzer" element={
             <ErrorBoundary title="Errore nel caricamento del Risk Analyzer">
               <RiskAnalyzer />
+            </ErrorBoundary>
+          } />
+          <Route path="/risk-simulator" element={
+            <ErrorBoundary title="Errore nel caricamento del Risk Simulator">
+              <RiskSimulator />
             </ErrorBoundary>
           } />
           <Route path="/admin" element={

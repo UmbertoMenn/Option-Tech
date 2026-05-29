@@ -270,6 +270,10 @@ export function Dashboard() {
                       <ShieldAlert className="w-4 h-4 mr-2" />
                       Risk Analyzer
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/risk-simulator')}>
+                      <ShieldAlert className="w-4 h-4 mr-2" />
+                      Risk Simulator
+                    </DropdownMenuItem>
                     {isAdmin && (
                       <DropdownMenuItem onClick={() => navigate('/admin')}>
                         <Settings className="w-4 h-4 mr-2" />
@@ -304,6 +308,12 @@ export function Dashboard() {
                   <Link to="/risk-analyzer">
                     <ShieldAlert className="w-4 h-4" />
                     <span className="ml-2">Risk Analyzer</span>
+                  </Link>
+                </Button>
+                <Button variant="outline" size="sm" asChild className="shrink-0">
+                  <Link to="/risk-simulator">
+                    <ShieldAlert className="w-4 h-4" />
+                    <span className="ml-2">Risk Simulator</span>
                   </Link>
                 </Button>
                 {isAdmin && (
