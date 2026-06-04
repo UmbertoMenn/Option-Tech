@@ -1,34 +1,37 @@
-## Obiettivo
-Sostituire il denominatore della percentuale "(X% del valore asset)" nella card "Esposizione in Equity e Commodities" del Risk Analyzer con il **Patrimonio Netting Totale** (`nettingTotal`), così da allinearla al valore usato in dashboard.
+# Causa dell'errore
 
-## Formula attuale (sbagliata)
+Caricando il file `PortafoglioT0 (10).xls` il parser estrae correttamente 10 posizioni (1 bond + 9 opzioni) e la liquidità (€35.853,80). L'errore arriva nello **STEP 1 (insert)** del salvataggio su database, non nel parser.
+
+Lo schema della tabella `positions` ha:
+
+| Colonna | Tipo | Valore massimo |
+|---|---|---|
+| `weight_pct` | `numeric(6,4)` | **±99,9999** |
+| `profit_loss_pct` | `numeric(8,4)` | ±9.999,9999 |
+
+Il file contiene il **BOT ANNUALE 14/05/2027** con `% PATR = 106,55`. Quando il client tenta di inserire `weight_pct = 106.55` in una colonna `numeric(6,4)` (max 99.9999), Postgres rifiuta l'INSERT con:
+
 ```
-% = dynamicGrandTotal / summary.totalValue × 100
+numeric field overflow
+A field with precision 6, scale 4 must round to an absolute value less than 10^2.
 ```
-`summary.totalValue` = cash + investito non-derivati. Esclude il netting dei derivati → percentuale gonfiata.
 
-## Formula corretta
+Tutta la transazione fallisce (delete + insert) e la UI mostra il toast generico "Errore elaborazione file".
+
+Nota: il bond pesa >100% del controvalore titoli perché il titolo (68k €) è > del controvalore titoli amministrato escludendo la liquidità — è un dato legittimo della banca, non un bug del parser. Lo schema è semplicemente troppo stretto.
+
+# Soluzione
+
+Migrazione che amplia la precisione delle colonne percentuali di `positions` per accettare valori sopra il 100%:
+
+```sql
+ALTER TABLE public.positions
+  ALTER COLUMN weight_pct      TYPE numeric(10,4),
+  ALTER COLUMN profit_loss_pct TYPE numeric(10,4);
 ```
-% = dynamicGrandTotal / nettingTotal × 100
-```
-dove `nettingTotal = summary.totalValue + totalNetting derivati` (stesso valore della card "Patrimonio Netting Totale" in dashboard), già esposto da `useDerivativeNetting`.
 
-## Modifiche
+Nessuna modifica al codice TypeScript: il parser produce già numeri corretti, e tutti i consumatori trattano la colonna come `number`. La modifica è retro-compatibile (allarga il range, non cambia la scala).
 
-### 1. `src/pages/RiskAnalyzer.tsx`
-- Importare/usare `useDerivativeNetting` (se non già presente) per ottenere `netting.nettingTotal`.
-- Passare a `<EquityExposureView>` un nuovo prop `portfolioNettingTotal={netting.nettingTotal}` invece (o in aggiunta) di `summary?.totalValue`.
+# Verifica
 
-### 2. `src/components/risk/EquityExposureView.tsx`
-- Rinominare/aggiungere il prop `portfolioNettingTotal?: number`.
-- Aggiornare la riga 527-531:
-  - Denominatore: `portfolioNettingTotal`.
-  - Etichetta: `(X% del Patrimonio Netting Totale)` per riflettere la nuova base.
-- Aggiornare il tooltip della card se utile, indicando la base di confronto.
-
-### 3. Nessun'altra logica toccata
-Le percentuali interne alla composizione (sector exposure, top holdings) restano invariate: usano `dynamicGrandTotal` come base.
-
-## Verifica
-- Caricare un portafoglio con derivati aperti e controllare che la percentuale corrisponda a `Esposizione totale / Patrimonio Netting Totale` mostrato in dashboard.
-- Quando `nettingTotal` non è disponibile (caricamento iniziale), la riga rimane nascosta come oggi.
+Dopo la migrazione, ricaricare il file Portafoglio: l'INSERT delle 10 posizioni va a buon fine e compare il toast "Portfolio caricato! 10 posizioni importate".
