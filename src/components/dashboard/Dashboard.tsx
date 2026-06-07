@@ -246,20 +246,24 @@ export function Dashboard() {
                 </div>
               </div>
 
-              {/* Mobile: single "Indice" dropdown */}
-              <div className="sm:hidden">
+              {/* Unified header: Dashboard + Menù */}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" asChild className="shrink-0">
+                  <Link to="/">
+                    <TrendingUp className="w-4 h-4" />
+                    <span className="ml-2">Dashboard</span>
+                  </Link>
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" className="shrink-0">
                       <Menu className="w-4 h-4 mr-2" />
-                      Indice
+                      Menù
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuItem asChild>
-                      <div className="w-full">
-                        <PortfolioSelector />
-                      </div>
+                    <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
+                      <div className="w-full"><PortfolioSelector /></div>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => navigate('/derivatives')}>
@@ -293,45 +297,6 @@ export function Dashboard() {
                 </DropdownMenu>
               </div>
 
-              {/* Desktop: full button bar */}
-              <div className="hidden sm:flex items-center gap-2">
-                <div className="shrink-0">
-                  <PortfolioSelector />
-                </div>
-                <Button variant="outline" size="sm" asChild className="shrink-0">
-                  <Link to="/derivatives">
-                    <TrendingUp className="w-4 h-4" />
-                    <span className="ml-2">Strategie Derivati</span>
-                  </Link>
-                </Button>
-                <Button variant="outline" size="sm" asChild className="shrink-0">
-                  <Link to="/risk-analyzer">
-                    <ShieldAlert className="w-4 h-4" />
-                    <span className="ml-2">Risk Analyzer</span>
-                  </Link>
-                </Button>
-                <Button variant="outline" size="sm" asChild className="shrink-0">
-                  <Link to="/risk-simulator">
-                    <ShieldAlert className="w-4 h-4" />
-                    <span className="ml-2">Risk Simulator</span>
-                  </Link>
-                </Button>
-                {isAdmin && (
-                  <Button variant="outline" size="sm" asChild className="shrink-0">
-                    <Link to="/admin">
-                      <Settings className="w-4 h-4" />
-                      <span className="ml-2">Admin</span>
-                    </Link>
-                  </Button>
-                )}
-                <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'} className="shrink-0">
-                  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
-                  <LogOut className="w-4 h-4" />
-                  <span className="ml-2">Esci</span>
-                </Button>
-              </div>
             </div>
         </div>
       </header>
