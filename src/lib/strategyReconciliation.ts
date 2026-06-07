@@ -259,10 +259,49 @@ export function reconcileConfigs(
     }
   }
 
-  // Also check for completely new underlyings (positions with no config at all)
-  for (const [underlyingKey, positions] of positionsByUnderlying) {
+  // Also include completely new underlyings (positions with no saved config at all)
+  // → emit a synthetic ReconciliationItem so the dialog auto-opens with them too.
+  for (const [underlyingKey, posList] of positionsByUnderlying) {
     if (configsByUnderlying.has(underlyingKey)) continue;
-    // This underlying has no config at all - skip, as these are handled by the wizard
+    if (posList.length === 0) continue;
+
+    const legs: LegStatus[] = posList.map(pos => ({
+      signature: {
+        option_type: pos.option_type || 'unknown',
+        strike: pos.strike_price || 0,
+        expiry: pos.expiry_date || '',
+        quantity_sign: pos.quantity >= 0 ? 1 : -1,
+      },
+      label: formatPositionLabel(pos),
+      status: 'new',
+      position: pos,
+    }));
+
+    const syntheticConfig = {
+      id: `__new__${underlyingKey}`,
+      portfolio_id: '',
+      underlying: posList[0].underlying || posList[0].description || underlyingKey,
+      strategy_type: 'other',
+      position_signatures: [],
+      is_synthetic: false,
+      linked_stock_id: null,
+      linked_stock_slot_ids: [],
+      sort_order: 9999,
+      created_at: '',
+      updated_at: '',
+    } as unknown as StrategyConfiguration;
+
+    items.push({
+      config: syntheticConfig,
+      underlying: syntheticConfig.underlying,
+      strategyType: 'other',
+      legs,
+      hasChanges: true,
+      isObsolete: false,
+      isDegraded: false,
+      missingCount: 0,
+      totalSignatures: 0,
+    });
   }
 
   return items;
