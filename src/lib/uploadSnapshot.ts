@@ -83,12 +83,28 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as any[];
 
-    // 6. Compute equity exposure
+    // 6. Compute equity exposure — formula allineata al Risk Analyzer:
+    //    numeratore = grandTotal (stock+ETF+commodity+naked put+leap+strategie+sintetiche CC/DR-CC)
+    //                 + valore stock delle GP allineate alla snapshot date
+    //    denominatore = netting_total (NON total_value)
     const derivatives = positions.filter(p => p.asset_type === 'derivative');
     const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
     const riskAnalysis = analyzePortfolioRisk(positions, categories);
-    const equityExposurePct = totalValue > 0
-      ? Math.max(0, Math.min(1, riskAnalysis.grandTotal / totalValue))
+
+    // Stock GP allineate alla data snapshot (stessa logica temporale del gpTotalValue)
+    const { data: gpStocksRaw } = await supabase
+      .from('gp_holdings')
+      .select('asset_type, market_value')
+      .eq('portfolio_id', portfolioId);
+    const gpStockTotalValue = gpAlignedWithSnapshot
+      ? (gpStocksRaw || [])
+          .filter((h: any) => h.asset_type === 'stock')
+          .reduce((sum: number, h: any) => sum + Number(h.market_value || 0), 0)
+      : 0;
+
+    const equityNumerator = riskAnalysis.grandTotal + gpStockTotalValue;
+    const equityExposurePct = nettingTotal > 0
+      ? Math.max(0, Math.min(1, equityNumerator / nettingTotal))
       : 0.6;
 
     // 7. Compute USD exposure
