@@ -291,8 +291,8 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
       positions.push(position);
     }
   }
-  
-  return { positions, cashValue };
+  const cashValue = cashAccounts.reduce((s, c) => s + c.value, 0);
+  return { positions, cashValue, cashAccounts };
 }
 
 // Parse EUREX/IDEM expiry format like "MAR26", "DEC25", "JUN27"
