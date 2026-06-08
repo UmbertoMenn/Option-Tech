@@ -334,7 +334,32 @@ export function resolveUnderlyingIdentity(
     const map = options.dynamicAliases instanceof Map
       ? options.dynamicAliases
       : new Map(Object.entries(options.dynamicAliases));
-    return map.get(norm) || null;
+    // 1. Exact normalized match
+    const exact = map.get(norm);
+    if (exact) return exact;
+    // 2. Whole-word substring fallback: if any alias key is contained as a
+    //    word-bounded prefix in `norm` (e.g. "vertiv holdings" ⊂
+    //    "vertiv holdings co"), use it. Pick the longest match for specificity.
+    const tokens = norm.split(/\s+/).filter(Boolean);
+    let best: { key: string; ticker: string } | null = null;
+    for (const [key, ticker] of map.entries()) {
+      if (!key) continue;
+      const keyTokens = key.split(/\s+/).filter(Boolean);
+      if (keyTokens.length === 0 || keyTokens.length > tokens.length) continue;
+      // Require keyTokens to appear as a contiguous sequence inside tokens
+      let matched = false;
+      for (let i = 0; i + keyTokens.length <= tokens.length; i++) {
+        let ok = true;
+        for (let j = 0; j < keyTokens.length; j++) {
+          if (tokens[i + j] !== keyTokens[j]) { ok = false; break; }
+        }
+        if (ok) { matched = true; break; }
+      }
+      if (matched && (!best || key.length > best.key.length)) {
+        best = { key, ticker };
+      }
+    }
+    return best ? best.ticker : null;
   };
 
   // 0. Exchange-suffixed raw ticker → canonical (highest priority for non-US tickers)
