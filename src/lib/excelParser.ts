@@ -266,7 +266,7 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
       }
       const value = findColumnValue(row, headerRow, ['VALORIZZAZIONE EUR', 'VALORIZZAZIONE IN DIVISA']);
       if (value) {
-        cashValue += parseExcelNumber(value);
+        cashAccounts.push({ accountId, value: parseExcelNumber(value) });
       }
       continue;
     }
