@@ -78,15 +78,26 @@ export async function computeAndUpsertStagingValues({ portfolioId, positions, ca
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as any[];
 
-    // 6. Compute equity exposure
+    // 6. Compute equity exposure — formula allineata al Risk Analyzer:
+    //    numeratore = grandTotal + valore stock GP; denominatore = netting_total
     const derivatives = fullPositions.filter(p => p.asset_type === 'derivative');
     const categories = categorizeDerivatives(derivatives, fullPositions, overrides, strategyConfigs);
     const riskAnalysis = analyzePortfolioRisk(fullPositions, categories);
-    const equityExposurePct = totalValue > 0
-      ? Math.max(0, Math.min(1, riskAnalysis.grandTotal / totalValue))
+
+    const { data: gpStocksRaw } = await supabase
+      .from('gp_holdings')
+      .select('asset_type, market_value')
+      .eq('portfolio_id', portfolioId);
+    const gpStockTotalValue = (gpStocksRaw || [])
+      .filter((h: any) => h.asset_type === 'stock')
+      .reduce((sum: number, h: any) => sum + Number(h.market_value || 0), 0);
+
+    const equityNumerator = riskAnalysis.grandTotal + gpStockTotalValue;
+    const equityExposurePct = nettingTotal > 0
+      ? Math.max(0, Math.min(1, equityNumerator / nettingTotal))
       : 0.6;
 
-    // 6. Compute USD exposure
+    // 6b. Compute USD exposure
     const currencyExposures = calculateCurrencyExposure(riskAnalysis);
     const totalExposure = currencyExposures.reduce((sum, c) => sum + c.totalRisk, 0);
     const usdExposure = currencyExposures.find(c => c.currency === 'USD');
