@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ShieldAlert, Play, Loader2, Sun, Moon, LogOut } from 'lucide-react';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown } from 'lucide-react';
 
@@ -123,20 +124,7 @@ export function Simulator() {
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/"><ArrowLeft className="w-4 h-4 mr-2" />Dashboard</Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/derivatives"><ShieldAlert className="w-4 h-4 mr-2" />Derivati</Link>
-              </Button>
-              <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={signOut}>
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </div>
+            <AppHeaderMenu />
           </div>
         </div>
       </header>

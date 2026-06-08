@@ -20,6 +20,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
@@ -202,69 +203,10 @@ export function RiskAnalyzer() {
                   Esposizione reale in equity (EUR)
                 </p>
               </div>
-              <div className="ml-4 hidden sm:block">
-                <PortfolioSelector />
-              </div>
             </div>
 
-            {/* Mobile: Indice dropdown */}
-            <div className="sm:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    Indice <Menu className="ml-2 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
-                    <div className="w-full"><PortfolioSelector /></div>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => navigate('/')}>
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Dashboard
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate('/derivatives')}>
-                    <TrendingUp className="w-4 h-4 mr-2" /> Strategie Derivati
-                  </DropdownMenuItem>
-                  {isAdmin && (
-                    <DropdownMenuItem onClick={() => navigate('/admin')}>
-                      <Settings className="w-4 h-4 mr-2" /> Admin
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                    {theme === 'dark' ? <Sun className="w-4 h-4 mr-2" /> : <Moon className="w-4 h-4 mr-2" />}
-                    {theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={signOut}>
-                    <LogOut className="w-4 h-4 mr-2" /> Esci
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            
-            {/* Desktop: full button bar */}
-            <div className="hidden sm:flex items-center gap-2 overflow-x-auto flex-nowrap">
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/">
-                  <ArrowLeft className="w-4 h-4" />
-                  <span className="ml-2">Dashboard</span>
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/derivatives">
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="ml-2">Strategie Derivati</span>
-                </Link>
-              </Button>
-              <Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'} className="shrink-0">
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
-                <LogOut className="w-4 h-4" />
-                <span className="ml-2">Esci</span>
-              </Button>
-            </div>
+            <AppHeaderMenu />
+
           </div>
         </div>
       </header>

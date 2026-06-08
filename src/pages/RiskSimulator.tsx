@@ -1,7 +1,6 @@
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, Activity } from 'lucide-react';
+import { Activity } from 'lucide-react';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 
 export function RiskSimulator() {
   return (
@@ -14,12 +13,7 @@ export function RiskSimulator() {
             </div>
             <h1 className="text-lg font-bold">Risk Simulator</h1>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/">
-              <ArrowLeft className="w-4 h-4" />
-              <span className="ml-2">Dashboard</span>
-            </Link>
-          </Button>
+          <AppHeaderMenu />
         </div>
       </header>
       <main className="container mx-auto px-4 py-8">
