@@ -323,7 +323,7 @@ export function FileUploader() {
                   isProcessing={isProcessing}
                   uploadSuccess={uploadSuccess}
                   isDragActive={portfolioDropzone.isDragActive}
-                  label="Carica Portfolio"
+                  label="Carica Portfolio (fino a 2 file)"
                 />
               </div>
             </CarouselItem>
