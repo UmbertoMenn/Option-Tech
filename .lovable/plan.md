@@ -1,45 +1,42 @@
+# Fix conflitto Split / Aggrega nel wizard configurazione derivati
 
-# Upload di due file Excel con merge intelligente
+## Problema
+Nel `StrategyConfigWizard`, la selezione utente è memorizzata in `selectedIdsByGroup: Map<groupKey, Set<positionId>>`. Quando si splitta una posizione (es. opzione qty 3 → 3 slot `__opt_slot_0/1/2`, oppure stock 300 → 3 slot `__slot_0/1/2`), l'ID "padre" già selezionato resta nel Set anche se non esiste più in `effectivePositions`. Analogamente al rejoin (aggrega), gli ID degli slot restano flaggati pur essendo scomparsi. Questo crea conflitti: il contatore "selezionati" mostra valori errati, e la creazione strategia può tentare di usare ID inesistenti o duplicati (parent + slot insieme).
 
-Permettere il caricamento di 1 o 2 file Excel portfolio nella stessa operazione. Le posizioni (azioni, obbligazioni, ETF, derivati, commodity) vengono unite; la liquidità viene deduplicata per ID conto e contata una sola volta.
+## Soluzione
+I due handler `handleSplitPosition` e `handleRejoinPosition` (righe ~854-880) devono ripulire `selectedIdsByGroup` rimuovendo sia il `posId` padre sia tutti gli ID slot derivati (`${posId}__opt_slot_*`, `${posId}__slot_*`) da ogni gruppo. È un'operazione locale, non tocca strategie già create né dati persistiti.
 
-## Vincoli funzionali
+### Modifica
+In `src/components/derivatives/StrategyConfigWizard.tsx`:
 
-- I due file devono avere la stessa `snapshot_date`. Date diverse → errore bloccante, nessun salvataggio.
-- La deduplicazione cassa avviene per **codice conto** (prima cella della riga sezione "DISPONIBILITA' LIQUIDE" del file Fideuram). Se lo stesso ID compare in entrambi i file, conta solo la prima occorrenza.
-- Le posizioni si sommano per concatenazione semplice (no merge per ISIN): se la stessa posizione compare in entrambi i file viene caricata due volte. Si presume che i due file rappresentino sotto-portafogli distinti dello stesso cliente, quindi non devono contenere duplicati di titoli.
-- Il GP upload (seconda dropzone esistente) resta invariato e singolo.
+1. `handleSplitPosition(posId)`: dopo `setSplitPositionIds`, chiamare `clearSelectionsFor(posId)` che, per ogni Set in `selectedIdsByGroup`, rimuove `posId` e qualunque id che inizi con `${posId}__opt_slot_` o `${posId}__slot_` (per coprire il caso di un re-split dopo aggregazione).
+2. `handleRejoinPosition(posId)`: stessa pulizia prima/dopo il `setSplitPositionIds`.
 
-## Modifiche file
+### Pseudo-codice
+```ts
+const clearSelectionsFor = (posId: string) => {
+  setSelectedIdsByGroup(prev => {
+    const next = new Map(prev);
+    next.forEach((set, key) => {
+      const cleaned = new Set(
+        [...set].filter(id =>
+          id !== posId &&
+          !id.startsWith(`${posId}__opt_slot_`) &&
+          !id.startsWith(`${posId}__slot_`)
+        )
+      );
+      next.set(key, cleaned);
+    });
+    return next;
+  });
+};
+```
 
-### 1. `src/lib/excelParser.ts`
-- Aggiungere al return di `parsePortfolioExcel` (e `parsePortfolioData`) un campo `cashAccounts: { accountId: string; value: number }[]` che lista i singoli conti di liquidità non esclusi, oltre al `cashValue` aggregato.
-- Modificare il ramo `currentSection === 'cash'`: invece di sommare direttamente in `cashValue`, pushare `{ accountId, value }` in `cashAccounts`. Il totale `cashValue` viene calcolato a fine parsing come somma dei `value`. Comportamento single-file invariato.
+## Scope
+- File toccato: `src/components/derivatives/StrategyConfigWizard.tsx` (solo UI/stato locale).
+- Nessuna modifica a DB, hook o logica di salvataggio.
 
-### 2. `src/components/dashboard/FileUploader.tsx`
-- Dropzone Portfolio: `maxFiles: 2`, accetta 1 o 2 file.
-- Nuova funzione `mergePortfolioParseResults(results)`:
-  - Verifica che tutte le `snapshotDate` siano uguali (ignorando i `null`). Se differiscono → `toast.error` e abort.
-  - Concatena `positions[]` di tutti i file.
-  - Deduplica `cashAccounts` per `accountId` (Map con prima occorrenza). `cashValue` finale = somma dei value unici. ID vuoti/falsy non vengono deduplicati (trattati come distinti).
-  - Restituisce `{ positions, cashValue, snapshotDate }`.
-- `onDropPortfolio` itera su tutti gli `acceptedFiles`, parsa ciascuno in parallelo con `Promise.all`, applica `mergePortfolioParseResults`, poi prosegue identico al flusso esistente (update portfolio, `updatePositionsAsync`, snapshot, refresh cache).
-- UI della slide Portfolio: aggiungere sottotitolo "Puoi caricare fino a 2 file" e mostrare in `DropzoneContent` il numero di file selezionati durante il drag se >1.
-- Messaggio toast finale: "Portfolio caricato! N posizioni da X file."
-
-### 3. Nessuna modifica DB
-- I dati continuano a essere salvati come oggi: il portfolio ha un unico `cash_value` e una sola lista di `positions`. Il merge avviene client-side prima del salvataggio.
-
-## Edge cases gestiti
-
-- Solo 1 file → comportamento identico a oggi.
-- 2 file con date diverse → errore, nulla viene scritto.
-- 2 file con stesso conto liquidità → contato una volta.
-- 2 file con conti liquidità diversi → sommati.
-- Conto liquidità senza accountId riconoscibile → non deduplicato (sommato), con warning in console.
-
-## Fuori scope
-
-- Persistere quale file ha generato quali posizioni.
-- UI per scegliere quale liquidità prevale in caso di conflitto sullo stesso accountId (si tiene la prima).
-- Memorizzazione cross-sessione di un flag "cliente multi-file".
+## Verifica
+1. Selezionare opzione qty 3 in un gruppo → splittare → il contatore "selezionati" torna a 0 per quella posizione, gli slot non risultano pre-selezionati.
+2. Selezionare 2 slot di uno stock 300 → rejoin → il padre non risulta selezionato; il counter non eredita gli slot scomparsi.
+3. Creazione strategia dopo split/rejoin non include ID fantasma.

@@ -851,9 +851,28 @@ export function StrategyConfigWizard({
   const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
+  // Rimuove dalla selezione il posId padre e qualunque suo slot derivato
+  const clearSelectionsFor = (posId: string) => {
+    setSelectedIdsByGroup(prev => {
+      const next = new Map(prev);
+      next.forEach((set, key) => {
+        const cleaned = new Set(
+          [...set].filter(id =>
+            id !== posId &&
+            !id.startsWith(`${posId}__opt_slot_`) &&
+            !id.startsWith(`${posId}__slot_`)
+          )
+        );
+        next.set(key, cleaned);
+      });
+      return next;
+    });
+  };
+
   // Split position handler (options or stocks)
   const handleSplitPosition = (posId: string) => {
     setSplitPositionIds(prev => new Set(prev).add(posId));
+    clearSelectionsFor(posId);
   };
 
   // Rejoin handler — only if no slots are assigned
@@ -877,7 +896,9 @@ export function StrategyConfigWizard({
       next.delete(posId);
       return next;
     });
+    clearSelectionsFor(posId);
   };
+
 
   if (effectivePositions.length === 0) return null;
 
