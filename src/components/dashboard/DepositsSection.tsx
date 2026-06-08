@@ -36,21 +36,47 @@ export function DepositsSection({
   const [movementType, setMovementType] = useState<'deposit' | 'withdrawal'>('deposit');
 
   const parseValue = (val: string) => {
-    // Support Italian number formats:
-    // - 5.000 -> 5000
-    // - 5.000,50 -> 5000.50
-    // - 5000,50 -> 5000.50
-    // Also supports negatives.
-    const cleaned = val
-      .toString()
-      .replace(/\s/g, '')
-      .replace(/[^0-9.,-]/g, '');
-
+    // Support both '.' and ',' as decimal separator.
+    // Examples:
+    // - "5.000,50" -> 5000.50   (IT: '.' thousands, ',' decimal)
+    // - "5,000.50" -> 5000.50   (EN: ',' thousands, '.' decimal)
+    // - "1,5"      -> 1.5
+    // - "1.5"      -> 1.5
+    // - "5.000"    -> 5000      (thousands)
+    // - "5.00"     -> 5.00      (decimal, 1-2 digits after)
+    const cleaned = val.toString().replace(/\s/g, '').replace(/[^0-9.,-]/g, '');
     if (!cleaned) return 0;
 
-    const normalized = cleaned.includes(',')
-      ? cleaned.replace(/\./g, '').replace(',', '.')
-      : cleaned.replace(/\./g, '');
+    const lastComma = cleaned.lastIndexOf(',');
+    const lastDot = cleaned.lastIndexOf('.');
+    let normalized: string;
+
+    if (lastComma === -1 && lastDot === -1) {
+      normalized = cleaned;
+    } else if (lastComma !== -1 && lastDot !== -1) {
+      // Both present: the last one is the decimal separator
+      if (lastComma > lastDot) {
+        normalized = cleaned.replace(/\./g, '').replace(',', '.');
+      } else {
+        normalized = cleaned.replace(/,/g, '');
+      }
+    } else if (lastComma !== -1) {
+      // Only commas: if single comma with ≤2 trailing digits → decimal, else thousands
+      const parts = cleaned.split(',');
+      if (parts.length === 2 && parts[1].length <= 2) {
+        normalized = parts[0] + '.' + parts[1];
+      } else {
+        normalized = cleaned.replace(/,/g, '');
+      }
+    } else {
+      // Only dots: same heuristic
+      const parts = cleaned.split('.');
+      if (parts.length === 2 && parts[1].length <= 2) {
+        normalized = cleaned;
+      } else {
+        normalized = cleaned.replace(/\./g, '');
+      }
+    }
 
     const num = parseFloat(normalized);
     return Number.isFinite(num) ? num : 0;
