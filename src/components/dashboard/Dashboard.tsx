@@ -37,6 +37,7 @@ import { formatRelativeTime } from '@/lib/formatters';
 import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link, useNavigate } from 'react-router-dom';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { DepositEntry } from '@/types/deposits';
 import { PortfolioSummary, AssetType } from '@/types/portfolio';
 
