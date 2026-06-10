@@ -85,6 +85,22 @@ function annualizedVol(closes: number[]): number | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function guruFocusBeta(ticker: string): Promise<number | null> {
+  try {
+    const r = await fetch(`https://www.gurufocus.com/term/beta/${encodeURIComponent(ticker)}`, {
+      headers: { "User-Agent": UA },
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/Beta[^<>]{0,40}?(-?\d+\.\d+)/i);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (isFinite(v) && Math.abs(v) < 10) return v;
+    }
+    return null;
+  } catch { return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
