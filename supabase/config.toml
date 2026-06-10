@@ -44,3 +44,12 @@ verify_jwt = false
 
 [functions.admin-reset-password]
 verify_jwt = false
+
+[functions.fetch-ticker-fundamentals]
+verify_jwt = false
+
+[functions.update-erp-cron]
+verify_jwt = false
+
+[functions.update-beta-cron]
+verify_jwt = false
