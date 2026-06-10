@@ -563,7 +563,7 @@ export function OptionAnalyzer() {
               ? <span style={{ color: C.amber, fontSize: 13.5 }}>Premio sotto il valore intrinseco o non risolvibile a questo strike/scadenza: controlla gli input.</span>
               : <span style={{ fontSize: 13.5, lineHeight: 1.5 }}>
                   Vendere <b style={{ color: type === "PUT" ? C.green : C.red }}>{type}</b> a {fmt(K, 0)}: Edge reale <b style={{ color: evColor(selEV) }}>{selEV >= 0 ? "+" : ""}{fmt(selEV)}</b> {selEV >= 0 ? "(rende più del giusto)" : "(rende meno del giusto)"}, prob. di gain <b>{pct(c.gain)}</b>, prob. di non rollare <b>{pct(c.noRoll)}</b>.{" "}
-                  Direzione: titolo più probabile <b>{dirUp ? "su" : "giù"}</b> (μ {dirUp ? ">" : "<"} σ²/2), che favorisce la <b>{dirUp ? "PUT" : "CALL"}</b>{type === (dirUp ? "PUT" : "CALL") ? " — sei dal lato giusto" : " — la direzione rema contro, ti regge il premio"}.
+                  Direzione: titolo più probabile <b>{dirUp ? "su" : "giù"}</b> (μ {dirUp ? ">" : "<"} σ²/2), che favorisce la <b>{dirUp ? "PUT" : "CALL"}</b>{type === (dirUp ? "PUT" : "CALL") ? "." : " — la direzione rema contro, ti regge il premio."}
                 </span>}
           </div>
 
