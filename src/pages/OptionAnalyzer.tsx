@@ -563,7 +563,7 @@ export function OptionAnalyzer() {
               ? <span style={{ color: C.amber, fontSize: 13.5 }}>Premio sotto il valore intrinseco o non risolvibile a questo strike/scadenza: controlla gli input.</span>
               : <span style={{ fontSize: 13.5, lineHeight: 1.5 }}>
                   Vendere <b style={{ color: type === "PUT" ? C.green : C.red }}>{type}</b> a {fmt(K, 0)}: Edge reale <b style={{ color: evColor(selEV) }}>{selEV >= 0 ? "+" : ""}{fmt(selEV)}</b> {selEV >= 0 ? "(rende più del giusto)" : "(rende meno del giusto)"}, prob. di gain <b>{pct(c.gain)}</b>, prob. di non rollare <b>{pct(c.noRoll)}</b>.{" "}
-                  Direzione: titolo più probabile <b>{dirUp ? "su" : "giù"}</b> (μ {dirUp ? ">" : "<"} σ²/2), che favorisce la <b>{dirUp ? "PUT" : "CALL"}</b>{type === (dirUp ? "PUT" : "CALL") ? " — sei dal lato giusto" : " — la direzione rema contro, ti regge il premio"}.
+                  Direzione: titolo più probabile <b>{dirUp ? "su" : "giù"}</b> (μ {dirUp ? ">" : "<"} σ²/2), che favorisce la <b>{dirUp ? "PUT" : "CALL"}</b>{type === (dirUp ? "PUT" : "CALL") ? "." : " — la direzione rema contro, ti regge il premio."}
                 </span>}
           </div>
 
@@ -579,7 +579,7 @@ export function OptionAnalyzer() {
             <MetricDual label={useMu ? <>Deriva reale <span style={{ color: C.red, textTransform: "none" }}>⚠ SLIDER</span></> : "Deriva reale (drift)"} a={pct(c.m)} b={pct(c.m * c.T)} color={C.amber} sub={useMu ? `override manuale attivo · CAPM = ${pct(c.mCapm)}` : `fonte: CAPM (r + β·ERP − q)`} info="Drift del prezzo = μ CAPM − dividendi (μ = risk-free + β×premio di rischio)." />
             <MetricDual label={<>Drenaggio <span style={{ textTransform: "none" }}>σ²/2</span></>} a={pct(c.dren)} b={pct(c.dren * c.T)} info="La zavorra della volatilità: metà della varianza." />
             <Metric label="Mediana a scadenza" value={fmt(c.median)} sub={`media ${fmt(c.mean)}`} color={C.teal} info="Prezzo centrale = S₀·e^((drift−σ²/2)·T)." />
-            <Metric label="Direzione (mediana)" value={dirUp ? "↑ Salire" : "↓ Scendere"} sub={dirUp ? "drift > drenaggio" : "drenaggio > drift"} color={dirUp ? C.green : C.red} edge info="Confronto drift vs drenaggio." />
+            <Metric label="Direzione (mediana)" value={dirUp ? "↑ Salire" : "↓ Scendere"} sub={dirUp ? "drift > drenaggio" : "drenaggio > drift"} color={type === (dirUp ? "PUT" : "CALL") ? C.green : C.red} edge info="Confronto drift vs drenaggio." />
           </div>
 
           <GroupTitle>Valore reale & Edge Reale · vendita {type}</GroupTitle>
