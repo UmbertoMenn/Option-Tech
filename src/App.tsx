@@ -19,6 +19,7 @@ const AdminPanel = lazy(() => import("@/components/admin/AdminPanel").then(m => 
 const Derivatives = lazy(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
 const RiskAnalyzer = lazy(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
 const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ default: m.RiskSimulator })));
+const OptionAnalyzer = lazy(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazy(() => import("@/pages/Simulator"));
 const NotFound = lazy(() => import("./pages/NotFound"));
