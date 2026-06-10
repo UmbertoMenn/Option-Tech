@@ -130,12 +130,18 @@ serve(async (req) => {
         }
 
         const s = sum.data;
-        const beta: number | null =
+        let beta: number | null =
           (typeof s?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(s.defaultKeyStatistics.beta.raw))
             ? s.defaultKeyStatistics.beta.raw
             : (typeof s?.summaryDetail?.beta?.raw === "number" && isFinite(s.summaryDetail.beta.raw))
               ? s.summaryDetail.beta.raw
               : null;
+        let betaSource: string = "Yahoo Finance";
+        // Fallback GuruFocus se Yahoo non ha Beta
+        if (beta == null) {
+          const gf = await guruFocusBeta(ticker);
+          if (gf != null) { beta = gf; betaSource = "GuruFocus"; }
+        }
         const name: string | null = s?.price?.longName ?? s?.price?.shortName ?? null;
         const currency: string | null = s?.price?.currency ?? null;
         const priceFromSummary: number | null =
