@@ -216,33 +216,44 @@ serve(async (req) => {
     const cached = await getCachedFundamental(supabase, ticker);
     const now = Date.now();
 
-    // 1. Price + name + currency (always fresh)
-    const q = await yahooQuote(ticker);
-    const price = q?.regularMarketPrice ?? null;
-    const name = q?.longName ?? q?.shortName ?? cached?.name ?? null;
-    const currency = q?.currency ?? cached?.currency ?? "USD";
+    // 0. Auth Yahoo (crumb + cookie)
+    const auth = await getYahooCrumb();
+
+    // 1. Price + name + currency: Yahoo primary, Finnhub fallback
+    const q = await yahooQuote(ticker, auth);
+    let price: number | null = q?.regularMarketPrice ?? null;
+    let name: string | null = q?.longName ?? q?.shortName ?? null;
+    let currency: string | null = q?.currency ?? null;
+
+    if (price == null || name == null || currency == null) {
+      const fh = await finnhubQuote(ticker);
+      if (price == null) price = fh.price;
+      if (name == null) name = fh.name;
+      if (currency == null) currency = fh.currency;
+    }
+    name = name ?? cached?.name ?? null;
+    currency = currency ?? cached?.currency ?? "USD";
 
     // 2. Beta — monthly refresh
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
     if (!beta || now - betaUpdatedAt > MONTH_MS) {
-      const sum = await yahooSummary(ticker);
+      const sum = await yahooSummary(ticker, auth);
       const yBeta = sum?.defaultKeyStatistics?.beta?.raw ?? sum?.summaryDetail?.beta?.raw ?? null;
       if (typeof yBeta === "number" && isFinite(yBeta)) {
-        beta = yBeta; betaSource = "Yahoo Finance";
+        beta = yBeta; betaSource = "Yahoo Finance"; betaUpdatedAt = now;
       } else {
         const gf = await guruFocusBeta(ticker);
-        if (gf != null) { beta = gf; betaSource = "GuruFocus"; }
+        if (gf != null) { beta = gf; betaSource = "GuruFocus"; betaUpdatedAt = now; }
       }
-      betaUpdatedAt = now;
     }
 
     // 3. RV — daily refresh
     let rv: number | null = cached?.rv ?? null;
     let rvUpdatedAt = cached?.rv_updated_at ? new Date(cached.rv_updated_at).getTime() : 0;
     if (!rv || now - rvUpdatedAt > DAY_MS) {
-      const closes = await yahooChart1y(ticker);
+      const closes = await yahooChart1y(ticker, auth);
       if (closes) {
         const v = annualizedVol(closes);
         if (v != null) { rv = v; rvUpdatedAt = now; }
@@ -252,10 +263,10 @@ serve(async (req) => {
     // 4. Risk-free per currency
     let riskFree: number | null = null;
     const rfTk = RF_TICKER[currency] ?? "^TNX";
-    const rfQ = await yahooQuote(rfTk);
+    const rfQ = await yahooQuote(rfTk, auth);
     if (rfQ?.regularMarketPrice != null) riskFree = Number(rfQ.regularMarketPrice);
     if (riskFree == null && currency !== "USD") {
-      const us = await yahooQuote("^TNX");
+      const us = await yahooQuote("^TNX", auth);
       if (us?.regularMarketPrice != null) riskFree = Number(us.regularMarketPrice);
     }
 
