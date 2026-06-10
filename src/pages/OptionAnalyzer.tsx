@@ -192,7 +192,7 @@ export function OptionAnalyzer() {
   const [rf, setRf] = useState(4);
   const [erp, setErp] = useState(5.5);
   const [q, setQ] = useState(0);
-  const [buff, setBuff] = useState(5);
+  const [buff, setBuff] = useState(1);
   const [ticker, setTicker] = useState("");
   const [loading, setLoading] = useState(false);
   const [fetchErr, setFetchErr] = useState("");
