@@ -1,29 +1,35 @@
-## Modifiche
+# Snapshot storico sempre allineato alle strategie configurate
 
-### 1. `supabase/functions/update-beta-cron/index.ts`
-Aggiungere fallback GuruFocus quando Yahoo non restituisce il Beta:
-- Funzione `guruFocusBeta(ticker)` (stessa regex già usata in `fetch-ticker-fundamentals`).
-- Nel loop, se `beta` da Yahoo è `null`/non finito → chiamata a GuruFocus. Se trovato, salvato con `beta_source = "GuruFocus"`.
-- Lo sleep adattivo già presente copre anche le chiamate GuruFocus (stessa cadenza).
-- Se nemmeno GuruFocus risponde, il ticker viene comunque aggiornato con gli altri campi (RV, prezzo, nome, currency, risk_free) — non si perde il run.
+## Problema
 
-### 2. Schedulazione cron — passaggio a settimanale
+Oggi, dopo l'upload Excel, lo snapshot in `historical_data` viene scritto **prima** che l'utente riconcili / riconfiguri le strategie. Risultato: se ci sono nuovi derivati non ancora mappati in `strategy_configurations`, `categorizeDerivatives` li droppa (regola "unmapped dropped"), il netting risulta sottostimato e l'equity_exposure sovrastimato. Lo snapshot per quella data resta sbagliato fino al prossimo upload.
 
-Riprogrammare entrambi i job via `pg_cron` (insert SQL, non migration, per non rieseguirsi sui remix):
+## Soluzione scelta: snapshot all'upload + ricalcolo al salvataggio config
 
-- `update-erp-weekly` → ogni lunedì alle 02:00 UTC (`0 2 * * 1`)
-- `update-beta-weekly` → ogni lunedì alle 03:00 UTC (`0 3 * * 1`)
+Mantengo lo snapshot immediato (evita buchi nel grafico) e aggiungo un ricalcolo automatico ogni volta che `strategy_configurations` viene modificata, per la `snapshot_date` corrente del portfolio.
 
-Sequenza SQL:
-1. `cron.unschedule('update-erp-daily')` (vecchio job giornaliero)
-2. `cron.unschedule('update-beta-monthly')` (vecchio job mensile)
-3. `cron.schedule('update-erp-weekly', '0 2 * * 1', …)` con `net.http_post` verso `/functions/v1/update-erp-cron`
-4. `cron.schedule('update-beta-weekly', '0 3 * * 1', …)` con `net.http_post` verso `/functions/v1/update-beta-cron`
+## Cambi previsti
 
-### 3. Verifica
-- Query `cron.job` per confermare che restino solo i due job settimanali.
-- Trigger manuale di `update-beta-cron` su un ticker noto senza beta Yahoo per verificare il fallback GuruFocus.
+### 1. `src/lib/uploadSnapshot.ts`
+Estrai la logica di upsert in una funzione riutilizzabile:
+- Mantieni `upsertUploadSnapshot({ portfolioId, snapshotDate, cashValue })` come oggi.
+- Aggiungi `recomputeLatestSnapshot(portfolioId)`: legge `portfolios.snapshot_date` e `portfolios.cash_value`, e se la `snapshot_date` esiste richiama la stessa pipeline (positions → overrides → configs → categorize → netting → equity_exposure → upsert in `historical_data` con `onConflict`). No-op se manca la snapshot_date.
 
-## File toccati
-- edit `supabase/functions/update-beta-cron/index.ts`
-- insert SQL (non-migration) per riprogrammare i due cron
+### 2. `src/hooks/useStrategyConfigurations.ts`
+Dopo ogni mutation che modifica `strategy_configurations` per un portfolio (upsert singolo, upsertBatch, delete), chiama `recomputeLatestSnapshot(portfolioId)` in fire-and-forget nell'`onSuccess`, e invalida `['historical-data']` per aggiornare grafici e card.
+
+### 3. `src/components/dashboard/FileUploader.tsx`
+Nessun cambio strutturale: lo snapshot all'upload resta com'è. Il successivo salvataggio del wizard / `StrategyReconciliationDialog` farà partire il ricalcolo automatico.
+
+## Considerazioni
+
+- Il ricalcolo è idempotente perché l'upsert usa `onConflict: 'portfolio_id,snapshot_date'`.
+- Si ricalcola SOLO lo snapshot della snapshot_date corrente del portfolio: gli snapshot storici precedenti non vengono toccati (le strategie passate erano valide per quei giorni).
+- Fire-and-forget: errori loggati ma non bloccano la UX del wizard.
+- Nessuna migration: solo modifiche di codice frontend.
+
+## Out of scope
+
+- Ricalcolo retroattivo di snapshot vecchi.
+- Cambi all'AGGREGATED snapshot (non viene scritto a DB).
+- Modifiche ai cron job di pricing.

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
+import { recomputeLatestSnapshot } from '@/lib/uploadSnapshot';
 
 export interface PositionSignature {
   option_type: string; // 'call' | 'put'
@@ -109,6 +110,11 @@ export function useStrategyConfigurations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
+      if (portfolioId) {
+        recomputeLatestSnapshot(portfolioId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        });
+      }
     },
     onError: (error) => {
       console.error('Failed to save strategy configuration:', error);
@@ -143,6 +149,11 @@ export function useStrategyConfigurations() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Configurazione strategie salvata');
+      if (portfolioId) {
+        recomputeLatestSnapshot(portfolioId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        });
+      }
     },
     onError: (error) => {
       console.error('Failed to batch save strategy configurations:', error);
@@ -157,6 +168,11 @@ export function useStrategyConfigurations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
+      if (portfolioId) {
+        recomputeLatestSnapshot(portfolioId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        });
+      }
     },
     onError: (error) => {
       console.error('Failed to delete strategy configuration:', error);

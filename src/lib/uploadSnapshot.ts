@@ -147,3 +147,30 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
     console.error('[UploadSnapshot] Unexpected error:', err);
   }
 }
+
+/**
+ * Ricalcola lo snapshot della snapshot_date corrente del portfolio,
+ * rileggendo strategy_configurations aggiornate. Idempotente.
+ * Da chiamare dopo ogni modifica a strategy_configurations.
+ */
+export async function recomputeLatestSnapshot(portfolioId: string): Promise<void> {
+  try {
+    if (!portfolioId || portfolioId === 'AGGREGATED' || portfolioId.startsWith('AGGREGATED_')) return;
+    const { data: pf, error } = await supabase
+      .from('portfolios')
+      .select('snapshot_date, cash_value')
+      .eq('id', portfolioId)
+      .single();
+    if (error || !pf?.snapshot_date) {
+      console.log('[recomputeLatestSnapshot] No snapshot_date, skipping', portfolioId);
+      return;
+    }
+    await upsertUploadSnapshot({
+      portfolioId,
+      snapshotDate: pf.snapshot_date as string,
+      cashValue: Number(pf.cash_value || 0),
+    });
+  } catch (err) {
+    console.error('[recomputeLatestSnapshot] Unexpected error:', err);
+  }
+}
