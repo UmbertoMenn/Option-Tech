@@ -110,6 +110,11 @@ export function useStrategyConfigurations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
+      if (portfolioId) {
+        recomputeLatestSnapshot(portfolioId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        });
+      }
     },
     onError: (error) => {
       console.error('Failed to save strategy configuration:', error);
