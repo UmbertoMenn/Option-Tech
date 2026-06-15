@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
+import { recomputeLatestSnapshot } from '@/lib/uploadSnapshot';
 
 export interface PositionSignature {
   option_type: string; // 'call' | 'put'
