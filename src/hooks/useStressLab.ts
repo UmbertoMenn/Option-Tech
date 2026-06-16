@@ -181,20 +181,72 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     return { USD: usdRate, HKD: hkdRate };
   }, [stocks, etfs, commodities, bonds, derivatives]);
 
+  /* ---------- 3a. Risoluzione underlying→ticker (riuso underlying_mappings) ---------- */
+
+  const mappingsQuery = useQuery({
+    queryKey: ['stress-lab-underlying-mappings'],
+    queryFn: async () => {
+      const [m, up] = await Promise.all([
+        supabase.from('underlying_mappings').select('underlying, ticker'),
+        supabase.from('underlying_prices').select('ticker'),
+      ]);
+      return {
+        mappings: m.data ?? [],
+        knownTickers: new Set((up.data ?? []).map((r: any) => String(r.ticker).toUpperCase())),
+      };
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const resolveUnderlying = useCallback(
+    (raw: string | null | undefined): string => {
+      if (!raw) return '';
+      const up = String(raw).toUpperCase().trim();
+      const data = mappingsQuery.data;
+      // Se è già un ticker pulito noto -> ok
+      if (VALID_TICKER_RE.test(up)) {
+        if (!data || data.knownTickers.has(up)) return up;
+        // ticker formalmente valido ma sconosciuto: accettiamo comunque
+        return up;
+      }
+      if (!data) return '';
+      // Lookup diretto + normalizzato su underlying_mappings
+      const direct = data.mappings.find((m: any) => m.underlying === raw);
+      if (direct) return String(direct.ticker).toUpperCase();
+      const normKey = normalizeUnderlying(raw);
+      const norm = data.mappings.find((m: any) => normalizeUnderlying(m.underlying) === normKey);
+      if (norm) return String(norm.ticker).toUpperCase();
+      return '';
+    },
+    [mappingsQuery.data],
+  );
+
+  /** Versione risolta di getRawOptionUnderlyingKey */
+  const getOptionUnderlyingKey = useCallback(
+    (p: Position): string => {
+      const fromUnd = resolveUnderlying(p.underlying);
+      if (fromUnd) return fromUnd;
+      const fromTk = normTick(p.ticker);
+      if (fromTk && VALID_TICKER_RE.test(fromTk)) return fromTk;
+      return '';
+    },
+    [resolveUnderlying],
+  );
+
   /* ---------- 3. Tickers che ci servono: derivati + equity ---------- */
 
   const allTickers = useMemo(() => {
     const set = new Set<string>();
     derivatives.forEach((d) => {
       const k = getOptionUnderlyingKey(d);
-      if (k) set.add(k);
+      if (k && VALID_TICKER_RE.test(k)) set.add(k);
     });
     [...stocks, ...etfs, ...commodities].forEach((s) => {
       const t = normTick(s.ticker);
-      if (t) set.add(t);
+      if (t && VALID_TICKER_RE.test(t)) set.add(t);
     });
     return [...set].sort();
-  }, [derivatives, stocks, etfs, commodities]);
+  }, [derivatives, stocks, etfs, commodities, getOptionUnderlyingKey]);
 
   /* ---------- 4. Spot prices via useUnderlyingPrices ---------- */
 
