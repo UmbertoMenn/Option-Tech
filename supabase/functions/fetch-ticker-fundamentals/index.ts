@@ -22,39 +22,24 @@ interface Result {
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36";
 
-// Map currency -> 10y yield ticker on Yahoo
-const RF_TICKER: Record<string, string> = {
-  USD: "^TNX",
-  EUR: "IT10Y.B", // fallback to BTP 10y; if missing, we'll try ^TNX
-  GBP: "GB10Y.B",
-  CHF: "CH10YT=RR",
-  JPY: "JP10Y.B",
-  CAD: "CA10YT=RR",
-};
+// Valid ticker: uppercase letters/digits, dot, dash, caret, equals. Max ~12 chars.
+const VALID_TICKER_RE = /^[A-Z0-9.\-^=]{1,12}$/;
 
-// Map currency -> Damodaran country key (default)
+const RF_TICKER: Record<string, string> = {
+  USD: "^TNX", EUR: "IT10Y.B", GBP: "GB10Y.B", CHF: "CH10YT=RR", JPY: "JP10Y.B", CAD: "CA10YT=RR",
+};
 const CURRENCY_TO_COUNTRY: Record<string, string> = {
-  USD: "United States",
-  EUR: "Italy",
-  GBP: "United Kingdom",
-  CHF: "Switzerland",
-  JPY: "Japan",
-  CAD: "Canada",
+  USD: "United States", EUR: "Italy", GBP: "United Kingdom", CHF: "Switzerland", JPY: "Japan", CAD: "Canada",
 };
 
 async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   try {
-    const initResp = await fetch("https://fc.yahoo.com", {
-      redirect: "manual",
-      headers: { "User-Agent": UA },
-    });
+    const initResp = await fetch("https://fc.yahoo.com", { redirect: "manual", headers: { "User-Agent": UA } });
     await initResp.text();
     const setCookies = initResp.headers.get("set-cookie") || "";
     const cookies = setCookies.split(",").map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
     if (!cookies) return null;
-    const crumbResp = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-      headers: { "User-Agent": UA, Cookie: cookies },
-    });
+    const crumbResp = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", { headers: { "User-Agent": UA, Cookie: cookies } });
     if (!crumbResp.ok) { await crumbResp.text(); return null; }
     const crumb = await crumbResp.text();
     if (!crumb || crumb.length > 50) return null;
@@ -130,7 +115,6 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
     });
     if (!r.ok) return null;
     const html = await r.text();
-    // Pattern: "Beta : 1.30" or similar
     const m = html.match(/Beta[^<>]{0,40}?(-?\d+\.\d+)/i);
     if (m) {
       const v = parseFloat(m[1]);
@@ -140,15 +124,27 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+/**
+ * Combina Beta Yahoo + GuruFocus.
+ *  - se entrambi presenti -> media, source="Yahoo+GuruFocus"
+ *  - se solo uno -> quello, source corrispondente
+ *  - se nessuno -> null
+ */
+function combineBeta(yahoo: number | null, guru: number | null): { beta: number | null; source: string | null } {
+  const yOk = typeof yahoo === "number" && isFinite(yahoo);
+  const gOk = typeof guru === "number" && isFinite(guru);
+  if (yOk && gOk) return { beta: (yahoo! + guru!) / 2, source: "Yahoo+GuruFocus" };
+  if (yOk) return { beta: yahoo!, source: "Yahoo Finance" };
+  if (gOk) return { beta: guru!, source: "GuruFocus" };
+  return { beta: null, source: null };
+}
+
 async function fetchERPDamodaran(): Promise<Record<string, { erp: number; currency?: string }>> {
   try {
-    const r = await fetch("https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html", {
-      headers: { "User-Agent": UA },
-    });
+    const r = await fetch("https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html", { headers: { "User-Agent": UA } });
     if (!r.ok) return {};
     const html = await r.text();
     const out: Record<string, { erp: number }> = {};
-    // Rows like: <tr>...<td>United States</td>...<td>4.60%</td>...
     const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let m: RegExpExecArray | null;
     while ((m = rowRe.exec(html))) {
@@ -157,7 +153,6 @@ async function fetchERPDamodaran(): Promise<Record<string, { erp: number; curren
       );
       if (cells.length < 3) continue;
       const country = cells[0];
-      // ERP usually in column 3 or 4 - take last percentage cell
       let erpStr: string | null = null;
       for (let i = cells.length - 1; i >= 1; i--) {
         const c = cells[i].replace(",", ".");
@@ -177,16 +172,13 @@ async function getCachedFundamental(supabase: any, ticker: string) {
   const { data } = await supabase.from("ticker_fundamentals").select("*").eq("ticker", ticker).maybeSingle();
   return data;
 }
-
 async function upsertFundamental(supabase: any, row: any) {
   await supabase.from("ticker_fundamentals").upsert(row, { onConflict: "ticker" });
 }
-
 async function getCachedERP(supabase: any, country: string) {
   const { data } = await supabase.from("equity_risk_premiums").select("*").eq("country", country).maybeSingle();
   return data;
 }
-
 async function upsertERPs(supabase: any, all: Record<string, { erp: number }>) {
   const rows = Object.entries(all).map(([country, v]) => ({
     country, erp_pct: v.erp, source: "Damodaran", updated_at: new Date().toISOString(),
@@ -200,12 +192,15 @@ const MONTH_MS = 30 * DAY_MS;
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const { ticker: rawTicker } = await req.json();
+    const { ticker: rawTicker, force } = await req.json();
     const ticker = String(rawTicker || "").trim().toUpperCase();
-    if (!ticker) {
-      return new Response(JSON.stringify({ error: "Missing ticker" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+
+    // VALIDAZIONE: solo ticker puliti, niente "APPLE COMPUTER, INC."
+    if (!ticker || !VALID_TICKER_RE.test(ticker)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid ticker (must be a clean symbol, e.g. AAPL)", ticker: rawTicker }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const supabase = createClient(
@@ -216,10 +211,9 @@ serve(async (req) => {
     const cached = await getCachedFundamental(supabase, ticker);
     const now = Date.now();
 
-    // 0. Auth Yahoo (crumb + cookie)
     const auth = await getYahooCrumb();
 
-    // 1. Price + name + currency: Yahoo primary, Finnhub fallback
+    // 1. Price + name + currency
     const q = await yahooQuote(ticker, auth);
     let price: number | null = q?.regularMarketPrice ?? null;
     let name: string | null = q?.longName ?? q?.shortName ?? null;
@@ -234,22 +228,28 @@ serve(async (req) => {
     name = name ?? cached?.name ?? null;
     currency = currency ?? cached?.currency ?? "USD";
 
-    // 2. Beta — monthly refresh
+    // 2. Beta — media Yahoo + GuruFocus (refresh mensile, o force)
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
-    if (!beta || now - betaUpdatedAt > MONTH_MS) {
+    if (force || beta == null || now - betaUpdatedAt > MONTH_MS) {
       const sum = await yahooSummary(ticker, auth);
-      const yBeta = sum?.defaultKeyStatistics?.beta?.raw ?? sum?.summaryDetail?.beta?.raw ?? null;
-      if (typeof yBeta === "number" && isFinite(yBeta)) {
-        beta = yBeta; betaSource = "Yahoo Finance"; betaUpdatedAt = now;
-      } else {
-        const gf = await guruFocusBeta(ticker);
-        if (gf != null) { beta = gf; betaSource = "GuruFocus"; betaUpdatedAt = now; }
+      const yBeta: number | null =
+        (typeof sum?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(sum.defaultKeyStatistics.beta.raw))
+          ? sum.defaultKeyStatistics.beta.raw
+          : (typeof sum?.summaryDetail?.beta?.raw === "number" && isFinite(sum.summaryDetail.beta.raw))
+            ? sum.summaryDetail.beta.raw
+            : null;
+      const gBeta = await guruFocusBeta(ticker);
+      const combined = combineBeta(yBeta, gBeta);
+      if (combined.beta != null) {
+        beta = combined.beta;
+        betaSource = combined.source;
+        betaUpdatedAt = now;
       }
     }
 
-    // 3. RV — daily refresh
+    // 3. RV — refresh giornaliero
     let rv: number | null = cached?.rv ?? null;
     let rvUpdatedAt = cached?.rv_updated_at ? new Date(cached.rv_updated_at).getTime() : 0;
     if (!rv || now - rvUpdatedAt > DAY_MS) {
@@ -260,7 +260,7 @@ serve(async (req) => {
       }
     }
 
-    // 4. Risk-free per currency
+    // 4. Risk-free
     let riskFree: number | null = null;
     const rfTk = RF_TICKER[currency] ?? "^TNX";
     const rfQ = await yahooQuote(rfTk, auth);
@@ -270,7 +270,7 @@ serve(async (req) => {
       if (us?.regularMarketPrice != null) riskFree = Number(us.regularMarketPrice);
     }
 
-    // 5. ERP from cache, refresh daily if stale
+    // 5. ERP
     const country = CURRENCY_TO_COUNTRY[currency] ?? "United States";
     let erpRow = await getCachedERP(supabase, country);
     if (!erpRow || now - new Date(erpRow.updated_at).getTime() > DAY_MS) {
@@ -282,7 +282,6 @@ serve(async (req) => {
     }
     const erp = erpRow?.erp_pct != null ? Number(erpRow.erp_pct) : null;
 
-    // Cache
     await upsertFundamental(supabase, {
       ticker, name, currency, beta, beta_source: betaSource, rv, risk_free: riskFree, price,
       beta_updated_at: new Date(betaUpdatedAt || now).toISOString(),
@@ -298,7 +297,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: String(e?.message || e) }), {
+    return new Response(JSON.stringify({ error: String((e as any)?.message || e) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell, Stethoscope, KeyRound, Copy, Check } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell, Stethoscope, KeyRound, Copy, Check, Activity } from 'lucide-react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -20,6 +20,7 @@ import { PortfolioManager } from './PortfolioManager';
 import { TickerMappingManager } from './TickerMappingManager';
 import { AdminNotificationSettings } from './AdminNotificationSettings';
 import { ResolutionDiagnostics } from './ResolutionDiagnostics';
+import { BetaRefreshPanel } from './BetaRefreshPanel';
 
 interface UserWithRole {
   id: string;
@@ -371,6 +372,10 @@ export function AdminPanel() {
               <Stethoscope className="w-4 h-4 mr-2" />
               Diagnostica
             </TabsTrigger>
+            <TabsTrigger value="beta" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Activity className="w-4 h-4 mr-2" />
+              Beta
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
@@ -481,6 +486,10 @@ export function AdminPanel() {
 
           <TabsContent value="diagnostics">
             <ResolutionDiagnostics />
+          </TabsContent>
+
+          <TabsContent value="beta">
+            <BetaRefreshPanel />
           </TabsContent>
         </Tabs>
       </main>
