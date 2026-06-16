@@ -261,11 +261,13 @@ serve(async (req) => {
     name = name ?? cached?.name ?? null;
     currency = currency ?? cached?.currency ?? "USD";
 
-    // 2. Beta — media Yahoo + GuruFocus (refresh mensile, o force)
+    // 2. Beta — media Yahoo + GuruFocus + TradingView (refresh mensile, o force).
+    // RISPETTA il flag beta_manual: se admin ha inserito beta a mano, NON sovrascrivere.
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
-    if (force || beta == null || now - betaUpdatedAt > MONTH_MS) {
+    const isManual = !!cached?.beta_manual;
+    if (!isManual && (force || beta == null || now - betaUpdatedAt > MONTH_MS)) {
       const sum = await yahooSummary(ticker, auth);
       const yBeta: number | null =
         (typeof sum?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(sum.defaultKeyStatistics.beta.raw))
@@ -273,8 +275,8 @@ serve(async (req) => {
           : (typeof sum?.summaryDetail?.beta?.raw === "number" && isFinite(sum.summaryDetail.beta.raw))
             ? sum.summaryDetail.beta.raw
             : null;
-      const gBeta = await guruFocusBeta(ticker);
-      const combined = combineBeta(yBeta, gBeta);
+      const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
+      const combined = combineBeta(yBeta, gBeta, tvBeta);
       if (combined.beta != null) {
         beta = combined.beta;
         betaSource = combined.source;
