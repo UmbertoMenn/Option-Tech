@@ -238,9 +238,33 @@ export function BetaRefreshPanel() {
       </CardHeader>
       <CardContent>
         <p className="text-xs text-muted-foreground mb-3">
-          Fonti automatiche: Yahoo Finance, GuruFocus, TradingView (media semplice tra quelle disponibili).
+          Fonti automatiche: Yahoo Finance, GuruFocus, TradingView, Investing (media semplice tra quelle disponibili).
           I valori manuali hanno priorità e non vengono mai sovrascritti dal cron.
         </p>
+        <div className="flex items-center gap-3 mb-3">
+          <Label className="text-xs text-muted-foreground">Filtra per fonte:</Label>
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <SelectTrigger className="w-[260px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tutte ({rows?.length ?? 0})</SelectItem>
+              <SelectItem value="__manual__">🔒 Solo manuali</SelectItem>
+              <SelectItem value="__auto_only__">Solo automatici (no manuali)</SelectItem>
+              <SelectItem value="__none__">Senza beta</SelectItem>
+              {sourceOptions
+                .filter((s) => s !== '__manual__' && s !== '__none__')
+                .map((s) => (
+                  <SelectItem key={s} value={s}>
+                    Contiene: {s}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">
+            {filteredRows.length} risultati
+          </span>
+        </div>
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Caricamento...</div>
         ) : (
@@ -258,7 +282,7 @@ export function BetaRefreshPanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(rows || []).map((r) => (
+                {filteredRows.map((r) => (
                   <TableRow key={r.ticker} className={r.beta == null ? 'bg-destructive/5' : ''}>
                     <TableCell className="font-mono font-semibold">{r.ticker}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.name ?? '-'}</TableCell>
@@ -282,7 +306,7 @@ export function BetaRefreshPanel() {
                           variant="outline"
                           onClick={() => refetchOne(r.ticker)}
                           disabled={busy === r.ticker || r.beta_manual}
-                          title={r.beta_manual ? 'Beta manuale: rimuovi il lock per refetchare' : 'Refetch da Yahoo/GuruFocus/TradingView'}
+                          title={r.beta_manual ? 'Beta manuale: rimuovi il lock per refetchare' : 'Refetch da Yahoo/GuruFocus/TradingView/Investing'}
                         >
                           {busy === r.ticker ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
