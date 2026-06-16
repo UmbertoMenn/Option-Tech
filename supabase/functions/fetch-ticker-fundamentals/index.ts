@@ -132,12 +132,10 @@ async function tradingViewBeta(ticker: string): Promise<number | null> {
     );
     if (!sr.ok) return null;
     const arr = await sr.json();
-    // Preferisci match primario (is_primary_listing) sullo stesso ticker
     const candidates = Array.isArray(arr)
       ? arr.filter((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase())
       : [];
     const match = candidates.find((x: any) => x?.is_primary_listing) || candidates[0] || (Array.isArray(arr) ? arr[0] : null);
-    // `prefix` è l'identificatore tecnico (es. "AMEX"); `exchange` può essere un nome con spazi (es. "NYSE Arca")
     let prefix: string | undefined = match?.prefix || match?.source_id || match?.exchange;
     if (!prefix) return null;
     prefix = String(prefix).replace(/\s+/g, "").toUpperCase();
@@ -155,19 +153,63 @@ async function tradingViewBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+async function investingBeta(ticker: string): Promise<number | null> {
+  try {
+    const headers = {
+      "User-Agent": UA,
+      "Accept": "application/json, text/plain, */*",
+      "Referer": "https://www.investing.com/",
+      "X-Requested-With": "XMLHttpRequest",
+      "domain-id": "www",
+    };
+    const sr = await fetch("https://www.investing.com/search/service/searchTopBar", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+      body: `search_text=${encodeURIComponent(ticker)}`,
+    });
+    if (!sr.ok) return null;
+    const sj = await sr.json();
+    const quotes: any[] = Array.isArray(sj?.quotes) ? sj.quotes : [];
+    const match = quotes.find((q) => String(q?.symbol || "").toUpperCase() === ticker.toUpperCase()) || quotes[0];
+    const link: string | undefined = match?.link;
+    if (!link) return null;
+    const pageUrl = link.startsWith("http") ? link : `https://www.investing.com${link}`;
+    const pr = await fetch(pageUrl, {
+      headers: { "User-Agent": UA, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.9" },
+    });
+    if (!pr.ok) return null;
+    const html = await pr.text();
+    const patterns = [
+      /Beta[^<>\n]{0,80}?<[^>]*>\s*(-?\d+\.\d+)/i,
+      /"Beta"\s*[:,]\s*"?(-?\d+\.\d+)"?/i,
+      />Beta<[\s\S]{0,200}?(-?\d+\.\d+)/i,
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m) {
+        const v = parseFloat(m[1]);
+        if (isFinite(v) && Math.abs(v) < 10) return v;
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
 /**
- * Combina Beta Yahoo + GuruFocus + TradingView con media semplice.
- *  - source elenca le fonti contributrici, es. "Yahoo+GuruFocus+TradingView"
+ * Combina Beta Yahoo + GuruFocus + TradingView + Investing con media semplice.
+ *  - source elenca le fonti contributrici, es. "Yahoo+GuruFocus+TradingView+Investing"
  */
 function combineBeta(
   yahoo: number | null,
   guru: number | null,
   tv: number | null,
+  inv: number | null,
 ): { beta: number | null; source: string | null } {
   const parts: { name: string; v: number }[] = [];
   if (typeof yahoo === "number" && isFinite(yahoo)) parts.push({ name: "Yahoo", v: yahoo });
   if (typeof guru === "number" && isFinite(guru)) parts.push({ name: "GuruFocus", v: guru });
   if (typeof tv === "number" && isFinite(tv)) parts.push({ name: "TradingView", v: tv });
+  if (typeof inv === "number" && isFinite(inv)) parts.push({ name: "Investing", v: inv });
   if (!parts.length) return { beta: null, source: null };
   const avg = parts.reduce((a, b) => a + b.v, 0) / parts.length;
   const src = parts.length === 1 && parts[0].name === "Yahoo"
@@ -279,8 +321,8 @@ serve(async (req) => {
           : (typeof sum?.summaryDetail?.beta?.raw === "number" && isFinite(sum.summaryDetail.beta.raw))
             ? sum.summaryDetail.beta.raw
             : null;
-      const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
-      const combined = combineBeta(yBeta, gBeta, tvBeta);
+      const [gBeta, tvBeta, invBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker), investingBeta(ticker)]);
+      const combined = combineBeta(yBeta, gBeta, tvBeta, invBeta);
       if (combined.beta != null) {
         beta = combined.beta;
         betaSource = combined.source;

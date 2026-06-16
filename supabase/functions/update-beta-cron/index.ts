@@ -130,6 +130,48 @@ async function tradingViewBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+async function investingBeta(ticker: string): Promise<number | null> {
+  try {
+    const headers = {
+      "User-Agent": UA,
+      "Accept": "application/json, text/plain, */*",
+      "Referer": "https://www.investing.com/",
+      "X-Requested-With": "XMLHttpRequest",
+      "domain-id": "www",
+    };
+    const sr = await fetch("https://www.investing.com/search/service/searchTopBar", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+      body: `search_text=${encodeURIComponent(ticker)}`,
+    });
+    if (!sr.ok) return null;
+    const sj = await sr.json();
+    const quotes: any[] = Array.isArray(sj?.quotes) ? sj.quotes : [];
+    const match = quotes.find((q) => String(q?.symbol || "").toUpperCase() === ticker.toUpperCase()) || quotes[0];
+    const link: string | undefined = match?.link;
+    if (!link) return null;
+    const pageUrl = link.startsWith("http") ? link : `https://www.investing.com${link}`;
+    const pr = await fetch(pageUrl, {
+      headers: { "User-Agent": UA, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.9" },
+    });
+    if (!pr.ok) return null;
+    const html = await pr.text();
+    const patterns = [
+      /Beta[^<>\n]{0,80}?<[^>]*>\s*(-?\d+\.\d+)/i,
+      /"Beta"\s*[:,]\s*"?(-?\d+\.\d+)"?/i,
+      />Beta<[\s\S]{0,200}?(-?\d+\.\d+)/i,
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m) {
+        const v = parseFloat(m[1]);
+        if (isFinite(v) && Math.abs(v) < 10) return v;
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -194,12 +236,17 @@ serve(async (req) => {
             : (typeof s?.summaryDetail?.beta?.raw === "number" && isFinite(s.summaryDetail.beta.raw))
               ? s.summaryDetail.beta.raw
               : null;
-        // Sempre interroga GuruFocus e TradingView per fare media con Yahoo
-        const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
+        // Sempre interroga GuruFocus, TradingView e Investing per fare media con Yahoo
+        const [gBeta, tvBeta, invBeta] = await Promise.all([
+          guruFocusBeta(ticker),
+          tradingViewBeta(ticker),
+          investingBeta(ticker),
+        ]);
         const parts: { name: string; v: number }[] = [];
         if (yBeta != null) parts.push({ name: "Yahoo", v: yBeta });
         if (gBeta != null) parts.push({ name: "GuruFocus", v: gBeta });
         if (tvBeta != null) parts.push({ name: "TradingView", v: tvBeta });
+        if (invBeta != null) parts.push({ name: "Investing", v: invBeta });
         let beta: number | null = null;
         let betaSource: string = "";
         if (parts.length) {
