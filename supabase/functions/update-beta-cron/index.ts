@@ -172,6 +172,12 @@ serve(async (req) => {
 
     for (const ticker of tickers) {
       try {
+        // Salta i ticker con beta inserito manualmente: non sovrascrivere mai.
+        if (manualSet.has(ticker)) {
+          stats.skipped++;
+          continue;
+        }
+
         const sum = await yahooSummary(ticker, auth);
         if (sum.status === 429 || sum.status >= 500) {
           delay = Math.min(MAX_DELAY, Math.floor(delay * 1.8));
@@ -186,13 +192,20 @@ serve(async (req) => {
             : (typeof s?.summaryDetail?.beta?.raw === "number" && isFinite(s.summaryDetail.beta.raw))
               ? s.summaryDetail.beta.raw
               : null;
-        // Sempre interroga GuruFocus per fare media con Yahoo
-        const gBeta = await guruFocusBeta(ticker);
+        // Sempre interroga GuruFocus e TradingView per fare media con Yahoo
+        const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
+        const parts: { name: string; v: number }[] = [];
+        if (yBeta != null) parts.push({ name: "Yahoo", v: yBeta });
+        if (gBeta != null) parts.push({ name: "GuruFocus", v: gBeta });
+        if (tvBeta != null) parts.push({ name: "TradingView", v: tvBeta });
         let beta: number | null = null;
         let betaSource: string = "";
-        if (yBeta != null && gBeta != null) { beta = (yBeta + gBeta) / 2; betaSource = "Yahoo+GuruFocus"; }
-        else if (yBeta != null) { beta = yBeta; betaSource = "Yahoo Finance"; }
-        else if (gBeta != null) { beta = gBeta; betaSource = "GuruFocus"; }
+        if (parts.length) {
+          beta = parts.reduce((a, b) => a + b.v, 0) / parts.length;
+          betaSource = parts.length === 1 && parts[0].name === "Yahoo"
+            ? "Yahoo Finance"
+            : parts.map((p) => p.name).join("+");
+        }
         const name: string | null = s?.price?.longName ?? s?.price?.shortName ?? null;
         const currency: string | null = s?.price?.currency ?? null;
         const priceFromSummary: number | null =
