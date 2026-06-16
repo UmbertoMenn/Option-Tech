@@ -151,6 +151,7 @@ serve(async (req) => {
         .filter((r: any) => r.beta_manual)
         .map((r: any) => String(r.ticker || "").toUpperCase()),
     );
+    const tickers = Array.from(new Set((pricesRes.data ?? []).map((r: any) => String(r.ticker || "").trim().toUpperCase()).filter(Boolean))).sort();
 
     const auth = await getYahooCrumb();
     if (!auth) {
