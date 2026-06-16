@@ -203,19 +203,21 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       if (!raw) return '';
       const up = String(raw).toUpperCase().trim();
       const data = mappingsQuery.data;
-      // Se è già un ticker pulito noto -> ok
-      if (VALID_TICKER_RE.test(up)) {
-        if (!data || data.knownTickers.has(up)) return up;
-        // ticker formalmente valido ma sconosciuto: accettiamo comunque
-        return up;
+      // PRIORITÀ AI MAPPINGS: anche se "RAMBUS" passa VALID_TICKER_RE, il
+      // mapping RAMBUS->RMBS deve avere la precedenza per evitare beta=1.0 default.
+      if (data) {
+        const direct =
+          data.mappings.find((m: any) => String(m.underlying).toUpperCase() === up) ||
+          data.mappings.find((m: any) => m.underlying === raw);
+        if (direct) return String(direct.ticker).toUpperCase();
+        const normKey = normalizeUnderlying(raw);
+        const norm = data.mappings.find(
+          (m: any) => normalizeUnderlying(m.underlying) === normKey,
+        );
+        if (norm) return String(norm.ticker).toUpperCase();
       }
-      if (!data) return '';
-      // Lookup diretto + normalizzato su underlying_mappings
-      const direct = data.mappings.find((m: any) => m.underlying === raw);
-      if (direct) return String(direct.ticker).toUpperCase();
-      const normKey = normalizeUnderlying(raw);
-      const norm = data.mappings.find((m: any) => normalizeUnderlying(m.underlying) === normKey);
-      if (norm) return String(norm.ticker).toUpperCase();
+      // Fallback: se è un ticker formalmente valido lo accettiamo
+      if (VALID_TICKER_RE.test(up)) return up;
       return '';
     },
     [mappingsQuery.data],
