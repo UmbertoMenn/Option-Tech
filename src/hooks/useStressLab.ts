@@ -6,12 +6,13 @@
  * React Query: i fetch non si ripetono ad ogni movimento di slider.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { Position } from '@/types/portfolio';
 import {
   StressLeg,
@@ -23,6 +24,9 @@ import {
   impliedVolFromPrice,
   effIVMap,
 } from '@/lib/stressLab';
+
+// Ticker pulito (es. AAPL, GOOGL, ENI.MI, ^TNX) — no spazi/virgole/parentesi
+const VALID_TICKER_RE = /^[A-Z0-9.\-^=]{1,12}$/;
 
 /* ===========================================================================
  * COSTANTI / DEFAULT
@@ -100,8 +104,14 @@ function normTick(t?: string | null): string {
   return (t || '').toUpperCase().trim();
 }
 
-/** Estrae il ticker da una posizione opzione: priorità all'underlying, fallback su ticker */
-function getOptionUnderlyingKey(p: Position): string {
+/**
+ * Estrae il ticker da una posizione opzione. NB: spesso `p.underlying` è il
+ * nome grezzo del sottostante (es. "APPLE COMPUTER, INC.") e va risolto a
+ * ticker pulito tramite `underlying_mappings`. Questa è la versione "raw"
+ * che fa solo trim; per la risoluzione vera si veda `makeUnderlyingResolver`
+ * dentro `useStressLab`.
+ */
+function getRawOptionUnderlyingKey(p: Position): string {
   const u = normTick(p.underlying);
   if (u) return u;
   return normTick(p.ticker);
