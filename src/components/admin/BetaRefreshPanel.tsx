@@ -50,12 +50,14 @@ async function loadRows(): Promise<Row[]> {
   const resolve = (raw: string | null): string | null => {
     if (!raw) return null;
     const up = raw.trim().toUpperCase();
-    if (VALID_TICKER_RE.test(up) && knownTickers.has(up)) return up;
-    if (VALID_TICKER_RE.test(up)) return up;
-    const d = direct.get(raw);
+    // 1. Mapping diretto (priorità massima: copre RAMBUS→RMBS, APPLE→AAPL, ecc.)
+    const d = direct.get(raw) || direct.get(up);
     if (d) return d.toUpperCase();
+    // 2. Mapping normalizzato
     const n = normMap.get(normalizeUnderlying(raw));
     if (n) return n.toUpperCase();
+    // 3. Solo se NON c'è mapping, accetta come ticker pulito
+    if (VALID_TICKER_RE.test(up)) return up;
     return null;
   };
 
