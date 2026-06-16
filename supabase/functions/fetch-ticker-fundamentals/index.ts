@@ -132,11 +132,15 @@ async function tradingViewBeta(ticker: string): Promise<number | null> {
     );
     if (!sr.ok) return null;
     const arr = await sr.json();
-    const match = Array.isArray(arr)
-      ? arr.find((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase()) || arr[0]
-      : null;
-    const prefix = match?.exchange || match?.prefix;
+    // Preferisci match primario (is_primary_listing) sullo stesso ticker
+    const candidates = Array.isArray(arr)
+      ? arr.filter((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase())
+      : [];
+    const match = candidates.find((x: any) => x?.is_primary_listing) || candidates[0] || (Array.isArray(arr) ? arr[0] : null);
+    // `prefix` è l'identificatore tecnico (es. "AMEX"); `exchange` può essere un nome con spazi (es. "NYSE Arca")
+    let prefix: string | undefined = match?.prefix || match?.source_id || match?.exchange;
     if (!prefix) return null;
+    prefix = String(prefix).replace(/\s+/g, "").toUpperCase();
     const full = `${prefix}:${ticker.toUpperCase()}`;
     const sc = await fetch("https://scanner.tradingview.com/global/scan", {
       method: "POST",
