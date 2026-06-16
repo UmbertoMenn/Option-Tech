@@ -391,7 +391,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, underlyingPrices, betaMap, fx.USD]);
+  }, [derivatives, stocks, etfs, commodities, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -429,7 +429,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       });
     });
     return out;
-  }, [derivatives, baselineUnders, riskFree]);
+  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey]);
 
   const effIV = useMemo(() => effIVMap(legs), [legs]);
 
