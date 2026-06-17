@@ -522,8 +522,10 @@ interface PreparedLeg {
 /**
  * Margine cassa con metodologia ibrida (Reg-T strategy + scan TIMS di classe):
  *  - Per sottostante:
- *    1) STRATEGY-BASED (Reg-T): short nuda con floor, spread riconosciuti.
- *       È quanto vede la cassa sulle posizioni semplici.
+ *    1) STRATEGY-BASED (Reg-T): short nuda con floor; credito di spread SOLO sui
+ *       VERTICALI a stessa scadenza (debit/net-long → 0, credit → ampiezza−premio).
+ *       I diagonali/calendar (scadenze diverse) NON ricevono il credito verticale:
+ *       sono margiati dallo scan TIMS.
  *    2) SCAN TIMS DI CLASSE: applicato SOLO ai sottostanti con un VERO spread
  *       (short residua + long stesso lato). Rivaluta INSIEME tutte le gambe del
  *       nome (call+put, short+long) sulla griglia di prezzo ±R in 10 passi e,
@@ -655,7 +657,14 @@ export function occMargin(
         const prs: [number, number, number, number][] = [];
         shorts.forEach((x, si) =>
           longs.forEach((l, li) => {
-            if (l.T + 1e-9 < x.T) return;
+            // CREDITO DI SPREAD REG-T SOLO SUI VERTICALI (STESSA SCADENZA).
+            // Un diagonale/calendar (scadenze diverse) NON è un verticale a
+            // rischio definito: non riceve il credito ampiezza−premio del Reg-T,
+            // ma viene margiato dallo SCAN TIMS (che rivaluta la long alla sua
+            // scadenza con prezzo+vol shockati e ne misura la copertura reale,
+            // incluso il rischio di term-structure/vega che il payoff a scadenza
+            // ignora). Tolleranza ~1 settimana per i T arrotondati dai giorni.
+            if (Math.abs(l.T - x.T) > 0.02) return;
             const rr = pairStrat(x, l, mult);
             const ben = (x.nk ?? 0) - rr;
             if (ben > 0) prs.push([ben, si, li, rr]);
@@ -670,7 +679,15 @@ export function occMargin(
         });
       }
       let out = 0;
-      shorts.forEach((x) => (out += x.rq !== undefined ? x.rq : x.nk ?? 0));
+      // Short non appaiata: se sul lato esiste comunque una long (è quindi una
+      // gamba di un diagonale/calendar), NON la si addebita a nudo nel Reg-T — il
+      // margine lo determina lo scan TIMS. La si addebita a nudo solo se sul lato
+      // non c'è alcuna long (short davvero nuda → Reg-T puro).
+      shorts.forEach((x) => {
+        if (x.rq !== undefined) out += x.rq;
+        else if (longs.length === 0) out += x.nk ?? 0;
+        // else: diagonale → deferito allo scan TIMS (contributo strategy 0)
+      });
       return out / fxUSD;
     };
 

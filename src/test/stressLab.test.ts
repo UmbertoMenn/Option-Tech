@@ -298,6 +298,52 @@ describe('stressLab — occMargin', () => {
   });
 });
 
+describe('stressLab — diagonali governate dallo scan TIMS, non Reg-T', () => {
+  const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
+  const prm: MarginParams = { ...surf, r: R, fxUSD: FX.USD, kScan: 0.7, fxRange: 0.03 };
+
+  it('verticale put STESSA scadenza: credito Reg-T riconosciuto (strat > 0)', () => {
+    const vert: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'P', K: 85, T: 0.25, exp: '2026-09-18', q: 1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(vert, [], unders, 0, sig, 0, prm);
+    const bd = m.bd.find((b) => b.u === 'XYZ')!;
+    // credito di spread Reg-T riconosciuto → componente strategy presente e
+    // limitata: la short NON è addebitata a nudo pieno
+    expect(bd.strat).toBeGreaterThan(0);
+    const nakedShort = occMargin([vert[0]], [], unders, 0, { 0: 0.4 }, 0, prm).total;
+    expect(bd.strat).toBeLessThan(nakedShort); // il verticale costa meno della nuda
+  });
+
+  it('diagonale put (scadenze DIVERSE): NESSUN credito verticale Reg-T → scan TIMS', () => {
+    // stessi strike/premi del verticale, ma la long scade molto dopo → diagonale
+    const diag: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'P', K: 85, T: 1.25, exp: '2027-09-18', q: 1, px: 9, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(diag, [], unders, 0, sig, 0, prm);
+    const bd = m.bd.find((b) => b.u === 'XYZ')!;
+    // la short diagonale NON riceve il credito verticale: la componente strategy
+    // è azzerata (deferita allo scan), il margine è interamente TIMS
+    expect(bd.strat).toBe(0);
+    expect(bd.scan).toBeGreaterThan(0);
+    expect(m.total).toBeGreaterThan(0);
+  });
+
+  it('naked puro (nessuna long sul lato) resta Reg-T nudo, non deferito', () => {
+    const naked: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const m = occMargin(naked, [], unders, 0, { 0: 0.4 }, 0, prm);
+    const bd = m.bd.find((b) => b.u === 'XYZ')!;
+    expect(bd.strat).toBeGreaterThan(0); // nudo addebitato (Reg-T), scan non gira
+    expect(bd.scan).toBe(0);
+  });
+});
+
 describe('stressLab — scan IV di classe (ivScan)', () => {
   const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
   const base = { ...surf, r: R, fxUSD: FX.USD, kScan: 0.7, fxRange: 0.03 };
