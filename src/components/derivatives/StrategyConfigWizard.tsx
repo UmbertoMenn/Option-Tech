@@ -710,8 +710,11 @@ export function StrategyConfigWizard({
   }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, draftStorageKey, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (!isOpen) {
+      sessionStorage.removeItem(draftStorageKey);
+    }
     onOpenChange(isOpen);
-  }, [onOpenChange]);
+  }, [onOpenChange, draftStorageKey]);
 
   const toggleSelected = (groupKey: string, posId: string) => {
     setSelectedIdsByGroup(prev => {
@@ -855,6 +858,7 @@ export function StrategyConfigWizard({
 
     // NO deduplication — each strategy is saved as a separate row
     await onSave(rawConfigs);
+    sessionStorage.removeItem(draftStorageKey);
     onOpenChange(false);
   };
 
