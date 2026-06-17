@@ -754,13 +754,13 @@ export function StrategyConfigWizard({
   };
 
   const removeFromStrategy = (strategyId: string, positionId: string) => {
-    setStrategies(prev => prev.map(s => {
+    setStrategies(prev => prev.flatMap(s => {
       if (s.id !== strategyId) return s;
       const newPositions = s.positions.filter(p => p.id !== positionId);
-      if (newPositions.length === 0) return null as any;
+      if (newPositions.length === 0) return [];
       const suggested = detectStrategyType(newPositions);
       return { ...s, positions: newPositions, suggestedType: suggested };
-    }).filter(Boolean));
+    }));
   };
 
   const deleteStrategy = (strategyId: string) => {
@@ -869,7 +869,7 @@ export function StrategyConfigWizard({
 
   // Filter groups by search AND exclude archived
   const filteredGroups = useMemo(() => {
-    let groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+    const groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
     if (!searchQuery.trim()) return groups;
     const q = searchQuery.toLowerCase();
     return groups.filter(g =>
