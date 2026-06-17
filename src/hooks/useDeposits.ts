@@ -65,6 +65,7 @@ export function useDeposits(portfolioId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] });
+      queryClient.invalidateQueries({ queryKey: ['historical-data'] });
       toast.success('Movimento salvato!');
     },
     onError: (error) => { toast.error('Errore nel salvataggio', { description: error.message }); },
@@ -77,6 +78,7 @@ export function useDeposits(portfolioId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deposits'] });
+      queryClient.invalidateQueries({ queryKey: ['historical-data'] });
       toast.success('Movimento eliminato');
     },
     onError: (error) => { toast.error('Errore nell\'eliminazione', { description: error.message }); },

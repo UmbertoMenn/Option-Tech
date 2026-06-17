@@ -89,7 +89,14 @@ export function StatsCards({
     }
 
     const startDate = parseISO(selectedHistoricalEntry.snapshot_date);
-    const endDate = parseISO(snapshotDate);
+    // Il valore "attuale" del portafoglio è quello LIVE (di oggi), non quello dell'ultimo
+    // snapshot salvato. Di conseguenza il periodo entro cui scorporare i movimenti
+    // (versamenti/prelievi) deve arrivare fino a OGGI, non fermarsi alla data dello
+    // snapshot: un prelievo registrato dopo l'ultimo snapshot deve comunque contare,
+    // altrimenti il rendimento non si aggiorna quando si aggiunge un movimento recente.
+    const snapshotEnd = parseISO(snapshotDate);
+    const today = new Date();
+    const endDate = today > snapshotEnd ? today : snapshotEnd;
 
     console.log('[StatsCards] Calculating time-weighted average:', {
       startDate: selectedHistoricalEntry.snapshot_date,

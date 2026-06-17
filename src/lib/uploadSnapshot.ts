@@ -171,15 +171,39 @@ export async function recomputeLatestSnapshot(portfolioId: string): Promise<void
       .select('snapshot_date, cash_value')
       .eq('id', portfolioId)
       .single();
-    if (error || !pf?.snapshot_date) {
-      console.log('[recomputeLatestSnapshot] No snapshot_date, skipping', portfolioId);
+    if (error) {
+      console.error('[recomputeLatestSnapshot] Error reading portfolio:', error.message);
       return;
     }
+
+    // La data di riferimento è normalmente portfolios.snapshot_date. Se manca
+    // (es. portfolio popolato senza un upload che la imposti), ricadiamo sulla
+    // data più recente già presente in historical_data: così il record che
+    // l'utente sta effettivamente guardando viene comunque riscritto col netting
+    // aggiornato, invece di uscire senza fare nulla.
+    let snapshotDate = pf?.snapshot_date as string | null;
+    if (!snapshotDate) {
+      const { data: latest } = await supabase
+        .from('historical_data')
+        .select('snapshot_date')
+        .eq('portfolio_id', portfolioId)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      snapshotDate = (latest?.snapshot_date as string) || null;
+    }
+
+    if (!snapshotDate) {
+      console.log('[recomputeLatestSnapshot] No snapshot_date and no historical_data, skipping', portfolioId);
+      return;
+    }
+
     await upsertUploadSnapshot({
       portfolioId,
-      snapshotDate: pf.snapshot_date as string,
-      cashValue: Number(pf.cash_value || 0),
+      snapshotDate,
+      cashValue: Number(pf?.cash_value || 0),
     });
+    console.log('[recomputeLatestSnapshot] Recomputed snapshot for', portfolioId, 'date', snapshotDate);
   } catch (err) {
     console.error('[recomputeLatestSnapshot] Unexpected error:', err);
   }
