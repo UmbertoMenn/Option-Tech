@@ -1,5 +1,4 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
@@ -12,7 +11,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp } from 'lucide-react';
 
-import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
@@ -107,8 +105,6 @@ function getOptionCurrency(option: Position): string {
 }
 
 export function Derivatives() {
-  const { user, isAdmin, signOut } = useAuth();
-  const { theme, setTheme } = useTheme();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
