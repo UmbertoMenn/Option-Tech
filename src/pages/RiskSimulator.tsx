@@ -386,6 +386,7 @@ function StressLabContent() {
   const [netting, setNetting] = useState(false);
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
+  const [shortFloorPct, setShortFloorPct] = useState(0.55);
 
   const { legs, eq, fx, effIV, ptfBaseMTM, nettingTotal, nettingExCCAndNP, riskFree } = data;
   const r = riskFree;
@@ -436,7 +437,7 @@ function StressLabContent() {
   /* ---------- Margine cassa ---------- */
   const { marNow, marScen, marCurve, marPnlMTM } = useMemo(() => {
     const fxR = fxRange / 100;
-    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp };
+    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, shortFloorPct };
     const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false };
     const base = runScenario(legs, eq, unders, effIV, 0, 0, bp);
     const sig0s: Record<number, number> = {};
@@ -449,7 +450,8 @@ function StressLabContent() {
     try {
       console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
         '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
-        '| call coperte da titoli:', now.nCov);
+        '| call coperte da titoli:', now.nCov,
+        '| kScan:', kScan, '| shortFloorPct:', shortFloorPct);
       console.table(
         now.bd.map((b) => ({
           sottostante: b.u,
@@ -484,7 +486,7 @@ function StressLabContent() {
       });
     }
     return { marNow: now, marScen: sc, marCurve: pts, marPnlMTM: cur.totEUR };
-  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, volMode, dVman]);
+  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, shortFloorPct, volMode, dVman]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -1435,6 +1437,27 @@ function StressLabContent() {
               <Info title="Range sweep FX (solo EUR/USD)" w={320}>
                 Per la sola gamba EUR/USD, che non segue il modello equity: niente floor 20%, solo scan con vol
                 smorzata. ±3% è tipico per uno stress giornaliero sul cambio.
+              </Info>
+            }
+          />
+          <Slider
+            label="Minimo opzione corta (spread)"
+            value={shortFloorPct}
+            set={setShortFloorPct}
+            min={0}
+            max={1}
+            step={0.05}
+            fmt={(v) => fmtN(v * 100, 0) + '% del nudo'}
+            accent={C.amber}
+            info={
+              <Info title="Minimo opzione corta sui veri spread" w={400}>
+                L'overnight (portfolio margin / TIMS) riconosce solo PARZIALMENTE il credito di uno spread:
+                anche quando una long copre la short, il broker addebita comunque una frazione del requisito
+                Reg-T <b>nudo</b> delle short residue. È la differenza tipica fra il Reg-T strategy-based (credito
+                pieno) e l'overnight sui portafogli a spread/diagonal. Si applica SOLO dove lo scan gira (short
+                residua + long stesso lato): le posizioni nude e coperte da titoli restano identiche al Reg-T.
+                0% = comportamento storico; 100% = nessun credito di spread. Default 55%; taralo sui margini
+                broker reali (es. Mauro G overnight) e validalo su un secondo cliente.
               </Info>
             }
           />

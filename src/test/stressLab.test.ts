@@ -290,6 +290,92 @@ describe('stressLab — occMargin', () => {
   });
 });
 
+describe('stressLab — minimo opzione corta (shortFloorPct)', () => {
+  const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
+  const base = { ...surf, r: R, fxUSD: FX.USD, kScan: 0.7, fxRange: 0.03 };
+  const withFloor = (p: number): MarginParams => ({ ...base, shortFloorPct: p });
+
+  // Spread verticale call: short K=100 + long K=115, nessun titolo → lo scan gira.
+  const callSpread: StressLeg[] = [
+    { u: 'XYZ', cp: 'C', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    { u: 'XYZ', cp: 'C', K: 115, T: 0.25, exp: '2026-09-18', q: 1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+  ];
+  const sigSpread: Record<number, number> = { 0: 0.4, 1: 0.4 };
+
+  it('floor più alto → margine ≥ (monotòno) sul vero spread', () => {
+    const m0 = occMargin(callSpread, [], unders, 0, sigSpread, 0, withFloor(0)).total;
+    const m55 = occMargin(callSpread, [], unders, 0, sigSpread, 0, withFloor(0.55)).total;
+    const m90 = occMargin(callSpread, [], unders, 0, sigSpread, 0, withFloor(0.9)).total;
+    expect(m55).toBeGreaterThanOrEqual(m0);
+    expect(m90).toBeGreaterThanOrEqual(m55);
+    // a floor 0.9 il minimo opzione corta deve MORDERE oltre lo scan puro
+    expect(m90).toBeGreaterThan(m0);
+  });
+
+  it('lo spread con floor resta ≤ del nudo pieno della short', () => {
+    // requisito nudo della sola short call K=100 (ATM, S=100): 6*100 + 20%*100*100 = 2600 USD
+    const nakedShortOnly: StressLeg[] = [callSpread[0]];
+    const sigShort: Record<number, number> = { 0: 0.4 };
+    const nudo = occMargin(nakedShortOnly, [], unders, 0, sigShort, 0, withFloor(0.55)).total;
+    const spread = occMargin(callSpread, [], unders, 0, sigSpread, 0, withFloor(0.55)).total;
+    // lo spread (short coperta da una long) non può costare più della short nuda
+    expect(spread).toBeLessThanOrEqual(nudo + 1);
+    // ma con il minimo opzione corta costa più di zero / più del solo debit
+    expect(spread).toBeGreaterThan(0);
+  });
+
+  it('INVARIANTE: short nuda NON è toccata dal floor (nessuna long sul lato)', () => {
+    const naked: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 5, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4 };
+    const m0 = occMargin(naked, [], unders, 0, sig, 0, withFloor(0)).total;
+    const m90 = occMargin(naked, [], unders, 0, sig, 0, withFloor(0.9)).total;
+    expect(m90).toBeCloseTo(m0, 6); // identico: lo scan non gira sulle nude
+  });
+
+  it('INVARIANTE: covered call resta 0 anche con floor alto', () => {
+    const cc: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 110, T: 0.25, exp: '2026-09-18', q: -1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const eqCov: StressEquity[] = [
+      { nm: 'XYZ', ccy: 'USD', px: 100, q: 100, eur: 8620, beta: 1, tick: 'XYZ' },
+    ];
+    const sig: Record<number, number> = { 0: 0.4 };
+    const m = occMargin(cc, eqCov, unders, 0, sig, 0, withFloor(0.9));
+    expect(m.total).toBe(0);
+  });
+
+  it('INVARIANTE: covered call + long orfana resta 0 anche con floor alto', () => {
+    const legsBug: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 105, T: 0.25, exp: '2026-09-18', q: -1, px: 3, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'C', K: 130, T: 1.0, exp: '2027-06-18', q: 1, px: 5, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const eqCov: StressEquity[] = [
+      { nm: 'XYZ', ccy: 'USD', px: 100, q: 100, eur: 8620, beta: 1, tick: 'XYZ' },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(legsBug, eqCov, unders, 0, sig, 0, withFloor(0.9));
+    expect(m.total).toBe(0); // la long pagata non genera mai margine
+  });
+
+  it('diagonal stretto (long copre quasi del tutto): il minimo opzione corta morde', () => {
+    // short near-dated + long far-dated PROFONDA, stesso lato: lo scan worst-case è
+    // piccolo (la long copre quasi la short) → è qui che il minimo opzione corta
+    // deve far salire il margine verso il nudo parziale.
+    const diag: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 100, T: 0.15, exp: '2026-08-18', q: -1, px: 5, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'C', K: 102, T: 1.5, exp: '2027-12-18', q: 1, px: 20, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m0 = occMargin(diag, [], unders, 0, sig, 0, withFloor(0)).total;
+    const m60 = occMargin(diag, [], unders, 0, sig, 0, withFloor(0.6)).total;
+    const m95 = occMargin(diag, [], unders, 0, sig, 0, withFloor(0.95)).total;
+    expect(m60).toBeGreaterThanOrEqual(m0);
+    expect(m95).toBeGreaterThan(m0); // il minimo opzione corta morde dove lo scan è basso
+  });
+});
+
 describe('stressLab — pricing a intrinseco (gambe fl)', () => {
   const unders: StressUnderlyingMap = { DEEP: { S: 650, beta: 1 } };
 

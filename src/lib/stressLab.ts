@@ -437,6 +437,19 @@ export interface MarginParams extends SurfaceParams {
   kScan: number;
   /** Range sweep FX (decimali: 0.03 = ±3%) */
   fxRange: number;
+  /**
+   * Minimo opzione corta (frazione del requisito nudo) sui VERI spread.
+   * Il margine overnight / portfolio-margin del broker riconosce solo
+   * PARZIALMENTE il credito di uno spread: anche quando una long "copre" la
+   * short, viene comunque addebitata una frazione `shortFloorPct` del requisito
+   * Reg-T nudo delle short residue. È esattamente la differenza tra Reg-T
+   * strategy-based (credito pieno) e overnight TIMS sui portafogli a spread.
+   *  - 0   → comportamento storico (solo worst-case scan + floor $0,375/azione)
+   *  - 1   → nessun credito di spread (overnight = nudo pieno sulle short residue)
+   * Si applica SOLO dove lo scan gira (short residua + long stesso lato):
+   * posizioni nude e coperte da titoli restano invariate (= Reg-T). Default 0,55.
+   */
+  shortFloorPct?: number;
 }
 
 export interface MarginBreakdown {
@@ -497,10 +510,16 @@ interface PreparedLeg {
  *  - Per sottostante e per lato (call/put separati):
  *    1) STRATEGY-BASED (Reg-T): short nuda con floor, spread riconosciuti
  *    2) SCAN TIMS: applicato SOLO ai veri spread (short + long stesso lato)
- *       Rivalutazione ±R con vol accoppiata (sticky-delta + term + skew)
+ *       Rivalutazione ±R con vol accoppiata (sticky-delta + term + skew) +
+ *       MINIMO OPZIONE CORTA = shortFloorPct · nudo delle short residue
+ *       (l'overnight riconosce solo parzialmente il credito di spread)
  *  - Margine lato = max(strategy-based, scan TIMS)
  *  - Priorità ai titoli: call corte coperte dalle azioni → margine 0
  *  - EUR/USD: scan-only con range FX dedicato
+ *
+ * INVARIANTE: posizioni semplici (nude, coperte da titoli) → lo scan NON gira,
+ * quindi il margine = Reg-T strategy-based, in linea con l'overnight del broker.
+ * Solo i veri spread/diagonal vengono "morsi" dallo scan + minimo opzione corta.
  */
 export function occMargin(
   legs: StressLeg[],
@@ -512,6 +531,9 @@ export function occMargin(
   prm: MarginParams,
 ): MarginResult {
   const { r, fxUSD, kScan, fxRange, skewB, kappa, pExp } = prm;
+  // Frazione del nudo addebitata sulle short residue di un vero spread (overnight
+  // riconosce solo parzialmente il credito di spread). Default 0,55.
+  const shortFloorPct = prm.shortFloorPct ?? 0.55;
   const eff = effIVMap(legs);
 
   const legsByU: Record<string, number[]> = {};
@@ -688,7 +710,19 @@ export function occMargin(
         }
       }
       const shortCtr = Sx[cp].length;
-      return Math.max(-worst, 37.5 * shortCtr) / fxUSD;
+      // MINIMO OPZIONE CORTA (overnight / portfolio margin): il broker riconosce
+      // solo PARZIALMENTE il credito di uno spread. Anche quando la long copre la
+      // short, viene addebitata una frazione `shortFloorPct` del requisito Reg-T
+      // NUDO delle short RESIDUE (post-copertura titoli). È ciò che fa salire il
+      // margine overnight sopra il Reg-T strategy-based sui portafogli a spread/
+      // diagonal — mentre le posizioni nude e coperte (dove lo scan non gira)
+      // restano identiche al Reg-T. Resta il vecchio minimo $0,375/azione.
+      let nakedRes = 0;
+      Sx[cp].forEach((x) => {
+        nakedRes += nakedMar(x.K, x.px, cp === 'C', S, mult);
+      });
+      const floor = Math.max(shortFloorPct * nakedRes, 37.5 * shortCtr);
+      return Math.max(-worst, floor) / fxUSD;
     };
 
     let mar = 0;
