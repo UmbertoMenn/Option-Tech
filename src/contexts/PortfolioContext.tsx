@@ -101,11 +101,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const portfolios = portfoliosQuery.data || [];
 
-  // Reset quando user cambia (logout/login)
+  // Reset quando user cambia (logout)
   useEffect(() => {
     if (!user) {
       setSelectedId(null);
       setHasInitialized(false);
+      setAdminViewUserId(null);
+      sessionStorage.removeItem(ADMIN_VIEW_USER_KEY);
+      sessionStorage.removeItem(ADMIN_VIEW_PORTFOLIO_KEY);
     }
   }, [user]);
 
