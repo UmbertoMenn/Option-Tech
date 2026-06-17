@@ -604,7 +604,6 @@ export type Database = {
           netting_total: number
           portfolio_id: string
           snapshot_date: string
-          snapshot_underlying_prices: Json
           total_value: number
           updated_at: string
           usd_exposure_pct: number | null
@@ -620,7 +619,6 @@ export type Database = {
           netting_total?: number
           portfolio_id: string
           snapshot_date: string
-          snapshot_underlying_prices?: Json
           total_value?: number
           updated_at?: string
           usd_exposure_pct?: number | null
@@ -636,7 +634,6 @@ export type Database = {
           netting_total?: number
           portfolio_id?: string
           snapshot_date?: string
-          snapshot_underlying_prices?: Json
           total_value?: number
           updated_at?: string
           usd_exposure_pct?: number | null
