@@ -262,6 +262,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const setAdminViewPortfolio = useCallback((portfolioId: string, ownerUserId: string) => {
     setAdminViewUserId(ownerUserId);
     setSelectedId(portfolioId);
+    // Persisti la vista admin in sessionStorage per sopravvivere a remount/refresh token
+    sessionStorage.setItem(ADMIN_VIEW_USER_KEY, ownerUserId);
+    sessionStorage.setItem(ADMIN_VIEW_PORTFOLIO_KEY, portfolioId);
     // Invalidate queries to fetch data for the new portfolio
     queryClient.invalidateQueries({ queryKey: ['positions'] });
     queryClient.invalidateQueries({ queryKey: ['deposits'] });
@@ -271,6 +274,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const exitAdminMode = useCallback(() => {
     setAdminViewUserId(null);
+    sessionStorage.removeItem(ADMIN_VIEW_USER_KEY);
+    sessionStorage.removeItem(ADMIN_VIEW_PORTFOLIO_KEY);
     // Reset to user's own portfolio
     const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
     if (savedId && portfolios.some(p => p.id === savedId)) {
