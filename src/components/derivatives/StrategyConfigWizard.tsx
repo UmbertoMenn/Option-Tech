@@ -669,17 +669,45 @@ export function StrategyConfigWizard({
     if (open && !hasInitialized.current) {
       hasInitialized.current = true;
       startTransition(() => {
+        const rawDraft = sessionStorage.getItem(draftStorageKey);
+        if (rawDraft) {
+          try {
+            const draft = JSON.parse(rawDraft) as WizardDraft;
+            if (Date.now() - draft.ts < 4 * 60 * 60 * 1000) {
+              setStrategies(draft.strategies || []);
+              setSplitPositionIds(new Set(draft.splitPositionIds || []));
+              setSelectedIdsByGroup(new Map((draft.selectedIdsByGroup || []).map(([k, ids]) => [k, new Set(ids)])));
+              setSearchQuery(draft.searchQuery || '');
+              return;
+            }
+            sessionStorage.removeItem(draftStorageKey);
+          } catch {
+            sessionStorage.removeItem(draftStorageKey);
+          }
+        }
         const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
         setSplitPositionIds(autoSplitIds);
+        setSelectedIdsByGroup(new Map());
+        setSearchQuery('');
       });
-      setSelectedIdsByGroup(new Map());
-      setSearchQuery('');
     }
     if (!open) {
       hasInitialized.current = false;
     }
-  }, [open, restoreFromConfigs, hasInitialized]);
+  }, [open, restoreFromConfigs, hasInitialized, draftStorageKey]);
+
+  useEffect(() => {
+    if (!open || !hasInitialized.current) return;
+    const draft: WizardDraft = {
+      ts: Date.now(),
+      strategies,
+      selectedIdsByGroup: Array.from(selectedIdsByGroup.entries()).map(([key, ids]) => [key, Array.from(ids)]),
+      splitPositionIds: Array.from(splitPositionIds),
+      searchQuery,
+    };
+    sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, draftStorageKey, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     onOpenChange(isOpen);
