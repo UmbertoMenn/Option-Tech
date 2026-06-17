@@ -387,6 +387,7 @@ function StressLabContent() {
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
+  const [nakedPct, setNakedPct] = useState(0.2);
 
   const { legs, eq, fx, effIV, ptfBaseMTM, nettingTotal, nettingExCCAndNP, riskFree } = data;
   const r = riskFree;
@@ -437,7 +438,7 @@ function StressLabContent() {
   /* ---------- Margine cassa ---------- */
   const { marNow, marScen, marCurve, marPnlMTM } = useMemo(() => {
     const fxR = fxRange / 100;
-    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan };
+    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
     const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false };
     const base = runScenario(legs, eq, unders, effIV, 0, 0, bp);
     const sig0s: Record<number, number> = {};
@@ -451,7 +452,7 @@ function StressLabContent() {
       console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
         '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
         '| call coperte da titoli:', now.nCov,
-        '| kScan:', kScan, '| ivScan:', ivScan);
+        '| kScan:', kScan, '| ivScan:', ivScan, '| nakedPct:', nakedPct);
       console.table(
         now.bd.map((b) => ({
           sottostante: b.u,
@@ -486,7 +487,7 @@ function StressLabContent() {
       });
     }
     return { marNow: now, marScen: sc, marCurve: pts, marPnlMTM: cur.totEUR };
-  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, volMode, dVman]);
+  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -1455,8 +1456,26 @@ function StressLabContent() {
                 del suo livello (±ivScan·σ) e prende lo scenario peggiore. È la componente che fa "mordere" i
                 calendar/diagonal con net-vega (gamba lunga lontana), che il solo scan di prezzo ignora. Si
                 applica SOLO sui veri spread: nude e coperte da titoli restano Reg-T. Parametro reale del TIMS,
-                non un fattore inventato. Default ±40% del livello di vol; taralo sui margini broker reali (es.
-                Mauro G overnight) e validalo su un secondo cliente.
+                non un fattore inventato. Default ±40% del livello di vol; taralo sull'eccedenza spread reale.
+              </Info>
+            }
+          />
+          <Slider
+            label="Mantenimento short nude (Reg-T)"
+            value={nakedPct}
+            set={setNakedPct}
+            min={0.15}
+            max={0.4}
+            step={0.01}
+            fmt={(v) => fmtN(v * 100, 0) + '% del sottostante'}
+            accent={C.amber}
+            info={
+              <Info title="Requisito di mantenimento Reg-T sulle short nude" w={400}>
+                Il margine di una short nuda = premio + max(<b>pct</b>·sottostante − OTM, floor 10%). Il 20% è il
+                minimo regolamentare Reg-T, ma il broker/banca lo alza sui nomi volatili (small/mid-cap tech:
+                25–35%). È il parametro che governa la BASE strategy-based, cioè il "302k" della banca. Taralo
+                finché la voce <i>strategy</i> nel log [MarginDiag] ≈ il Reg-T della banca; poi rifinisci lo scan
+                (k / IV) sull'eccedenza spread. Default 20% (textbook).
               </Info>
             }
           />

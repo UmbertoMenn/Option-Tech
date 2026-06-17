@@ -202,6 +202,14 @@ describe('stressLab — occMargin', () => {
     expect(m.total).toBeLessThan(2300);
   });
 
+  it('nakedPct più alto → margine nudo più alto (mantenimento di casa)', () => {
+    const m20 = occMargin(legs, eq, unders, 0, sig, 0, { ...marPrm, nakedPct: 0.2 }).total;
+    const m30 = occMargin(legs, eq, unders, 0, sig, 0, { ...marPrm, nakedPct: 0.3 }).total;
+    expect(m30).toBeGreaterThan(m20);
+    // +10 punti di mantenimento su S=100, 1 contratto = +10*100 USD = +1000 USD ≈ +862 EUR
+    expect(m30 - m20).toBeCloseTo((0.1 * 100 * 100) / FX.USD, 0);
+  });
+
   it('covered call (azioni in portafoglio): nCov > 0', () => {
     const legsCC: StressLeg[] = [
       {

@@ -445,6 +445,13 @@ export interface MarginParams extends SurfaceParams {
    * prezzo ignora. Es. 0,40 = ±40% del livello di vol. Default 0,40.
    */
   ivScan?: number;
+  /**
+   * Requisito di mantenimento Reg-T sulle short NUDE (frazione del sottostante).
+   * 0,20 = minimo regolamentare textbook; il broker/banca lo alza sui nomi
+   * volatili (small/mid-cap: 0,25–0,35). È il parametro che governa la base
+   * strategy-based (il "302k" della banca). Default 0,20.
+   */
+  nakedPct?: number;
 }
 
 export interface MarginBreakdown {
@@ -464,14 +471,26 @@ export interface MarginResult {
   nCov: number;
 }
 
-/** Margine naked (Reg-T): premio + max(20%·U − OTM, floor 10%) */
-function nakedMar(K: number, px: number, isCall: boolean, S: number, mult: number): number {
+/**
+ * Margine naked (Reg-T): premio + max(pct·U − OTM, floor 10%).
+ * `pct` è il requisito di mantenimento sulle short nude: 20% è il minimo
+ * regolamentare Reg-T (textbook), ma il broker/banca lo alza sui nomi volatili
+ * (small/mid-cap tech tipicamente 25-35%). Il floor del 10% resta fisso.
+ */
+function nakedMar(
+  K: number,
+  px: number,
+  isCall: boolean,
+  S: number,
+  mult: number,
+  pct: number,
+): number {
   if (isCall) {
     const otm = Math.max(0, K - S);
-    return px * mult + Math.max(0.2 * S * mult - otm * mult, 0.1 * S * mult);
+    return px * mult + Math.max(pct * S * mult - otm * mult, 0.1 * S * mult);
   }
   const otm = Math.max(0, S - K);
-  return px * mult + Math.max(0.2 * S * mult - otm * mult, 0.1 * K * mult);
+  return px * mult + Math.max(pct * S * mult - otm * mult, 0.1 * K * mult);
 }
 
 /** Margine spread strategy-based (debit/net-long → 0; credit → ampiezza − credito) */
@@ -533,6 +552,9 @@ export function occMargin(
   // A ogni punto di prezzo la IV viene spostata di ±ivScan·σ e si prende il
   // peggiore: è lo scan-vol standard del TIMS. Default 0,40 (±40% del livello).
   const ivScan = prm.ivScan ?? 0.4;
+  // Requisito di mantenimento Reg-T sulle short nude. 0,20 = textbook; più alto
+  // sui nomi volatili (è il parametro che taratura la base strategy = "302k banca").
+  const nakedPct = prm.nakedPct ?? 0.2;
   const eff = effIVMap(legs);
 
   const legsByU: Record<string, number[]> = {};
@@ -626,7 +648,7 @@ export function occMargin(
       if (isFX) return 0;
       const shorts = Sx[cp];
       const longs = Lx[cp];
-      shorts.forEach((x) => (x.nk = nakedMar(x.K, x.px, cp === 'C', S, mult)));
+      shorts.forEach((x) => (x.nk = nakedMar(x.K, x.px, cp === 'C', S, mult, nakedPct)));
       const sd = shorts.map(() => false);
       const ul = longs.map(() => false);
       if (shorts.length && longs.length) {
