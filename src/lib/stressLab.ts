@@ -433,23 +433,18 @@ export interface MarginParams extends SurfaceParams {
   r: number;
   /** Cambio EUR/USD (USD per 1 EUR) */
   fxUSD: number;
-  /** Moltiplicatore vol per il range di scan TIMS (R = clip(k·σ, 10%, 80%)) */
+  /** Moltiplicatore vol per il range di scan PREZZO TIMS (R = clip(k·σ, 10%, 80%)) */
   kScan: number;
   /** Range sweep FX (decimali: 0.03 = ±3%) */
   fxRange: number;
   /**
-   * Minimo opzione corta (frazione del requisito nudo) sui VERI spread.
-   * Il margine overnight / portfolio-margin del broker riconosce solo
-   * PARZIALMENTE il credito di uno spread: anche quando una long "copre" la
-   * short, viene comunque addebitata una frazione `shortFloorPct` del requisito
-   * Reg-T nudo delle short residue. È esattamente la differenza tra Reg-T
-   * strategy-based (credito pieno) e overnight TIMS sui portafogli a spread.
-   *  - 0   → comportamento storico (solo worst-case scan + floor $0,375/azione)
-   *  - 1   → nessun credito di spread (overnight = nudo pieno sulle short residue)
-   * Si applica SOLO dove lo scan gira (short residua + long stesso lato):
-   * posizioni nude e coperte da titoli restano invariate (= Reg-T). Default 0,55.
+   * RANGE DI SCAN DELLA VOLATILITÀ IMPLICITA (TIMS), come frazione del livello di
+   * vol. Il TIMS reale, a ogni punto di prezzo, sposta la IV su e giù di
+   * `ivScan · σ` e prende lo scenario peggiore. È ciò che cattura il rischio di
+   * net-vega dei calendar/diagonal (gamba lunga lontana) che il solo scan di
+   * prezzo ignora. Es. 0,40 = ±40% del livello di vol. Default 0,40.
    */
-  shortFloorPct?: number;
+  ivScan?: number;
 }
 
 export interface MarginBreakdown {
@@ -506,20 +501,23 @@ interface PreparedLeg {
 }
 
 /**
- * Margine cassa con metodologia ibrida validata (MAE 2.3% su portafogli reali):
- *  - Per sottostante e per lato (call/put separati):
- *    1) STRATEGY-BASED (Reg-T): short nuda con floor, spread riconosciuti
- *    2) SCAN TIMS: applicato SOLO ai veri spread (short + long stesso lato)
- *       Rivalutazione ±R con vol accoppiata (sticky-delta + term + skew) +
- *       MINIMO OPZIONE CORTA = shortFloorPct · nudo delle short residue
- *       (l'overnight riconosce solo parzialmente il credito di spread)
- *  - Margine lato = max(strategy-based, scan TIMS)
- *  - Priorità ai titoli: call corte coperte dalle azioni → margine 0
- *  - EUR/USD: scan-only con range FX dedicato
+ * Margine cassa con metodologia ibrida (Reg-T strategy + scan TIMS di classe):
+ *  - Per sottostante:
+ *    1) STRATEGY-BASED (Reg-T): short nuda con floor, spread riconosciuti.
+ *       È quanto vede la cassa sulle posizioni semplici.
+ *    2) SCAN TIMS DI CLASSE: applicato SOLO ai sottostanti con un VERO spread
+ *       (short residua + long stesso lato). Rivaluta INSIEME tutte le gambe del
+ *       nome (call+put, short+long) sulla griglia di prezzo ±R in 10 passi e,
+ *       a ogni passo, sposta la IV di ±ivScan·σ (su/giù, indipendente): il
+ *       requisito è la perdita peggiore, con minimo $0,375/contratto. Call e
+ *       put sono NETTATE a ogni prezzo (regola TIMS), non per lato separato.
+ *  - Margine del nome = max(strategy-based, scan TIMS).
+ *  - Priorità ai titoli: call corte coperte dalle azioni → margine 0.
+ *  - EUR/USD: scan-only con range FX dedicato.
  *
  * INVARIANTE: posizioni semplici (nude, coperte da titoli) → lo scan NON gira,
  * quindi il margine = Reg-T strategy-based, in linea con l'overnight del broker.
- * Solo i veri spread/diagonal vengono "morsi" dallo scan + minimo opzione corta.
+ * Solo i veri spread/diagonal vengono "morsi" dallo scan TIMS.
  */
 export function occMargin(
   legs: StressLeg[],
@@ -531,9 +529,10 @@ export function occMargin(
   prm: MarginParams,
 ): MarginResult {
   const { r, fxUSD, kScan, fxRange, skewB, kappa, pExp } = prm;
-  // Frazione del nudo addebitata sulle short residue di un vero spread (overnight
-  // riconosce solo parzialmente il credito di spread). Default 0,55.
-  const shortFloorPct = prm.shortFloorPct ?? 0.55;
+  // Range di scan della volatilità implicita TIMS (frazione del livello di vol).
+  // A ogni punto di prezzo la IV viene spostata di ±ivScan·σ e si prende il
+  // peggiore: è lo scan-vol standard del TIMS. Default 0,40 (±40% del livello).
+  const ivScan = prm.ivScan ?? 0.4;
   const eff = effIVMap(legs);
 
   const legsByU: Record<string, number[]> = {};
@@ -604,8 +603,9 @@ export function occMargin(
       Sx.C = Sx.C.slice(nc);
     }
 
-    // Range di scan per nome (FX a parte)
+    // Range di scan per nome (FX a parte) + IV ATM per lo scan di volatilità
     let R: number;
+    let ivAtm = 0.4;
     if (isFX) {
       R = fxRange;
     } else {
@@ -619,6 +619,7 @@ export function occMargin(
         }
       });
       R = Math.min(Math.max(kScan * eff[atm], 0.1), 0.8);
+      ivAtm = eff[atm];
     }
 
     const stratSide = (cp: OptType): number => {
@@ -651,7 +652,12 @@ export function occMargin(
       return out / fxUSD;
     };
 
-    const scanSide = (cp: OptType): number => {
+    // SCAN TIMS DI CLASSE: rivaluta INSIEME tutte le gambe del sottostante (call e
+    // put, short e long) a ogni punto di prezzo della griglia ±R, spostando anche la
+    // IV su/giù di ±ivScan·σ in modo indipendente. Il requisito è la perdita peggiore
+    // tra tutti gli scenari, con minimo $0,375/contratto. Call e put sono NETTATE a
+    // ogni prezzo (regola TIMS reale), non addebitate per lato separatamente.
+    const classGroupScan = (): number => {
       const units: {
         q: 1 | -1;
         K: number;
@@ -660,23 +666,21 @@ export function occMargin(
         iv: number;
         isC: boolean;
       }[] = [];
-      Sx[cp].forEach((x) =>
-        units.push({ q: -1, K: x.K, px: x.scanPx, T: x.T, iv: x.iv, isC: cp === 'C' }),
-      );
-      Lx[cp].forEach((x) =>
-        units.push({ q: 1, K: x.K, px: x.scanPx, T: x.T, iv: x.iv, isC: cp === 'C' }),
-      );
+      (['C', 'P'] as OptType[]).forEach((cp) => {
+        Sx[cp].forEach((x) =>
+          units.push({ q: -1, K: x.K, px: x.scanPx, T: x.T, iv: x.iv, isC: cp === 'C' }),
+        );
+        Lx[cp].forEach((x) =>
+          units.push({ q: 1, K: x.K, px: x.scanPx, T: x.T, iv: x.iv, isC: cp === 'C' }),
+        );
+      });
       if (!units.length) return 0;
-      // Guardia: lo scan misura il rischio di uno spread (short + long). Un insieme di
-      // sole gambe LONG è un asset già pagato e non genera margine: ritorna 0.
+      // Un insieme di sole gambe LONG è un attivo già pagato → nessun margine.
       if (!units.some((u) => u.q < 0)) return 0;
 
-      // Stress di volatilità INDIPENDENTE dal prezzo (TIMS reale): a ogni punto di prezzo
-      // non basta la vol "accoppiata" al movimento (skew). Il TIMS valuta anche gli scenari
-      // di vol su / vol giù in modo indipendente e prende il peggiore. Questo cattura il
-      // vero worst-case degli spread con net vega (tipico delle diagonali), che altrimenti
-      // verrebbe sottostimato. Sulle posizioni semplici lo scan non gira, quindi non cambiano.
-      const volMax = (isFX ? 0.25 : 1) * Math.abs(coupledDV1M(R * 100));
+      // Range di scan della IV (TIMS): ±ivScan·σ in punti di vol, indipendente dal
+      // prezzo. È ciò che fa "mordere" i calendar/diagonal con net vega.
+      const volMax = (isFX ? 0.25 : 1) * ivScan * ivAtm * 100;
 
       const plAt = (mv: number, dv: number): number => {
         let pl = 0;
@@ -703,42 +707,31 @@ export function occMargin(
       for (let kk = 0; kk <= 10; kk++) {
         const mv = -R + (2 * R * kk) / 10;
         const dvCoupled = (isFX ? 0.25 : 1) * coupledDV1M(mv * 100);
-        // Tre scenari di vol per ogni punto di prezzo: accoppiata, +volMax, -volMax.
+        // A ogni punto di prezzo: vol accoppiata + scan IV su/giù (TIMS).
         for (const dv of [dvCoupled, volMax, -volMax]) {
           const pl = plAt(mv, dv);
           if (pl < worst) worst = pl;
         }
       }
-      const shortCtr = Sx[cp].length;
-      // MINIMO OPZIONE CORTA (overnight / portfolio margin): il broker riconosce
-      // solo PARZIALMENTE il credito di uno spread. Anche quando la long copre la
-      // short, viene addebitata una frazione `shortFloorPct` del requisito Reg-T
-      // NUDO delle short RESIDUE (post-copertura titoli). È ciò che fa salire il
-      // margine overnight sopra il Reg-T strategy-based sui portafogli a spread/
-      // diagonal — mentre le posizioni nude e coperte (dove lo scan non gira)
-      // restano identiche al Reg-T. Resta il vecchio minimo $0,375/azione.
-      let nakedRes = 0;
-      Sx[cp].forEach((x) => {
-        nakedRes += nakedMar(x.K, x.px, cp === 'C', S, mult);
-      });
-      const floor = Math.max(shortFloorPct * nakedRes, 37.5 * shortCtr);
-      return Math.max(-worst, floor) / fxUSD;
+      const shortCtr = Sx.C.length + Sx.P.length;
+      // Minimo TIMS reale: $0,375/azione = $37,5/contratto sulle short residue.
+      return Math.max(-worst, 37.5 * shortCtr) / fxUSD;
     };
 
-    let mar = 0;
-    let stratU = 0;
-    (['C', 'P'] as OptType[]).forEach((cp) => {
-      const st = stratSide(cp);
-      // Lo scan TIMS si applica SOLO ai veri spread: deve esistere una short RESIDUA
-      // (dopo la copertura con i titoli) E almeno una long sullo stesso lato.
-      // Usare hadShort (pre-copertura) era errato: una call corta coperta dai titoli
-      // lasciava una long orfana che lo scan addebitava come se fosse a rischio.
-      const hasResidualShort = Sx[cp].length > 0;
-      const doScan = (hasResidualShort && Lx[cp].length > 0) || (isFX && hasResidualShort);
-      const sc = doScan ? scanSide(cp) : 0;
-      stratU += st;
-      mar += Math.max(st, sc);
-    });
+    const stratU = stratSide('C') + stratSide('P');
+
+    // Gate ibrido: lo scan TIMS gira SOLO se sul sottostante esiste un VERO spread
+    // (short residua + long sullo stesso lato) — verticale, calendar o diagonale.
+    // Le posizioni semplici (short nude, call coperte da titoli) NON entrano nello
+    // scan: restano strategy-based Reg-T, in linea con l'overnight del broker.
+    const isTrueSpread = (cp: OptType) => Sx[cp].length > 0 && Lx[cp].length > 0;
+    const hasResidualShort = Sx.C.length > 0 || Sx.P.length > 0;
+    const runScan =
+      isTrueSpread('C') || isTrueSpread('P') || (isFX && hasResidualShort);
+
+    const sc = runScan ? classGroupScan() : 0;
+    // Margine del sottostante = max(strategy-based Reg-T, scan TIMS di classe).
+    const mar = Math.max(stratU, sc);
 
     if (mar > 0) {
       const strat = Math.min(stratU, mar);
