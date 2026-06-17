@@ -648,10 +648,15 @@ export function occMargin(
       // Guardia: lo scan misura il rischio di uno spread (short + long). Un insieme di
       // sole gambe LONG è un asset già pagato e non genera margine: ritorna 0.
       if (!units.some((u) => u.q < 0)) return 0;
-      let worst = 0;
-      for (let kk = 0; kk <= 10; kk++) {
-        const mv = -R + (2 * R * kk) / 10;
-        const dv = (isFX ? 0.25 : 1) * coupledDV1M(mv * 100);
+
+      // Stress di volatilità INDIPENDENTE dal prezzo (TIMS reale): a ogni punto di prezzo
+      // non basta la vol "accoppiata" al movimento (skew). Il TIMS valuta anche gli scenari
+      // di vol su / vol giù in modo indipendente e prende il peggiore. Questo cattura il
+      // vero worst-case degli spread con net vega (tipico delle diagonali), che altrimenti
+      // verrebbe sottostimato. Sulle posizioni semplici lo scan non gira, quindi non cambiano.
+      const volMax = (isFX ? 0.25 : 1) * Math.abs(coupledDV1M(R * 100));
+
+      const plAt = (mv: number, dv: number): number => {
         let pl = 0;
         units.forEach((un) => {
           const T = un.T;
@@ -669,7 +674,18 @@ export function occMargin(
           const sig = Math.max(0.03, Math.min(4, sATM + sb * mm2));
           pl += un.q * mult * (bsPrice(Fx, un.K, T, sig, un.isC, r) - un.px);
         });
-        if (pl < worst) worst = pl;
+        return pl;
+      };
+
+      let worst = 0;
+      for (let kk = 0; kk <= 10; kk++) {
+        const mv = -R + (2 * R * kk) / 10;
+        const dvCoupled = (isFX ? 0.25 : 1) * coupledDV1M(mv * 100);
+        // Tre scenari di vol per ogni punto di prezzo: accoppiata, +volMax, -volMax.
+        for (const dv of [dvCoupled, volMax, -volMax]) {
+          const pl = plAt(mv, dv);
+          if (pl < worst) worst = pl;
+        }
       }
       const shortCtr = Sx[cp].length;
       return Math.max(-worst, 37.5 * shortCtr) / fxUSD;
