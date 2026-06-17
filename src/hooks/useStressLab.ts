@@ -12,6 +12,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { Position } from '@/types/portfolio';
 import {
@@ -72,6 +75,10 @@ export interface StressLabData {
   effIV: Record<number, number>;
   /** Patrimonio MTM di base (EUR), già al netto/con i toggle applicati */
   ptfBaseMTM: number;
+  /** Patrimonio = NETTING TOTALE (stessa metrica della dashboard), coi toggle applicati */
+  nettingTotal: number;
+  /** Patrimonio = NETTING EX CC E NP (stessa metrica della dashboard), coi toggle applicati */
+  nettingExCCAndNP: number;
   /** Risk-free aggregato (default 4%) */
   riskFree: number;
   /** Numero di gambe per cui non è stato possibile calcolare l'IV */
@@ -128,8 +135,10 @@ function getOptionCurrency(p: Position): string {
  * ========================================================================= */
 
 export function useStressLab(inputs: StressLabInputs): StressLabData {
-  const { positions, portfolio, isLoading: isLoadingPortfolio } = usePortfolio();
+  const { positions, portfolio, summary, isLoading: isLoadingPortfolio } = usePortfolio();
   const { gpHoldings } = useGPHoldings();
+  const { overrides } = useDerivativeOverrides();
+  const { configurations: strategyConfigs } = useStrategyConfigurations();
 
   /* ---------- 1. Suddivisione posizioni per asset_type ---------- */
 
@@ -581,6 +590,43 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   const ivWarnings = useMemo(() => legs.filter((l) => l.fl).length, [legs]);
 
+  /* ---------- 12b. NETTING (stessa metrica e stesso motore della dashboard) ----------
+   * Il patrimonio mostrato nel simulatore deve essere il NETTING TOTALE (e, col toggle,
+   * il NETTING EX CC E NP), identico a quello che vede l'utente in dashboard.
+   * useDerivativeNetting parte da summary.totalValue (azioni+etf+bond+cash+commodity)
+   * e vi somma il contributo nettato dei derivati. Per rispettare i toggle del
+   * simulatore (escludere bond / cash / oro dal patrimonio) sottraggo le componenti
+   * disattivate; la GP non è inclusa nel summary, quindi la aggiungo se richiesta.
+   */
+  const liveNetting = useDerivativeNetting(
+    positions || [],
+    summary,
+    overrides || [],
+    underlyingPrices,
+    false,
+    strategyConfigs || [],
+  );
+
+  const { nettingTotal, nettingExCCAndNP } = useMemo(() => {
+    let adj = 0;
+    if (!inputs.includeBonds) adj -= patrimonyBreakdown.bondsEUR;
+    if (!inputs.includeCash) adj -= patrimonyBreakdown.cashEUR;
+    if (!inputs.includeCommodity) adj -= patrimonyBreakdown.commodityEUR;
+    if (inputs.includeGPInPatrimony) adj += patrimonyBreakdown.gpEUR;
+    return {
+      nettingTotal: liveNetting.nettingTotal + adj,
+      nettingExCCAndNP: liveNetting.nettingExCCAndNP + adj,
+    };
+  }, [
+    liveNetting.nettingTotal,
+    liveNetting.nettingExCCAndNP,
+    inputs.includeBonds,
+    inputs.includeCash,
+    inputs.includeCommodity,
+    inputs.includeGPInPatrimony,
+    patrimonyBreakdown,
+  ]);
+
   /* ---------- 13. Output ---------- */
 
   return {
@@ -590,6 +636,8 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     fx,
     effIV,
     ptfBaseMTM,
+    nettingTotal,
+    nettingExCCAndNP,
     riskFree,
     ivWarnings,
     missingBetaTickers,

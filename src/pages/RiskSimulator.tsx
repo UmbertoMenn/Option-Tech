@@ -27,7 +27,6 @@ import {
   occMargin,
   coupledDV1M,
   termFactor,
-  nettingPatrimonialDelta,
   T0M,
   StressUnderlyingMap,
 } from '@/lib/stressLab';
@@ -377,7 +376,7 @@ function StressLabContent() {
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, riskFree } = data;
+  const { legs, eq, fx, effIV, ptfBaseMTM, nettingTotal, nettingExCCAndNP, riskFree } = data;
   const r = riskFree;
   const prm = useMemo(
     () => ({ r, skewB, kappa, pExp, days, fx, netting }),
@@ -391,12 +390,13 @@ function StressLabContent() {
     [legs, eq, unders, effIV, d, dV1M, prm],
   );
 
-  /* ---------- Patrimonio base con/senza netting ---------- */
-  const ptfBaseNetting = useMemo(
-    () => ptfBaseMTM + nettingPatrimonialDelta(legs, unders, fx.USD),
-    [legs, unders, fx.USD, ptfBaseMTM],
-  );
-  const ptfBase = netting ? ptfBaseNetting : ptfBaseMTM;
+  /* ---------- Patrimonio di riferimento = NETTING della dashboard ----------
+   * Il patrimonio (denominatore di P&L% e beta, e valore mostrato) è il NETTING
+   * TOTALE quando il toggle è spento, il NETTING EX CC E NP quando è acceso.
+   * Stessa identica metrica e stesso motore della dashboard, così i numeri
+   * coincidono ovunque. ptfBaseMTM resta disponibile solo per riferimento/debug.
+   */
+  const ptfBase = netting ? nettingExCCAndNP : nettingTotal;
 
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
 
