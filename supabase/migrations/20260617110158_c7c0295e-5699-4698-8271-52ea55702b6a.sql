@@ -1,0 +1,1 @@
+ALTER TABLE public.historical_data ADD COLUMN IF NOT EXISTS snapshot_underlying_prices JSONB NOT NULL DEFAULT '{}'::jsonb;
