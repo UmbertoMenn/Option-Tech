@@ -341,6 +341,21 @@ describe('stressLab — diagonali governate dallo scan TIMS, non Reg-T', () => {
     const bd = m.bd.find((b) => b.u === 'XYZ')!;
     expect(bd.strat).toBeGreaterThan(0); // nudo addebitato (Reg-T), scan non gira
     expect(bd.scan).toBe(0);
+    // su una nuda il Reg-T puro coincide col totale (nessuno scan)
+    expect(m.totRegT).toBeCloseTo(m.total, 6);
+  });
+
+  it('Reg-T puro credita il diagonale come verticale (≠ totale ibrido)', () => {
+    const diag: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'P', K: 85, T: 1.25, exp: '2027-09-18', q: 1, px: 9, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(diag, [], unders, 0, sig, 0, prm);
+    // Reg-T puro applica il credito di spread al diagonale → valore definito > 0,
+    // diverso dal totale ibrido (governato dallo scan TIMS)
+    expect(m.totRegT).toBeGreaterThan(0);
+    expect(m.totRegT).not.toBeCloseTo(m.total, 1);
   });
 });
 

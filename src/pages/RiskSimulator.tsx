@@ -450,6 +450,7 @@ function StressLabContent() {
     // troppo basso rispetto al broker (es. short trattata come coperta, scan azzerato).
     try {
       console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
+        '| Reg-T puro:', Math.round(now.totRegT),
         '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
         '| call coperte da titoli:', now.nCov,
         '| kScan:', kScan, '| ivScan:', ivScan, '| nakedPct:', nakedPct);

@@ -466,6 +466,8 @@ export interface MarginResult {
   total: number;
   totStrat: number;
   totScan: number;
+  /** Margine in Reg-T puro (strategy-based su tutto, diagonali creditati = banca) */
+  totRegT: number;
   bd: MarginBreakdown[];
   /** Numero di gambe call corte coperte da azioni in portafoglio (margine 0) */
   nCov: number;
@@ -574,6 +576,7 @@ export function occMargin(
   let total = 0;
   let totStrat = 0;
   let totScan = 0;
+  let totRegT = 0;
   let nCov = 0;
   const bd: MarginBreakdown[] = [];
 
@@ -646,25 +649,25 @@ export function occMargin(
       ivAtm = eff[atm];
     }
 
-    const stratSide = (cp: OptType): number => {
+    const stratSide = (cp: OptType, regt: boolean): number => {
       if (isFX) return 0;
       const shorts = Sx[cp];
       const longs = Lx[cp];
-      shorts.forEach((x) => (x.nk = nakedMar(x.K, x.px, cp === 'C', S, mult, nakedPct)));
+      shorts.forEach((x) => {
+        x.nk = nakedMar(x.K, x.px, cp === 'C', S, mult, nakedPct);
+        x.rq = undefined; // ricalcolo pulito a ogni passata (ibrido vs Reg-T puro)
+      });
       const sd = shorts.map(() => false);
       const ul = longs.map(() => false);
       if (shorts.length && longs.length) {
         const prs: [number, number, number, number][] = [];
         shorts.forEach((x, si) =>
           longs.forEach((l, li) => {
-            // CREDITO DI SPREAD REG-T SOLO SUI VERTICALI (STESSA SCADENZA).
-            // Un diagonale/calendar (scadenze diverse) NON è un verticale a
-            // rischio definito: non riceve il credito ampiezza−premio del Reg-T,
-            // ma viene margiato dallo SCAN TIMS (che rivaluta la long alla sua
-            // scadenza con prezzo+vol shockati e ne misura la copertura reale,
-            // incluso il rischio di term-structure/vega che il payoff a scadenza
-            // ignora). Tolleranza ~1 settimana per i T arrotondati dai giorni.
-            if (Math.abs(l.T - x.T) > 0.02) return;
+            // Reg-T puro (regt=true): credito di spread a qualunque long con
+            // scadenza ≥ short (verticali E diagonali/calendar) — è la metodologia
+            // della banca. Ibrido (regt=false): credito SOLO ai verticali a stessa
+            // scadenza; i diagonali sono margiati dallo scan TIMS.
+            if (regt ? l.T + 1e-9 < x.T : Math.abs(l.T - x.T) > 0.02) return;
             const rr = pairStrat(x, l, mult);
             const ben = (x.nk ?? 0) - rr;
             if (ben > 0) prs.push([ben, si, li, rr]);
@@ -679,14 +682,13 @@ export function occMargin(
         });
       }
       let out = 0;
-      // Short non appaiata: se sul lato esiste comunque una long (è quindi una
-      // gamba di un diagonale/calendar), NON la si addebita a nudo nel Reg-T — il
-      // margine lo determina lo scan TIMS. La si addebita a nudo solo se sul lato
-      // non c'è alcuna long (short davvero nuda → Reg-T puro).
+      // Short non appaiata: nel Reg-T puro è sempre addebitata a nudo. Nell'ibrido,
+      // se sul lato esiste una long (gamba di diagonale/calendar) NON si addebita a
+      // nudo — il margine lo determina lo scan TIMS; a nudo solo se non c'è long.
       shorts.forEach((x) => {
         if (x.rq !== undefined) out += x.rq;
-        else if (longs.length === 0) out += x.nk ?? 0;
-        // else: diagonale → deferito allo scan TIMS (contributo strategy 0)
+        else if (regt || longs.length === 0) out += x.nk ?? 0;
+        // else (ibrido): diagonale → deferito allo scan TIMS (contributo 0)
       });
       return out / fxUSD;
     };
@@ -757,7 +759,9 @@ export function occMargin(
       return Math.max(-worst, 37.5 * shortCtr) / fxUSD;
     };
 
-    const stratU = stratSide('C') + stratSide('P');
+    const stratU = stratSide('C', false) + stratSide('P', false);
+    // Reg-T puro del nome (diagonali creditati come verticali, = metodologia banca).
+    const stratRegT = stratSide('C', true) + stratSide('P', true);
 
     // Gate ibrido: lo scan TIMS gira SOLO se sul sottostante esiste un VERO spread
     // (short residua + long sullo stesso lato) — verticale, calendar o diagonale.
@@ -778,12 +782,13 @@ export function occMargin(
       total += mar;
       totStrat += strat;
       totScan += scan;
+      totRegT += stratRegT;
       bd.push({ u, mar, strat, scan, R });
     }
   }
 
   bd.sort((a, b) => b.mar - a.mar);
-  return { total, totStrat, totScan, bd, nCov };
+  return { total, totStrat, totScan, totRegT, bd, nCov };
 }
 
 /* ===========================================================================
