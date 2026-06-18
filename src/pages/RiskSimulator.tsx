@@ -6,7 +6,7 @@
  * Questa pagina è SOLO UI.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   LineChart,
   Line,
@@ -168,6 +168,20 @@ function Slider({
   fmt: (v: number) => string;
   accent?: string;
 }) {
+  // Il thumb e l'etichetta seguono uno stato LOCALE → si muovono istantaneamente a
+  // ogni tick di drag. Il valore vero viene propagato al genitore dentro una
+  // transition: il ricalcolo pesante (riprezzo di tutto il portafoglio) è a bassa
+  // priorità e NON blocca lo scorrimento dello slider.
+  const [local, setLocal] = useState(value);
+  const [, startTransition] = useTransition();
+  // sync se il valore cambia dall'esterno (es. reset dei parametri)
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+  const handle = (v: number) => {
+    setLocal(v);
+    startTransition(() => set(v));
+  };
   return (
     <div style={{ marginBottom: 14 }}>
       <div
@@ -192,7 +206,7 @@ function Slider({
           {info}
         </span>
         <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, color: accent }}>
-          {fmt(value)}
+          {fmt(local)}
         </span>
       </div>
       <input
@@ -200,8 +214,8 @@ function Slider({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => set(parseFloat(e.target.value))}
+        value={local}
+        onChange={(e) => handle(parseFloat(e.target.value))}
         style={{ width: '100%', accentColor: accent, height: 4 }}
       />
     </div>
@@ -374,7 +388,7 @@ function StressLabContent() {
   }, [baselineSig]);
 
   /* ---------- Slider scenario ---------- */
-  const [d, setD] = useState(-15);
+  const [d, setD] = useState(-10);
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
   const [days, setDays] = useState(0);
