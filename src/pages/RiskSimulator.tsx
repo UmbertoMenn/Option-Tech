@@ -487,11 +487,20 @@ function StressLabContent() {
     // call coperte dai titoli, range di scan. Serve a capire DOVE il margine risulta
     // troppo basso rispetto al broker (es. short trattata come coperta, scan azzerato).
     try {
+      const undKeys = Object.keys(unders);
+      const spotSum = undKeys.reduce((s, k) => s + (unders[k]?.S || 0), 0);
       console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
         '| Reg-T puro:', Math.round(now.totRegT),
         '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
         '| call coperte da titoli:', now.nCov,
         '| kScan:', kScan, '| ivScan:', ivScan, '| nakedPct:', nakedPct);
+      // Fingerprint degli input: se cambia tra una visita e l'altra a parità di
+      // slider, il problema è nei dati (spot/beta/patrimonio), non nel motore.
+      console.log('[MarginDiag] Input fingerprint:',
+        'sottostanti:', undKeys.length,
+        '| Σspot:', spotSum.toFixed(2),
+        '| patrimonio (ptfBase):', Math.round(ptfBase),
+        '| gambe:', legs.length);
       console.table(
         now.bd.map((b) => ({
           sottostante: b.u,
@@ -526,7 +535,7 @@ function StressLabContent() {
       });
     }
     return { marNow: now, marScen: sc, marCurve: pts, marPnlMTM: cur.totEUR };
-  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman]);
+  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, ptfBase]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {

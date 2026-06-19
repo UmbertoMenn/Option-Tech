@@ -399,20 +399,12 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
   const baselineUnders: StressUnderlyingMap = useMemo(() => {
     const m: StressUnderlyingMap = {};
 
-    // a) Spot dai prezzi underlying (per i derivati)
-    derivatives.forEach((d) => {
-      const key = getOptionUnderlyingKey(d);
-      if (!key) return;
-      // Spot: prima provo dal cache (per nome esatto)
-      const lookupName = d.underlying || d.description;
-      const cached = lookupName ? underlyingPrices[lookupName] : undefined;
-      const spot = cached?.price;
-      if (spot && spot > 0 && !m[key]) {
-        m[key] = { S: spot, beta: betaMap[key] ?? DEFAULT_BETA_UNKNOWN };
-      }
-    });
-
-    // b) Spot dalle posizioni stock/etf (snapshot price o current price)
+    // a) PRIMA lo spot FROZEN dalle posizioni stock/etf/commodity (snapshot_price).
+    //    È stabile (non cambia navigando) e COERENTE con i premi snapshot usati per
+    //    le gambe: così l'IV = impliedVol(premio_snapshot, spot_snapshot) è
+    //    deterministica. Usare lo spot LIVE (underlyingPrices) qui mischiava premio
+    //    frozen + spot live → IV instabile e numeri diversi tra una visita e l'altra
+    //    (il layer prezzi live viene mutato in memoria dalla dashboard).
     [...stocks, ...etfs, ...commodities].forEach((s) => {
       const t = normTick(s.ticker);
       if (!t) return;
@@ -422,7 +414,21 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       }
     });
 
-    // c) EUR/USD: spot = 1/fx.USD * fx.USD? No: lo "spot" di EURUSD è quante USD per 1 EUR = fx.USD
+    // b) POI, SOLO per i sottostanti delle opzioni che NON sono detenuti come titolo
+    //    (nessuno snapshot disponibile), lo spot arriva dal price layer: è l'unica
+    //    fonte per quei nomi.
+    derivatives.forEach((d) => {
+      const key = getOptionUnderlyingKey(d);
+      if (!key || m[key]) return;
+      const lookupName = d.underlying || d.description;
+      const cached = lookupName ? underlyingPrices[lookupName] : undefined;
+      const spot = cached?.price;
+      if (spot && spot > 0) {
+        m[key] = { S: spot, beta: betaMap[key] ?? DEFAULT_BETA_UNKNOWN };
+      }
+    });
+
+    // c) EUR/USD: lo "spot" è quante USD per 1 EUR = fx.USD
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
