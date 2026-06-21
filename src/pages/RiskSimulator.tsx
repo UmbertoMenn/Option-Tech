@@ -225,11 +225,13 @@ function Slider({
 function Panel({
   title,
   info,
+  headerRight,
   children,
   style,
 }: {
   title?: string;
   info?: React.ReactNode;
+  headerRight?: React.ReactNode;
   children: React.ReactNode;
   style?: React.CSSProperties;
 }) {
@@ -258,6 +260,7 @@ function Panel({
         >
           {title}
           {info}
+          {headerRight && <span style={{ marginLeft: 'auto' }}>{headerRight}</span>}
         </div>
       )}
       {children}
@@ -773,7 +776,7 @@ function StressLabContent() {
       <Panel
         title="Patrimonio di riferimento"
         info={
-          <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={440}>
+          <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={360}>
             <b>Patrimonio Totale</b>: netting completo (equity + bond + cash + oro + derivati nettati)
             + Gestione Patrimoniale (cassa + azioni + bond GP). Coincide col netting totale della dashboard.
             <br />
@@ -786,9 +789,76 @@ function StressLabContent() {
             Patrimoniale, che viene anche shockata nello scenario.
             <br />
             <br />
-            Si combina col toggle <b>Netting Ex CC e NP</b>: se attivo, la base di partenza è il netting ex CC
-            e NP invece del netting totale.
+            Si combina col toggle <b>Netting Ex CC e NP</b> qui a fianco: se attivo, la base di partenza è
+            il netting ex CC e NP invece del netting totale.
           </Info>
+        }
+        headerRight={
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              textTransform: 'none',
+              letterSpacing: 0,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: netting ? C.amber : C.mut,
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}
+            >
+              Netting Ex CC e NP
+            </span>
+            <button
+              onClick={() => setNetting(!netting)}
+              style={{
+                width: 42,
+                height: 22,
+                borderRadius: 11,
+                border: `1px solid ${netting ? C.amber : C.border2}`,
+                background: netting ? 'rgba(247,166,0,.3)' : C.panel,
+                cursor: 'pointer',
+                position: 'relative',
+                padding: 0,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: netting ? 22 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: netting ? C.amber : C.mut,
+                  transition: 'left .15s',
+                }}
+              />
+            </button>
+            <Info title="Netting Ex Covered Call e Naked Put" w={360} right>
+              Cambia il <b>criterio di valutazione delle opzioni sotto shock</b>: invece del mark-to-market,
+              valgono il <b>valore intrinseco</b>, in logica "hold to expiry" (il premio è già contabilizzato).
+              La valutazione è <b>direzionale</b>:
+              <br />
+              <br />• shock <b>al ribasso</b>: PUT → intrinseco, CALL → zero
+              <br />• shock <b>al rialzo</b>: CALL → intrinseco, PUT → zero
+              <br />
+              <br />
+              <b>Esempio</b>: put venduta strike 200, premio 5. Crash, spot 190: il MTM sarebbe −20, qui vedi
+              solo −10 = intrinseco (200−190).
+              <br />
+              <br />
+              <b>Attenzione</b>: spariscono il rischio di vol e il vero costo di chiusura anticipata. In un
+              crash il riacquisto delle put avviene al MTM, non all'intrinseco. Con il toggle attivo il beta
+              al ribasso scende: non perché il rischio sia minore, ma perché parte non viene misurata.
+            </Info>
+          </span>
         }
         style={{ marginBottom: 14 }}
       >
@@ -997,71 +1067,6 @@ function StressLabContent() {
               </Info>
             }
           />
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 12,
-              padding: '9px 10px',
-              background: netting ? 'rgba(247,166,0,.08)' : C.panel2,
-              border: `1px solid ${netting ? C.amber : C.border2}`,
-              borderRadius: 7,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                color: netting ? C.amber : C.mut,
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-              }}
-            >
-              Netting Ex CC e NP
-              <Info title="Netting Ex Covered Call e Naked Put" w={380}>
-                Cambia il <b>criterio di valutazione delle gambe corte</b> (call coperte e put vendute):
-                invece del mark-to-market, contano solo per il <b>valore intrinseco</b>. Logica "hold to expiry":
-                il premio è già incassato. <b>Esempio</b>: put venduta strike 200, premio 5. Crash, spot 190, la
-                put quota 25. MTM = −20; qui vedi solo −10 = intrinseco (200−190).
-                <br />
-                <br />
-                <b>Attenzione</b>: il rischio di vol e il vero costo di chiusura anticipata spariscono. Se in un
-                crash devi ricomprare le put vendute, il prezzo è il MTM, non l'intrinseco. Con il toggle attivo
-                il beta al ribasso scende: non perché il rischio sia diminuito, ma perché parte del rischio non
-                viene misurata.
-              </Info>
-            </span>
-            <button
-              onClick={() => setNetting(!netting)}
-              style={{
-                width: 42,
-                height: 22,
-                borderRadius: 11,
-                border: `1px solid ${netting ? C.amber : C.border2}`,
-                background: netting ? 'rgba(247,166,0,.3)' : C.panel,
-                cursor: 'pointer',
-                position: 'relative',
-                padding: 0,
-                flexShrink: 0,
-              }}
-            >
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 2,
-                  left: netting ? 22 : 2,
-                  width: 16,
-                  height: 16,
-                  borderRadius: '50%',
-                  background: netting ? C.amber : C.mut,
-                  transition: 'left .15s',
-                }}
-              />
-            </button>
-          </div>
           <div
             onClick={() => setShowAdv(!showAdv)}
             style={{ ...lbl, cursor: 'pointer', color: C.blue, marginTop: 4 }}
