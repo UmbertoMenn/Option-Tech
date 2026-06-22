@@ -278,7 +278,7 @@ function StressLabContent() {
    * (esposizione equity del Risk Analyzer), coi due sotto-toggle qui sotto. Il patrimonio
    * assoluto "stressato" mostrato è invece sempre patrimonio totale + P&L. */
   // Include le azioni della Gestione Patrimoniale (= toggle GP del Risk Analyzer).
-  const [gpEquity, setGpEquity] = useState(false);
+  const [gpEquity, setGpEquity] = useState(true);
   // Include ETF e commodity/ETC. OFF → esposizione e shock solo su singoli titoli (+ opzioni).
   const [includeEtfCommodity, setIncludeEtfCommodity] = useState(true);
 
