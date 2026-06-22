@@ -12,7 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings, GPHoldingRow } from '@/hooks/useGPHoldings';
-import { resolveUnderlyingIdentity, buildDynamicAliasMap } from '@/lib/tickerIdentity';
+import { resolveUnderlyingIdentity, buildDynamicAliasMap, normalizeText } from '@/lib/tickerIdentity';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
@@ -257,33 +257,61 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     [resolveUnderlying],
   );
 
-  // Alias dinamici dai mappings backend (come il Risk Analyzer), per risolvere i nomi GP.
-  const gpDynamicAliases = useMemo(
-    () => buildDynamicAliasMap(mappingsQuery.data?.mappings ?? []),
-    [mappingsQuery.data],
-  );
+  // Alias dinamici per risolvere i nomi GP: mappings backend + descrizioni dei titoli del
+  // DEPOSITO (così resolveUnderlyingIdentity fa match esatto E per sottosequenza di token,
+  // robusto a piccole differenze tipo "SPA"/"INC"/"ORD" nella descrizione).
+  const gpDynamicAliases = useMemo(() => {
+    const bookRows = [...stocks, ...etfs]
+      .filter((p) => p.ticker && /[A-Za-z]/.test(p.ticker))
+      .map((p) => ({ underlying: p.description, ticker: normTick(p.ticker) }));
+    const mapRows = mappingsQuery.data?.mappings ?? [];
+    return buildDynamicAliasMap([...bookRows, ...mapRows]);
+  }, [stocks, etfs, mappingsQuery.data]);
+
+  // Indice descrizione→ticker dai titoli del DEPOSITO (book): è il match più affidabile per
+  // raggruppare lo stesso strumento detenuto sia in GP sia in deposito (la GP non ha ISIN).
+  const bookTickerByName = useMemo(() => {
+    const m = new Map<string, string>();
+    [...stocks, ...etfs].forEach((p) => {
+      const tk = normTick(p.ticker);
+      if (!tk || !/[A-Z]/.test(tk)) return;
+      const nd = normalizeText(p.description);
+      if (nd && !m.has(nd)) m.set(nd, tk);
+    });
+    return m;
+  }, [stocks, etfs]);
 
   // Risolve il TICKER CANONICO di un'azione GP, così lo stesso strumento detenuto in GP e in
-  // deposito finisce sotto la stessa chiave (si raggruppa) e mostra il ticker, mai un codice
-  // numerico. Catena: ticker_code alfabetico → mappings → descrizione via mappings → alias
-  // canonici (statici + dinamici). Coerente con come book e opzioni risolvono il sottostante.
+  // deposito finisce sotto la stessa chiave (si raggruppa) e mostra SEMPRE il ticker. Catena:
+  //   1) descrizione matchata coi titoli del deposito → ticker del deposito (raggruppa)
+  //   2) ticker_code se è già un ticker alfabetico (via mappings)
+  //   3) descrizione via mappings backend
+  //   4) alias canonici (statici + dinamici)
+  // Se NIENTE risolve, ritorna '' (MAI il codice numerico): a valle si userà la descrizione.
   const resolveGpTicker = useCallback(
     (h: GPHoldingRow): string => {
+      const nd = normalizeText(h.description);
+      const fromBook = nd ? bookTickerByName.get(nd) : undefined;
+      if (fromBook) return fromBook;
+
       const tc = normTick(h.ticker_code);
       if (tc && /[A-Z]/.test(tc)) {
         const viaMap = resolveUnderlying(tc);
         return viaMap && /[A-Z]/.test(viaMap) ? viaMap : tc;
       }
+
       const viaDesc = resolveUnderlying(h.description);
       if (viaDesc && /[A-Z]/.test(viaDesc)) return viaDesc;
+
       const id = resolveUnderlyingIdentity(
         { rawTicker: h.ticker_code, description: h.description },
         { dynamicAliases: gpDynamicAliases },
       );
       if (id.displayTicker && /[A-Z]/.test(id.displayTicker)) return normTick(id.displayTicker);
-      return tc;
+
+      return '';
     },
-    [resolveUnderlying, gpDynamicAliases],
+    [resolveUnderlying, gpDynamicAliases, bookTickerByName],
   );
 
   /* ---------- 3. Tickers che ci servono: derivati + equity ---------- */
