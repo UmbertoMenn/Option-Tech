@@ -718,7 +718,7 @@ function StressLabContent() {
 
       {/* HEADER */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16 }}>
-        <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3, color: C.blue }}>
           STRESS LAB
         </div>
         <div style={{ fontSize: 12, color: C.mut, fontFamily: MONO }}>
