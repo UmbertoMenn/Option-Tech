@@ -358,19 +358,14 @@ export function runScenario(
     const intrAt = (S: number) => (isCall ? Math.max(0, S - l.K) : Math.max(0, l.K - S));
 
     if (netting) {
-      // Ex CC e NP: intrinseco sul lato "vivo" per la direzione, zero sull'altro.
+      // Ex CC e NP (hold to expiry): OGNI gamba vale il suo INTRINSECO allo spot, base e shock.
+      // Niente "zero direzionale": una covered call ITM, scendendo, guadagna intrinseco e
+      // compensa le azioni FINCHÉ si resta sopra lo strike; si comincia a perdere solo sotto
+      // lo strike (dove l'intrinseco della call è 0). L'OTM dà intrinseco 0 in modo naturale.
       netted = true;
       atIntrinsic = true;
-      const up = d > 0;
-      const legLive = up ? isCall : !isCall;
-      if (legLive) {
-        p0eff = intrAt(S0);
-        p1eff = intrAt(S1);
-      } else {
-        // lato spento: P&L nullo (incasso/spesa già contabilizzati nel base dashboard)
-        p0eff = 0;
-        p1eff = 0;
-      }
+      p0eff = intrAt(S0);
+      p1eff = intrAt(S1);
     } else if (l.fl) {
       // Prezzo di riferimento (mid/bid) sotto l'intrinseco (deep-ITM americana): si quota
       // ESATTAMENTE all'intrinseco, sia long sia short. Delta 1, niente vega/gamma fittizia.

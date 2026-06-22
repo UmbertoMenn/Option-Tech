@@ -654,7 +654,7 @@ function StressLabContent() {
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
-      sub: netting ? '⚠ netting attivo: intrinseco direzionale (giù PUT · su CALL)' : 'full revaluation sticky-delta',
+      sub: netting ? '⚠ netting attivo: opzioni a intrinseco (hold to expiry)' : 'full revaluation sticky-delta',
     },
   ];
 
@@ -719,7 +719,7 @@ function StressLabContent() {
         <div style={{ fontSize: 12, color: C.mut, fontFamily: MONO }}>
           {legs.length} gambe opzioni · {eq.length} titoli · {fmtEUR(ptfBase)}
           {netting ? (
-            <span style={{ color: C.amber }}> (netting: intrinseco direzionale)</span>
+            <span style={{ color: C.amber }}> (netting: opzioni a intrinseco)</span>
           ) : (
             ''
           )}
@@ -846,20 +846,22 @@ function StressLabContent() {
             </button>
             <Info title="Netting Ex Covered Call e Naked Put" w={360} right>
               Cambia il <b>criterio di valutazione delle opzioni sotto shock</b>: invece del mark-to-market,
-              valgono il <b>valore intrinseco</b>, in logica "hold to expiry" (il premio è già contabilizzato).
-              La valutazione è <b>direzionale</b>:
-              <br />
-              <br />• shock <b>al ribasso</b>: PUT → intrinseco, CALL → zero
-              <br />• shock <b>al rialzo</b>: CALL → intrinseco, PUT → zero
+              ogni gamba vale il suo <b>valore intrinseco</b> allo spot, in logica "hold to expiry" (il premio
+              è già contabilizzato). Le opzioni OTM valgono 0 in modo naturale; quelle ITM seguono l'intrinseco.
               <br />
               <br />
-              <b>Esempio</b>: put venduta strike 200, premio 5. Crash, spot 190: il MTM sarebbe −20, qui vedi
+              <b>Covered call ITM</b>: 100 azioni a 500, call venduta strike 350. Le azioni scendono a 400: tu
+              non perdi nulla, perché sei sopra lo strike → azioni −100, call +100 (intrinseco 150→50) = 0.
+              Inizi a perdere solo <b>sotto lo strike</b> (350), dove la call vale 0.
+              <br />
+              <br />
+              <b>Naked put</b>: put venduta strike 200, premio 5. Crash, spot 190: il MTM sarebbe −20, qui vedi
               solo −10 = intrinseco (200−190).
               <br />
               <br />
               <b>Attenzione</b>: spariscono il rischio di vol e il vero costo di chiusura anticipata. In un
-              crash il riacquisto delle put avviene al MTM, non all'intrinseco. Con il toggle attivo il beta
-              al ribasso scende: non perché il rischio sia minore, ma perché parte non viene misurata.
+              crash il riacquisto avviene al MTM, non all'intrinseco. Con il toggle attivo il beta al ribasso
+              scende: non perché il rischio sia minore, ma perché parte non viene misurata.
             </Info>
           </span>
         }

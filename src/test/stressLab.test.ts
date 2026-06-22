@@ -463,7 +463,7 @@ describe('stressLab — pricing a intrinseco (gambe fl)', () => {
   });
 });
 
-describe('stressLab — netting Ex CC e NP (intrinseco direzionale)', () => {
+describe('stressLab — netting Ex CC e NP (intrinseco hold-to-expiry)', () => {
   // 4 gambe ATM sullo stesso sottostante (beta=1): short call, long put, long call, short put.
   const legs: StressLeg[] = [
     { u: 'X', cp: 'C', K: 100, T: 0.5, exp: '2026-12-18', q: -1, px: 8, fl: false, mult: 100, nm: 'X', iv: 0.3 }, // 0: CALL venduta
@@ -509,5 +509,32 @@ describe('stressLab — netting Ex CC e NP (intrinseco direzionale)', () => {
   it('senza netting le stesse gambe NON sono a intrinseco', () => {
     const res = runScenario(legs, [], unders, effIV, -10, 0, baseParams);
     expect(res.rows.every((r) => !r.atIntrinsic)).toBe(true);
+  });
+
+  it('covered call ITM: compensa sopra lo strike, perde solo sotto', () => {
+    // 100 azioni a 500, call venduta strike 350 (deep ITM). fx=1 per numeri puliti.
+    const eq: StressEquity[] = [
+      { nm: 'Y', ccy: 'USD', px: 500, q: 100, eur: 50000, beta: 1, tick: 'Y' },
+    ];
+    const cc: StressLeg[] = [
+      { u: 'Y', cp: 'C', K: 350, T: 0.3, exp: '2026-12-18', q: -1, px: 155, fl: false, mult: 100, nm: 'Y', iv: 0.3 },
+    ];
+    const un: StressUnderlyingMap = { Y: { S: 500, beta: 1 } };
+    const eff = effIVMap(cc);
+    const prm: ScenarioParams = { ...baseParams, netting: true, fx: { USD: 1, HKD: 9 } };
+
+    // −20%: 500 → 400, ancora SOPRA lo strike 350 → compensazione totale, P&L ≈ 0.
+    const above = runScenario(cc, eq, un, eff, -20, 0, prm);
+    // azioni −10000, call +10000 (intrinseco 150 → 50)
+    expect(above.eqEUR).toBeCloseTo(-10000, 4);
+    expect(above.optEUR).toBeCloseTo(10000, 4);
+    expect(above.totEUR).toBeCloseTo(0, 4);
+
+    // −40%: 500 → 300, SOTTO lo strike 350 → si perde dallo strike in giù.
+    const below = runScenario(cc, eq, un, eff, -40, 0, prm);
+    expect(below.eqEUR).toBeCloseTo(-20000, 4);
+    expect(below.optEUR).toBeCloseTo(15000, 4); // intrinseco 150 → 0
+    // perdita = (strike − spot)·azioni = (350 − 300)·100 = 5000
+    expect(below.totEUR).toBeCloseTo(-5000, 4);
   });
 });
