@@ -99,6 +99,27 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     enabled: isAdminMode && !!selectedId && !isAnyAggregatedId(selectedId),
   });
 
+  // Admin-only: most recently updated CLIENT portfolio (escluso quello dell'admin),
+  // usato come landing iniziale all'apertura dell'app per gli admin.
+  const latestClientPortfolioQuery = useQuery({
+    queryKey: ['admin-latest-client-portfolio', user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('id, user_id, last_updated, created_at')
+        .neq('user_id', user.id)
+        .order('last_updated', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { id: string; user_id: string } | null;
+    },
+    enabled: !!user && isAdmin,
+    staleTime: 60000,
+  });
+
   const portfolios = portfoliosQuery.data || [];
 
   // Reset quando user cambia (logout)
