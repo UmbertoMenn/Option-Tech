@@ -1271,12 +1271,21 @@ function StressLabContent() {
                   <br />• <b>Venditore di PUT</b>: la perdita è misurata <b>solo sull'intrinseco</b>, senza il
                   rigonfiamento di volatilità e time-value che un crash produce davvero → <b>delta/beta si
                   riduce</b>. (Attenzione: è un effetto di misura, non un rischio minore reale.)
+                  <br />
+                  <br />
+                  Il valore principale usa come denominatore l'<b>Esposizione Potenziale in Equity</b>. Sotto,
+                  in piccolo, lo stesso beta/delta riferito al <b>patrimonio totale</b> (netting completo della
+                  dashboard): è la base corretta per ponderare il rendimento del benchmark sull'equity line
+                  della dashboard.
                 </Info>
               </div>
               {(() => {
                 const headline = shockMode === 'market' ? betaScen : deltaScen;
                 const refDn = shockMode === 'market' ? betaDown : deltaDown;
                 const refUp = shockMode === 'market' ? betaUp : deltaUp;
+                const denomTot = data.nettingTotalRaw;
+                const scale = denomTot && ptfBase ? ptfBase / denomTot : 0;
+                const headlineTot = headline * scale;
                 return (
                   <>
                     <div
@@ -1298,6 +1307,9 @@ function StressLabContent() {
                       rif. <span style={{ color: C.dn }}>{fmtN(refDn, 2)}↓</span> ·{' '}
                       <span style={{ color: C.up }}>{fmtN(refUp, 2)}↑</span>{' '}
                       <span style={{ fontSize: 10 }}>(∓10%)</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
+                      {shockMode === 'market' ? 'β' : 'δ'} vs patrimonio totale: {fmtN(headlineTot, 2)}
                     </div>
                   </>
                 );
