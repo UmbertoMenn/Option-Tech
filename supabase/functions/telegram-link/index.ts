@@ -32,8 +32,20 @@ serve(async (req: Request): Promise<Response> => {
 
     // Handle Telegram webhook updates
     if (req.method === "POST" && action === "webhook") {
+      // Validate Telegram secret token to confirm origin
+      const expectedSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
+      const providedSecret = req.headers.get("x-telegram-bot-api-secret-token");
+      if (!expectedSecret || providedSecret !== expectedSecret) {
+        console.warn("Rejected Telegram webhook: invalid secret token");
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       const update = await req.json();
       console.log("Telegram webhook update:", update);
+
 
       if (update.message?.text) {
         const chatId = update.message.chat.id.toString();
