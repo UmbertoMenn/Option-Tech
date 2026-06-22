@@ -29,7 +29,7 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
       {!isDashboard && (
         <Button variant="outline" size="sm" asChild className="shrink-0">
           <Link to="/">
-            <TrendingUp className="w-4 h-4" />
+            <LayoutDashboard className="w-4 h-4" />
             <span className="ml-2">Dashboard</span>
           </Link>
         </Button>
