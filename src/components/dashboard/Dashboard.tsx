@@ -111,7 +111,7 @@ export function Dashboard() {
 
   // Centralized state for unified carousel
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('base');
+  const [viewMode, setViewMode] = useState<ViewMode>('netting_total');
   
   // Historical data hook now receives viewMode for synthetic deposits calculation
   const { 
