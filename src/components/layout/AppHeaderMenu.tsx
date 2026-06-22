@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart } from 'lucide-react';
+import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 
@@ -53,6 +53,10 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
               <DropdownMenuSeparator />
             </>
           )}
+          <DropdownMenuItem onClick={() => navigate('/')}>
+            <LayoutDashboard className="w-4 h-4 mr-2" />
+            Dashboard
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/derivatives')}>
             <TrendingUp className="w-4 h-4 mr-2" />
             Strategie Derivati
