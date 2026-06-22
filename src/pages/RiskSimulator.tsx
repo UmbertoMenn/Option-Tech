@@ -1330,44 +1330,44 @@ function StressLabContent() {
               style={{
                 padding: '14px 16px',
                 border: `1px solid ${
-                  ptfBaseMTM > 0 &&
-                  marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1) >
-                    (marNow.total / ptfBaseMTM) * 1.2
+                  bondCashBase > 0 &&
+                  marScen.total / Math.max(bondCashBase, 1) >
+                    (marNow.total / bondCashBase) * 1.2
                     ? C.dn
                     : C.border
                 }`,
               }}
             >
               <div style={{ ...lbl, display: 'flex', alignItems: 'center' }}>
-                Incidenza patrimonio
+                Incidenza su bond+cash
                 <Info title="La metrica del margin call" w={360} right>
-                  Margine richiesto / valore del portafoglio a mark-to-market. È il rapporto che fa scattare la
-                  richiesta di reintegro: nel crash il numeratore cresce e il denominatore cala, quindi
-                  l'incidenza accelera verso l'alto.
+                  Margine richiesto / valore di bond + cash (escluso cash GP). È il rapporto che fa scattare la
+                  richiesta di reintegro: nel crash il numeratore cresce mentre bond e cash restano stabili,
+                  quindi l'incidenza accelera verso l'alto.
                 </Info>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, margin: '6px 0 2px' }}>
                 <span style={{ color: C.mut, fontSize: 15 }}>
-                  {ptfBaseMTM > 0 ? fmtN((marNow.total / ptfBaseMTM) * 100, 0) : '—'}% →{' '}
+                  {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
                 </span>
                 <span
                   style={{
                     color:
-                      ptfBaseMTM > 0 &&
-                      marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1) >
-                        (marNow.total / ptfBaseMTM) * 1.2
+                      bondCashBase > 0 &&
+                      marScen.total / Math.max(bondCashBase, 1) >
+                        (marNow.total / bondCashBase) * 1.2
                         ? C.dn
                         : C.text,
                   }}
                 >
-                  {ptfBaseMTM > 0
-                    ? fmtN((marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1)) * 100, 0)
+                  {bondCashBase > 0
+                    ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
                     : '—'}
                   %
                 </span>
               </div>
               <div style={{ fontSize: 10.5, color: C.mut }}>
-                margine / patrimonio (MTM) · soglia margin call
+                margine / bond + cash · soglia margin call
               </div>
             </Panel>
           </div>
