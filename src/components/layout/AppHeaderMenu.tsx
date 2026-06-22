@@ -53,6 +53,10 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
               <DropdownMenuSeparator />
             </>
           )}
+          <DropdownMenuItem onClick={() => navigate('/')}>
+            <LayoutDashboard className="w-4 h-4 mr-2" />
+            Dashboard
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/derivatives')}>
             <TrendingUp className="w-4 h-4 mr-2" />
             Strategie Derivati
