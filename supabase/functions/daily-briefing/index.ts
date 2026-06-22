@@ -1,8 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "npm:resend@2.0.0";
-import { isCronAuthorized, getAuthenticatedUserId, isAdminUser } from "../_shared/cronAuth.ts";
-
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -735,24 +733,8 @@ serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Auth gate: allow shared cron secret OR an authenticated admin JWT.
-  const isCron = await isCronAuthorized(req);
-  let isAdmin = false;
-  if (!isCron) {
-    const uid = await getAuthenticatedUserId(req);
-    isAdmin = uid ? await isAdminUser(uid) : false;
-  }
-  if (!isCron && !isAdmin) {
-    return new Response(
-      JSON.stringify({ error: "Unauthorized" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
-
   try {
     const body = await req.json().catch(() => ({}));
-    // `force` is only honored for admins or cron; both pass the gate above.
     const force = body?.force === true;
 
     if (!force && !isItalian11AM()) {
@@ -762,7 +744,6 @@ serve(async (req: Request): Promise<Response> => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,

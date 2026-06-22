@@ -1,7 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { isCronAuthorized, getAuthenticatedUserId, isAdminUser } from "../_shared/cronAuth.ts";
-
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -261,22 +259,6 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-
-  // Auth gate: allow shared cron secret OR an authenticated admin JWT.
-  const isCron = await isCronAuthorized(req);
-  let isAdmin = false;
-  if (!isCron) {
-    const uid = await getAuthenticatedUserId(req);
-    isAdmin = uid ? await isAdminUser(uid) : false;
-  }
-  if (!isCron && !isAdmin) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
-  }
-
-
 
   try {
     // Check if US market is currently open (exact ET hours with DST awareness)

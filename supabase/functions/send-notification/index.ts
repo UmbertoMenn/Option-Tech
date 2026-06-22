@@ -1,8 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "npm:resend@2.0.0";
-import { isCronAuthorized } from "../_shared/cronAuth.ts";
-
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -281,16 +279,6 @@ serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
-
-  // Internal-only endpoint: require shared cron secret (vault).
-  if (!(await isCronAuthorized(req))) {
-    return new Response(
-      JSON.stringify({ error: "Unauthorized" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
-
 
   try {
     const supabase = createClient(

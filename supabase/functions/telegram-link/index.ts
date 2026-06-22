@@ -32,20 +32,8 @@ serve(async (req: Request): Promise<Response> => {
 
     // Handle Telegram webhook updates
     if (req.method === "POST" && action === "webhook") {
-      // Validate Telegram secret token to confirm origin
-      const expectedSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
-      const providedSecret = req.headers.get("x-telegram-bot-api-secret-token");
-      if (!expectedSecret || providedSecret !== expectedSecret) {
-        console.warn("Rejected Telegram webhook: invalid secret token");
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
       const update = await req.json();
       console.log("Telegram webhook update:", update);
-
 
       if (update.message?.text) {
         const chatId = update.message.chat.id.toString();
@@ -202,72 +190,10 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // Handle register-webhook action (admin-only): (re)registers the Telegram webhook
-    // with the secret token so Telegram itself signs every webhook delivery.
-    if (req.method === "POST" && action === "register-webhook") {
-      const authHeader = req.headers.get("Authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData } = await supabase.auth.getClaims(token);
-      const uid = claimsData?.claims?.sub as string | undefined;
-      if (!uid) {
-        return new Response(
-          JSON.stringify({ error: "Invalid token" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      const { data: roleRow } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", uid)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (!roleRow) {
-        return new Response(
-          JSON.stringify({ error: "Forbidden" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
-      const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
-      const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
-      if (!botToken || !webhookSecret) {
-        return new Response(
-          JSON.stringify({ error: "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const webhookUrl = `${supabaseUrl}/functions/v1/telegram-link/webhook`;
-      const tgRes = await fetch(
-        `https://api.telegram.org/bot${botToken}/setWebhook`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: webhookUrl,
-            secret_token: webhookSecret,
-            allowed_updates: ["message"],
-          }),
-        },
-      );
-      const tgJson = await tgRes.json();
-      return new Response(
-        JSON.stringify({ ok: tgRes.ok, telegram: tgJson, webhook_url: webhookUrl }),
-        { status: tgRes.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
     return new Response(
       JSON.stringify({ error: "Invalid action" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Handler error:", errorMessage);

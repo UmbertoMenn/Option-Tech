@@ -1,7 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { isCronAuthorized, getAuthenticatedUserId } from "../_shared/cronAuth.ts";
-
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -272,17 +270,7 @@ const MONTH_MS = 30 * DAY_MS;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-
-  // Auth gate: allow shared cron secret OR a valid authenticated JWT.
-  if (!(await isCronAuthorized(req)) && !(await getAuthenticatedUserId(req))) {
-    return new Response(
-      JSON.stringify({ error: "Unauthorized" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-
   try {
-
     const { ticker: rawTicker, force } = await req.json();
     const ticker = String(rawTicker || "").trim().toUpperCase();
 
