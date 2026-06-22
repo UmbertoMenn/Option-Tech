@@ -735,46 +735,20 @@ serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Auth gate: allow CRON_SECRET header OR an authenticated admin JWT.
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  const providedSecret = req.headers.get("x-cron-secret");
-  const isCron = !!cronSecret && providedSecret === cronSecret;
-
+  // Auth gate: allow shared cron secret OR an authenticated admin JWT.
+  const isCron = await isCronAuthorized(req);
   let isAdmin = false;
-  const authHeader = req.headers.get("Authorization");
-  if (!isCron && authHeader?.startsWith("Bearer ")) {
-    try {
-      const sbAuth = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_ANON_KEY")!,
-      );
-      const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData } = await sbAuth.auth.getClaims(token);
-      const uid = claimsData?.claims?.sub;
-      if (uid) {
-        const sbAdmin = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        );
-        const { data: roleRow } = await sbAdmin
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", uid)
-          .eq("role", "admin")
-          .maybeSingle();
-        isAdmin = !!roleRow;
-      }
-    } catch (_) {
-      isAdmin = false;
-    }
+  if (!isCron) {
+    const uid = await getAuthenticatedUserId(req);
+    isAdmin = uid ? await isAdminUser(uid) : false;
   }
-
   if (!isCron && !isAdmin) {
     return new Response(
       JSON.stringify({ error: "Unauthorized" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
+
 
   try {
     const body = await req.json().catch(() => ({}));
