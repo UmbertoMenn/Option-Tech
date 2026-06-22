@@ -13,7 +13,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   netting_total: 'Netting Totale',
 };
 
-const VIEWS: ViewMode[] = ['base', 'netting_ex_cc_np', 'netting_total'];
+const VIEWS: ViewMode[] = ['netting_total', 'netting_ex_cc_np', 'base'];
 
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   return (
