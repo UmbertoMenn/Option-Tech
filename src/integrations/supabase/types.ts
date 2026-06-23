@@ -1073,41 +1073,6 @@ export type Database = {
         }
         Relationships: []
       }
-      put_roll_flags: {
-        Row: {
-          created_at: string | null
-          id: string
-          portfolio_id: string
-          roll_up: boolean
-          strategy_key: string
-          updated_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          portfolio_id: string
-          roll_up?: boolean
-          strategy_key: string
-          updated_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          portfolio_id?: string
-          roll_up?: boolean
-          strategy_key?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "put_roll_flags_portfolio_id_fkey"
-            columns: ["portfolio_id"]
-            isOneToOne: false
-            referencedRelation: "portfolios"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       strategy_cache: {
         Row: {
           bought_call_strike: number | null
@@ -1394,8 +1359,6 @@ export type Database = {
         | "distance_naked_put"
         | "action_naked_put_itm"
         | "action_covered_call_itm"
-        | "action_put_roll_up_otm"
-        | "distance_put_roll_up"
         | "action_dd_ic_oor"
         | "action_strategy_oob"
         | "action_leap_gain_20"
@@ -1545,8 +1508,6 @@ export const Constants = {
         "distance_naked_put",
         "action_naked_put_itm",
         "action_covered_call_itm",
-        "action_put_roll_up_otm",
-        "distance_put_roll_up",
         "action_dd_ic_oor",
         "action_strategy_oob",
         "action_leap_gain_20",
