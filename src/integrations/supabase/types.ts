@@ -1394,7 +1394,7 @@ export type Database = {
         | "distance_naked_put"
         | "action_naked_put_itm"
         | "action_covered_call_itm"
-        | "action_put_roll_up_itm"
+        | "action_put_roll_up_otm"
         | "distance_put_roll_up"
         | "action_dd_ic_oor"
         | "action_strategy_oob"
@@ -1545,7 +1545,7 @@ export const Constants = {
         "distance_naked_put",
         "action_naked_put_itm",
         "action_covered_call_itm",
-        "action_put_roll_up_itm",
+        "action_put_roll_up_otm",
         "distance_put_roll_up",
         "action_dd_ic_oor",
         "action_strategy_oob",

@@ -76,16 +76,16 @@ describe('roll-up gating decision', () => {
   function pickAlertTypes(strategyKey: string, rollUpKeys: Set<string>) {
     const isRollUp = rollUpKeys.has(strategyKey);
     return {
-      itm: isRollUp ? 'action_put_roll_up_itm' : 'action_naked_put_itm',
+      action: isRollUp ? 'action_put_roll_up_otm' : 'action_naked_put_itm',
       dist: isRollUp ? 'distance_put_roll_up' : 'distance_naked_put',
     };
   }
 
-  it('flagged put → roll-up alert types', () => {
+  it('flagged put → roll-up alert types (critical on OTM)', () => {
     const key = nakedPutKeyForPosition(makePut());
     const flags = new Set([key]);
     expect(pickAlertTypes(key, flags)).toEqual({
-      itm: 'action_put_roll_up_itm',
+      action: 'action_put_roll_up_otm',
       dist: 'distance_put_roll_up',
     });
   });
@@ -93,7 +93,7 @@ describe('roll-up gating decision', () => {
   it('un-flagged put → standard naked-put alert types', () => {
     const key = nakedPutKeyForPosition(makePut());
     expect(pickAlertTypes(key, new Set())).toEqual({
-      itm: 'action_naked_put_itm',
+      action: 'action_naked_put_itm',
       dist: 'distance_naked_put',
     });
   });

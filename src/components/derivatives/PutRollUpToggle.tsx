@@ -52,10 +52,10 @@ export function PutRollUpToggle({ option, className }: PutRollUpToggleProps) {
               <TrendingUp className="w-3 h-3" /> Roll-up
             </Label>
           </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs max-w-[240px]">
-            PUT da rollare al rialzo. Se attivo, ricevi l'alert dedicato (ITM e
-            avvicinamento allo strike) e non più gli alert Naked Put standard per
-            questa put.
+          <TooltipContent side="top" className="text-xs max-w-[260px]">
+            PUT ITM da rollare al rialzo (come una covered call): avviso quando il
+            titolo sale e si avvicina allo strike, e avviso critico quando lo
+            supera (PUT OTM). Sostituisce gli alert Naked Put standard per questa put.
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

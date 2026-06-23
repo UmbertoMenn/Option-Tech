@@ -14,7 +14,7 @@ export const ALERT_TYPES = {
   ACTION_COVERED_CALL_ITM: 'action_covered_call_itm',
   // PUT da rollare al rialzo (gated by put_roll_flags) — replace the naked-put
   // alerts for flagged puts
-  ACTION_PUT_ROLL_UP_ITM: 'action_put_roll_up_itm',
+  ACTION_PUT_ROLL_UP_OTM: 'action_put_roll_up_otm',
   DISTANCE_PUT_ROLL_UP: 'distance_put_roll_up',
   ACTION_DD_IC_OOR: 'action_dd_ic_oor',
   ACTION_STRATEGY_OOB: 'action_strategy_oob',
@@ -50,7 +50,7 @@ export const DISTANCE_ALERT_TYPES: AlertType[] = [
 export const ACTION_ALERT_TYPES: AlertType[] = [
   ALERT_TYPES.ACTION_NAKED_PUT_ITM,
   ALERT_TYPES.ACTION_COVERED_CALL_ITM,
-  ALERT_TYPES.ACTION_PUT_ROLL_UP_ITM,
+  ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM,
   ALERT_TYPES.ACTION_DD_IC_OOR,
   ALERT_TYPES.ACTION_STRATEGY_OOB,
 ];
@@ -81,7 +81,7 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   [ALERT_TYPES.DISTANCE_NAKED_PUT]: 'Naked Put',
   [ALERT_TYPES.ACTION_NAKED_PUT_ITM]: 'Naked Put ITM',
   [ALERT_TYPES.ACTION_COVERED_CALL_ITM]: 'Covered Call ITM',
-  [ALERT_TYPES.ACTION_PUT_ROLL_UP_ITM]: 'PUT da rollare al rialzo — ITM',
+  [ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM]: 'PUT da rollare al rialzo — OTM (titolo sopra strike)',
   [ALERT_TYPES.DISTANCE_PUT_ROLL_UP]: 'PUT da rollare al rialzo — avvicinamento',
   [ALERT_TYPES.ACTION_DD_IC_OOR]: 'DD/IC Out of Range',
   [ALERT_TYPES.ACTION_STRATEGY_OOB]: 'Strategie OOB',

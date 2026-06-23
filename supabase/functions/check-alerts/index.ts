@@ -18,7 +18,7 @@ const ALERT_TYPES = {
   DISTANCE_NAKED_PUT: 'distance_naked_put',
   ACTION_NAKED_PUT_ITM: 'action_naked_put_itm',
   ACTION_COVERED_CALL_ITM: 'action_covered_call_itm',
-  ACTION_PUT_ROLL_UP_ITM: 'action_put_roll_up_itm',
+  ACTION_PUT_ROLL_UP_OTM: 'action_put_roll_up_otm',
   DISTANCE_PUT_ROLL_UP: 'distance_put_roll_up',
   ACTION_DD_IC_OOR: 'action_dd_ic_oor',
   ACTION_STRATEGY_OOB: 'action_strategy_oob',
@@ -584,125 +584,226 @@ serve(async (req) => {
             const soldPutStrike = strategy.sold_put_strike || 0;
             if (soldPutStrike <= 0) continue;
             
-            // Flagged "da rollare al rialzo"? → dedicated roll-up alerts,
-            // and the standard naked-put alerts are suppressed for this put.
             const isRollUp = rollUpKeys.has(strategy.strategy_key);
-            const itmAlertType = isRollUp ? ALERT_TYPES.ACTION_PUT_ROLL_UP_ITM : ALERT_TYPES.ACTION_NAKED_PUT_ITM;
-            const distAlertType = isRollUp ? ALERT_TYPES.DISTANCE_PUT_ROLL_UP : ALERT_TYPES.DISTANCE_NAKED_PUT;
-            const itmKeyPrefix = isRollUp ? 'pru_itm_' : 'np_itm_';
-            const distKeyPrefix = isRollUp ? 'pru_dist_' : 'np_dist_';
-            const strategyLabel = isRollUp ? 'PUT roll-up' : 'Naked Put';
-            const itmMessage = isRollUp
-              ? `La PUT ${ticker} è ITM — da rollare al rialzo`
-              : `La Naked Put è ITM`;
-            const distMessage = isRollUp
-              ? `${ticker} si avvicina allo strike della PUT — valuta il roll al rialzo`
-              : `${ticker} si avvicina allo strike della put venduta`;
             
-            // Calculate ITM state FIRST
-            const isITM = underlyingPrice < soldPutStrike;
-            
-            // ITM Alert
-            const itmConfig = getEffectiveConfig(configs || [], itmAlertType, ticker);
-            if (itmConfig.enabled) {
-              const positionKey = `${itmKeyPrefix}${strategy.strategy_key}`;
-              const stateKey = `${positionKey}:${itmAlertType}`;
-              const currentState = statesMap.get(stateKey);
+            if (isRollUp) {
+              // ---- PUT da rollare al rialzo: geometria "covered call" sullo
+              // strike della put. Il titolo SALE verso lo strike.
+              //   prezzo > strike  → PUT OTM  → CRITICAL (rolla su adesso)
+              //   prezzo <= strike e vicino (da sotto) → WARNING (si avvicina)
+              //   PUT ITM e lontana → nessun avviso
+              // Sostituisce gli alert Naked Put standard per questa put.
+              const isOTM = underlyingPrice > soldPutStrike;
               
-              if (isITM && (!currentState || currentState.current_state === 'safe')) {
-                if (cooldownPassed(currentState?.last_alerted_at || null, itmConfig.cooldown_minutes)) {
-                  const message = itmMessage;
-                  
-                  await supabase.from('alerts').insert({
-                    user_id: userId,
-                    portfolio_id: portfolioId,
-                    alert_type: itmAlertType,
-                    ticker,
-                    strategy_type: strategyLabel,
-                    direction: 'down',
-                    current_value: underlyingPrice,
-                    threshold_value: soldPutStrike,
-                    strike_price: soldPutStrike,
-                    underlying_price: underlyingPrice,
-                    message,
-                    severity: 'critical',
-                    option_type: 'put',
-                    option_expiry: strategy.sold_put_expiry,
-                  });
-                  totalAlertsCreated++;
-                  
-                  await supabase.from('alert_states').upsert({
-                    user_id: userId,
-                    portfolio_id: portfolioId,
-                    position_key: positionKey,
-                    alert_type: itmAlertType,
-                    current_state: 'alerted',
-                    last_alerted_at: new Date().toISOString(),
-                  }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
-                }
-              } else if (!isITM && currentState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', currentState.id);
+              // CRITICAL Alert (PUT OTM)
+              const otmConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM, ticker);
+              if (otmConfig.enabled) {
+                const positionKey = `pru_otm_${strategy.strategy_key}`;
+                const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM}`;
+                const currentState = statesMap.get(stateKey);
                 
-                // Pre-set distance state to 'alerted' to suppress spurious alert
-                // during recovery from ITM side
-                const distPositionKey = `${distKeyPrefix}${strategy.strategy_key}`;
-                await supabase.from('alert_states').upsert({
-                  user_id: userId,
-                  portfolio_id: portfolioId,
-                  position_key: distPositionKey,
-                  alert_type: distAlertType,
-                  current_state: 'alerted',
-                  last_alerted_at: new Date().toISOString(),
-                }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
-              }
-            }
-            
-            // Distance Alert - SUPPRESSED if already ITM
-            const distConfig = getEffectiveConfig(configs || [], distAlertType, ticker);
-            if (distConfig.enabled && !isITM) {
-              const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
-              const isInDanger = distancePct < distConfig.threshold_pct;
-              const positionKey = `${distKeyPrefix}${strategy.strategy_key}`;
-              const stateKey = `${positionKey}:${distAlertType}`;
-              const currentState = statesMap.get(stateKey);
-              
-              if (isInDanger && (!currentState || currentState.current_state === 'safe')) {
-                if (cooldownPassed(currentState?.last_alerted_at || null, distConfig.cooldown_minutes)) {
-                  const message = distMessage;
+                if (isOTM && (!currentState || currentState.current_state === 'safe')) {
+                  if (cooldownPassed(currentState?.last_alerted_at || null, otmConfig.cooldown_minutes)) {
+                    const message = `La PUT ${ticker} è OTM — rollare al rialzo`;
+                    
+                    await supabase.from('alerts').insert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      alert_type: ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM,
+                      ticker,
+                      strategy_type: 'PUT roll-up',
+                      direction: 'up',
+                      current_value: underlyingPrice,
+                      threshold_value: soldPutStrike,
+                      strike_price: soldPutStrike,
+                      underlying_price: underlyingPrice,
+                      message,
+                      severity: 'critical',
+                      option_type: 'put',
+                      option_expiry: strategy.sold_put_expiry,
+                    });
+                    totalAlertsCreated++;
+                    
+                    await supabase.from('alert_states').upsert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      position_key: positionKey,
+                      alert_type: ALERT_TYPES.ACTION_PUT_ROLL_UP_OTM,
+                      current_state: 'alerted',
+                      last_alerted_at: new Date().toISOString(),
+                    }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                  }
+                } else if (!isOTM && currentState?.current_state === 'alerted') {
+                  await supabase.from('alert_states')
+                    .update({ current_state: 'safe' })
+                    .eq('id', currentState.id);
                   
-                  await supabase.from('alerts').insert({
-                    user_id: userId,
-                    portfolio_id: portfolioId,
-                    alert_type: distAlertType,
-                    ticker,
-                    strategy_type: strategyLabel,
-                    direction: 'down',
-                    current_value: distancePct,
-                    threshold_value: distConfig.threshold_pct,
-                    strike_price: soldPutStrike,
-                    underlying_price: underlyingPrice,
-                    message,
-                    severity: 'warning',
-                    option_type: 'put',
-                    option_expiry: strategy.sold_put_expiry,
-                  });
-                  totalAlertsCreated++;
-                  
+                  // Pre-set distance state to 'alerted' to suppress spurious
+                  // approach alert while recovering from the OTM side (titolo
+                  // che ridiscende sotto lo strike).
+                  const distPositionKey = `pru_dist_${strategy.strategy_key}`;
                   await supabase.from('alert_states').upsert({
                     user_id: userId,
                     portfolio_id: portfolioId,
-                    position_key: positionKey,
-                    alert_type: distAlertType,
+                    position_key: distPositionKey,
+                    alert_type: ALERT_TYPES.DISTANCE_PUT_ROLL_UP,
                     current_state: 'alerted',
                     last_alerted_at: new Date().toISOString(),
                   }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
                 }
-              } else if (!isInDanger && currentState?.current_state === 'alerted') {
-                await supabase.from('alert_states')
-                  .update({ current_state: 'safe' })
-                  .eq('id', currentState.id);
+              }
+              
+              // WARNING Alert (avvicinamento da sotto) — soppresso se già OTM
+              const distConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_PUT_ROLL_UP, ticker);
+              if (distConfig.enabled && !isOTM) {
+                // Distanza dallo strike salendo da sotto: (strike - prezzo)/prezzo
+                const distancePct = calcCallDistance(underlyingPrice, soldPutStrike);
+                const isInDanger = distancePct < distConfig.threshold_pct;
+                const positionKey = `pru_dist_${strategy.strategy_key}`;
+                const stateKey = `${positionKey}:${ALERT_TYPES.DISTANCE_PUT_ROLL_UP}`;
+                const currentState = statesMap.get(stateKey);
+                
+                if (isInDanger && (!currentState || currentState.current_state === 'safe')) {
+                  if (cooldownPassed(currentState?.last_alerted_at || null, distConfig.cooldown_minutes)) {
+                    const message = `${ticker} sale verso lo strike della PUT — preparati a rollare al rialzo`;
+                    
+                    await supabase.from('alerts').insert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      alert_type: ALERT_TYPES.DISTANCE_PUT_ROLL_UP,
+                      ticker,
+                      strategy_type: 'PUT roll-up',
+                      direction: 'up',
+                      current_value: distancePct,
+                      threshold_value: distConfig.threshold_pct,
+                      strike_price: soldPutStrike,
+                      underlying_price: underlyingPrice,
+                      message,
+                      severity: 'warning',
+                      option_type: 'put',
+                      option_expiry: strategy.sold_put_expiry,
+                    });
+                    totalAlertsCreated++;
+                    
+                    await supabase.from('alert_states').upsert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      position_key: positionKey,
+                      alert_type: ALERT_TYPES.DISTANCE_PUT_ROLL_UP,
+                      current_state: 'alerted',
+                      last_alerted_at: new Date().toISOString(),
+                    }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                  }
+                } else if (!isInDanger && currentState?.current_state === 'alerted') {
+                  await supabase.from('alert_states')
+                    .update({ current_state: 'safe' })
+                    .eq('id', currentState.id);
+                }
+              }
+            } else {
+              // ---- Naked Put standard (invariata) ----
+              const isITM = underlyingPrice < soldPutStrike;
+              
+              // ITM Alert
+              const itmConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_NAKED_PUT_ITM, ticker);
+              if (itmConfig.enabled) {
+                const positionKey = `np_itm_${strategy.strategy_key}`;
+                const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_NAKED_PUT_ITM}`;
+                const currentState = statesMap.get(stateKey);
+                
+                if (isITM && (!currentState || currentState.current_state === 'safe')) {
+                  if (cooldownPassed(currentState?.last_alerted_at || null, itmConfig.cooldown_minutes)) {
+                    const message = `La Naked Put è ITM`;
+                    
+                    await supabase.from('alerts').insert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      alert_type: ALERT_TYPES.ACTION_NAKED_PUT_ITM,
+                      ticker,
+                      strategy_type: 'Naked Put',
+                      direction: 'down',
+                      current_value: underlyingPrice,
+                      threshold_value: soldPutStrike,
+                      strike_price: soldPutStrike,
+                      underlying_price: underlyingPrice,
+                      message,
+                      severity: 'critical',
+                      option_type: 'put',
+                      option_expiry: strategy.sold_put_expiry,
+                    });
+                    totalAlertsCreated++;
+                    
+                    await supabase.from('alert_states').upsert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      position_key: positionKey,
+                      alert_type: ALERT_TYPES.ACTION_NAKED_PUT_ITM,
+                      current_state: 'alerted',
+                      last_alerted_at: new Date().toISOString(),
+                    }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                  }
+                } else if (!isITM && currentState?.current_state === 'alerted') {
+                  await supabase.from('alert_states')
+                    .update({ current_state: 'safe' })
+                    .eq('id', currentState.id);
+                  
+                  const distPositionKey = `np_dist_${strategy.strategy_key}`;
+                  await supabase.from('alert_states').upsert({
+                    user_id: userId,
+                    portfolio_id: portfolioId,
+                    position_key: distPositionKey,
+                    alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                    current_state: 'alerted',
+                    last_alerted_at: new Date().toISOString(),
+                  }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                }
+              }
+              
+              // Distance Alert - SUPPRESSED if already ITM
+              const distConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_NAKED_PUT, ticker);
+              if (distConfig.enabled && !isITM) {
+                const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
+                const isInDanger = distancePct < distConfig.threshold_pct;
+                const positionKey = `np_dist_${strategy.strategy_key}`;
+                const stateKey = `${positionKey}:${ALERT_TYPES.DISTANCE_NAKED_PUT}`;
+                const currentState = statesMap.get(stateKey);
+                
+                if (isInDanger && (!currentState || currentState.current_state === 'safe')) {
+                  if (cooldownPassed(currentState?.last_alerted_at || null, distConfig.cooldown_minutes)) {
+                    const message = `${ticker} si avvicina allo strike della put venduta`;
+                    
+                    await supabase.from('alerts').insert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                      ticker,
+                      strategy_type: 'Naked Put',
+                      direction: 'down',
+                      current_value: distancePct,
+                      threshold_value: distConfig.threshold_pct,
+                      strike_price: soldPutStrike,
+                      underlying_price: underlyingPrice,
+                      message,
+                      severity: 'warning',
+                      option_type: 'put',
+                      option_expiry: strategy.sold_put_expiry,
+                    });
+                    totalAlertsCreated++;
+                    
+                    await supabase.from('alert_states').upsert({
+                      user_id: userId,
+                      portfolio_id: portfolioId,
+                      position_key: positionKey,
+                      alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                      current_state: 'alerted',
+                      last_alerted_at: new Date().toISOString(),
+                    }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+                  }
+                } else if (!isInDanger && currentState?.current_state === 'alerted') {
+                  await supabase.from('alert_states')
+                    .update({ current_state: 'safe' })
+                    .eq('id', currentState.id);
+                }
               }
             }
           }
