@@ -19,6 +19,11 @@ CREATE TABLE public.put_roll_flags (
 
 ALTER TABLE public.put_roll_flags ENABLE ROW LEVEL SECURITY;
 
+CREATE POLICY "Admins can manage all put_roll_flags"
+  ON public.put_roll_flags
+  FOR ALL
+  USING (public.has_role(auth.uid(), 'admin'));
+
 CREATE POLICY "Users can read own put roll flags"
   ON public.put_roll_flags
   FOR SELECT
