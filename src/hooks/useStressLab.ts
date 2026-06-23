@@ -542,50 +542,37 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   const legs: StressLeg[] = useMemo(() => {
     const out: StressLeg[] = [];
-    const diag: Array<Record<string, unknown>> = [];
     derivatives.forEach((d) => {
       const key = getOptionUnderlyingKey(d);
       const und = baselineUnders[key];
+      if (!und) return; // impossibile lavorare senza spot
+      if (!d.strike_price || !d.expiry_date || !d.option_type) return;
       const px = d.snapshot_price ?? d.current_price;
-      const T = d.expiry_date ? yearsToExpiry(d.expiry_date, snapshotRef) : NaN;
-      let drop = '';
-      if (!key) drop = 'underlying non risolto (key vuota)';
-      else if (!und) drop = `nessuno spot per "${key}"`;
-      else if (!d.strike_price || !d.expiry_date || !d.option_type) drop = 'manca strike/scadenza/tipo';
-      else if (typeof px !== 'number' || px <= 0) drop = `prezzo assente/≤0 (${px})`;
-      else if (T <= 0) drop = `scaduta allo snapshot (T=${T?.toFixed?.(3) ?? T})`;
-      diag.push({
-        descr: d.description, ticker: d.ticker, underlying: d.underlying, key,
-        tipo: d.option_type, strike: d.strike_price, scad: d.expiry_date,
-        snapshot: portfolio?.snapshot_date ?? '(oggi)', T: Number.isNaN(T) ? null : +T.toFixed(3),
-        px, spot: und?.S ?? null, esito: drop || 'INCLUSA',
-      });
-      if (drop) return;
+      if (typeof px !== 'number' || px <= 0) return;
+      const T = yearsToExpiry(d.expiry_date, snapshotRef);
+      if (T <= 0) return; // scadute GIÀ allo snapshot le scartiamo
 
       const isCall = d.option_type === 'call';
-      const fl = isPriceBelowIntrinsic(px as number, und!.S, d.strike_price!, isCall);
+      const fl = isPriceBelowIntrinsic(px, und.S, d.strike_price, isCall);
       // IV: bisezione; se sotto intrinseco userà la mediana del sottostante
       const iv = fl
         ? 0.45
-        : impliedVolFromPrice(px as number, und!.S, d.strike_price!, T, riskFree, isCall);
+        : impliedVolFromPrice(px, und.S, d.strike_price, T, riskFree, isCall);
 
       out.push({
         u: key,
         cp: isCall ? 'C' : 'P',
-        K: d.strike_price!,
+        K: d.strike_price,
         T,
-        exp: d.expiry_date!,
+        exp: d.expiry_date,
         q: d.quantity,
-        px: px as number,
+        px,
         fl: fl || isNaN(iv),
         mult: DEFAULT_OPT_MULT,
         nm: d.description || key,
         iv: isNaN(iv) ? 0.45 : iv,
       });
     });
-    const scartate = diag.filter((r) => r.esito !== 'INCLUSA');
-    console.log(`[StressLab legs] ${out.length}/${derivatives.length} incluse · ${scartate.length} scartate · snapshot=${portfolio?.snapshot_date ?? '(oggi)'}`);
-    if (scartate.length) console.table(scartate);
     return out;
   }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey, snapshotRef]);
 

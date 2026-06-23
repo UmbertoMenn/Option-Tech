@@ -130,21 +130,27 @@ export function FileUploader() {
       // Conti senza ID riconoscibile vengono trattati come distinti.
       const seenAccounts = new Map<string, number>();
       let anonCash = 0;
+      let anonCount = 0;
+      let dedupCount = 0;
       for (const p of parsed) {
         for (const acc of p.cashAccounts) {
           const id = (acc.accountId || '').trim();
           if (!id) {
             anonCash += acc.value;
-            console.warn('[FileUploader] Cash account senza ID, non deduplicabile:', acc.value);
+            anonCount += 1;
             continue;
           }
           if (!seenAccounts.has(id)) {
             seenAccounts.set(id, acc.value);
           } else {
-            console.log(`[FileUploader] Cash account ${id} già presente, deduplicato`);
+            dedupCount += 1;
           }
         }
       }
+      // Log volutamente REDATTO: nessun numero di conto né importo (dati sensibili).
+      console.log(
+        `[FileUploader] liquidità: ${seenAccounts.size} conti, ${anonCount} senza ID, ${dedupCount} duplicati rimossi`,
+      );
       const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v, 0) + anonCash;
 
       if (positions.length === 0) {
