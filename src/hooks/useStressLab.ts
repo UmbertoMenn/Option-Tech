@@ -786,7 +786,8 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     riskFree,
     ivWarnings,
     missingBetaTickers,
-    isLoading: isLoadingPortfolio || isLoadingPrices || betasQuery.isLoading,
+    isLoading:
+      isLoadingPortfolio || isLoadingPrices || betasQuery.isLoading || mappingsQuery.isLoading,
     isFetchingBeta: fetchedBetasQuery.isFetching || isFetchingMissing,
     baselineUnders,
     patrimonyBreakdown,
