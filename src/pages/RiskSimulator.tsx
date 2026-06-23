@@ -329,7 +329,7 @@ function StressLabContent() {
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
   // (beta=1 su ogni nome, l'EUR/USD resta fermo) → card "Delta di portafoglio".
   // Il toggle vive nella card Scenario perché cambia TUTTI i P&L (totale/azioni/opzioni).
-  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('titoli');
+  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('market');
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
@@ -1113,7 +1113,7 @@ function StressLabContent() {
           }
         >
           <div style={{ display: 'flex', gap: 0, marginBottom: 12 }}>
-            {(['titoli', 'market'] as const).map((m, i) => {
+            {(['market', 'titoli'] as const).map((m, i) => {
               const active = shockMode === m;
               const isTitoli = m === 'titoli';
               const accent = isTitoli ? C.cyan : C.blue;
@@ -1305,15 +1305,8 @@ function StressLabContent() {
               </Panel>
             ))}
             {/* Beta @ scenario — sensibilità al mercato */}
-            <Panel
-              style={{
-                padding: '14px 16px',
-                ...(shockMode === 'market'
-                  ? { border: `1px solid ${C.blue}`, boxShadow: `0 0 0 1px ${C.blue} inset` }
-                  : {}),
-              }}
-            >
-              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6, color: shockMode === 'market' ? C.blue : undefined }}>
+            <Panel style={{ padding: '14px 16px' }}>
+              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Beta @ scenario
                 <Info title="Sensibilità al mercato" w={420}>
                   Se il <b>mercato</b> fa −10%, di quanto si muove il portafoglio? La mossa passa per il
@@ -1355,15 +1348,8 @@ function StressLabContent() {
             </Panel>
 
             {/* Delta @ scenario — sensibilità ai propri titoli */}
-            <Panel
-              style={{
-                padding: '14px 16px',
-                ...(shockMode === 'titoli'
-                  ? { border: `1px solid ${C.cyan}`, boxShadow: `0 0 0 1px ${C.cyan} inset` }
-                  : {}),
-              }}
-            >
-              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6, color: shockMode === 'titoli' ? C.cyan : undefined }}>
+            <Panel style={{ padding: '14px 16px' }}>
+              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Delta @ scenario
                 <Info title="Sensibilità ai tuoi titoli" w={420}>
                   Se i <b>tuoi titoli</b> si muovono direttamente di −10% (beta = 1, a prescindere dal mercato),
@@ -1393,6 +1379,42 @@ function StressLabContent() {
                 <span style={{ color: C.up }}>{fmtN(deltaUp, 2)}↑</span>{' '}
                 <span style={{ fontSize: 10 }}>(∓10%)</span>
               </div>
+              {(() => {
+                // P/L teorico = se l'intera Esposizione Potenziale si muovesse a delta pieno
+                // (1,00) con lo shock; P/L reale = quello effettivo @ delta corrente.
+                const plTeorico = ptfBase * (d / 100);
+                const plReale = deltaScen * plTeorico;
+                return (
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      color: C.mut,
+                      fontFamily: MONO,
+                      marginTop: 5,
+                      paddingTop: 5,
+                      borderTop: `1px solid ${C.border}`,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    <div>
+                      P/L reale{' '}
+                      <span style={{ color: pnlColor(plReale), fontWeight: 700 }}>
+                        {fmtEUR(plReale)}
+                      </span>
+                    </div>
+                    <div>
+                      ÷ P/L teorico (esp. pot.){' '}
+                      <span style={{ color: pnlColor(plTeorico), fontWeight: 700 }}>
+                        {fmtEUR(plTeorico)}
+                      </span>
+                    </div>
+                    <div>
+                      = Delta{' '}
+                      <span style={{ color: C.text, fontWeight: 800 }}>{fmtN(deltaScen, 2)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </Panel>
 
             {/* Margine richiesto + incidenza bond/cash accorpata */}
