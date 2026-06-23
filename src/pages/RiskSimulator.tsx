@@ -329,7 +329,7 @@ function StressLabContent() {
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
   // (beta=1 su ogni nome, l'EUR/USD resta fermo) → card "Delta di portafoglio".
   // Il toggle vive nella card Scenario perché cambia TUTTI i P&L (totale/azioni/opzioni).
-  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('market');
+  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('titoli');
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
@@ -634,7 +634,7 @@ function StressLabContent() {
 
   const kpi = [
     { l: 'P&L Totale', v: scen.totEUR, sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}` },
-    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: shockMode === 'titoli' ? 'shock diretto (β=1)' : 'lineare via beta' },
+    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: shockMode === 'titoli' ? 'diretto (β=1,00)' : 'via beta reale' },
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
@@ -891,7 +891,7 @@ function StressLabContent() {
               {(() => {
                 const reale = ptfBase * deltaScen;
                 const leva = totalPatrimony ? reale / totalPatrimony : 0;
-                const showReal = shockMode === 'titoli';
+                const showReal = true;
                 const card = (
                   label: string,
                   value: string,
@@ -1088,54 +1088,60 @@ function StressLabContent() {
         }}
       >
         <Panel
-          title="Scenario"
+          title="Scenario shock di mercato"
           info={
-            <Info title="Come leggere i controlli" w={340}>
-              <b>Mercato</b>: shock dell'indice azionario di riferimento; ogni titolo si muove di beta × shock.
+            <Info title="Come leggere i controlli" w={360}>
+              Lo slider è lo <b>shock di mercato</b> (la variazione % dell'indice di riferimento). Scegli come
+              propagarlo ai tuoi titoli:
+              <br />
+              <br />
+              • <b>Beta Reale</b>: ogni titolo si muove di <b>beta × shock</b> (es. beta 1,5 → −15% se il mercato
+              fa −10%). È lo scenario realistico “se il mercato scende del 10%”.
+              <br />
+              • <b>Beta = 1.00</b>: ogni titolo si muove <b>esattamente come lo shock</b> (−10% = −10% su tutti),
+              ignorando il beta. Utile per isolare la sensibilità ai tuoi sottostanti.
+              <br />
+              <br />
+              In entrambi i casi vedi sempre, a fianco, sia il <b>Beta</b> (sensibilità al mercato) sia il
+              <b> Delta</b> (sensibilità ai tuoi titoli).
               <br />
               <br />
               <b>Vol accoppiata (consigliata)</b>: la vol ATM a 1 mese reagisce al mercato secondo la relazione
-              empirica SPX–VIX. Un −10% genera ≈ +12,5 punti; un −30% ≈ +52 punti (a marzo 2020 un −34% portò il
-              VIX da ~15 a 82). Nei rialzi la vol comprime ~0,55 pt per +1%.
-              <br />
-              <br />
-              <b>Manuale</b>: imposti tu lo shock sulla vol ATM 1M, che viene poi propagato alle altre scadenze.
+              empirica SPX–VIX. Un −10% genera ≈ +12,5 punti; un −30% ≈ +52 punti. <b>Manuale</b>: imposti tu lo
+              shock sulla vol ATM 1M, propagato poi alle altre scadenze.
             </Info>
           }
         >
           <div style={{ display: 'flex', gap: 0, marginBottom: 12 }}>
-            {(['market', 'titoli'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setShockMode(m)}
-                style={{
-                  flex: 1,
-                  padding: '7px 4px',
-                  cursor: 'pointer',
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                  background:
-                    shockMode === m
-                      ? m === 'titoli'
-                        ? C.cyan
-                        : 'rgba(41,98,255,.16)'
-                      : 'transparent',
-                  border: `1px solid ${
-                    shockMode === m ? (m === 'titoli' ? C.cyan : C.blue) : C.border2
-                  }`,
-                  borderLeft: m === 'titoli' ? 'none' : undefined,
-                  color:
-                    shockMode === m ? (m === 'titoli' ? '#0b0f17' : C.blue) : C.mut,
-                  borderRadius: m === 'market' ? '6px 0 0 6px' : '0 6px 6px 0',
-                  fontFamily: SANS,
-                }}
-              >
-                {m === 'market' ? 'Shock mercato' : 'Shock titoli'}
-              </button>
-            ))}
+            {(['titoli', 'market'] as const).map((m, i) => {
+              const active = shockMode === m;
+              const isTitoli = m === 'titoli';
+              const accent = isTitoli ? C.cyan : C.blue;
+              return (
+                <button
+                  key={m}
+                  onClick={() => setShockMode(m)}
+                  style={{
+                    flex: 1,
+                    padding: '7px 4px',
+                    cursor: 'pointer',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    background: active ? (isTitoli ? C.cyan : 'rgba(41,98,255,.16)') : 'transparent',
+                    border: `1px solid ${active ? accent : C.border2}`,
+                    borderLeft: i === 1 ? 'none' : undefined,
+                    color: active ? (isTitoli ? '#0b0f17' : C.blue) : C.mut,
+                    borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                    fontFamily: SANS,
+                  }}
+                >
+                  {isTitoli ? 'Beta = 1.00' : 'Beta Reale'}
+                </button>
+              );
+            })}
           </div>
           <Slider
-            label={shockMode === 'titoli' ? 'Shock titoli (diretto)' : 'Shock mercato'}
+            label="Shock di mercato"
             value={d}
             set={setD}
             min={-40}
@@ -1298,6 +1304,57 @@ function StressLabContent() {
                 <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>
               </Panel>
             ))}
+            {/* Beta @ scenario — sensibilità al mercato */}
+            <Panel
+              style={{
+                padding: '14px 16px',
+                ...(shockMode === 'market'
+                  ? { border: `1px solid ${C.blue}`, boxShadow: `0 0 0 1px ${C.blue} inset` }
+                  : {}),
+              }}
+            >
+              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6, color: shockMode === 'market' ? C.blue : undefined }}>
+                Beta @ scenario
+                <Info title="Sensibilità al mercato" w={420}>
+                  Se il <b>mercato</b> fa −10%, di quanto si muove il portafoglio? La mossa passa per il
+                  <b> beta</b> di ogni titolo (beta 1,5 = scende una volta e mezza il mercato). È la sensibilità
+                  “vs indice”, complementare al Delta (che misura “vs i tuoi titoli”).
+                  <br />
+                  <br />
+                  Le <b>put vendute</b> hanno gamma negativo: in discesa pesano sempre di più e la perdita
+                  accelera.
+                  <br />
+                  <br />
+                  Denominatore = <b>Esposizione Potenziale in Equity</b>. Sotto, in piccolo, lo stesso beta
+                  riferito al <b>patrimonio totale</b> (netting dashboard): la base per ponderare il benchmark
+                  sull'equity line.
+                </Info>
+              </div>
+              {(() => {
+                const denomTot = data.nettingTotalRaw;
+                const scale = denomTot && ptfBase ? ptfBase / denomTot : 0;
+                const betaTot = betaScen * scale;
+                return (
+                  <>
+                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: betaScen >= 1.5 ? C.dn : betaScen <= 0.9 ? C.up : C.text }}>
+                      {fmtN(betaScen, 2)}
+                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
+                      rif. <span style={{ color: C.dn }}>{fmtN(betaDown, 2)}↓</span> ·{' '}
+                      <span style={{ color: C.up }}>{fmtN(betaUp, 2)}↑</span>{' '}
+                      <span style={{ fontSize: 10 }}>(∓10%)</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: C.mut, fontFamily: MONO, marginTop: 4 }}>
+                      β vs patr. totale{' '}
+                      <span style={{ color: C.text, fontWeight: 700 }}>{fmtN(betaTot, 2)}</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </Panel>
+
+            {/* Delta @ scenario — sensibilità ai propri titoli */}
             <Panel
               style={{
                 padding: '14px 16px',
@@ -1306,151 +1363,39 @@ function StressLabContent() {
                   : {}),
               }}
             >
-              <div
-                style={{
-                  ...lbl,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  color: shockMode === 'titoli' ? C.cyan : undefined,
-                }}
-              >
-                {shockMode === 'market' ? 'Beta @ scenario' : 'Delta portafoglio'}
-                <Info
-                  title={
-                    shockMode === 'market'
-                      ? 'Quanto si muove il portafoglio col mercato'
-                      : 'Quanto si muove il portafoglio coi suoi titoli'
-                  }
-                  w={440}
-                >
-                  {shockMode === 'market' ? (
-                    <>
-                      Se il <b>mercato</b> fa −10%, di quanto si muove il portafoglio? La mossa è trasmessa via
-                      il <b>beta</b> di ciascun nome. Beta 1,5 = cala una volta e mezza il mercato. Le put
-                      vendute hanno gamma negativo: a ogni gradino di discesa pesano di più e la perdita
-                      accelera.
-                    </>
-                  ) : (
-                    <>
-                      Se i <b>titoli in portafoglio</b> si muovono direttamente di −10% (a prescindere dal beta
-                      col mercato), di quanto si muove il portafoglio? È il <b>delta complessivo</b> del
-                      portafoglio sui propri sottostanti. Esempio: solo MICRON, se MICRON fa −10% e il
-                      portafoglio fa −5% → Delta 0,50. L'EUR/USD resta fermo (non è un titolo). La metodologia
-                      si imposta dalla card <b>Scenario</b>.
-                    </>
-                  )}
+              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6, color: shockMode === 'titoli' ? C.cyan : undefined }}>
+                Delta @ scenario
+                <Info title="Sensibilità ai tuoi titoli" w={420}>
+                  Se i <b>tuoi titoli</b> si muovono direttamente di −10% (beta = 1, a prescindere dal mercato),
+                  di quanto si muove il portafoglio? È il <b>delta complessivo</b> sui tuoi sottostanti.
                   <br />
                   <br />
-                  <b>Come leggerlo in base alla posizione</b>
-                  <br />• <b>Venditore netto di PUT</b> (poche/nessuna azione): delta <b>basso</b>. Le put
-                  vendute sono a strike più bassi (OTM), quindi ognuna ha delta piccolo e il portafoglio si
-                  muove poco con il sottostante.
-                  <br />• <b>Venditore netto di CALL con titoli in pancia</b> (covered call): delta/beta
-                  <b> alto</b>. Le azioni hanno delta pieno e dominano; le call vendute OTM le frenano poco.
+                  Esempio: solo MICRON in pancia; se MICRON fa −10% e il portafoglio −5% → Delta 0,50. L'EUR/USD
+                  resta fermo (non è un titolo).
                   <br />
                   <br />
-                  <b>Con Netting Ex CC e NP attivo</b> (opzioni valutate solo a intrinseco):
-                  <br />• <b>Venditore di CALL</b>: in un ribasso le call OTM non danno intrinseco, quindi
-                  <b> non fanno cuscinetto</b> (sparisce il guadagno di time-value che avrebbero in MTM) → le
-                  azioni perdono piene → <b>delta/beta aumenta</b>.
-                  <br />• <b>Venditore di PUT</b>: la perdita è misurata <b>solo sull'intrinseco</b>, senza il
-                  rigonfiamento di volatilità e time-value che un crash produce davvero → <b>delta/beta si
-                  riduce</b>. (Attenzione: è un effetto di misura, non un rischio minore reale.)
+                  • <b>Venditore netto di PUT OTM</b>: delta <b>basso</b> (poca direzionalità finché non vanno
+                  ITM).
+                  <br />• <b>Covered call</b> (titoli in pancia + call vendute): delta <b>alto</b>, le azioni
+                  dominano.
                   <br />
                   <br />
-                  Il valore principale usa come denominatore l'<b>Esposizione Potenziale in Equity</b>.
-                  <br />• In modalità <b>mercato</b>: a fianco, in piccolo, lo stesso beta riferito al
-                  <b> patrimonio totale</b> (netting della dashboard) — base per ponderare il benchmark
-                  sull'equity line.
-                  <br />• In modalità <b>titoli</b>: la stessa idea è esposta come card <b>Esposizione Reale</b>
-                  (potenziale × delta) e <b>Leva Reale</b> (reale ÷ patrimonio totale), accanto all'Esposizione
-                  Potenziale.
+                  Da qui nascono le card <b>Esposizione Reale</b> (potenziale × delta) e <b>Leva Reale</b>
+                  (reale ÷ patrimonio totale) qui sopra.
                 </Info>
               </div>
-              {(() => {
-                const headline = shockMode === 'market' ? betaScen : deltaScen;
-                const refDn = shockMode === 'market' ? betaDown : deltaDown;
-                const refUp = shockMode === 'market' ? betaUp : deltaUp;
-                const denomTot = data.nettingTotalRaw;
-                const scale = denomTot && ptfBase ? ptfBase / denomTot : 0;
-                const headlineTot = headline * scale;
-                return (
-                  <>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        margin: '6px 0 2px',
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: 24,
-                          fontWeight: 800,
-                          color: headline >= 1.5 ? C.dn : headline <= 0.9 ? C.up : C.text,
-                        }}
-                      >
-                        {fmtN(headline, 2)}
-                        <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
-                          {' '}
-                          @ {sgn(d, 1)}%{shockMode === 'titoli' ? ' titoli' : ''}
-                        </span>
-                      </div>
-                      {shockMode === 'market' && (
-                        <div
-                          style={{
-                            fontSize: 10,
-                            lineHeight: 1.15,
-                            color: C.mut,
-                            fontFamily: MONO,
-                            textAlign: 'right',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          β vs patr. totale
-                          <br />
-                          <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                            {fmtN(headlineTot, 2)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
-                      rif. <span style={{ color: C.dn }}>{fmtN(refDn, 2)}↓</span> ·{' '}
-                      <span style={{ color: C.up }}>{fmtN(refUp, 2)}↑</span>{' '}
-                      <span style={{ fontSize: 10 }}>(∓10%)</span>
-                    </div>
-                  </>
-                );
-              })()}
-            </Panel>
-
-            <Panel style={{ padding: '14px 16px' }}>
-              <div style={{ ...lbl, display: 'flex', alignItems: 'center' }}>
-                Margine richiesto
-                <Info title="Margine cassa: attuale → scenario" w={380} right>
-                  Per ogni sottostante e per lato, <b>max(strategy-based, scan TIMS)</b>: il margine interno
-                  (premio + 20%/floor, call coperte dai titoli escluse) e — sui soli veri spread — lo scan a
-                  2 giorni con vol accoppiata. Nel crash la premium delle put vendute si gonfia, quindi il
-                  margine sale proprio mentre il patrimonio si svuota.
-                </Info>
+              <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: deltaScen >= 1.5 ? C.dn : deltaScen <= 0.9 ? C.up : C.text }}>
+                {fmtN(deltaScen, 2)}
+                <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, margin: '6px 0 2px' }}>
-                <span style={{ color: C.mut, fontSize: 15 }}>{fmtN(marNow.total / 1000, 0)}k → </span>
-                <span style={{ color: marScen.total > marNow.total ? C.dn : C.up }}>
-                  {fmtN(marScen.total / 1000, 0)}k €
-                </span>
-              </div>
-              <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
-                @ scen.: strategy {fmtN(marScen.totStrat / 1000, 0)}k + scan{' '}
-                {fmtN(marScen.totScan / 1000, 0)}k
+              <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
+                rif. <span style={{ color: C.dn }}>{fmtN(deltaDown, 2)}↓</span> ·{' '}
+                <span style={{ color: C.up }}>{fmtN(deltaUp, 2)}↑</span>{' '}
+                <span style={{ fontSize: 10 }}>(∓10%)</span>
               </div>
             </Panel>
 
+            {/* Margine richiesto + incidenza bond/cash accorpata */}
             <Panel
               style={{
                 padding: '14px 16px',
@@ -1464,19 +1409,47 @@ function StressLabContent() {
               }}
             >
               <div style={{ ...lbl, display: 'flex', alignItems: 'center' }}>
-                Incidenza su bond+cash
-                <Info title="La metrica del margin call" w={360} right>
-                  Margine richiesto / valore di bond + cash (escluso cash GP). È il rapporto che fa scattare la
-                  richiesta di reintegro: nel crash il numeratore cresce mentre bond e cash restano stabili,
-                  quindi l'incidenza accelera verso l'alto.
+                Margine richiesto
+                <Info title="Margine cassa e soglia di margin call" w={420} right>
+                  <b>Margine richiesto</b>: per ogni sottostante e lato, <b>max(strategy-based, scan TIMS)</b> —
+                  margine interno (premio + 20%/floor, call coperte dai titoli escluse) e, sui soli veri spread,
+                  lo scan a 2 giorni con vol accoppiata. Nel crash la premium delle put vendute si gonfia: il
+                  margine sale proprio mentre il patrimonio si svuota.
+                  <br />
+                  <br />
+                  <b>Incidenza su bond + cash</b> (riga piccola): margine ÷ valore di bond + cash (escluso cash
+                  GP). È il rapporto che fa scattare la <b>richiesta di reintegro</b>: nel crash il numeratore
+                  cresce mentre bond e cash restano stabili, quindi l'incidenza accelera. Il bordo diventa rosso
+                  quando lo scenario la fa salire oltre +20% rispetto a oggi.
                 </Info>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, margin: '6px 0 2px' }}>
-                <span style={{ color: C.mut, fontSize: 15 }}>
+                <span style={{ color: C.mut, fontSize: 15 }}>{fmtN(marNow.total / 1000, 0)}k → </span>
+                <span style={{ color: marScen.total > marNow.total ? C.dn : C.up }}>
+                  {fmtN(marScen.total / 1000, 0)}k €
+                </span>
+              </div>
+              <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
+                @ scen.: strategy {fmtN(marScen.totStrat / 1000, 0)}k + scan{' '}
+                {fmtN(marScen.totScan / 1000, 0)}k
+              </div>
+              <div
+                style={{
+                  fontSize: 10.5,
+                  color: C.mut,
+                  fontFamily: MONO,
+                  marginTop: 5,
+                  paddingTop: 5,
+                  borderTop: `1px solid ${C.border}`,
+                }}
+              >
+                incidenza bond+cash{' '}
+                <span style={{ color: C.mut }}>
                   {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
                 </span>
                 <span
                   style={{
+                    fontWeight: 800,
                     color:
                       bondCashBase > 0 &&
                       marScen.total / Math.max(bondCashBase, 1) >
@@ -1490,9 +1463,6 @@ function StressLabContent() {
                     : '—'}
                   %
                 </span>
-              </div>
-              <div style={{ fontSize: 10.5, color: C.mut }}>
-                margine / bond + cash · soglia margin call
               </div>
             </Panel>
           </div>
