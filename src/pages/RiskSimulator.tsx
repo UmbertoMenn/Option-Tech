@@ -423,6 +423,28 @@ function StressLabContent() {
     return pl / ptfBase / (d / 100);
   }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
+  /* ---------- Beta di portafoglio (media pesata sui controvalori equity) ----------
+   * È il beta "puro" delta-1: serve per il P/L TEORICO = esposizione potenziale ×
+   * beta portafoglio × shock (quanto perderei se tutto si muovesse a delta pieno). */
+  const betaPort = useMemo(() => {
+    let num = 0;
+    let den = 0;
+    for (const s of eq) {
+      const b = s.tick && unders[s.tick] ? unders[s.tick].beta : s.beta;
+      const w = Math.abs(s.eur);
+      num += w * b;
+      den += w;
+    }
+    return den > 0 ? num / den : 0;
+  }, [eq, unders]);
+
+  /* ---------- P&L VERO dello scenario di MERCATO (coincide con la card P&L Totale
+   * quando il selettore è su Beta Reale). È il "P/L reale" della card Delta. */
+  const scenMarketTot = useMemo(() => {
+    if (shockMode === 'market') return scen.totEUR;
+    return runScenario(legs, eq, unders, effIV, d, dV1M, prm).totEUR;
+  }, [shockMode, scen, legs, eq, unders, effIV, d, dV1M, prm]);
+
   /* ---------- Margine cassa ----------
    * Diviso in due memo per le performance dello slider:
    *  - marNow (margine iniziale) e marCurve (curva margine vs shock) NON dipendono dallo
@@ -1347,72 +1369,65 @@ function StressLabContent() {
               })()}
             </Panel>
 
-            {/* Delta @ scenario — sensibilità ai propri titoli */}
+            {/* Delta @ scenario — quota della perdita beta-implicita che si realizza davvero */}
             <Panel style={{ padding: '14px 16px' }}>
               <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Delta @ scenario
-                <Info title="Sensibilità ai tuoi titoli" w={420}>
-                  Se i <b>tuoi titoli</b> si muovono direttamente di −10% (beta = 1, a prescindere dal mercato),
-                  di quanto si muove il portafoglio? È il <b>delta complessivo</b> sui tuoi sottostanti.
+                <Info title="Quanto realizzi della perdita teorica" w={440}>
+                  Se il <b>mercato fa −10%</b>, quanto perdo <b>davvero</b> (P/L reale, = card P&L Totale)
+                  rispetto a quanto perderei se l'intera <b>Esposizione Potenziale</b> si muovesse a
+                  <b> delta pieno (1,00)</b> col mio <b>beta di portafoglio</b> (P/L teorico)?
                   <br />
                   <br />
-                  Esempio: solo MICRON in pancia; se MICRON fa −10% e il portafoglio −5% → Delta 0,50. L'EUR/USD
-                  resta fermo (non è un titolo).
+                  <b>Esempio</b>: esposizione potenziale 1 mln, beta 1,5 → teorico = 1M × 1,5 × 10% = 150k. Se in
+                  realtà perdo 100k → <b>Delta = 100 / 150 = 0,66</b>.
                   <br />
                   <br />
-                  • <b>Venditore netto di PUT OTM</b>: delta <b>basso</b> (poca direzionalità finché non vanno
-                  ITM).
-                  <br />• <b>Covered call</b> (titoli in pancia + call vendute): delta <b>alto</b>, le azioni
-                  dominano.
-                  <br />
-                  <br />
-                  Da qui nascono le card <b>Esposizione Reale</b> (potenziale × delta) e <b>Leva Reale</b>
-                  (reale ÷ patrimonio totale) qui sopra.
+                  Misura quanta parte dell'esposizione beta-adjusted è <b>direzionalmente viva</b>: le call
+                  vendute coperte e le put OTM tagliano il delta (&lt; 1), un book molto direzionale lo avvicina
+                  a 1. Cambia con lo slider (gamma e vol lungo il tragitto).
                 </Info>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: deltaScen >= 1.5 ? C.dn : deltaScen <= 0.9 ? C.up : C.text }}>
-                {fmtN(deltaScen, 2)}
-                <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
-              </div>
-              <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
-                rif. <span style={{ color: C.dn }}>{fmtN(deltaDown, 2)}↓</span> ·{' '}
-                <span style={{ color: C.up }}>{fmtN(deltaUp, 2)}↑</span>{' '}
-                <span style={{ fontSize: 10 }}>(∓10%)</span>
-              </div>
               {(() => {
-                // P/L teorico = se l'intera Esposizione Potenziale si muovesse a delta pieno
-                // (1,00) con lo shock; P/L reale = quello effettivo @ delta corrente.
-                const plTeorico = ptfBase * (d / 100);
-                const plReale = deltaScen * plTeorico;
+                const plReale = scenMarketTot;
+                const plTeorico = ptfBase * betaPort * (d / 100);
+                const deltaEff =
+                  Math.abs(plTeorico) > 1
+                    ? plReale / plTeorico
+                    : betaPort
+                    ? betaScen / betaPort
+                    : 0;
                 return (
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      color: C.mut,
-                      fontFamily: MONO,
-                      marginTop: 5,
-                      paddingTop: 5,
-                      borderTop: `1px solid ${C.border}`,
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    <div>
-                      P/L reale{' '}
-                      <span style={{ color: pnlColor(plReale), fontWeight: 700 }}>
-                        {fmtEUR(plReale)}
-                      </span>
+                  <>
+                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: deltaEff >= 1 ? C.dn : deltaEff <= 0.5 ? C.up : C.text }}>
+                      {fmtN(deltaEff, 2)}
+                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
                     </div>
-                    <div>
-                      ÷ P/L teorico (esp. pot.){' '}
-                      <span style={{ color: pnlColor(plTeorico), fontWeight: 700 }}>
-                        {fmtEUR(plTeorico)}
-                      </span>
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        color: C.mut,
+                        fontFamily: MONO,
+                        marginTop: 5,
+                        paddingTop: 5,
+                        borderTop: `1px solid ${C.border}`,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <div>
+                        P/L reale{' '}
+                        <span style={{ color: pnlColor(plReale), fontWeight: 700 }}>{fmtEUR(plReale)}</span>
+                      </div>
+                      <div>
+                        ÷ P/L teorico (esp.pot × β {fmtN(betaPort, 2)}){' '}
+                        <span style={{ color: pnlColor(plTeorico), fontWeight: 700 }}>{fmtEUR(plTeorico)}</span>
+                      </div>
+                      <div>
+                        = Delta{' '}
+                        <span style={{ color: C.text, fontWeight: 800 }}>{fmtN(deltaEff, 2)}</span>
+                      </div>
                     </div>
-                    <div>
-                      = Delta{' '}
-                      <span style={{ color: C.text, fontWeight: 800 }}>{fmtN(deltaScen, 2)}</span>
-                    </div>
-                  </div>
+                  </>
                 );
               })()}
             </Panel>
