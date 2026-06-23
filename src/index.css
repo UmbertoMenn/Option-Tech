@@ -95,7 +95,17 @@
     --shadow-glow-primary: 0 0 20px hsl(217 91% 60% / 0.3);
     --shadow-glow-profit: 0 0 20px hsl(142 71% 45% / 0.3);
     --shadow-glow-loss: 0 0 20px hsl(0 84% 60% / 0.3);
+
+    /* Stress Lab palette (dark) */
+    --stress-bg: 220 25% 6%;
+    --stress-panel: 222 24% 11%;
+    --stress-panel2: 222 22% 13%;
+    --stress-border: 222 18% 15%;
+    --stress-border2: 222 14% 20%;
+    --stress-text: 220 13% 82%;
+    --stress-mut: 220 5% 50%;
   }
+
 
   /* Light mode */
   .light {
@@ -172,8 +182,18 @@
     --shadow-glow-primary: 0 0 15px hsl(217 91% 60% / 0.15);
     --shadow-glow-profit: 0 0 15px hsl(142 71% 35% / 0.15);
     --shadow-glow-loss: 0 0 15px hsl(0 84% 50% / 0.15);
+
+    /* Stress Lab palette (light) */
+    --stress-bg: 0 0% 100%;
+    --stress-panel: 220 14% 98%;
+    --stress-panel2: 220 14% 95%;
+    --stress-border: 220 13% 87%;
+    --stress-border2: 220 13% 80%;
+    --stress-text: 222 47% 15%;
+    --stress-mut: 215 16% 47%;
   }
 }
+
 
 @layer base {
   * {

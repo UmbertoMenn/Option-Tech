@@ -31,21 +31,24 @@ import {
   StressUnderlyingMap,
 } from '@/lib/stressLab';
 
-/* ============================== THEME ============================== */
+/* ============================== THEME ==============================
+ * Colori legati alle CSS vars tematiche (definite in src/index.css per
+ * :root [dark] e .light). In questo modo lo Stress Lab segue il tema. */
 const C = {
-  bg: '#0B0E14',
-  panel: '#131722',
-  panel2: '#171B26',
-  border: '#1E222D',
-  border2: '#2A2E39',
-  text: '#D1D4DC',
-  mut: '#787B86',
+  bg: 'hsl(var(--stress-bg))',
+  panel: 'hsl(var(--stress-panel))',
+  panel2: 'hsl(var(--stress-panel2))',
+  border: 'hsl(var(--stress-border))',
+  border2: 'hsl(var(--stress-border2))',
+  text: 'hsl(var(--stress-text))',
+  mut: 'hsl(var(--stress-mut))',
   up: '#089981',
   dn: '#F23645',
   blue: '#2962FF',
   amber: '#F7A600',
   cyan: '#22AEC4',
 };
+
 const MONO = "'JetBrains Mono','SF Mono','Roboto Mono',ui-monospace,Menlo,monospace";
 const SANS = "-apple-system,'Inter','Segoe UI',Roboto,sans-serif";
 
