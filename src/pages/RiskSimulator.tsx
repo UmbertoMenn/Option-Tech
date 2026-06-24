@@ -20,6 +20,7 @@ import {
 } from 'recharts';
 import { Activity, AlertTriangle, Loader2 } from 'lucide-react';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useStressLab, StressLabInputs } from '@/hooks/useStressLab';
 import {
@@ -274,6 +275,7 @@ function Panel({
 /* ============================== STRESS LAB CONTENT ============================== */
 
 function StressLabContent() {
+  const isMobile = useIsMobile();
   /* ---------- Ambito del patrimonio di riferimento ----------
    * total  = patrimonio totale (netting completo della dashboard, GP inclusa)
   /* ---------- Esposizione di riferimento ----------
@@ -1104,7 +1106,7 @@ function StressLabContent() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(280px,360px) 1fr',
+          gridTemplateColumns: isMobile ? '1fr' : 'minmax(280px,360px) 1fr',
           gap: 14,
           marginBottom: 14,
         }}
@@ -1307,7 +1309,7 @@ function StressLabContent() {
         </Panel>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,minmax(0,1fr))', gap: 14 }}>
             {kpi.map((k) => (
               <Panel key={k.l} style={{ padding: '14px 16px' }}>
                 <div style={lbl}>{k.l}</div>

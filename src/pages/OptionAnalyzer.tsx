@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Activity } from "lucide-react";
 import { AppHeaderMenu } from "@/components/layout/AppHeaderMenu";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 
 /* ============================ MATH CORE ============================ */
@@ -181,6 +182,7 @@ interface FetchInfo {
 }
 
 export function OptionAnalyzer() {
+  const isMobile = useIsMobile();
   const expiries = useMemo(() => nextExpiries(14), []);
   const [type, setType] = useState<"CALL" | "PUT">("PUT");
   const [S0, setS0] = useState(100);
@@ -517,7 +519,7 @@ export function OptionAnalyzer() {
         <span style={{ fontSize: 11, color: C.dim, marginLeft: "auto" }}>dati auto da verificare · tutti i campi restano modificabili</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "300px 1fr", gap: 16, alignItems: "start" }}>
         <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
             {(["PUT", "CALL"] as const).map((t) => (
@@ -568,14 +570,14 @@ export function OptionAnalyzer() {
           </div>
 
           <GroupTitle>Volatilità</GroupTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: 10 }}>
             <MetricDual label="IV implicita" a={pct(c.iv)} b={isFinite(c.iv) ? pct(c.iv * rt) : "—"} color={C.blue} info="Volatilità implicita ricavata invertendo Black-Scholes dal premio inserito." />
             <MetricDual label="RV reale" a={pct(c.sig)} b={pct(c.sig * rt)} info="Volatilità realizzata del sottostante." />
             <MetricDual label="Premio di varianza" a={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * 100).toFixed(1) + " pt" : "—"} b={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * rt * 100).toFixed(1) + " pt" : "—"} color={vp > 0 ? C.green : C.red} edge info="IV − RV in punti: l'edge di chi vende." />
           </div>
 
           <GroupTitle>Dove finirà il prezzo · a scadenza ({c.days} giorni · T = {fmt(c.T, 3)} anni)</GroupTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 10 }}>
             <MetricDual label={useMu ? <>Deriva reale <span style={{ color: C.red, textTransform: "none" }}>⚠ SLIDER</span></> : "Deriva reale (drift)"} a={pct(c.m)} b={pct(c.m * c.T)} color={C.amber} sub={useMu ? `override manuale attivo · CAPM = ${pct(c.mCapm)}` : `fonte: CAPM (r + β·ERP − q)`} info="Drift del prezzo = μ CAPM − dividendi (μ = risk-free + β×premio di rischio)." />
             <MetricDual label={<>Drenaggio <span style={{ textTransform: "none" }}>σ²/2</span></>} a={pct(c.dren)} b={pct(c.dren * c.T)} info="La zavorra della volatilità: metà della varianza." />
             <Metric label="Mediana a scadenza" value={fmt(c.median)} sub={`media ${fmt(c.mean)}`} color={C.teal} info="Prezzo centrale = S₀·e^((drift−σ²/2)·T)." />
@@ -583,7 +585,7 @@ export function OptionAnalyzer() {
           </div>
 
           <GroupTitle>Valore reale & Edge Reale · vendita {type}</GroupTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 10 }}>
             <Metric label="Premio incassato" value={fmt(prem)} sub={<span style={{ color: C.green }}>{pct(prem / K)} dello strike</span>} info="Quanto incassi vendendo l'opzione." />
             <Metric label={`Valore reale ${type}`} value={fmt(selReal)} sub={<span style={{ color: C.green }}>{pct(selReal / K)} dello strike</span>} info="Valore equo dell'opzione con deriva reale μ e vol RV." />
             <MetricDual label={<><span style={{ textTransform: "none" }}>μ*</span> · deriva di pareggio</>}
@@ -595,7 +597,7 @@ export function OptionAnalyzer() {
           </div>
 
           <GroupTitle>Probabilità · misura reale (<span style={{ textTransform: "none" }}>μ</span>, RV)</GroupTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 10 }}>
             <Metric label="Prob. di GAIN" value={pct(c.gain)} sub={`breakeven ${fmt(c.beLevel)}`} color={c.gain >= 0.5 ? C.green : C.amber} info="Probabilità di chiudere in utile col cuscinetto del premio." />
             <Metric label="Prob. ITM (buco)" value={pct(c.breachReal)} sub={`implicita ${pct(c.breachImpl)}`} color={C.red} info="Probabilità che l'opzione finisca in-the-money a scadenza." />
             <Metric label="Prob. di NON rollare" value={pct(c.noRoll)} sub={`oltre ${buff}% (barriera ${fmt(c.barrier, 0)})`} color={c.noRoll >= 0.6 ? C.green : C.amber} info="Probabilità che il prezzo non tocchi mai la barriera (first-passage)." />
