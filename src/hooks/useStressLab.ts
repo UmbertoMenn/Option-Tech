@@ -93,9 +93,6 @@ export interface StressLabData {
   /** Esposizione Potenziale in Equity (denominatore di P&L%/beta/delta), coi due sotto-toggle
    *  ETF/commodity e GP già applicati. */
   equityExposure: number;
-  /** Beta di portafoglio pesato sull'ESPOSIZIONE POTENZIALE (azioni + esposizione
-   *  implicita da put/leap/strategie/sintetiche + GP), non solo sull'equity diretto. */
-  betaPotential: number;
   /** Componenti per breakdown/tooltip dell'esposizione equity. */
   equityGrandTotal: number;
   equityEtfEUR: number;
@@ -768,39 +765,6 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     patrimonyBreakdown,
   ]);
 
-  /* ---------- 12b. Beta di portafoglio pesato sull'ESPOSIZIONE POTENZIALE ----------
-   * Pesa il beta di ogni sottostante sul suo controvalore di esposizione potenziale:
-   * azioni + ETF/commodity + esposizione implicita (naked put, leap, strategie,
-   * sintetiche) + GP. Es: 1M azioni β1 + 1M esposizione PUT su titoli β2 → β tot 1,5.
-   * Rispetta i sotto-toggle ETF/commodity e GP come equityExposure. */
-  const betaPotential = useMemo(() => {
-    let num = 0;
-    let den = 0;
-    const add = (w: number, key: string) => {
-      const aw = Math.abs(w);
-      if (aw <= 0) return;
-      const beta = betaMap[normTick(key)] ?? baselineUnders[key]?.beta ?? DEFAULT_BETA_UNKNOWN;
-      num += aw * beta;
-      den += aw;
-    };
-    for (const s of riskAnalysis.stockDetails ?? []) {
-      if (s.isETF && !inputs.includeEtfCommodity) continue;
-      add(s.riskEUR, s.tickerKey);
-    }
-    if (inputs.includeEtfCommodity) {
-      for (const c of riskAnalysis.commodityDetails ?? [])
-        add(c.riskEUR, (c as { tickerKey?: string }).tickerKey ?? c.underlying);
-    }
-    for (const s of riskAnalysis.syntheticCcDrccDetails ?? []) add(s.riskEUR, s.tickerKey);
-    for (const n of riskAnalysis.nakedPutDetails ?? []) add(n.riskEUR, n.tickerKey);
-    for (const l of riskAnalysis.leapCallDetails ?? []) add(l.riskEUR, l.tickerKey);
-    for (const st of riskAnalysis.strategyDetails ?? []) add(st.maxLossEUR, st.tickerKey);
-    if (inputs.gpEquity) {
-      for (const e of eq) if ((e as { gp?: boolean }).gp) add(e.eur, e.tick ?? '');
-    }
-    return den > 0 ? num / den : 0;
-  }, [riskAnalysis, betaMap, baselineUnders, eq, inputs.includeEtfCommodity, inputs.gpEquity]);
-
   /* ---------- 13. Output ---------- */
 
   return {
@@ -815,7 +779,6 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     nettingTotalRaw: liveNetting.nettingTotal,
     nettingExCCAndNPRaw: liveNetting.nettingExCCAndNP,
     equityExposure,
-    betaPotential,
     equityGrandTotal: grandTotal,
     equityEtfEUR: etfRiskEUR,
     equityCommodityEUR: commodityRiskEUR,

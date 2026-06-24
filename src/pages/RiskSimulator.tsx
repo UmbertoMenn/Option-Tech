@@ -426,12 +426,6 @@ function StressLabContent() {
     return pl / ptfBase / (d / 100);
   }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
-  /* ---------- Beta di portafoglio pesato sull'ESPOSIZIONE POTENZIALE ----------
-   * Calcolato nell'hook su tutte le componenti di ptfBase (azioni + esposizione
-   * implicita da put/leap/strategie/sintetiche + GP). È il beta "puro" delta-1 per
-   * il P/L TEORICO = esposizione potenziale × beta × shock. */
-  const betaPort = data.betaPotential;
-
   /* ---------- P&L VERO dello scenario di mercato (= card P&L Totale). ---------- */
   const scenMarketTot = scen.totEUR;
 
@@ -567,6 +561,13 @@ function StressLabContent() {
     }
     return den > 0 ? num / den : 0;
   }, [undTable]);
+
+  /* ---------- Beta di portafoglio per la card Delta ----------
+   * È lo STESSO beta totale mostrato dalla tabella per sottostante (totBetaWeighted):
+   * media dei beta di riga pesata per esposizione (|ctv titoli| + nozionale opzioni),
+   * con beta da undersActive (override UI inclusi). Usato nel P/L teorico = esposizione
+   * potenziale × beta × shock. Allineato alla tabella per coerenza. */
+  const betaPort = totBetaWeighted;
 
   /* ---------- Curva P&L vs mercato ---------- */
   const curve = useMemo(() => {
