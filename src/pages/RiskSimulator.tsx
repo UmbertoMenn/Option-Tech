@@ -967,12 +967,18 @@ function StressLabContent() {
               {(() => {
                 const reale = ptfBase * deltaEff;
                 const leva = totalPatrimony ? reale / totalPatrimony : 0;
+                const betaW = totBetaWeighted;
+                // Rovina lineare dalla leva @ scenario: −100% perf. = calo titoli 100/leva,
+                // = calo mercato (100/leva)/β. Solo se leva > 0 (esposizione netta lunga).
+                const ruinTitoli = leva > 0.01 ? 100 / leva : null;
+                const ruinMkt = ruinTitoli != null && betaW > 0.01 ? ruinTitoli / betaW : null;
                 const showReal = true;
                 const card = (
                   label: string,
                   value: string,
                   accent: string,
                   info: React.ReactNode,
+                  sub?: React.ReactNode,
                 ) => (
                   <div
                     style={{
@@ -1001,6 +1007,11 @@ function StressLabContent() {
                     <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 800, color: C.text, marginTop: 3 }}>
                       {value}
                     </div>
+                    {sub && (
+                      <div style={{ fontSize: 9.5, color: C.mut, fontFamily: MONO, marginTop: 4, lineHeight: 1.55 }}>
+                        {sub}
+                      </div>
+                    )}
                   </div>
                 );
                 return (
@@ -1034,6 +1045,7 @@ function StressLabContent() {
                           È un'esposizione <b>lineare</b> (delta-€): in un crash la perdita reale è maggiore,
                           perché il gamma delle put vendute accelera. Negativa = sei net short.
                         </Info>,
+                        <>valori a questo shock di mercato ({sgn(d, 1)}%)</>,
                       )}
                     {showReal &&
                       card(
@@ -1054,6 +1066,22 @@ function StressLabContent() {
                           net short. È leva <b>direzionale lineare</b>, non perdita massima (la coda è peggiore
                           per il gamma).
                         </Info>,
+                        <>
+                          <div>valori a questo shock di mercato ({sgn(d, 1)}%)</div>
+                          {ruinTitoli != null ? (
+                            <div>
+                              −100% perf. a <span style={{ color: C.dn }}>−{fmtN(ruinTitoli, 2)}%</span> titoli ·{' '}
+                              {ruinMkt != null ? (
+                                <span style={{ color: C.dn }}>−{fmtN(ruinMkt, 1)}%</span>
+                              ) : (
+                                '—'
+                              )}{' '}
+                              mercato (β pond. {fmtN(betaW, 2)})
+                            </div>
+                          ) : (
+                            <div>net short / non direzionale lungo</div>
+                          )}
+                        </>,
                       )}
                   </div>
                 );
