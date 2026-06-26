@@ -323,6 +323,7 @@ function StressLabContent() {
   const [heatCollapsed, setHeatCollapsed] = useState(true); // matrice shock/vol ridotta di default
   const [marginCollapsed, setMarginCollapsed] = useState(true); // margine cassa ridotto di default
   const [plPct, setPlPct] = useState(true); // card P&L vs shock: default in % sul patrimonio
+  const [curveMode, setCurveMode] = useState<'market' | 'titoli'>('market'); // asse X: shock mercato (via beta) o titoli (β=1)
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
   const [days, setDays] = useState(0);
@@ -591,10 +592,13 @@ function StressLabContent() {
 
   /* ---------- Curva P&L vs mercato ---------- */
   const curve = useMemo(() => {
+    // Asse X: "mercato" trasmette via beta reale (unders); "titoli" muove i titoli
+    // direttamente (β=1, undersDelta). Range esteso a −60% per vedere la rovina.
+    const undsCurve = curveMode === 'titoli' ? undersDelta : unders;
     const pts: { d: number; Totale: number; 'Azioni/ETF': number; Opzioni: number }[] = [];
-    for (let x = -35; x <= 15.01; x += 2.5) {
+    for (let x = -60; x <= 15.01; x += 2.5) {
       const dv = volMode === 'auto' ? coupledDV1M(x) : dVman;
-      const s = runScenario(legs, eq, undersActive, effIV, x, dv, prm);
+      const s = runScenario(legs, eq, undsCurve, effIV, x, dv, prm);
       pts.push({
         d: x,
         Totale: Math.round(s.totEUR),
@@ -603,7 +607,25 @@ function StressLabContent() {
       });
     }
     return pts;
-  }, [legs, eq, undersActive, effIV, volMode, dVman, prm]);
+  }, [legs, eq, unders, undersDelta, curveMode, effIV, volMode, dVman, prm]);
+
+  // Shock di "rovina": x in cui il P&L Totale = −patrimonio (−100%). Interpolazione
+  // lineare sul primo attraversamento scendendo. null se non raggiunto nel range.
+  const ruinX = useMemo(() => {
+    if (!totalPatrimony) return null;
+    const target = -totalPatrimony;
+    const asc = [...curve].sort((a, b) => a.d - b.d);
+    for (let i = asc.length - 1; i > 0; i--) {
+      const hi = asc[i];
+      const lo = asc[i - 1];
+      // scendendo da hi.d a lo.d il Totale passa sopra→sotto target?
+      if (hi.Totale > target && lo.Totale <= target) {
+        const t = (target - hi.Totale) / (lo.Totale - hi.Totale);
+        return hi.d + t * (lo.d - hi.d);
+      }
+    }
+    return null;
+  }, [curve, totalPatrimony]);
 
   // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle ex CC e NP).
   const curvePct = useMemo(
@@ -1619,7 +1641,9 @@ function StressLabContent() {
 
       {/* CHART */}
       <Panel
-        title={plPct ? 'P/L % su patrimonio vs shock di mercato' : 'P&L (€) vs shock di mercato (vol coerente per ogni punto)'}
+        title={`${plPct ? 'P/L % su patrimonio' : 'P&L (€)'} vs ${
+          curveMode === 'titoli' ? 'shock titoli (β=1)' : 'shock mercato (β reale)'
+        }`}
         style={{ marginBottom: 14 }}
         info={
           <Info title="Perché la curva delle opzioni non è una retta" w={350}>
@@ -1633,27 +1657,51 @@ function StressLabContent() {
           </Info>
         }
         headerRight={
-          <div style={{ display: 'flex', gap: 0 }}>
-            {(['pct', 'eur'] as const).map((u, i) => (
-              <button
-                key={u}
-                onClick={() => setPlPct(u === 'pct')}
-                style={{
-                  padding: '3px 9px',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  background: (plPct ? 'pct' : 'eur') === u ? C.blue : 'transparent',
-                  border: `1px solid ${(plPct ? 'pct' : 'eur') === u ? C.blue : C.border2}`,
-                  borderLeft: i === 1 ? 'none' : undefined,
-                  color: (plPct ? 'pct' : 'eur') === u ? '#fff' : C.mut,
-                  borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
-                  fontFamily: SANS,
-                }}
-              >
-                {u === 'pct' ? '% patrim.' : '€'}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 0 }}>
+              {(['market', 'titoli'] as const).map((m, i) => (
+                <button
+                  key={m}
+                  onClick={() => setCurveMode(m)}
+                  style={{
+                    padding: '3px 9px',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: curveMode === m ? C.cyan : 'transparent',
+                    border: `1px solid ${curveMode === m ? C.cyan : C.border2}`,
+                    borderLeft: i === 1 ? 'none' : undefined,
+                    color: curveMode === m ? '#0b0f17' : C.mut,
+                    borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                    fontFamily: SANS,
+                  }}
+                >
+                  {m === 'market' ? 'vs shock mercato' : 'vs shock titoli'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 0 }}>
+              {(['pct', 'eur'] as const).map((u, i) => (
+                <button
+                  key={u}
+                  onClick={() => setPlPct(u === 'pct')}
+                  style={{
+                    padding: '3px 9px',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: (plPct ? 'pct' : 'eur') === u ? C.blue : 'transparent',
+                    border: `1px solid ${(plPct ? 'pct' : 'eur') === u ? C.blue : C.border2}`,
+                    borderLeft: i === 1 ? 'none' : undefined,
+                    color: (plPct ? 'pct' : 'eur') === u ? '#fff' : C.mut,
+                    borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                    fontFamily: SANS,
+                  }}
+                >
+                  {u === 'pct' ? '% patrim.' : '€'}
+                </button>
+              ))}
+            </div>
           </div>
         }
       >
@@ -1686,6 +1734,20 @@ function StressLabContent() {
               />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: SANS }} />
               <ReferenceLine x={d} stroke={C.amber} strokeDasharray="4 3" />
+              {ruinX != null && (
+                <ReferenceLine
+                  x={ruinX}
+                  stroke={C.dn}
+                  strokeWidth={2}
+                  label={{
+                    value: `−100% @ ${sgn(ruinX, 0)}%`,
+                    position: 'insideTopLeft',
+                    fill: C.dn,
+                    fontSize: 11,
+                    fontFamily: MONO,
+                  }}
+                />
+              )}
               <ReferenceLine y={0} stroke={C.border2} />
               <Line type="monotone" dataKey="Totale" stroke={C.blue} strokeWidth={2.5} dot={false} />
               <Line
