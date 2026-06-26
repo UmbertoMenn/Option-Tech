@@ -973,6 +973,10 @@ function StressLabContent() {
                 // inclusi). Shock titoli = beta titoli ponderato × shock mercato.
                 const ruinMktV = ruinX; // shock mercato di rovina (o null se oltre −95%)
                 const ruinTitoliV = ruinX != null ? betaW * ruinX : null;
+                // Leva reale alla rovina = |−100% perf.| ÷ |movimento titoli a rovina|
+                // = 100 / |β × ruinX| (leva secante implicita nel punto di rovina full-reval).
+                const ruinLeva =
+                  ruinTitoliV != null && Math.abs(ruinTitoliV) > 0.01 ? 100 / Math.abs(ruinTitoliV) : null;
                 const showReal = true;
                 const card = (
                   label: string,
@@ -1072,9 +1076,10 @@ function StressLabContent() {
                           {ruinX != null ? (
                             <div>
                               rovina −100% perf. (full reval):{' '}
-                              <span style={{ color: C.dn }}>{sgn(ruinTitoliV as number, 1)}%</span> titoli ·{' '}
-                              <span style={{ color: C.dn }}>{sgn(ruinMktV as number, 1)}%</span> mercato (β pond.{' '}
-                              {fmtN(betaW, 2)})
+                              <span style={{ color: C.dn }}>{sgn(ruinMktV as number, 1)}%</span> mercato ·{' '}
+                              <span style={{ color: C.dn }}>{sgn(ruinTitoliV as number, 1)}%</span> titoli · leva
+                              rovina <span style={{ color: C.amber, fontWeight: 700 }}>{ruinLeva != null ? fmtN(ruinLeva, 2) : '—'}×</span>{' '}
+                              (β pond. {fmtN(betaW, 2)})
                             </div>
                           ) : (
                             <div>rovina oltre −95% di mercato (book robusto)</div>
