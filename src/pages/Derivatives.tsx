@@ -3049,8 +3049,8 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </Tooltip>
             
             {/* Col 6: Roll-up toggle */}
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <PutRollUpToggle option={option} />
+            <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+              <PutRollUpToggle option={option} hideLabel />
             </div>
             
             {/* Col 8: Calculator */}
@@ -3083,7 +3083,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -3094,7 +3094,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                 >
                   {netPerShare !== undefined 
                     ? <>
-                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
+                        {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
                             ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
@@ -3110,14 +3110,14 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </Tooltip>
             
             {/* Col 11: Contratti */}
-            <span className="text-sm text-muted-foreground text-right">
+            <span className="text-sm font-mono text-muted-foreground text-right">
               {contracts} × 100
             </span>
             
             {/* Col 11: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm font-mono text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
                   {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
@@ -3128,7 +3128,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             
             {/* Col 12: Prezzo */}
             <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-              <span className="font-semibold text-sm">
+              <span className="font-mono font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
               </span>
               {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
