@@ -1290,7 +1290,15 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                       : 'Sintetico (PUT venduta deep ITM)'}
                   </p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+                  <>
+                    <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+                    <p className="text-xs text-muted-foreground">
+                      PMC azioni:{' '}
+                      <span className="text-foreground font-medium">
+                        {formatCurrency(underlying.avg_cost || 0, underlying.currency || getOptionCurrency(option))}
+                      </span>
+                    </p>
+                  </>
                 )}
               </div>
               <div>
@@ -1583,7 +1591,17 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               <div>
                 <p className="text-muted-foreground text-xs">Sottostante</p>
                 <p className="font-medium">{underlying.description}</p>
-                {!isSynthetic && <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>}
+                {!isSynthetic && (
+                  <>
+                    <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
+                    <p className="text-xs text-muted-foreground">
+                      PMC azioni:{' '}
+                      <span className="text-foreground font-medium">
+                        {formatCurrency(underlying.avg_cost || 0, underlying.currency || getOptionCurrency(option))}
+                      </span>
+                    </p>
+                  </>
+                )}
                 {isSynthetic && (
                   <p className="text-xs text-orange-400">
                     {syntheticCall
