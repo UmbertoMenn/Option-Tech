@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard } from 'lucide-react';
+import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard, FlaskConical } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 
@@ -66,7 +66,7 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
             Risk Analyzer
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/risk-simulator')}>
-            <ShieldAlert className="w-4 h-4 mr-2" />
+            <FlaskConical className="w-4 h-4 mr-2" />
             Stress Lab
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/option-analyzer')}>
