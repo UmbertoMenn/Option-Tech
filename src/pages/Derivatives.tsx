@@ -663,6 +663,17 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[900px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span /><span />
+                    <span>Sottostante / Strategia</span>
+                    <span /><span />
+                    <span className="text-center">Stato</span>
+                    <span />
+                    <span className="text-right">Netto unit.</span>
+                    <span className="text-right">Contratti</span>
+                    <span className="text-right">PMC</span>
+                    <span className="text-right">Prezzo</span>
+                  </div>
                   {categories.coveredCalls.map((cc, index) => (
                     <CoveredCallRow 
                       key={index} 
@@ -714,6 +725,17 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[900px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span /><span />
+                    <span>Sottostante / Strategia</span>
+                    <span /><span />
+                    <span className="text-center">Stato</span>
+                    <span />
+                    <span className="text-right">Netto unit.</span>
+                    <span className="text-right">Contratti</span>
+                    <span className="text-right">PMC</span>
+                    <span className="text-right">Prezzo</span>
+                  </div>
                   {categories.deRiskingCoveredCalls.map((dr, index) => (
                     <DeRiskingCoveredCallRow 
                       key={index} 
@@ -950,6 +972,15 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[800px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span /><span />
+                    <span>Sottostante / Strategia</span>
+                    <span />
+                    <span className="text-center">Stato</span>
+                    <span className="text-right">Contratti</span>
+                    <span className="text-right">PMC</span>
+                    <span className="text-right">Prezzo</span>
+                  </div>
                   {categories.leapCalls.map((lc, index) => (
                     <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                   ))}
@@ -983,6 +1014,15 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[800px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span /><span />
+                    <span>Sottostante / Strategia</span>
+                    <span /><span />
+                    <span className="text-center">Stato</span>
+                    <span className="text-right">Contratti</span>
+                    <span className="text-right">PMC</span>
+                    <span className="text-right">Prezzo</span>
+                  </div>
                   {categories.longPuts.map((lp, index) => (
                     <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                   ))}
@@ -1106,7 +1146,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_2rem_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -1182,8 +1222,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 7: Menu */}
-            <span />
+
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -1215,7 +1254,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -1226,7 +1265,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 >
                   {netPerShare !== undefined 
                     ? <>
-                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
+                        {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
                             ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
@@ -1241,22 +1280,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 9: PS */}
-            <div className="text-right flex items-center justify-end">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
-              {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-              )}
-            </div>
+
             
             {/* Col 10: Contratti */}
             <span className="text-sm text-muted-foreground text-right">
@@ -1277,7 +1301,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             
             {/* Col 12: Prezzo + % */}
             <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-              <span className="font-semibold text-sm">
+              <span className="font-mono font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
               </span>
               {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
@@ -1428,7 +1452,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_2rem_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -1489,8 +1513,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 7: Menu */}
-            <span />
+
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -1522,7 +1545,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -1533,7 +1556,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
                 >
                   {netPerShare !== undefined 
                     ? <>
-                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
+                        {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
                             ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
@@ -1548,22 +1571,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 10: PS */}
-            <div className="text-right flex items-center justify-end">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Prezzo Sottostante</p>
-                </TooltipContent>
-              </Tooltip>
-              {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-              )}
-            </div>
+
             
             {/* Col 11: Contratti */}
             <span className="text-sm text-muted-foreground text-right">
@@ -1584,7 +1592,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             
             {/* Col 13: Prezzo + % */}
             <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-              <span className="font-semibold text-sm">
+              <span className="font-mono font-semibold text-sm">
                 {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
               </span>
               {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
@@ -1741,7 +1749,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition, underlyin
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1794,31 +1802,9 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 7: Menu */}
-          <span />
+
           
-          {/* Col 7: PS */}
-          <div className="text-right flex items-center justify-end">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">-</span>
-            )}
-          </div>
+
           
           {/* Col 8: Contratti */}
           <span className="text-sm text-muted-foreground text-right">
@@ -1839,7 +1825,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
           
           {/* Col 10: Prezzo */}
           <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-            <span className="font-semibold text-sm">
+            <span className="font-mono font-semibold text-sm">
               {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
             </span>
             {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
@@ -2850,7 +2836,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
             <p>Prezzo Medio di Carico Opzione</p>
           </TooltipContent>
         </Tooltip>
-        <span className="font-semibold text-sm">
+        <span className="font-mono font-semibold text-sm">
           {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
         </span>
       </div>
@@ -2937,7 +2923,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
                 <p>Prezzo Medio di Carico Opzione</p>
               </TooltipContent>
             </Tooltip>
-            <span className="font-semibold text-sm">
+            <span className="font-mono font-semibold text-sm">
               {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
             </span>
           </div>
@@ -3209,7 +3195,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
+        className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -3243,35 +3229,11 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 6: Override Badge */}
-          <div className="flex items-center">
-                      </div>
+
           
-          {/* Col 7: Menu */}
-          <span />
+
           
-          {/* Col 7: PS */}
-          <div className="text-right flex items-center justify-end">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">-</span>
-            )}
-          </div>
+
           
           {/* Col 8: Contratti */}
           <span className="text-sm text-muted-foreground text-right">
