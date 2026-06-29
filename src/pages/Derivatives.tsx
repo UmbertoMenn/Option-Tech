@@ -779,6 +779,16 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_4.5rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[880px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span>Sottostante / Strategia</span>
+                    <span />
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Scadenza</span>
+                    <span className="text-center">PUT spread</span>
+                    <span className="text-center">CALL spread</span>
+                    <span className="text-right">Contratti</span>
+                  </div>
                   {categories.ironCondors.map((ic, index) => (
                     <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
@@ -815,6 +825,16 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[880px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span>Sottostante / Strategia</span>
+                    <span />
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Scadenze</span>
+                    <span className="text-center">PUT spread</span>
+                    <span className="text-center">CALL spread</span>
+                    <span className="text-right">Contratti</span>
+                  </div>
                   {categories.doubleDiagonals.map((dd, index) => (
                     <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
@@ -900,6 +920,17 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_8rem] gap-3 items-center px-3 pb-1 border border-transparent min-w-[850px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span>Sottostante</span>
+                    <span />
+                    <span>Strategia</span>
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Break-even</span>
+                    <span className="text-center">Gambe</span>
+                    <span className="text-center">Call/Put</span>
+                    <span className="text-right">P/L</span>
+                  </div>
                   {putSpreads.map((group, index) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
@@ -936,6 +967,17 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_8rem] gap-3 items-center px-3 pb-1 border border-transparent min-w-[850px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span>Sottostante</span>
+                    <span />
+                    <span>Strategia</span>
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Break-even</span>
+                    <span className="text-center">Gambe</span>
+                    <span className="text-center">Call/Put</span>
+                    <span className="text-right">P/L</span>
+                  </div>
                   {diagonalPutSpreads.map((group, index) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
@@ -1059,6 +1101,17 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_8rem] gap-3 items-center px-3 pb-1 border border-transparent min-w-[850px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span>Sottostante</span>
+                    <span />
+                    <span>Strategia</span>
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Break-even</span>
+                    <span className="text-center">Gambe</span>
+                    <span className="text-center">Call/Put</span>
+                    <span className="text-right">P/L</span>
+                  </div>
                   {remainingOtherStrategies.map((group, index) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
