@@ -184,17 +184,8 @@ serve(async (req) => {
     // Quando viene aggiunto un nuovo ticker (Option Analyzer, derivatives, ecc.) finisce qui,
     // quindi il cron lo aggiornerà automaticamente al successivo run.
     // SINGLE SOURCE OF TRUTH: underlying_prices contiene tutti i ticker noti dell'app.
-    // Inoltre, carichiamo i flag beta_manual per saltare i ticker con beta inserito manualmente.
-    const [pricesRes, fundsRes] = await Promise.all([
-      supabase.from("underlying_prices").select("ticker"),
-      supabase.from("ticker_fundamentals").select("ticker, beta_manual"),
-    ]);
+    const pricesRes = await supabase.from("underlying_prices").select("ticker");
     if (pricesRes.error) throw pricesRes.error;
-    const manualSet = new Set<string>(
-      (fundsRes.data || [])
-        .filter((r: any) => r.beta_manual)
-        .map((r: any) => String(r.ticker || "").toUpperCase()),
-    );
     const tickers = Array.from(new Set((pricesRes.data ?? []).map((r: any) => String(r.ticker || "").trim().toUpperCase()).filter(Boolean))).sort();
 
     const auth = await getYahooCrumb();
@@ -216,12 +207,6 @@ serve(async (req) => {
 
     for (const ticker of tickers) {
       try {
-        // Salta i ticker con beta inserito manualmente: non sovrascrivere mai.
-        if (manualSet.has(ticker)) {
-          stats.skipped++;
-          continue;
-        }
-
         const sum = await yahooSummary(ticker, auth);
         if (sum.status === 429 || sum.status >= 500) {
           delay = Math.min(MAX_DELAY, Math.floor(delay * 1.8));
@@ -277,7 +262,10 @@ serve(async (req) => {
         if (typeof rf.data?.regularMarketPrice === "number") riskFree = rf.data.regularMarketPrice;
 
         const update: Record<string, any> = { ticker, updated_at: now };
-        if (beta != null) { update.beta = beta; update.beta_source = betaSource; update.beta_updated_at = now; }
+        // Se è stato trovato un valore di beta, lo si scrive e si declassa l'eventuale
+        // flag manuale (il cron prevale). Se NON è stato trovato (beta == null), beta e
+        // beta_manual NON vengono toccati: resta il valore manuale esistente come fallback.
+        if (beta != null) { update.beta = beta; update.beta_source = betaSource; update.beta_updated_at = now; update.beta_manual = false; }
         if (rv != null)   { update.rv = rv; update.rv_updated_at = now; }
         if (name)         update.name = name;
         if (currency)     update.currency = currency;
