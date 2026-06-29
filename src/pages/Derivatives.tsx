@@ -3014,7 +3014,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-[hsl(var(--stress-border))] bg-[hsl(var(--stress-panel))] hover:bg-[hsl(var(--stress-panel2))] cursor-pointer transition-colors min-w-[920px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-[hsl(var(--stress-border))] bg-[hsl(var(--stress-bg))] hover:bg-[hsl(var(--stress-panel))] cursor-pointer transition-colors min-w-[920px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
