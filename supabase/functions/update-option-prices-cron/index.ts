@@ -265,18 +265,43 @@ serve(async (req) => {
       );
     }
 
-    // Step 2: Resolve underlying -> ticker mappings
+    // Step 2: Resolve underlying -> ticker mappings (with canonical normalization)
+    // Allineato a `normalizeUnderlying` di src/hooks/useUnderlyingMappings.ts:
+    // case-insensitive, rimuove punteggiatura, spazi e suffissi societari.
+    const normalizeUnderlying = (s: string): string =>
+      s.toUpperCase()
+        .replace(/[.,]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\b(INC|CORP|LTD|LLC|PLC|CO|THE)\b/g, '')
+        .replace(/[^A-Z0-9]/g, '');
+
     const uniqueUnderlyings = [...new Set(derivatives.map(d => d.underlying).filter(Boolean))];
+
+    // Carichiamo TUTTI i mapping e li indicizziamo per chiave normalizzata
+    // (non possiamo filtrare server-side con .in() perché i nomi nelle positions
+    // hanno casing/suffissi diversi rispetto a quelli in underlying_mappings).
     const { data: mappings, error: mapError } = await supabase
       .from('underlying_mappings')
-      .select('underlying, ticker')
-      .in('underlying', uniqueUnderlyings);
+      .select('underlying, ticker');
 
     if (mapError) console.error("Error fetching underlying_mappings:", mapError.message);
 
+    const exactMap: Record<string, string> = {};
+    const normalizedMap: Record<string, string> = {};
+    mappings?.forEach(m => {
+      exactMap[m.underlying] = m.ticker;
+      const norm = normalizeUnderlying(m.underlying);
+      if (norm && !normalizedMap[norm]) normalizedMap[norm] = m.ticker;
+    });
+
     const underlyingToTicker: Record<string, string> = {};
-    mappings?.forEach(m => { underlyingToTicker[m.underlying] = m.ticker; });
-    console.log(`Resolved ${Object.keys(underlyingToTicker).length} / ${uniqueUnderlyings.length} underlyings to tickers`);
+    for (const u of uniqueUnderlyings) {
+      const direct = exactMap[u];
+      if (direct) { underlyingToTicker[u] = direct; continue; }
+      const fallback = normalizedMap[normalizeUnderlying(u)];
+      if (fallback) underlyingToTicker[u] = fallback;
+    }
+    console.log(`Resolved ${Object.keys(underlyingToTicker).length} / ${uniqueUnderlyings.length} underlyings to tickers (exact + normalized)`);
 
     // Step 3: Group positions by ticker + expiry month
     const groups: Record<string, GroupKey> = {};
