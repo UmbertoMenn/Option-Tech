@@ -172,21 +172,50 @@ serve(async (req) => {
     const underlyings = [...new Set(derivativePositions?.map(p => p.underlying).filter(Boolean) || [])];
     console.log(`Found ${underlyings.length} unique underlyings from derivative positions`);
 
-    // Resolve tickers from underlyings via underlying_mappings
+    // Resolve tickers from underlyings via underlying_mappings (with normalization fallback)
     let tickersFromDerivatives: string[] = [];
     if (underlyings.length > 0) {
-      const { data: underlyingMappings, error: umError } = await supabase
+      const normalizeUnderlying = (s: string): string => {
+        return String(s || '')
+          .toUpperCase()
+          .replace(/[.,'"`]/g, '')
+          .replace(/\s+/g, ' ')
+          .replace(/\b(INC|CORP|CORPORATION|CO|COMPANY|LTD|LLC|PLC|SA|NV|AG|SE|HOLDINGS?|GROUP|GRP)\b/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
+
+      const { data: allMappings, error: umError } = await supabase
         .from('underlying_mappings')
-        .select('ticker')
-        .in('underlying', underlyings);
-      
+        .select('underlying, ticker');
+
       if (umError) {
         console.error("Error fetching underlying_mappings:", umError.message);
       }
-      
-      tickersFromDerivatives = underlyingMappings?.map(m => m.ticker).filter(Boolean) || [];
+
+      const exactMap: Record<string, string> = {};
+      const normalizedMap: Record<string, string> = {};
+      (allMappings || []).forEach((m: any) => {
+        if (m.underlying && m.ticker) {
+          exactMap[m.underlying] = m.ticker;
+          normalizedMap[normalizeUnderlying(m.underlying)] = m.ticker;
+        }
+      });
+
+      const resolved = new Set<string>();
+      const unresolved: string[] = [];
+      for (const u of underlyings) {
+        const t = exactMap[u] || normalizedMap[normalizeUnderlying(u)];
+        if (t) resolved.add(t);
+        else unresolved.push(u);
+      }
+      tickersFromDerivatives = [...resolved];
       console.log(`Resolved ${tickersFromDerivatives.length} tickers from derivative underlyings`);
+      if (unresolved.length > 0) {
+        console.log(`Unresolved underlyings (no mapping): ${unresolved.join(', ')}`);
+      }
     }
+
 
     // Step 3: Get tickers from price_alerts
     const { data: priceAlerts, error: priceAlertsError } = await supabase
