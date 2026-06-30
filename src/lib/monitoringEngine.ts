@@ -489,23 +489,46 @@ function computeAvailableCalls(
 ): MonitoringAvailableCalls[] {
   // Build archived set using resolveKey for proper ticker matching
   const archivedResolved = new Set<string>();
+  // Raw archived keys (as stored by the wizard: canonical or normalized)
+  const archivedRaw = new Set<string>();
   for (const k of (archivedKeys || [])) {
-    archivedResolved.add(resolveKey(k, underlyingPrices));
-    archivedResolved.add(normalizeForMatching(k));
+    const trimmed = (k || '').trim();
+    if (!trimmed) continue;
+    archivedResolved.add(resolveKey(trimmed, underlyingPrices));
+    archivedResolved.add(normalizeForMatching(trimmed));
+    archivedRaw.add(trimmed.toUpperCase());
   }
 
-  const balance = new Map<string, { owned: number; soldCalls: number; displayTicker: string }>();
+  // Replica della logica wizard getUnderlyingKey per stock/etf
+  const computeWizardStockKey = (stock: Position): string[] => {
+    const out: string[] = [];
+    const desc = stock.description ?? '';
+    const tkr = stock.ticker ?? '';
+    const full = `${desc} ${tkr}`.trim();
+    const c1 = getCanonicalKey(full);
+    if (c1) out.push(c1.toUpperCase());
+    const c2 = getCanonicalKey(desc);
+    if (c2) out.push(c2.toUpperCase());
+    out.push(normalizeForMatching(full).toUpperCase());
+    out.push(normalizeForMatching(desc).toUpperCase());
+    return out;
+  };
 
-  const ensure = (key: string, displayTicker?: string) => {
+  const balance = new Map<string, { owned: number; soldCalls: number; displayTicker: string; stockKeys: string[] }>();
+
+  const ensure = (key: string, displayTicker?: string, stockKeys?: string[]) => {
     if (!balance.has(key)) {
-      balance.set(key, { owned: 0, soldCalls: 0, displayTicker: displayTicker || key });
+      balance.set(key, { owned: 0, soldCalls: 0, displayTicker: displayTicker || key, stockKeys: stockKeys || [] });
+    } else if (stockKeys && stockKeys.length) {
+      const cur = balance.get(key)!;
+      cur.stockKeys = Array.from(new Set([...cur.stockKeys, ...stockKeys]));
     }
   };
 
   // Count shares
   for (const stock of stockPositions) {
     const { key, display } = resolveStockKey(stock, underlyingPrices);
-    ensure(key, display);
+    ensure(key, display, computeWizardStockKey(stock));
     balance.get(key)!.owned += stock.quantity;
   }
 
@@ -523,8 +546,14 @@ function computeAvailableCalls(
   const result: MonitoringAvailableCalls[] = [];
   for (const [key, data] of balance) {
     // Skip archived underlyings
-    if (archivedResolved.size > 0) {
-      if (archivedResolved.has(key) || archivedResolved.has(normalizeForMatching(key)) || archivedResolved.has(normalizeForMatching(data.displayTicker))) continue;
+    if (archivedResolved.size > 0 || archivedRaw.size > 0) {
+      if (
+        archivedResolved.has(key) ||
+        archivedResolved.has(normalizeForMatching(key)) ||
+        archivedResolved.has(normalizeForMatching(data.displayTicker)) ||
+        archivedRaw.has(key.toUpperCase()) ||
+        data.stockKeys.some(sk => archivedRaw.has(sk))
+      ) continue;
     }
     const potential = Math.floor(data.owned / 100);
     const available = potential - data.soldCalls;
@@ -532,6 +561,7 @@ function computeAvailableCalls(
       result.push({ ticker: data.displayTicker, availableShares: available * 100 });
     }
   }
+
 
   return result.sort((a, b) => b.availableShares - a.availableShares);
 }
