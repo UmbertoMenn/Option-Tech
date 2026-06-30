@@ -125,6 +125,16 @@ export interface ResolvedConfig {
   status: 'matched' | 'partial' | 'unmatched';
 }
 
+export interface IncompleteStrategyPosition {
+  configId: string;
+  strategyType: string;          // 'iron_condor', 'double_diagonal', 'covered_call', 'derisking_covered_call'
+  underlying: string;
+  isSynthetic: boolean;
+  presentLegs: Position[];
+  missingLegs: string[];         // labels human-readable: 'Short Call', 'Long Put', ...
+  linkedStock: Position | null;
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
@@ -136,6 +146,7 @@ export interface DerivativeCategories {
   otherStrategies: OtherStrategyPosition[];
   groupedOtherStrategies: GroupedOtherStrategy[];
   resolvedConfigs: ResolvedConfig[];
+  incompleteStrategies: IncompleteStrategyPosition[];
 }
 
 /**
