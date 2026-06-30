@@ -2835,7 +2835,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
   );
 }
 
-function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosition }) {
+function OtherStrategyRow({ otherStrategy, underlyingPrices }: { otherStrategy: OtherStrategyPosition } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const { option, underlying } = otherStrategy;
   
@@ -2843,9 +2843,9 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
   const isPut = option.option_type === 'put';
   const isBought = option.quantity > 0;
   
-  // Calculate ITM/OTM
+  // Calculate ITM/OTM — prezzo sottostante dal lookup condiviso (uniforme con gli altri renderer)
   const strikePrice = option.strike_price || 0;
-  const underlyingPrice = underlying?.current_price || 0;
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : undefined) ?? underlying?.current_price ?? 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   
   let isITM = false;
@@ -2879,7 +2879,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             >
               {isBought ? 'A' : 'V'}
             </Badge>
-            <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlying?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+            <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlying?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
               className="text-xs shrink-0"
