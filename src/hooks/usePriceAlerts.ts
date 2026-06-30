@@ -72,6 +72,47 @@ export function useCreatePriceAlert() {
   });
 }
 
+// Batch create multiple price alerts in a single insert
+export function useBatchCreatePriceAlerts() {
+  const { user } = useAuth();
+  const effectiveUserId = useEffectiveUserId();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (alerts: Array<{
+      ticker: string;
+      direction: 'above' | 'below';
+      target_price: number;
+      cooldown_minutes?: number;
+      delete_after_trigger?: boolean;
+    }>) => {
+      if (!user || !effectiveUserId) throw new Error('User not authenticated');
+      if (alerts.length === 0) return [];
+
+      const rows = alerts.map(a => ({
+        user_id: effectiveUserId,
+        ticker: a.ticker.toUpperCase(),
+        direction: a.direction,
+        target_price: a.target_price,
+        cooldown_minutes: a.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES,
+        delete_after_trigger: a.delete_after_trigger ?? false,
+        enabled: true,
+      }));
+
+      const { data, error } = await supabase
+        .from('price_alerts')
+        .insert(rows)
+        .select();
+
+      if (error) throw error;
+      return data as PriceAlert[];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['price-alerts'] });
+    },
+  });
+}
+
 // Update an existing price alert
 export function useUpdatePriceAlert() {
   const queryClient = useQueryClient();
