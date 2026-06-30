@@ -277,7 +277,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       derivVal += px * d.qtyMult;
     }
   }
-  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal + equityAdjAtExpiry;
+  const equitySleeve = inp.equityFlat * sh.equityMult + inp.gpEquityFlat + derivVal + equityAdjAtExpiry + inp.equityDerivOffset;
 
   // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
