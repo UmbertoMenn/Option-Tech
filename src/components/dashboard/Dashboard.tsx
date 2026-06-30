@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
-import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
+import { useDerivativeNetting, compareNettingMethods } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
@@ -144,6 +144,41 @@ export function Dashboard() {
   }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
 
   const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
+
+  // DEBUG diagnostico: confronto "ex CC e NP" attuale vs "solo valore intrinseco" (qualsiasi posizione).
+  // Attivazione: in console -> localStorage.setItem('nettingDebug','1'); poi seleziona il portfolio e ricarica.
+  // Disattivazione: localStorage.removeItem('nettingDebug').
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('nettingDebug') !== '1') return;
+    if (!summary || positions.length === 0) return;
+    const cmp = compareNettingMethods(positions, summary.totalValue, overrides, frozenUnderlyingPrices, strategyConfigs);
+    const fmt = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+    /* eslint-disable no-console */
+    console.log(`%c[NETTING] ${portfolio?.name ?? 'portfolio'} — confronto metodi`, 'font-weight:bold;font-size:13px');
+    console.table(cmp.rows.map(r => ({
+      cat: r.category,
+      ticker: r.ticker,
+      descr: r.description,
+      tipo: r.optionType,
+      qty: r.quantity,
+      strike: r.strike,
+      prezzoOpz: r.price,
+      prezzoSott: r.underlyingPrice,
+      'MARKET': Math.round(r.marketValue),
+      'EX_CC_NP (attuale)': Math.round(r.currentExCCNP),
+      'INTRINSECO (tutto)': Math.round(r.fullyIntrinsic),
+      'Δ intr-attuale': Math.round(r.fullyIntrinsic - r.currentExCCNP),
+    })));
+    console.log(
+      `Base (patrimonio non-derivati): €${fmt(cmp.baseValue)}\n` +
+      `Σ derivati  — market: €${fmt(cmp.totals.marketValue)} | ex CC&NP attuale: €${fmt(cmp.totals.currentExCCNP)} | solo intrinseco: €${fmt(cmp.totals.fullyIntrinsic)}\n` +
+      `NETTING totale:           €${fmt(cmp.finalMarket)}\n` +
+      `NETTING ex CC e NP (ATT.): €${fmt(cmp.finalCurrentExCCNP)}\n` +
+      `NETTING solo INTRINSECO:   €${fmt(cmp.finalFullyIntrinsic)}`
+    );
+    /* eslint-enable no-console */
+  }, [positions, summary, overrides, frozenUnderlyingPrices, strategyConfigs, portfolio?.name]);
   
   const {
     deposits,

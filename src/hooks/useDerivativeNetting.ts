@@ -320,6 +320,172 @@ export function computeSinglePortfolioNetting(
   return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown };
 }
 
+/**
+ * Confronto metodologico per-gamba: per ogni gamba canonica calcola
+ *  - marketValue        = price * qty * 100 / fx  (mark-to-market pieno, segno incluso)
+ *  - currentExCCNP      = contributo col metodo ATTUALE "netting ex CC e NP"
+ *                         (CALL vendute CC/DCC e PUT vendute nude a valore intrinseco ITM,
+ *                          0 se OTM; ogni altra gamba a market value)
+ *  - fullyIntrinsic     = contributo valutando OGNI opzione SOLO al valore intrinseco
+ *                         (short → -intrinseco, long → +intrinseco, 0 se OTM), con lo
+ *                          stesso cap del metodo attuale (la perdita/valore intrinseco non
+ *                          supera mai il market value della gamba).
+ *
+ * Gestisce automaticamente il caso multi-portfolio (somma per portfolio).
+ */
+export interface NettingCompareRow {
+  portfolioId: string;
+  category: StrategySectionCategory;
+  ticker: string;
+  description: string;
+  optionType: string | null;
+  quantity: number;
+  strike: number | null;
+  expiry: string | null;
+  price: number;
+  underlyingPrice: number;
+  marketValue: number;
+  currentExCCNP: number;
+  fullyIntrinsic: number;
+}
+
+export interface NettingCompareResult {
+  rows: NettingCompareRow[];
+  totals: { marketValue: number; currentExCCNP: number; fullyIntrinsic: number };
+  baseValue: number;
+  finalMarket: number;        // baseValue + Σ marketValue   (= netting totale)
+  finalCurrentExCCNP: number; // baseValue + Σ currentExCCNP  (= netting ex CC e NP attuale)
+  finalFullyIntrinsic: number;// baseValue + Σ fullyIntrinsic (= ipotesi "tutto intrinseco")
+}
+
+export function compareNettingMethods(
+  positions: Position[],
+  baseValue: number,
+  overrides: DerivativeOverride[] = [],
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  strategyConfigs: StrategyConfiguration[] = []
+): NettingCompareResult {
+  const byPortfolio = new Map<string, Position[]>();
+  positions.forEach(p => {
+    if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
+    byPortfolio.get(p.portfolio_id)!.push(p);
+  });
+  const overridesByPortfolio = new Map<string, DerivativeOverride[]>();
+  overrides.forEach(o => {
+    if (!overridesByPortfolio.has(o.portfolio_id)) overridesByPortfolio.set(o.portfolio_id, []);
+    overridesByPortfolio.get(o.portfolio_id)!.push(o);
+  });
+  const configsByPortfolio = new Map<string, StrategyConfiguration[]>();
+  strategyConfigs.forEach(c => {
+    if (!configsByPortfolio.has(c.portfolio_id)) configsByPortfolio.set(c.portfolio_id, []);
+    configsByPortfolio.get(c.portfolio_id)!.push(c);
+  });
+
+  const rows: NettingCompareRow[] = [];
+
+  for (const [pid, pPositions] of byPortfolio) {
+    const derivatives = pPositions.filter(p => p.asset_type === 'derivative');
+    if (derivatives.length === 0) continue;
+    const legs = buildCanonicalLegs(
+      derivatives, pPositions,
+      overridesByPortfolio.get(pid) || [],
+      configsByPortfolio.get(pid) || []
+    );
+
+    for (const leg of legs) {
+      const p = leg.position;
+      const cat = leg.category;
+      const price = p.snapshot_price ?? p.current_price ?? 0;
+      const quantity = p.quantity;
+      const multiplier = 100;
+      const fx = getEffectiveExchangeRate(p);
+      const marketValue = (price * quantity * multiplier) / fx;
+      const contracts = Math.abs(quantity);
+      const strike = p.strike_price ?? 0;
+
+      const underlyingPrice = (() => {
+        if (leg.associatedUnderlying) {
+          const up = leg.associatedUnderlying.snapshot_price ?? leg.associatedUnderlying.current_price ?? 0;
+          if (up > 0) return up;
+        }
+        const key = p.underlying || p.description || '';
+        return underlyingPrices?.[key]?.price ?? 0;
+      })();
+
+      // ---- metodo ATTUALE (ex CC e NP) ----
+      let currentExCCNP = marketValue;
+      if (cat === 'covered_call' || cat === 'derisking_cc') {
+        if (p.option_type === 'call' && quantity < 0) {
+          if (underlyingPrice > 0 && strike < underlyingPrice) {
+            const intrinsic = (contracts * multiplier * (underlyingPrice - strike)) / fx;
+            currentExCCNP = Math.max(-intrinsic, marketValue);
+          } else {
+            currentExCCNP = 0;
+          }
+        }
+      } else if (cat === 'naked_put') {
+        if (underlyingPrice > 0 && strike >= underlyingPrice) {
+          const intrinsic = (contracts * multiplier * (strike - underlyingPrice)) / fx;
+          currentExCCNP = Math.max(-intrinsic, marketValue);
+        } else {
+          currentExCCNP = 0;
+        }
+      }
+
+      // ---- ipotesi: SOLO valore intrinseco, qualsiasi posizione ----
+      let fullyIntrinsic = marketValue;
+      if (p.option_type === 'call' || p.option_type === 'put') {
+        const perShare = p.option_type === 'call'
+          ? Math.max(0, underlyingPrice - strike)
+          : Math.max(0, strike - underlyingPrice);
+        const intrinsicMag = (contracts * multiplier * perShare) / fx; // ≥ 0
+        if (underlyingPrice <= 0) {
+          fullyIntrinsic = marketValue; // prezzo sottostante ignoto → fallback prudente a market
+        } else if (quantity < 0) {
+          fullyIntrinsic = Math.max(-intrinsicMag, marketValue); // short: -intrinseco, cappato al market
+        } else {
+          fullyIntrinsic = Math.min(intrinsicMag, marketValue);  // long: +intrinseco, cappato al market
+        }
+      }
+
+      rows.push({
+        portfolioId: pid,
+        category: cat,
+        ticker: p.underlying || p.ticker || p.description || '?',
+        description: p.description,
+        optionType: p.option_type ?? null,
+        quantity,
+        strike: p.strike_price ?? null,
+        expiry: p.expiry_date ?? null,
+        price,
+        underlyingPrice,
+        marketValue,
+        currentExCCNP,
+        fullyIntrinsic,
+      });
+    }
+  }
+
+  const totals = rows.reduce(
+    (t, r) => {
+      t.marketValue += r.marketValue;
+      t.currentExCCNP += r.currentExCCNP;
+      t.fullyIntrinsic += r.fullyIntrinsic;
+      return t;
+    },
+    { marketValue: 0, currentExCCNP: 0, fullyIntrinsic: 0 }
+  );
+
+  return {
+    rows,
+    totals,
+    baseValue,
+    finalMarket: baseValue + totals.marketValue,
+    finalCurrentExCCNP: baseValue + totals.currentExCCNP,
+    finalFullyIntrinsic: baseValue + totals.fullyIntrinsic,
+  };
+}
+
 export function useDerivativeNetting(
   positions: Position[],
   summary: PortfolioSummary | null,
