@@ -1,24 +1,25 @@
-## Obiettivo
-Unificare le due card "Avviso singolo" e "Crea avvisi massivi" nel tab **Prezzo** di `AlertSettingsDialog.tsx` in un'unica card più compatta, con un toggle per passare da una modalità all'altra.
+## Problema
+Quando si archivia un sottostante nel wizard di configurazione strategie, la "Call da rivendere" continua a mostrare lo stock. Il filtro in `monitoringEngine.computeAvailableCalls` non riesce ad agganciare l'archivio perché:
 
-## Modifiche
+- **Wizard** salva `archived_underlyings.underlying_key` usando `getCanonicalKey(...) || normalizeForMatching(...)` calcolato sul testo del sottostante derivato (es. `"AAPL"` come canonical, oppure `"APPLEINC"` come fallback normalizzato).
+- **monitoringEngine** indicizza le azioni con `resolveStockKey` che restituisce il ticker risolto via `underlyingPrices` (es. `"AAPL"`). Il confronto attuale `resolveKey(archivedKey)` + `normalizeForMatching(archivedKey)` spesso non combacia con quel ticker.
 
-**File:** `src/components/derivatives/AlertSettingsDialog.tsx` (tab `price`)
+## Modifica
 
-1. **Stato locale**: aggiungere `const [priceMode, setPriceMode] = useState<'single' | 'bulk'>('single')`.
+**File:** `src/lib/monitoringEngine.ts` — funzione `computeAvailableCalls` (e helper privato).
 
-2. **Card unificata**: sostituire le due card separate con un'unica `<Card>` contenente:
-   - **Header**: titolo dinamico ("Nuovo avviso di prezzo" / "Crea avvisi massivi") + descrizione breve + un **ToggleGroup** (o due `Button` pill) in alto a destra per scegliere `Singolo` / `Massivo`.
-   - **Body condizionale**:
-     - Se `priceMode === 'single'` → render del form attuale dell'avviso singolo (ticker, prezzo target, direzione, switch elimina su trigger, pulsante crea).
-     - Se `priceMode === 'bulk'` → render del form attuale massivo (ticker, base prezzo attuale/manuale, step %, slider numero avvisi, direzione, switch elimina, anteprima badge, pulsante crea).
+1. Aggiungere un piccolo helper `computeWizardStockKey(stock: Position)` che replica esattamente la logica del wizard per gli stock:
+   - Prova `getCanonicalKey(\`${description} ${ticker}\`)`.
+   - Fallback a `getCanonicalKey(description)`.
+   - Fallback finale a `normalizeForMatching(\`${description} ${ticker}\`)`.
 
-3. **Riuso stato**: condividere dove possibile gli stati comuni già esistenti (ticker, validazione, prezzo corrente fetchato, switch "elimina su trigger") così cambiando modalità non si perdono i dati ticker già inseriti.
+2. In `computeAvailableCalls`:
+   - Costruire `archivedSet = new Set(archivedKeys.map(k => k.trim().toUpperCase()))`.
+   - Per ogni `stock`, oltre alle chiavi già usate, calcolare anche `wizardKey = computeWizardStockKey(stock).toUpperCase()` e `getCanonicalKey(stock.description)?.toUpperCase()`.
+   - Saltare lo stock se **una qualsiasi** di queste forme è presente in `archivedSet`, oltre ai controlli esistenti (`archivedResolved.has(key) | normalizeForMatching(key) | normalizeForMatching(displayTicker)`).
 
-4. **UI/spacing**: ridurre padding interno e gap rispetto alle due card attuali per ottenere una sezione più compatta. Mantenere l'anteprima dei prezzi target solo in modalità Massivo.
+3. Niente cambi a schema DB, hook, o altre sezioni della monitoring card: l'esistente passaggio di `archivedKeys` da `Derivatives.tsx` → `DerivativesSummaryCard` → `computeMonitoring` resta invariato.
 
-5. Nessuna modifica a hook, schema DB, o logica di creazione (`useCreatePriceAlert` e `useBatchCreatePriceAlerts` restano invariati).
-
-## Note
-- Toggle realizzato con `ToggleGroup` di shadcn già presente nel progetto, oppure due bottoni con variant `default`/`outline`.
-- Nessun impatto su altri tab dell'`AlertSettingsDialog`.
+## Verifica
+- Build TS pulita.
+- Quick manual check: archiviare un ticker con stock posseduto → la riga sparisce immediatamente da "Call da rivendere" nella card Posizioni da monitorare; ripristinandolo, torna a comparire.
