@@ -36,6 +36,45 @@ const STRATEGY_OPTIONS = [
   { value: 'other', label: 'Altre Strategie' },
 ];
 
+/**
+ * Verifica le sole incompatibilità LOGICHE tra una categoria e le gambe presenti.
+ * NON blocca strategie incomplete (gambe mancanti sono ammesse).
+ * Ritorna `{ ok: true }` o `{ ok: false, reason }`.
+ */
+function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean; reason?: string } {
+  const options = legs.filter(p => p.asset_type === 'derivative');
+  const hasCall = options.some(o => o.option_type === 'call');
+  const hasPut = options.some(o => o.option_type === 'put');
+  const hasShortCall = options.some(o => o.option_type === 'call' && o.quantity < 0);
+  const hasLongCall = options.some(o => o.option_type === 'call' && o.quantity > 0);
+  const hasShortPut = options.some(o => o.option_type === 'put' && o.quantity < 0);
+  const hasLongPut = options.some(o => o.option_type === 'put' && o.quantity > 0);
+
+  switch (category) {
+    case 'naked_put':
+      if (hasCall) return { ok: false, reason: 'Naked Put non può contenere CALL' };
+      if (hasLongPut && !hasShortPut) return { ok: false, reason: 'Naked Put richiede una PUT venduta' };
+      return { ok: true };
+    case 'leap_call':
+      if (hasPut) return { ok: false, reason: 'LEAP Call non può contenere PUT' };
+      if (hasShortCall && !hasLongCall) return { ok: false, reason: 'LEAP Call richiede una CALL comprata' };
+      return { ok: true };
+    case 'protection':
+      if (hasCall) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
+      if (hasShortPut) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
+      return { ok: true };
+    case 'covered_call':
+    case 'derisking_covered_call':
+    case 'iron_condor':
+    case 'double_diagonal':
+    case 'put_spread':
+    case 'diagonal_put_spread':
+    case 'other':
+    default:
+      return { ok: true };
+  }
+}
+
 interface WizardStrategy {
   id: string;
   positions: Position[];
