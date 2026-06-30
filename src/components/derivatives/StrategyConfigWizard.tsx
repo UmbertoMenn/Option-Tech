@@ -1269,12 +1269,21 @@ export function StrategyConfigWizard({
                                         targetPortfolioId = leg.portfolio_id;
                                       }
                                     } else if (strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call') {
-                                      const leg = strategy.positions.find(p => p.option_type === 'call' && p.quantity < 0);
-                                      if (leg) {
+                                      const shortCall = strategy.positions.find(p => p.option_type === 'call' && p.quantity < 0);
+                                      if (shortCall) {
                                         targetKey = strategy.strategyType === 'covered_call'
-                                          ? coveredCallKeyForPosition(leg)
-                                          : deRiskingCoveredCallKeyForPosition(leg);
-                                        targetPortfolioId = leg.portfolio_id;
+                                          ? coveredCallKeyForPosition(shortCall)
+                                          : deRiskingCoveredCallKeyForPosition(shortCall);
+                                        targetPortfolioId = shortCall.portfolio_id;
+                                      } else {
+                                        // Fallback: CC/DR-CC senza short call (es. solo azioni "da rivendere")
+                                        const anyLeg = strategy.positions[0];
+                                        if (anyLeg) {
+                                          const underlying = anyLeg.underlying || anyLeg.description || '';
+                                          const prefix = strategy.strategyType === 'covered_call' ? 'cc' : 'dcc';
+                                          targetKey = `${prefix}_${underlying}_pending`;
+                                          targetPortfolioId = anyLeg.portfolio_id;
+                                        }
                                       }
                                     }
                                     if (!targetKey || !targetPortfolioId) return null;
@@ -1287,6 +1296,7 @@ export function StrategyConfigWizard({
                                       </div>
                                     );
                                   })()}
+
                                 </div>
 
                                 <div className="flex items-center gap-1 shrink-0">
