@@ -1,125 +1,47 @@
+
 ## Obiettivo
-Semplificare e rendere coerente la classificazione strategie: ammettere strategie multi-gamba **incomplete** (con flag "gambe mancanti"), bloccare nel wizard solo le incompatibilità logiche reali, rinominare la categoria "Call da rivendere" e correggere il calcolo includendo le componenti sintetiche (Long Call ITM, Short Put ITM) di CC e DR-CC.
 
----
+Introdurre **`call_spread`** come categoria di prima classe (allo stesso livello di `put_spread` / `diagonal_put_spread`), con riconoscimento automatico, scelta nel wizard, e — quando una gamba manca — comparsa nella sezione "Strategie incomplete" della card di monitoraggio.
 
-## 1. Wizard — Blocchi solo per incompatibilità logiche
+## Definizione
 
-**File:** `src/components/derivatives/StrategyConfigWizard.tsx`
+Una **Call Spread** è composta da **1 Long Call + 1 Short Call** sullo stesso sottostante, **stessa scadenza**. Se le scadenze differiscono → resta classificata come `diagonal_call_spread` (variante orizzontale, gestita come "Altre Strategie", coerente con la logica `put_spread` ≠ `diagonal_put_spread`).
 
-Aggiungere una funzione `isCategoryCompatible(category, legs)` che valida le sole incompatibilità logiche (non blocca strategie incomplete):
+Sia bull (long strike < short strike) che bear (long strike > short strike) ricadono nella stessa categoria `call_spread`; la differenza bull/bear continua a essere mostrata da `detectStrategyName`.
 
-| Categoria | Vincolo |
-|---|---|
-| `naked_put` | solo `option_type='put'` con `quantity<0`; **nessuna call** |
-| `leap_call` | solo `option_type='call'` con `quantity>0`; **nessuna put** |
-| `covered_call` / `de_risking_cc` | deve contenere almeno una call OR una componente sintetica (long call / short put); ammesso senza la sold call (incompleta) |
-| `iron_condor` / `double_diagonal` / `other` | qualunque mix di call+put ammesso (anche incompleto) |
+## Modifiche
 
-- Disabilitare nel selettore di categoria le opzioni incompatibili (con tooltip "Incompatibile: contiene PUT" ecc.).
-- Bloccare il **Salva** se la combinazione è incompatibile, con messaggio chiaro.
-- Mantenere `detectStrategyType` come suggerimento iniziale.
+### 1. `src/components/derivatives/StrategyConfigWizard.tsx`
 
----
+- **`STRATEGY_OPTIONS`**: nuova voce `{ value: 'call_spread', label: 'Call Spread' }` (e `diagonal_call_spread` come opzione separata per simmetria con i put spread).
+- **`detectStrategyType`**: prima dei rami CC/DR-CC, riconoscere il pattern "1+ Long Call & 1+ Short Call, niente put, niente stock" — se tutte le call hanno la stessa scadenza → `call_spread`, altrimenti `diagonal_call_spread`. Va posizionato **dopo** il check IC/DD e **prima** del check CC per evitare conflitti.
+- **`isCategoryCompatible`**: aggiungere un case `call_spread` (e `diagonal_call_spread`) che rifiuta PUT nelle gambe. Le gambe mancanti restano ammesse (no blocco wizard).
 
-## 2. Categorizer — Ammettere strategie multi-gamba incomplete
+### 2. `src/lib/derivativeStrategies.ts`
 
-**File:** `src/lib/derivativeStrategies.ts` (sezione configOnly Step 0.5, righe ~552-585)
+- Estendere il `switch (config.strategy_type)` (intorno a riga 540-700, dove vivono i case `iron_condor` / `double_diagonal`) con un nuovo `case 'call_spread'`:
+  - Se `longCall.length >= 1 && shortCall.length >= 1` → crea entry in `groupedOtherStrategies` (riusando lo stesso shape già usato per `put_spread`) con `strategyName: detectStrategyName(...)` così la UI mostra "Bull/Bear Call Spread".
+  - Se manca una gamba (solo long o solo short) → push in `incompleteStrategies` con `strategyType: 'call_spread'` e `missingLegs: ['Short Call']` o `['Long Call']`.
+- `case 'diagonal_call_spread'` resta gestito dal ramo `default` (come già accade per `diagonal_put_spread`).
+- Aggiornare la label map `STRATEGY_LABELS` in `computeIncompleteMultiLeg` (`monitoringEngine.ts`) con `call_spread: 'Call Spread'`.
 
-Attualmente Iron Condor e Double Diagonal **vengono droppati** se manca anche una sola gamba (signature non matchata). Va modificato:
+### 3. `src/lib/monitoringEngine.ts`
 
-- Rimuovere il check `if (sc.length > 0 && bc.length > 0 && sp.length > 0 && bp.length > 0)`.
-- Pushare sempre la posizione in `ironCondors` / `doubleDiagonals` con campi `soldPut/boughtPut/soldCall/boughtCall` **opzionali** (possibly null).
-- Aggiungere ai tipi `IronCondorPosition` e `DoubleDiagonalPosition` un campo:
-  ```ts
-  missingLegs?: Array<'soldPut' | 'boughtPut' | 'soldCall' | 'boughtCall'>;
-  isIncomplete?: boolean;
-  ```
-- Calcolare `missingLegs` confrontando con le 4 gambe attese; settare `isIncomplete = missingLegs.length > 0`.
-- Per i campi opzionali rendere nullable: cambiare `soldPut: Position` → `soldPut: Position | null` (idem altre 3).
-- Stesso trattamento per le multi-gamba in `groupedOtherStrategies` (Short Strangle, Put Spread, ecc. con qualche gamba mancante).
+- Estendere `STRATEGY_LABELS` in `computeIncompleteMultiLeg` con `call_spread: 'Call Spread'` (la pipeline esistente fa già il resto: l'entry incomplete viene mostrata in "Strategie incomplete" della `DerivativesSummaryCard`).
+- **Nessun impatto** su `computeAvailableCalls`: le short call di una Call Spread sono già conteggiate via `allPositions` (RAW), e la long call della spread **non** è una copertura sintetica del sottostante (non sostituisce 100 azioni come la CC sintetica ITM), quindi NON va sommata a `syntheticCovered`.
 
-**Covered Call sintetica incompleta** (es. solo Long Call senza Call venduta):
-- Step 0.5 covered_call attualmente richiede `Math.abs(call.quantity)` (la sold call). Estendere: se manca la sold call ma è presente almeno una componente sintetica (long call o short put), pushare comunque con `isIncomplete=true`, `missingLegs=['soldCall']`, `contractsCovered=0`.
-- Aggiungere `isIncomplete?: boolean` e `missingLegs?: string[]` a `CoveredCallPosition` e `DeRiskingCoveredCallPosition`.
+### 4. `src/lib/monitoringEngine.ts` — Call non coperte
 
----
+Verificare `computeUncoveredCalls`: le long call di una Call Spread oggi entrano nel calcolo come "bought call che offset le sold". Questo è corretto perché entrambe le gambe sono dello stesso sottostante: lo spread non lascia esposizione netta di call vendute. Nessuna modifica.
 
-## 3. Render strategie incomplete + nuova sezione "Posizioni da monitorare"
+## Note tecniche
 
-**File:** `src/lib/monitoringEngine.ts`
-
-- Aggiungere al `MonitoringResult` un nuovo campo:
-  ```ts
-  incompleteMultiLegStrategies: Array<{
-    ticker: string;
-    strategyName: string;        // "Iron Condor", "Double Diagonal", "Covered Call", ...
-    missingLegs: string[];        // labels leggibili: "Short Call", "Long Put", ...
-  }>;
-  ```
-- Funzione `computeIncompleteMultiLeg(categories)` che attraversa `ironCondors`, `doubleDiagonals`, `coveredCalls`, `deRiskingCoveredCalls`, `groupedOtherStrategies` e raccoglie quelle con `isIncomplete=true`.
-
-**File:** `src/components/derivatives/DerivativesSummaryCard.tsx`
-
-- Aggiungere una nuova `<CompactSection>` **"Strategie incomplete"** (badge arancio "MANCA GAMBA"), che elenca `ticker — Strategia (manca: Short Call)`.
-- Posizione consigliata: prima di "Call da rivendere".
-
-**File:** `src/pages/Derivatives.tsx` (sezioni IC, DD, CC, DR-CC, Other)
-
-- Renderizzare le strategie incomplete nella loro card normale, con badge "INCOMPLETA" e indicazione delle gambe mancanti accanto al ticker.
-- Gestire i campi null/optional nelle gambe (skip riga gamba se mancante o mostrare "—").
-
----
-
-## 4. Rinomina + correzione calcolo "Call da rivendere"
-
-### Rinomina
-- `src/components/derivatives/DerivativesSummaryCard.tsx:330` → titolo "**COVERED CALL / D-R CC DA RIVENDERE**".
-- `src/lib/monitoringEngine.ts` `buildSnapshotSections` → cambia title `'Call da rivendere'` → `'Covered Call / D-R CC da rivendere'`.
-- `supabase/functions/daily-briefing/index.ts` se referenzia la stringa, aggiornare.
-
-### Correzione formula in `computeAvailableCalls`
-
-Formula nuova:
-```
-potential = floor(owned / 100)
-          + long_calls_in_synthetic_CC
-          + long_calls_in_synthetic_DR_CC
-          + short_puts_ITM_in_synthetic_CC
-          + short_puts_ITM_in_synthetic_DR_CC
-available = potential - sold_calls_totali
-```
-
-Implementazione:
-- Aggiungere `categories: DerivativeCategories` alla firma di `computeAvailableCalls` (già esiste `categories` in `computeMonitoring`, passarlo).
-- Iterare `categories.coveredCalls` + `categories.deRiskingCoveredCalls` filtrando `cc.isSynthetic === true`:
-  - Se `cc.syntheticCall` presente → sommare `|syntheticCall.quantity|` al `syntheticCovered` del relativo underlying.
-  - Se `cc.syntheticPut` presente → sommare `|syntheticPut.quantity|` al `syntheticCovered`.
-  - Per DR-CC: stessa cosa su `dr.coveredCall.syntheticCall` / `dr.coveredCall.syntheticPut`.
-- Mappare l'underlying col solito `resolveKey(cc.option.underlying, underlyingPrices)`.
-- Conteggio finale:
-  ```ts
-  potential = Math.floor(owned/100) + syntheticCovered;
-  available = potential - soldCalls;
-  ```
-- Continuare a filtrare gli archived underlyings come oggi.
-
-### Coerenza
-Verificare che `computeUncoveredCalls` (già usa `syntheticCovered`) resti coerente: la stessa Long Call ITM **non** deve essere contata anche come "long call che offset una short call" via `netSoldCalls -= bought`. Già oggi `computeUncoveredCalls` decrementa `netSoldCalls` per ogni long call: se la stessa long call è anche `syntheticCall` di una CC, otteniamo doppio conteggio. **Fix:** in `computeUncoveredCalls`, escludere dal decremento `netSoldCalls` le long calls che sono già `syntheticCall` di una CC/DR-CC sintetica (raccogliere gli `id` in un Set prima del loop).
-
----
+- **Compatibilità retroattiva**: configurazioni esistenti salvate come `other` con due call (bull/bear spread) continuano a funzionare via `detectStrategyName`. Solo nuove config o riclassificazioni manuali useranno il nuovo `call_spread`.
+- **Iron Condor**: il check IC in `detectStrategyType` (richiede call + put) ha priorità, quindi non c'è ambiguità.
+- **LEAP Call**: il check LEAP (`boughtCalls > 0 && soldCalls === 0`) resta valido — non viene toccato perché la Call Spread richiede entrambe.
 
 ## File toccati
-1. `src/components/derivatives/StrategyConfigWizard.tsx` — validazione incompatibilità
-2. `src/lib/derivativeStrategies.ts` — tipi nullable + `isIncomplete`/`missingLegs`; rimozione drop in configOnly per IC/DD/CC; supporto CC sintetica incompleta
-3. `src/lib/monitoringEngine.ts` — nuova sezione `incompleteMultiLegStrategies`, fix `computeAvailableCalls` + dedup synthetic in `computeUncoveredCalls`
-4. `src/components/derivatives/DerivativesSummaryCard.tsx` — render nuova sezione + rinomina titolo
-5. `src/pages/Derivatives.tsx` — badge "INCOMPLETA" e gestione gambe null nelle card IC/DD/CC/DR-CC/Other
-6. `supabase/functions/daily-briefing/index.ts` — eventuale rinomina sezione nel briefing
 
-Nessuna modifica DB.
-
-## Non-goals
-- Non si modificano gli override `single` (rimangono con le 5 categorie attuali).
-- Non si tocca lo Step 1-7 di auto-classificazione (solo configOnly Step 0.5).
-- Nessuna logica nuova per le strategie complete: solo quelle incomplete cambiano comportamento.
+- `src/components/derivatives/StrategyConfigWizard.tsx` — opzione select, `detectStrategyType`, `isCategoryCompatible`.
+- `src/lib/derivativeStrategies.ts` — nuovo `case 'call_spread'` nel categorizer config-driven.
+- `src/lib/monitoringEngine.ts` — label "Call Spread" in `STRATEGY_LABELS`.
