@@ -207,6 +207,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   // Price alerts hooks
   const { data: priceAlerts = [], isLoading: isLoadingPriceAlerts } = usePriceAlerts();
   const createPriceAlertMutation = useCreatePriceAlert();
+  const batchCreatePriceAlertsMutation = useBatchCreatePriceAlerts();
   const deletePriceAlertMutation = useDeletePriceAlert();
   const togglePriceAlertMutation = useTogglePriceAlert();
   
