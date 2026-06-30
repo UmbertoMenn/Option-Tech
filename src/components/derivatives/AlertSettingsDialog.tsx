@@ -35,6 +35,7 @@ import {
 import {
   usePriceAlerts,
   useCreatePriceAlert,
+  useBatchCreatePriceAlerts,
   useDeletePriceAlert,
   useTogglePriceAlert,
   validateTicker,
