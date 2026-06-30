@@ -604,6 +604,10 @@ export function categorizeDerivatives(
         const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
         const sp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0);
         const bp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const qSc = sc.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBc = bc.reduce((s, p) => s + p.quantity, 0);
+        const qSp = sp.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBp = bp.reduce((s, p) => s + p.quantity, 0);
         if (sc.length > 0 && bc.length > 0 && sp.length > 0 && bp.length > 0) {
           ironCondors.push({
             underlying: config.underlying,
@@ -613,12 +617,17 @@ export function categorizeDerivatives(
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
           });
-        } else if (matchedVirtual.length > 0) {
-          const missing: string[] = [];
-          if (sc.length === 0) missing.push('Short Call');
-          if (bc.length === 0) missing.push('Long Call');
-          if (sp.length === 0) missing.push('Short Put');
-          if (bp.length === 0) missing.push('Long Put');
+        }
+        const missing: string[] = [];
+        if (sc.length === 0) missing.push('Short Call');
+        else if (qSc < qBc) missing.push(`Short Call ×${qBc - qSc}`);
+        if (bc.length === 0) missing.push('Long Call');
+        else if (qBc < qSc) missing.push(`Long Call ×${qSc - qBc}`);
+        if (sp.length === 0) missing.push('Short Put');
+        else if (qSp < qBp) missing.push(`Short Put ×${qBp - qSp}`);
+        if (bp.length === 0) missing.push('Long Put');
+        else if (qBp < qSp) missing.push(`Long Put ×${qSp - qBp}`);
+        if (missing.length > 0 && matchedVirtual.length > 0) {
           incompleteStrategies.push({
             configId: config.id,
             strategyType: 'iron_condor',
@@ -636,6 +645,10 @@ export function categorizeDerivatives(
         const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
         const sp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0);
         const bp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const qSc = sc.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBc = bc.reduce((s, p) => s + p.quantity, 0);
+        const qSp = sp.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBp = bp.reduce((s, p) => s + p.quantity, 0);
         if (sc.length > 0 && bc.length > 0 && sp.length > 0 && bp.length > 0) {
           doubleDiagonals.push({
             underlying: config.underlying,
@@ -646,12 +659,17 @@ export function categorizeDerivatives(
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
           });
-        } else if (matchedVirtual.length > 0) {
-          const missing: string[] = [];
-          if (sc.length === 0) missing.push('Short Call');
-          if (bc.length === 0) missing.push('Long Call');
-          if (sp.length === 0) missing.push('Short Put');
-          if (bp.length === 0) missing.push('Long Put');
+        }
+        const missing: string[] = [];
+        if (sc.length === 0) missing.push('Short Call');
+        else if (qSc < qBc) missing.push(`Short Call ×${qBc - qSc}`);
+        if (bc.length === 0) missing.push('Long Call');
+        else if (qBc < qSc) missing.push(`Long Call ×${qSc - qBc}`);
+        if (sp.length === 0) missing.push('Short Put');
+        else if (qSp < qBp) missing.push(`Short Put ×${qBp - qSp}`);
+        if (bp.length === 0) missing.push('Long Put');
+        else if (qBp < qSp) missing.push(`Long Put ×${qSp - qBp}`);
+        if (missing.length > 0 && matchedVirtual.length > 0) {
           incompleteStrategies.push({
             configId: config.id,
             strategyType: 'double_diagonal',
@@ -664,10 +682,13 @@ export function categorizeDerivatives(
         }
         break;
       }
-      case 'call_spread': {
-        // Call Spread verticale (stessa scadenza): 1+ Long Call & 1+ Short Call, no PUT.
+      case 'call_spread':
+      case 'diagonal_call_spread': {
+        // Call Spread (verticale o diagonale): 1+ Long Call & 1+ Short Call, no PUT.
         const sc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
         const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
+        const qSc = sc.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBc = bc.reduce((s, p) => s + p.quantity, 0);
         if (sc.length > 0 && bc.length > 0) {
           const configOptions: OtherStrategyPosition[] = [];
           for (const opt of matchedVirtual) {
@@ -680,17 +701,62 @@ export function categorizeDerivatives(
             options: configOptions,
             totalPremium: configOptions.reduce((sum, o) => sum + (o.option.market_value || 0), 0),
             totalProfitLoss: configOptions.reduce((sum, o) => sum + (o.option.profit_loss || 0), 0),
-            strategyName: detectStrategyName(configOptions) || 'Call Spread',
+            strategyName: detectStrategyName(configOptions) || (config.strategy_type === 'diagonal_call_spread' ? 'Diagonal Call Spread' : 'Call Spread'),
             configId: config.id,
             configStrategyType: config.strategy_type,
           });
-        } else if (matchedVirtual.length > 0) {
-          const missing: string[] = [];
-          if (sc.length === 0) missing.push('Short Call');
-          if (bc.length === 0) missing.push('Long Call');
+        }
+        const missing: string[] = [];
+        if (sc.length === 0) missing.push('Short Call');
+        else if (qSc < qBc) missing.push(`Short Call ×${qBc - qSc}`);
+        if (bc.length === 0) missing.push('Long Call');
+        else if (qBc < qSc) missing.push(`Long Call ×${qSc - qBc}`);
+        if (missing.length > 0 && matchedVirtual.length > 0) {
           incompleteStrategies.push({
             configId: config.id,
-            strategyType: 'call_spread',
+            strategyType: config.strategy_type,
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
+        }
+        break;
+      }
+      case 'put_spread':
+      case 'diagonal_put_spread': {
+        // Put Spread (verticale o diagonale): 1+ Long Put & 1+ Short Put, no CALL.
+        const sp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0);
+        const bp = matchedVirtual.filter(d => d.option_type === 'put' && d.quantity > 0);
+        const qSp = sp.reduce((s, p) => s + Math.abs(p.quantity), 0);
+        const qBp = bp.reduce((s, p) => s + p.quantity, 0);
+        if (sp.length > 0 && bp.length > 0) {
+          const configOptions: OtherStrategyPosition[] = [];
+          for (const opt of matchedVirtual) {
+            const entry: OtherStrategyPosition = { option: opt, underlying: linkedStock || null };
+            otherStrategies.push(entry);
+            configOptions.push(entry);
+          }
+          configOtherGroups.push({
+            underlying: config.underlying,
+            options: configOptions,
+            totalPremium: configOptions.reduce((sum, o) => sum + (o.option.market_value || 0), 0),
+            totalProfitLoss: configOptions.reduce((sum, o) => sum + (o.option.profit_loss || 0), 0),
+            strategyName: detectStrategyName(configOptions) || (config.strategy_type === 'diagonal_put_spread' ? 'Diagonal Put Spread' : 'Put Spread'),
+            configId: config.id,
+            configStrategyType: config.strategy_type,
+          });
+        }
+        const missing: string[] = [];
+        if (sp.length === 0) missing.push('Short Put');
+        else if (qSp < qBp) missing.push(`Short Put ×${qBp - qSp}`);
+        if (bp.length === 0) missing.push('Long Put');
+        else if (qBp < qSp) missing.push(`Long Put ×${qSp - qBp}`);
+        if (missing.length > 0 && matchedVirtual.length > 0) {
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: config.strategy_type,
             underlying: config.underlying,
             isSynthetic: false,
             presentLegs: matchedVirtual,
