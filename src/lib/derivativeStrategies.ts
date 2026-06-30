@@ -486,6 +486,19 @@ export function categorizeDerivatives(
               });
             }
           }
+
+          // INCOMPLETE: synthetic CC senza Short Call ma con componente sintetica
+          if (calls.length === 0 && (synCall || synPut)) {
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'covered_call',
+              underlying: config.underlying,
+              isSynthetic: true,
+              presentLegs: matchedVirtual,
+              missingLegs: ['Short Call'],
+              linkedStock: linkedStock || null,
+            });
+          }
         } else {
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
