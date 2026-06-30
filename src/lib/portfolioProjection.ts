@@ -90,6 +90,8 @@ export function buildProjectionInputs(
   baseValue: number,
   underlyingPrices?: Record<string, UnderlyingPrice>,
   bondOverrides?: Record<string, ResolvedBondOverride>,
+  gpEquityValue: number = 0,
+  derivativesNettingT0Override: number | null = null,
 ): ProjectionInputs {
   const t0 = new Date();
   const fxOf = (p: Position) => (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1);
