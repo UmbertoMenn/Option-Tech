@@ -101,7 +101,7 @@ function BondFixRow({ position, override, onSave, saving }: {
   );
 }
 
-export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices }: Props) {
+export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices, gpEquityValue = 0, derivativesNettingT0 }: Props) {
   const [mcVolRates, setMcVolRates] = useState(false);
   const [mcUnderlying, setMcUnderlying] = useState(false);
   const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
@@ -123,8 +123,8 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   }, [overrides]);
 
   const inputs = useMemo(
-    () => buildProjectionInputs(positions, baseValue, underlyingPrices, bondOverrideMap),
-    [positions, baseValue, underlyingPrices, bondOverrideMap],
+    () => buildProjectionInputs(positions, baseValue, underlyingPrices, bondOverrideMap, gpEquityValue, derivativesNettingT0 ?? null),
+    [positions, baseValue, underlyingPrices, bondOverrideMap, gpEquityValue, derivativesNettingT0],
   );
 
   const maxYears = Math.max(0.25, (inputs.horizon.getTime() - inputs.t0.getTime()) / MS_YEAR);
