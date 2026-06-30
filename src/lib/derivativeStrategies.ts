@@ -223,6 +223,7 @@ export function categorizeDerivatives(
   const otherStrategies: OtherStrategyPosition[] = [];
   const configOtherGroups: GroupedOtherStrategy[] = []; // Per-config groups for config-only mode
   const resolvedConfigs: ResolvedConfig[] = []; // Track 1:1 config→result mapping
+  const incompleteStrategies: IncompleteStrategyPosition[] = [];
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions (NOT ETFs for matching)
