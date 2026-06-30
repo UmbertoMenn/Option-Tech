@@ -14,7 +14,13 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
-import { isSoldPut } from '@/lib/strategyKeys';
+import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
+import {
+  isSoldPut,
+  nakedPutKeyForPosition,
+  coveredCallKeyForPosition,
+  deRiskingCoveredCallKeyForPosition,
+} from '@/lib/strategyKeys';
 
 function formatExpiryMMY(date: string | null | undefined): string {
   if (!date) return '-';
@@ -1229,12 +1235,6 @@ export function StrategyConfigWizard({
                                     </Badge>
                                   )}
 
-                                  {strategy.suggestedType && strategy.suggestedType !== strategy.strategyType && (
-                                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                      Suggerito: {strategyLabel(strategy.suggestedType)}
-                                    </Badge>
-                                  )}
-
                                   {strategy.suggestedType === strategy.strategyType && (
                                     <Badge variant="secondary" className="text-[10px]">
                                       ✓ Auto
@@ -1258,6 +1258,35 @@ export function StrategyConfigWizard({
                                   {rollUpPut && (
                                     <PutRollUpToggle option={rollUpPut} />
                                   )}
+
+                                  {(() => {
+                                    let targetKey: string | null = null;
+                                    let targetPortfolioId: string | null = null;
+                                    if (strategy.strategyType === 'naked_put') {
+                                      const leg = strategy.positions.find(isSoldPut);
+                                      if (leg) {
+                                        targetKey = nakedPutKeyForPosition(leg);
+                                        targetPortfolioId = leg.portfolio_id;
+                                      }
+                                    } else if (strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call') {
+                                      const leg = strategy.positions.find(p => p.option_type === 'call' && p.quantity < 0);
+                                      if (leg) {
+                                        targetKey = strategy.strategyType === 'covered_call'
+                                          ? coveredCallKeyForPosition(leg)
+                                          : deRiskingCoveredCallKeyForPosition(leg);
+                                        targetPortfolioId = leg.portfolio_id;
+                                      }
+                                    }
+                                    if (!targetKey || !targetPortfolioId) return null;
+                                    return (
+                                      <div className="flex items-center gap-1">
+                                        <Label className="text-[10px] text-muted-foreground">Target</Label>
+                                        <div className="w-24">
+                                          <RollTargetInput strategyKey={targetKey} portfolioId={targetPortfolioId} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
 
                                 <div className="flex items-center gap-1 shrink-0">
