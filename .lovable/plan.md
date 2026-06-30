@@ -1,60 +1,40 @@
 ## Obiettivo
+Correggere il bucket **Equity (incl. derivati)** a t0 della card "Evoluzione patrimonio alle scadenze" affinché sia:
 
-Nella card "Evoluzione patrimonio alle scadenze" (Dashboard) i derivati devono:
-1. Concorrere al **patrimonio totale** in modo coerente (MV iniziale + decadimento BS fino a scadenza, con gestione dell'esercizio se ITM).
-2. Essere **inclusi nel toggle "Equity"**, perché tutti i derivati hanno sottostante azionario.
+```
+Equity_t0 = (azioni + ETF) + (GP_total − GP_cash) + Netting Totale derivati (signed)
+```
 
-## Diagnosi
+dove "Netting Totale derivati" = la componente derivati del Netting Totale già calcolato in `useDerivativeNetting` (la stessa che la Dashboard mostra), cioè il delta `nettingTotal − summary.totalValue` (negativo quando i derivati pesano).
 
-File chiave: `src/lib/portfolioProjection.ts`, `src/components/dashboard/PatrimonyProjectionCard.tsx`, `src/components/dashboard/DynamicPortfolioChart.tsx`, `src/hooks/usePortfolio.ts`.
-
-Stato attuale:
-- `summary.totalValue` (passato come `baseValue`) **esclude** i derivati (`usePortfolio.calculateSummary` salta `asset_type === 'derivative'`).
-- `buildProjectionInputs` somma `derivMVT0` solo dentro `patrimonyT0` e `equityT0`, e nel grafico calcola il valore derivati con Black-Scholes lungo la timeline.
-- A scadenza il derivato collassa all'intrinseco, ma **non viene modellato l'esercizio**: una covered call ITM resta come "−intrinseco" sul lato derivato e le azioni sottostanti restano comunque nel bucket equity (sopravvalutazione). Una short put ITM analogamente lascia equity invariato anziché materializzare un acquisto azionario al strike.
-- Il toggle `equity` in teoria include i derivati (`equityT0 = equityFlat + derivMVT0`, `equitySleeve = equityFlat·shock + derivVal`), ma se nello snapshot percepito dall'utente i derivati sembrano "spariti" è perché:
-  - per posizioni nette short OTM, `derivMVT0` è negativo e tende a 0 a scadenza → la linea sale, ma il valore iniziale appare ridotto rispetto al "valore assets" mostrato in Dashboard.
-  - se manca il prezzo sottostante (`hasUnderlying=false`), il derivato resta piatto al MV iniziale per tutta la timeline → indistinguibile da "non incluso".
-
-## Modifiche
+## Cosa cambia
 
 ### 1. `src/lib/portfolioProjection.ts`
-
-- **Esercizio a scadenza** (`patrimonyAt`): quando `tp.date >= expiry`, per ciascuna gamba derivato con sottostante:
-  - short call ITM (`S>K`, qty<0): aggiungere al bucket equity `qty·100·(K−S)/fx` (effetto consegna azioni al strike) e azzerare il contributo derivato.
-  - long call ITM: simmetrico positivo.
-  - short put ITM (`S<K`, qty<0): aggiungere `qty·100·(K−S)/fx` (acquisto azioni al strike: cash out già implicito nel valore intrinseco negativo).
-  - long put ITM: simmetrico.
-  - OTM: contributo derivato 0, equity invariato.
-  
-  Implementazione: separare `derivVal` in `derivVal` + `equityAdjustmentAtExpiry`, sommare quest'ultimo a `equitySleeve`.
-
-- **Derivati senza prezzo sottostante**: invece di lasciarli piatti a `mvT0`, decadere linearmente verso 0 sulla loro `T0` (interpretazione conservativa: assenza di sottostante = no ITM rilevabile, premio temporale si estingue). Registrarli comunque in `derivsNoUnderlying` come warning.
-
-- **Tracking diagnostica**: ritornare in `ProjectionInputs` un campo `derivMVT0` separato (somma assoluta dei MV derivati) per poter mostrare un badge informativo "include N derivati per €X".
+- Estendere `buildProjectionInputs` con due nuovi parametri opzionali:
+  - `gpEquityValue: number` (default 0) — quota GP azionaria (esclusa la liquidità GP).
+  - `derivativesNettingT0: number | null` (default `null`) — netting derivati signed a t0. Se passato, sostituisce `derivMVT0` nel calcolo di `equityT0` e nel "livello" iniziale del bucket equity per la proiezione.
+- Nuovo bucket interno `gpEquityFlat` (piatto, come `commodityFlat`): aggiunto al sleeve **Equity** sia a t0 sia nei punti futuri (nessuno shock azionario applicato — la GP resta piatta come oggi nello Stress Lab; se l'utente vorrà shockarla la rivedremo).
+- Ricalcolo:
+  - `equityT0 = equityFlat + gpEquityFlat + (derivativesNettingT0 ?? derivMVT0)`
+  - `patrimonyT0 = baseValue + (derivativesNettingT0 ?? derivMVT0)` (resta consistente con la card "Netting Totale" della Dashboard).
+- Nei punti futuri il sleeve equity continua a usare il pricing BS dei derivati (`derivVal + equityAdjAtExpiry`) — la correzione "netting vs MV" è solo sul livello iniziale. Il delta `derivativesNettingT0 − derivMVT0` viene aggiunto come **offset costante** al sleeve equity (così a t0 il grafico parte dal valore corretto e il P/L% futuro è coerente).
 
 ### 2. `src/components/dashboard/PatrimonyProjectionCard.tsx`
+- Aggiungere due props opzionali: `gpEquityValue?: number`, `derivativesNettingT0?: number`.
+- Inoltrarli a `buildProjectionInputs`.
+- Aggiornare il tooltip "Equity (incl. derivati)" per spiegare la formula nuova.
 
-- Mostrare nella sezione info, accanto ai badge bond, un badge **"N derivati"** con tooltip che elenca i sottostanti e il segno (long/short) — chiarisce visivamente che sono inclusi.
-- Aggiornare la nota in fondo per esplicitare: "Le opzioni ITM a scadenza vengono esercitate: per le covered call le azioni vengono consegnate al strike, per le short put vengono acquistate al strike. Il toggle **Equity** comprende azioni, ETF e derivati (tutti su sottostante azionario)."
-- Rinominare il toggle da `Equity` a `Equity (incl. derivati)` per evitare ambiguità.
+### 3. `src/components/dashboard/DynamicPortfolioChart.tsx`
+- Calcolare i due valori e passarli alla card:
+  - `gpEquityValue = (portfolio?.gp_total_value ?? 0) − (portfolio?.gp_cash_value ?? 0)`
+  - `derivativesNettingT0 = netting.nettingTotal − (summary?.totalValue ?? 0)`
+- Nessuna altra modifica di rendering.
 
-### 3. Test
+## Dettagli tecnici
+- Nessuna modifica DB, nessun edge function, nessuna RLS.
+- Test esistente `src/test/portfolioProjection.test.ts`: aggiornare le aspettative dove serve (e aggiungere un caso che verifica `equityT0 = equity + gp + nettingDerivT0` quando i nuovi parametri sono passati).
+- Retro-compatibilità: se `derivativesNettingT0` non viene passato, il calcolo resta identico a oggi (`derivMVT0`).
 
-Aggiornare/integrare `src/test/portfolioProjection.test.ts`:
-- Covered call OTM → a scadenza equityFlat invariato, derivVal=0, patrimonio = baseValue + premio incassato.
-- Covered call ITM con S>K → equity ridotto di `(S−K)·qty·100`, derivVal=0.
-- Short put ITM con S<K → equity aumentato (acquisto azioni) di `(K−S)·qty·100`.
-- Toggle `equity` con sole opzioni (no azioni) → `equityT0 = derivMVT0`, sleeve evolve correttamente.
-
-## Tecnico
-
-- `ProjectionScope = 'equity'` continua a usare `equitySleeve` ma ora include anche `equityAdjustmentAtExpiry`.
-- Nessuna modifica a `usePortfolio` o allo schema DB.
-- Nessuna modifica a `Dashboard.tsx` oltre a verificare che `positions` includa effettivamente i derivati (già il caso).
-
-## Non incluso
-
-- Roll automatico dei derivati prima della scadenza.
-- Riallocazione cash post-esercizio in altri asset (resta cash).
-- Modifiche a Risk Analyzer / Stress Lab.
+## Fuori scope
+- Logica della GP nella proiezione futura (resta piatta come oggi nello Stress Lab).
+- Modifica del netting futuro alle scadenze (continua via BS).

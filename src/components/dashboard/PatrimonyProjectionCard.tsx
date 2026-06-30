@@ -25,6 +25,8 @@ interface Props {
   positions: Position[];
   baseValue: number;
   underlyingPrices?: Record<string, UnderlyingPrice>;
+  gpEquityValue?: number;
+  derivativesNettingT0?: number;
 }
 
 const MS_YEAR = 365.25 * 24 * 3600 * 1000;
@@ -99,7 +101,7 @@ function BondFixRow({ position, override, onSave, saving }: {
   );
 }
 
-export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices }: Props) {
+export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices, gpEquityValue = 0, derivativesNettingT0 }: Props) {
   const [mcVolRates, setMcVolRates] = useState(false);
   const [mcUnderlying, setMcUnderlying] = useState(false);
   const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
@@ -121,8 +123,8 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   }, [overrides]);
 
   const inputs = useMemo(
-    () => buildProjectionInputs(positions, baseValue, underlyingPrices, bondOverrideMap),
-    [positions, baseValue, underlyingPrices, bondOverrideMap],
+    () => buildProjectionInputs(positions, baseValue, underlyingPrices, bondOverrideMap, gpEquityValue, derivativesNettingT0 ?? null),
+    [positions, baseValue, underlyingPrices, bondOverrideMap, gpEquityValue, derivativesNettingT0],
   );
 
   const maxYears = Math.max(0.25, (inputs.horizon.getTime() - inputs.t0.getTime()) / MS_YEAR);
@@ -359,8 +361,8 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         sono consegnate al strike, per le short put sono acquistate al strike (l'effetto si
         materializza nel bucket Equity). I bond convergono al valore di rimborso (pull-to-par) e
         le cedole staccate incrementano il patrimonio. Azioni/ETF/cash restano costanti nello
-        scenario base. Il toggle <strong>Equity</strong> include azioni, ETF e tutti i derivati
-        (sottostante azionario).
+        scenario base. Il toggle <strong>Equity</strong> = azioni + ETF + GP azionaria
+        (esclusa la liquidità GP) + Netting Totale derivati a t0.
       </p>
     </div>
   );

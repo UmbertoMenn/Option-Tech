@@ -358,6 +358,8 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                   positions={positions}
                   baseValue={baseValue}
                   underlyingPrices={underlyingPrices}
+                  gpEquityValue={Math.max(0, (portfolio?.gp_total_value ?? 0) - (portfolio?.gp_cash_value ?? 0))}
+                  derivativesNettingT0={netting.nettingTotal - baseValue}
                 />
               </CarouselItem>
             )}

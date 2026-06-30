@@ -66,6 +66,7 @@ export interface ProjectionInputs {
   horizon: Date;
   // bucket costanti (EUR)
   equityFlat: number;        // azioni + ETF — shockabili nel MC titoli
+  gpEquityFlat: number;      // GP azionaria (gp_total - gp_cash) — piatta, in bucket Equity
   commodityFlat: number;     // materie prime — piatte
   cashResidual: number;      // cash + arrotondamenti — piatto
   unparsedBondFlat: number;  // bond senza scadenza → tenuti al valore corrente (bucket bond)
@@ -75,17 +76,22 @@ export interface ProjectionInputs {
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
   derivMVT0: number;         // somma MV derivati a t0 (con segno)
+  derivativesNettingT0: number; // valore "netting derivati" signed a t0 (= derivMVT0 se non override)
+  equityDerivOffset: number; // (derivativesNettingT0 - derivMVT0): offset costante aggiunto al sleeve equity
   derivSummary: DerivSummaryLeg[]; // dettaglio gambe per UI
   patrimonyT0: number;       // 'all'
-  equityT0: number;          // azionario + derivati a t0
+  equityT0: number;          // azionario + GP equity + netting derivati a t0
   bondCommodityT0: number;   // bond + commodities a t0
 }
+
 
 export function buildProjectionInputs(
   positions: Position[],
   baseValue: number,
   underlyingPrices?: Record<string, UnderlyingPrice>,
   bondOverrides?: Record<string, ResolvedBondOverride>,
+  gpEquityValue: number = 0,
+  derivativesNettingT0Override: number | null = null,
 ): ProjectionInputs {
   const t0 = new Date();
   const fxOf = (p: Position) => (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1);
@@ -180,22 +186,27 @@ export function buildProjectionInputs(
     }
   }
 
-  // baseValue = non-derivati a MV + cash. Sottraiamo i bucket espliciti; ciò che resta è cash + arrotondamenti.
-  const cashResidual = baseValue - parsedBondMV - unparsedBondFlat - equityFlat - commodityFlat;
+  // GP equity (gp_total - gp_cash) viene scorporata dal cashResidual e messa nel bucket Equity.
+  const gpEquityFlat = Math.max(0, gpEquityValue);
+  // baseValue = non-derivati a MV + cash (include anche la GP totale). Sottraiamo i bucket espliciti
+  // e la quota GP equity; ciò che resta è cash + GP cash + arrotondamenti.
+  const cashResidual = baseValue - parsedBondMV - unparsedBondFlat - equityFlat - commodityFlat - gpEquityFlat;
 
   const horizon = maxExpiry > 0 ? new Date(maxExpiry) : new Date(t0.getTime() + MS_YEAR);
 
   const derivMVT0 = derivs.reduce((s, d) => s + d.mvT0, 0);
+  const derivativesNettingT0 = derivativesNettingT0Override ?? derivMVT0;
+  const equityDerivOffset = derivativesNettingT0 - derivMVT0;
   const parsedBondT0 = bonds.reduce((s, b) => s + b.mvT0, 0);
-  const patrimonyT0 = baseValue + derivMVT0;
-  const equityT0 = equityFlat + derivMVT0;
+  const patrimonyT0 = baseValue + derivativesNettingT0;
+  const equityT0 = equityFlat + gpEquityFlat + derivativesNettingT0;
   const bondCommodityT0 = parsedBondT0 + unparsedBondFlat + commodityFlat;
 
   return {
     t0, horizon,
-    equityFlat, commodityFlat, cashResidual, unparsedBondFlat,
+    equityFlat, gpEquityFlat, commodityFlat, cashResidual, unparsedBondFlat,
     derivs, bonds, unparsedBonds, partialBonds, derivsNoUnderlying,
-    derivMVT0, derivSummary,
+    derivMVT0, derivativesNettingT0, equityDerivOffset, derivSummary,
     patrimonyT0, equityT0, bondCommodityT0,
   };
 }
@@ -266,7 +277,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       derivVal += px * d.qtyMult;
     }
   }
-  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal + equityAdjAtExpiry;
+  const equitySleeve = inp.equityFlat * sh.equityMult + inp.gpEquityFlat + derivVal + equityAdjAtExpiry + inp.equityDerivOffset;
 
   // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
