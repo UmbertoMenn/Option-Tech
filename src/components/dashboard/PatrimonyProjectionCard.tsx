@@ -216,7 +216,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         <span className="text-[11px] text-muted-foreground ml-3 mr-1">Analizza:</span>
         {([
           { v: 'all', l: 'Tutto' },
-          { v: 'equity', l: 'Equity' },
+          { v: 'equity', l: 'Equity (incl. derivati)' },
           { v: 'bond_commodity', l: 'Bond/Comm.' },
         ] as { v: ProjectionScope; l: string }[]).map(s => (
           <button
