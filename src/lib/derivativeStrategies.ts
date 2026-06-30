@@ -545,14 +545,39 @@ export function categorizeDerivatives(
             });
           } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
             // Synthetic DR-CC without protection put (e.g., +CALL ITM / -CALL):
-            // keep classified as DR-CC sintetica with protectionPut undefined.
+            // keep classified as DR-CC sintetica con protectionPut undefined,
+            // ma segna come incompleta (manca Long Put).
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: undefined,
               isSynthetic: true, syntheticPut, syntheticCall,
             });
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'derisking_covered_call',
+              underlying: config.underlying,
+              isSynthetic: true,
+              presentLegs: matchedVirtual,
+              missingLegs: ['Long Put'],
+              linkedStock: linkedStock || null,
+            });
           } else {
             coveredCalls.push(cc);
           }
+        }
+
+        // INCOMPLETE: DR-CC sintetica senza Short Call ma con componente sintetica
+        if (calls.length === 0 && config.is_synthetic && (syntheticCall || syntheticPut)) {
+          const missing: string[] = ['Short Call'];
+          if (boughtPuts.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'derisking_covered_call',
+            underlying: config.underlying,
+            isSynthetic: true,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
         }
         break;
       }
@@ -588,6 +613,21 @@ export function categorizeDerivatives(
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
           });
+        } else if (matchedVirtual.length > 0) {
+          const missing: string[] = [];
+          if (sc.length === 0) missing.push('Short Call');
+          if (bc.length === 0) missing.push('Long Call');
+          if (sp.length === 0) missing.push('Short Put');
+          if (bp.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'iron_condor',
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
         }
         break;
       }
@@ -605,6 +645,21 @@ export function categorizeDerivatives(
             contracts: Math.abs(sc[0].quantity),
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
+          });
+        } else if (matchedVirtual.length > 0) {
+          const missing: string[] = [];
+          if (sc.length === 0) missing.push('Short Call');
+          if (bc.length === 0) missing.push('Long Call');
+          if (sp.length === 0) missing.push('Short Put');
+          if (bp.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'double_diagonal',
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
           });
         }
         break;
