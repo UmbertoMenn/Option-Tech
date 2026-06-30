@@ -195,6 +195,7 @@ export function buildProjectionInputs(
     t0, horizon,
     equityFlat, commodityFlat, cashResidual, unparsedBondFlat,
     derivs, bonds, unparsedBonds, partialBonds, derivsNoUnderlying,
+    derivMVT0, derivSummary,
     patrimonyT0, equityT0, bondCommodityT0,
   };
 }
