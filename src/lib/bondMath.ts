@@ -48,6 +48,9 @@ function parseMaturity(descUpper: string): { date: Date; how: string } | null {
     const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3];
     return { date: mkDate(yr, EN_MONTH[m[2]], +m[1]), how: 'DDMMMen/YYYY' };
   }
+  // 6b) MMM(EN)YY senza giorno (es. BOT ZC JUN27) -> giorno 1
+  m = descUpper.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})\b/);
+  if (m) return { date: mkDate(2000 + +m[2], EN_MONTH[m[1]], 1), how: 'MMMen/YY' };
   // 7) MM/YYYY -> fine mese
   m = descUpper.match(/\b(\d{1,2})[/\-.](\d{4})\b/);
   if (m) return { date: mkDate(+m[2], +m[1] % 12 + 1, 1), how: 'MM/YYYY' };
@@ -64,30 +67,38 @@ function defaultFrequency(descUpper: string): number {
 }
 
 export interface BondPartial {
-  couponRatePct: number | null; // null = cedola non deducibile (es. step-up / inflation)
+  couponRatePct: number | null; // null = cedola non deducibile (es. step-up); 0 = zero coupon noto
   maturity: Date | null;
   frequency: number;
+  inflationLinked: boolean;     // BTP Italia / €i / indicizzati: NON convergono a 100, accreditano sull'inflazione
+}
+
+/** Bond indicizzato all'inflazione? (BTP Italia, BTP€i, TIPS, ecc.) */
+function isInflationLinked(descUpper: string): boolean {
+  return /\bINFL\b|INFLAZ|INDICIZZAT|INFLATION|\bTII\b|€I\b|BTP\s*ITAL/.test(descUpper);
 }
 
 /**
  * Parsing parziale: prova a estrarre cedola e scadenza separatamente.
- * - maturity nota + coupon noto  → proiezione completa (pull-to-par + cedole)
- * - maturity nota + coupon null  → pull-to-par senza cedole modellate
- * - maturity null                → bond tenuto piatto
+ * - inflation-linked          → accredito su target inflazione (no pull-to-par)
+ * - maturity nota + coupon noto (anche 0 = zero coupon) → proiezione completa (pull-to-par)
+ * - maturity nota + coupon null → pull-to-par senza cedole modellate
+ * - maturity null               → bond tenuto piatto
  */
 export function parseBondPartial(description: string | null | undefined): BondPartial {
-  if (!description) return { couponRatePct: null, maturity: null, frequency: 1 };
+  if (!description) return { couponRatePct: null, maturity: null, frequency: 1, inflationLinked: false };
   const up = description.toUpperCase();
   let couponRatePct: number | null = null;
-  // evita di prendere come cedola un "TF"/"TV" senza numero; cerca "x.yy%"
   const cm = up.match(/(\d+(?:[.,]\d+)?)\s*%/);
   if (cm) couponRatePct = parseFloat(cm[1].replace(',', '.'));
-  else if (/\bZ\.?C\.?\b|\bZERO\b/.test(up)) couponRatePct = 0;
+  // BOT e zero-coupon: cedola NOTA = 0 (convergono a 100, nessuna cedola)
+  else if (/\bBOT\b|\bZ\.?C\.?\b|\bZERO\b|ZERO\s*COUPON/.test(up)) couponRatePct = 0;
   const mat = parseMaturity(up);
   return {
     couponRatePct,
     maturity: mat && isFinite(mat.date.getTime()) ? mat.date : null,
     frequency: defaultFrequency(up),
+    inflationLinked: isInflationLinked(up),
   };
 }
 

@@ -146,3 +146,66 @@ describe('portfolioProjection: regressione bond non proiettabili', () => {
     expect(det[0].patrimony).toBeCloseTo(4_000_000, -2);
   });
 });
+
+describe('bondMath.parseBondPartial — BOT ZC e indicizzati', () => {
+  it('BOT ZC JUN27 → cedola 0 (nota), scadenza giu 2027, non indicizzato', () => {
+    const b = parseBondPartial('BOT ZC (zero coupon) JUN27');
+    expect(b.couponRatePct).toBe(0);
+    expect(b.maturity?.getUTCFullYear()).toBe(2027);
+    expect(b.maturity?.getUTCMonth()).toBe(5); // giugno
+    expect(b.inflationLinked).toBe(false);
+  });
+  it('BTP ITA INFL → riconosciuto come indicizzato all\'inflazione', () => {
+    expect(parseBondPartial('BTP ITA 28062030 INFL ORD').inflationLinked).toBe(true);
+  });
+});
+
+describe('portfolioProjection — ZC e indicizzati', () => {
+  const up = {} as any;
+  const inDays = (days: number) => new Date(Date.now() + days * 86400000);
+  const ddmmyyyy = (d: Date) => `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+
+  it('BOT ZC converge a par e NON è segnalato come parziale', () => {
+    const mat = inDays(365);
+    const positions = [
+      pos({ asset_type: 'bond', isin: 'IT000BOT', description: `BOT ZC ${ddmmyyyy(mat)}`,
+        snapshot_price: 97, current_price: 97, snapshot_market_value: 97000, market_value: 97000 }),
+    ];
+    const inp = buildProjectionInputs(positions, 97000, up);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    expect(inp.partialBonds.length).toBe(0); // ZC è modellato, non "senza cedola"
+    expect(det[det.length - 1].patrimony).toBeCloseTo(100000, -2); // par
+  });
+
+  it('BTP indicizzato NON converge a 100: accredita ~2%/anno', () => {
+    const mat = inDays(Math.round(5 * 365.25));
+    const positions = [
+      pos({ asset_type: 'bond', isin: 'IT000INFL', description: `BTP ITA INFL ${ddmmyyyy(mat)}`,
+        snapshot_price: 100, current_price: 100, snapshot_market_value: 100000, market_value: 100000 }),
+    ];
+    const inp = buildProjectionInputs(positions, 100000, up);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    const last = det[det.length - 1].patrimony;
+    // a prezzo 100 il pull-to-par darebbe 100000 (piatto); l'accredito inflazione dà ~100000*1.02^5
+    expect(last).toBeGreaterThan(108000);
+    expect(last).toBeLessThan(113000);
+  });
+
+  it('scope: equity isola azionario+derivati, bond_commodity isola bond', () => {
+    const mat = inDays(365);
+    const positions = [
+      pos({ asset_type: 'stock', market_value: 200000, snapshot_market_value: 200000 }),
+      pos({ asset_type: 'bond', isin: 'IT000BOT2', description: `BOT ZC ${ddmmyyyy(mat)}`,
+        snapshot_price: 98, current_price: 98, snapshot_market_value: 98000, market_value: 98000 }),
+    ];
+    const inp = buildProjectionInputs(positions, 298000, up);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const eq = projectDeterministic(inp, grid, 'equity');
+    const bc = projectDeterministic(inp, grid, 'bond_commodity');
+    expect(eq[0].patrimony).toBeCloseTo(200000, -2);   // solo azionario
+    expect(bc[0].patrimony).toBeCloseTo(98000, -2);     // solo bond
+    expect(bc[bc.length - 1].patrimony).toBeCloseTo(100000, -2); // bond a par
+  });
+});

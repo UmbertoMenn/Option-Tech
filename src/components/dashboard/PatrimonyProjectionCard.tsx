@@ -16,7 +16,7 @@ import {
 import { Info, ChevronDown, Wrench } from 'lucide-react';
 import {
   buildProjectionInputs, buildTimeGrid, projectDeterministic, projectMonteCarlo,
-  DEFAULT_MC, ResolvedBondOverride,
+  DEFAULT_MC, ResolvedBondOverride, ProjectionScope,
 } from '@/lib/portfolioProjection';
 import { parseBondPartial } from '@/lib/bondMath';
 import { useBondOverrides, BondOverride } from '@/hooks/useBondOverrides';
@@ -103,6 +103,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   const [mcVolRates, setMcVolRates] = useState(false);
   const [mcUnderlying, setMcUnderlying] = useState(false);
   const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
+  const [scope, setScope] = useState<ProjectionScope>('all');
   const [fixOpen, setFixOpen] = useState(false);
 
   const { overrides, getOverride, setOverride, isSaving } = useBondOverrides();
@@ -132,13 +133,13 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   }, [rangeYears, inputs]);
 
   const grid = useMemo(() => buildTimeGrid(inputs.t0, effectiveHorizon, 60), [inputs, effectiveHorizon]);
-  const deterministic = useMemo(() => projectDeterministic(inputs, grid), [inputs, grid]);
+  const deterministic = useMemo(() => projectDeterministic(inputs, grid, scope), [inputs, grid, scope]);
 
   const mcOn = mcVolRates || mcUnderlying;
   const mc = useMemo(() => {
     if (!mcOn) return null;
-    return projectMonteCarlo(inputs, grid, { ...DEFAULT_MC, enableVolRates: mcVolRates, enableUnderlying: mcUnderlying });
-  }, [mcOn, mcVolRates, mcUnderlying, inputs, grid]);
+    return projectMonteCarlo(inputs, grid, { ...DEFAULT_MC, enableVolRates: mcVolRates, enableUnderlying: mcUnderlying }, scope);
+  }, [mcOn, mcVolRates, mcUnderlying, inputs, grid, scope]);
 
   const data = useMemo(() => deterministic.map((d, i) => {
     const m = mc?.[i];
@@ -153,13 +154,16 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   const last = deterministic[deterministic.length - 1];
   const horizonLabel = grid[grid.length - 1]?.label ?? '';
 
-  // bond da risolvere (non completamente modellati): no scadenza, oppure scadenza ma niente cedola
+  // bond da risolvere: manca la scadenza, oppure manca la cedola e NON è indicizzato/ZC
   const bondsToFix = useMemo(() => positions.filter(p => {
     if (p.asset_type !== 'bond') return false;
     const ov = getOverride(p.portfolio_id, p.isin);
-    if (ov) return ov.coupon_rate_pct == null || ov.maturity_date == null;
     const partial = parseBondPartial(p.description);
-    return !(partial.maturity && partial.couponRatePct != null && partial.couponRatePct > 0);
+    const maturity = ov?.maturity_date ?? (partial.maturity ? toISO(partial.maturity) : null);
+    const coupon = ov ? ov.coupon_rate_pct : partial.couponRatePct;
+    if (!maturity) return true;                       // scadenza assente
+    if (coupon == null && !partial.inflationLinked) return true; // cedola sconosciuta (non indicizzato/ZC)
+    return false;
   }), [positions, getOverride]);
 
   const presets: { label: string; years: number | null }[] = [
@@ -193,7 +197,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         </div>
       </div>
 
-      {/* Selettore arco temporale asse X */}
+      {/* Selettore arco temporale asse X + analisi per bucket */}
       <div className="flex items-center gap-1 flex-wrap">
         <span className="text-[11px] text-muted-foreground mr-1">Orizzonte:</span>
         {presets.map(p => (
@@ -207,6 +211,24 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
             }`}
           >
             {p.label}
+          </button>
+        ))}
+        <span className="text-[11px] text-muted-foreground ml-3 mr-1">Analizza:</span>
+        {([
+          { v: 'all', l: 'Tutto' },
+          { v: 'equity', l: 'Equity' },
+          { v: 'bond_commodity', l: 'Bond/Comm.' },
+        ] as { v: ProjectionScope; l: string }[]).map(s => (
+          <button
+            key={s.v}
+            onClick={() => setScope(s.v)}
+            className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
+              scope === s.v
+                ? 'border-primary bg-primary/15 text-primary'
+                : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {s.l}
           </button>
         ))}
       </div>

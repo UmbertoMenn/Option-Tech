@@ -7,6 +7,10 @@ const MS_YEAR = 365.25 * 24 * 3600 * 1000;
 const DEFAULT_RATE = 0.04;        // risk-free di base per il pricing opzioni
 const DEFAULT_OPT_VOL = 0.30;     // vol di fallback quando l'IV non è risolvibile
 const DEFAULT_EQUITY_VOL = 0.20;  // vol annua per lo shock aggregato azioni/ETF (MC titoli)
+const INFLATION_TARGET = 0.02;    // target BCE per i bond indicizzati all'inflazione
+
+/** Filtro di analisi: tutto, solo azionario+derivati, solo bond+commodities. */
+export type ProjectionScope = 'all' | 'equity' | 'bond_commodity';
 
 function yearFrac(a: Date, b: Date): number {
   return (b.getTime() - a.getTime()) / MS_YEAR;
@@ -35,8 +39,9 @@ interface BondInput {
   currentClean: number;  // prezzo % corrente
   ytm: number;
   mvT0: number;          // market value EUR a t0
-  couponCashPerPeriod: number; // EUR per cedola (0 se cedola non modellata)
+  couponCashPerPeriod: number; // EUR per cedola (0 se cedola non modellata o ZC)
   couponsModeled: boolean;
+  inflationLinked: boolean;
 }
 
 /** Override risolto per ISIN, chiave `${portfolio_id}::${isin}`. */
@@ -49,14 +54,19 @@ export interface ResolvedBondOverride {
 export interface ProjectionInputs {
   t0: Date;
   horizon: Date;
-  flatNonBondEquity: number; // commodity + cash + bond non proiettabili, costante (EUR)
-  equityFlat: number;        // azioni + ETF aggregati (EUR) — shockabili nel MC titoli
+  // bucket costanti (EUR)
+  equityFlat: number;        // azioni + ETF — shockabili nel MC titoli
+  commodityFlat: number;     // materie prime — piatte
+  cashResidual: number;      // cash + arrotondamenti — piatto
+  unparsedBondFlat: number;  // bond senza scadenza → tenuti al valore corrente (bucket bond)
   derivs: DerivInput[];
   bonds: BondInput[];
   unparsedBonds: string[];   // bond senza scadenza deducibile → tenuti piatti
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
-  patrimonyT0: number;
+  patrimonyT0: number;       // 'all'
+  equityT0: number;          // azionario + derivati a t0
+  bondCommodityT0: number;   // bond + commodities a t0
 }
 
 export function buildProjectionInputs(
@@ -107,8 +117,10 @@ export function buildProjectionInputs(
   const bonds: BondInput[] = [];
   const unparsedBonds: string[] = [];
   const partialBonds: string[] = [];
-  let parsedBondMV = 0;   // SOLO i bond effettivamente proiettati (da sottrarre dal flat)
+  let parsedBondMV = 0;       // bond proiettati (sottratti dal flat, riaggiunti via bonds[])
+  let unparsedBondFlat = 0;   // bond senza scadenza → bucket bond ma piatti
   let equityFlat = 0;
+  let commodityFlat = 0;
 
   for (const p of positions) {
     const mvEUR = p.snapshot_market_value ?? p.market_value ?? 0;
@@ -116,43 +128,50 @@ export function buildProjectionInputs(
       const ov = p.isin ? bondOverrides?.[`${p.portfolio_id}::${p.isin}`] : undefined;
       const partial = parseBondPartial(p.description);
       const maturity = ov?.maturityMs != null ? new Date(ov.maturityMs) : partial.maturity;
-      const couponRatePct = ov ? ov.couponRatePct : partial.couponRatePct; // override vince (anche se null)
+      const couponRatePct = ov ? ov.couponRatePct : partial.couponRatePct; // override vince (anche null)
       const frequency = ov?.frequency ?? partial.frequency;
       const currentClean = p.snapshot_price ?? p.current_price ?? 0;
+      const inflationLinked = partial.inflationLinked;
 
+      // serve la scadenza (per orizzonte/pull-to-par/accredito). Gli indicizzati possono
+      // essere proiettati anche senza cedola (accreditano sull'inflazione, no pull-to-par).
       if (maturity && isFinite(maturity.getTime()) && currentClean > 0 && mvEUR !== 0) {
         parsedBondMV += mvEUR;
         if (maturity.getTime() > maxExpiry) maxExpiry = maturity.getTime();
         const info: BondInfo = { couponRatePct: couponRatePct ?? 0, maturity, frequency, parsedFrom: ov ? 'override' : 'auto' };
-        const ytm = bondYTM(info, currentClean, t0);
+        const ytm = inflationLinked ? 0 : bondYTM(info, currentClean, t0);
         const couponsModeled = couponRatePct != null && couponRatePct > 0;
         const couponCashPerPeriod = couponsModeled ? (mvEUR * (couponRatePct as number)) / (currentClean * frequency) : 0;
-        bonds.push({ description: p.description, info, currentClean, ytm, mvT0: mvEUR, couponCashPerPeriod, couponsModeled });
-        if (!couponsModeled) partialBonds.push(p.description);
+        bonds.push({ description: p.description, info, currentClean, ytm, mvT0: mvEUR, couponCashPerPeriod, couponsModeled, inflationLinked });
+        // "parziale" solo se NON indicizzato e cedola sconosciuta (null). ZC (0) è modellato.
+        if (!inflationLinked && couponRatePct == null) partialBonds.push(p.description);
       } else {
-        // scadenza non deducibile → resta nel bucket flat (NON sottratto): tenuto al valore corrente
         unparsedBonds.push(p.description);
+        unparsedBondFlat += mvEUR;
       }
     } else if (p.asset_type === 'stock' || p.asset_type === 'etf') {
       equityFlat += mvEUR;
+    } else if (p.asset_type === 'commodity') {
+      commodityFlat += mvEUR;
     }
   }
 
-  // baseValue (summary.totalValue) = non-derivati a MV + cash. Sottraiamo SOLO i bond proiettati
-  // (riaggiunti tramite bonds[]) e l'azionario (shockabile). Tutto il resto — cash, commodity e i
-  // bond non proiettabili — resta costante nel bucket flat, così il patrimonio a t0 coincide col reale.
-  const flatNonBondEquity = baseValue - parsedBondMV - equityFlat;
+  // baseValue = non-derivati a MV + cash. Sottraiamo i bucket espliciti; ciò che resta è cash + arrotondamenti.
+  const cashResidual = baseValue - parsedBondMV - unparsedBondFlat - equityFlat - commodityFlat;
 
-  // Orizzonte: max scadenza tra bond e derivati; se assente, +1 anno di default.
   const horizon = maxExpiry > 0 ? new Date(maxExpiry) : new Date(t0.getTime() + MS_YEAR);
 
-  // patrimonio a t0 sotto netting totale = base + Σ MV derivati
   const derivMVT0 = derivs.reduce((s, d) => s + d.mvT0, 0);
+  const parsedBondT0 = bonds.reduce((s, b) => s + b.mvT0, 0);
   const patrimonyT0 = baseValue + derivMVT0;
+  const equityT0 = equityFlat + derivMVT0;
+  const bondCommodityT0 = parsedBondT0 + unparsedBondFlat + commodityFlat;
 
   return {
-    t0, horizon, flatNonBondEquity, equityFlat, derivs, bonds,
-    unparsedBonds, partialBonds, derivsNoUnderlying, patrimonyT0,
+    t0, horizon,
+    equityFlat, commodityFlat, cashResidual, unparsedBondFlat,
+    derivs, bonds, unparsedBonds, partialBonds, derivsNoUnderlying,
+    patrimonyT0, equityT0, bondCommodityT0,
   };
 }
 
@@ -191,53 +210,69 @@ export interface ShockSet {
 const NO_SHOCK: ShockSet = { volMult: 1, rateBump: 0, equityMult: 1, underlyingMult: {} };
 
 /** Valore patrimonio a una data sotto un set di shock. */
-function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet): number {
+function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: ProjectionScope = 'all'): number {
   const r = DEFAULT_RATE + sh.rateBump;
 
-  // derivati: repricing BS con T residuo, S shockato, IV shockata
+  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento) ──
   let derivVal = 0;
   for (const d of inp.derivs) {
-    if (!d.hasUnderlying) { derivVal += d.mvT0; continue; } // niente sottostante: piatto
+    if (!d.hasUnderlying) { derivVal += d.mvT0; continue; }
     const Tt = Math.max(0, d.T0 - tp.tYears);
     const sMult = sh.underlyingMult[d.underlying] ?? sh.equityMult;
     const S = d.S0 * sMult;
     if (d.ivResolved) {
-      const px = bsPrice(S, d.K, Tt, r, d.iv * sh.volMult, d.type);
-      derivVal += px * d.qtyMult;
+      derivVal += bsPrice(S, d.K, Tt, r, d.iv * sh.volMult, d.type) * d.qtyMult;
     } else {
-      // fallback model-free: decadimento lineare dell'estrinseco verso l'intrinseco
       const intrinsic = d.type === 'call' ? Math.max(0, S - d.K) : Math.max(0, d.K - S);
       const frac = d.T0 > 0 ? Tt / d.T0 : 0;
       const px = intrinsic + Math.max(0, d.anchorPerShare - intrinsic) * frac;
       derivVal += px * d.qtyMult;
     }
   }
+  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal;
 
-  // bond: pull-to-par con YTM shockato + cedole staccate fino a tp
+  // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
   let coupons = 0;
   for (const b of inp.bonds) {
-    const matured = tp.date.getTime() >= b.info.maturity.getTime();
-    if (matured) {
-      bondVal += b.mvT0 * (100 / b.currentClean); // rimborso a par
+    const tCapYears = Math.min(tp.tYears, Math.max(0, (b.info.maturity.getTime() - inp.t0.getTime()) / MS_YEAR));
+    if (b.inflationLinked) {
+      // NON converge a 100: accredita sul target inflazione BCE (shockabile dai tassi).
+      const inflation = Math.max(0, INFLATION_TARGET + sh.rateBump);
+      bondVal += b.mvT0 * Math.pow(1 + inflation, tCapYears);
     } else {
-      const clean = bondCleanPrice(b.info, b.ytm + sh.rateBump, tp.date);
-      bondVal += b.mvT0 * (clean / b.currentClean);
+      const matured = tp.date.getTime() >= b.info.maturity.getTime();
+      if (matured) {
+        bondVal += b.mvT0 * (100 / b.currentClean); // rimborso a par
+      } else {
+        const clean = bondCleanPrice(b.info, b.ytm + sh.rateBump, tp.date);
+        bondVal += b.mvT0 * (clean / b.currentClean);
+      }
     }
-    // cedole incassate in (t0, tp]
-    const stepMonths = Math.round(12 / b.info.frequency);
-    let cd = new Date(b.info.maturity.getTime());
-    const paid: number[] = [];
-    for (let i = 0; i < 200; i++) {
-      if (cd.getTime() <= inp.t0.getTime()) break;
-      if (cd.getTime() <= tp.date.getTime()) paid.push(cd.getTime());
-      cd = new Date(Date.UTC(cd.getUTCFullYear(), cd.getUTCMonth() - stepMonths, cd.getUTCDate()));
+    // cedole staccate in (t0, tp]
+    if (b.couponCashPerPeriod !== 0) {
+      const stepMonths = Math.round(12 / b.info.frequency);
+      let cd = new Date(b.info.maturity.getTime());
+      let n = 0;
+      for (let i = 0; i < 400; i++) {
+        if (cd.getTime() <= inp.t0.getTime()) break;
+        if (cd.getTime() <= tp.date.getTime()) n++;
+        cd = new Date(Date.UTC(cd.getUTCFullYear(), cd.getUTCMonth() - stepMonths, cd.getUTCDate()));
+      }
+      coupons += n * b.couponCashPerPeriod;
     }
-    coupons += paid.length * b.couponCashPerPeriod;
   }
+  const bondCommoditySleeve = bondVal + coupons + inp.unparsedBondFlat + inp.commodityFlat;
 
-  const equity = inp.equityFlat * sh.equityMult;
-  return inp.flatNonBondEquity + equity + bondVal + coupons + derivVal;
+  if (scope === 'equity') return equitySleeve;
+  if (scope === 'bond_commodity') return bondCommoditySleeve;
+  return equitySleeve + bondCommoditySleeve + inp.cashResidual;
+}
+
+function baseForScope(inp: ProjectionInputs, scope: ProjectionScope): number {
+  if (scope === 'equity') return inp.equityT0;
+  if (scope === 'bond_commodity') return inp.bondCommodityT0;
+  return inp.patrimonyT0;
 }
 
 // ───────────────────────── Proiezione deterministica ─────────────────────────
@@ -251,10 +286,10 @@ export interface ProjectionRow {
   p5?: number; p50?: number; p95?: number;
 }
 
-export function projectDeterministic(inp: ProjectionInputs, grid: TimePoint[]): ProjectionRow[] {
-  const base = inp.patrimonyT0;
+export function projectDeterministic(inp: ProjectionInputs, grid: TimePoint[], scope: ProjectionScope = 'all'): ProjectionRow[] {
+  const base = baseForScope(inp, scope);
   return grid.map(tp => {
-    const v = patrimonyAt(inp, tp, NO_SHOCK);
+    const v = patrimonyAt(inp, tp, NO_SHOCK, scope);
     return { label: tp.label, tYears: tp.tYears, patrimony: v, pnlPct: base !== 0 ? ((v - base) / base) * 100 : 0 };
   });
 }
@@ -299,9 +334,10 @@ export function projectMonteCarlo(
   inp: ProjectionInputs,
   grid: TimePoint[],
   cfg: MonteCarloConfig,
+  scope: ProjectionScope = 'all',
 ): ProjectionRow[] {
   const rand = mulberry32(0xC0FFEE);
-  const base = inp.patrimonyT0;
+  const base = baseForScope(inp, scope);
   const underlyings = Array.from(new Set(inp.derivs.map(d => d.underlying).filter(Boolean)));
 
   // matrice [point][path]
@@ -332,7 +368,7 @@ export function projectMonteCarlo(
         equityMult = Math.exp((DEFAULT_RATE - 0.5 * DEFAULT_EQUITY_VOL * DEFAULT_EQUITY_VOL) * t + DEFAULT_EQUITY_VOL * sq * eqZ);
       }
       const sh: ShockSet = { volMult, rateBump, equityMult, underlyingMult };
-      samples[i].push(patrimonyAt(inp, tp, sh));
+      samples[i].push(patrimonyAt(inp, tp, sh, scope));
     }
   }
 
