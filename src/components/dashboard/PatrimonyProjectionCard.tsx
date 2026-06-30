@@ -25,6 +25,8 @@ interface Props {
   positions: Position[];
   baseValue: number;
   underlyingPrices?: Record<string, UnderlyingPrice>;
+  gpEquityValue?: number;
+  derivativesNettingT0?: number;
 }
 
 const MS_YEAR = 365.25 * 24 * 3600 * 1000;
