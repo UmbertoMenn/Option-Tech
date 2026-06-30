@@ -65,6 +65,10 @@ function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean
       if (hasCall) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
       if (hasShortPut) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
       return { ok: true };
+    case 'call_spread':
+    case 'diagonal_call_spread':
+      if (hasPut) return { ok: false, reason: 'Call Spread non può contenere PUT' };
+      return { ok: true };
     case 'covered_call':
     case 'derisking_covered_call':
     case 'iron_condor':
