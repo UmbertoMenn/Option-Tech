@@ -244,6 +244,7 @@ export function Derivatives() {
       const merged: DerivativeCategories = {
         coveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
         nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [], resolvedConfigs: [],
+        incompleteStrategies: [],
       };
 
       for (const [pid, portfolioPositions] of positionsByPortfolio) {
@@ -262,6 +263,7 @@ export function Derivatives() {
         merged.otherStrategies.push(...result.otherStrategies);
         merged.groupedOtherStrategies.push(...result.groupedOtherStrategies);
         merged.resolvedConfigs.push(...result.resolvedConfigs);
+        merged.incompleteStrategies.push(...result.incompleteStrategies);
       }
 
       raw = merged;
