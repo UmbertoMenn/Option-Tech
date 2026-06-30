@@ -354,9 +354,13 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
       <p className="text-[11px] text-muted-foreground leading-snug">
         Per ogni mese da oggi fino alla scadenza massima tra bond e derivati: i derivati sono
         rivalutati al market value tramite Black-Scholes inverso (IV implicita dal prezzo
-        attuale, poi repricing con vita residua decrescente → il premio temporale scende); i
-        bond convergono al valore di rimborso (pull-to-par) e le cedole staccate incrementano il
-        patrimonio. Azioni/ETF/cash restano costanti nello scenario base.
+        attuale, poi repricing con vita residua decrescente → il premio temporale scende). A
+        scadenza le opzioni ITM vengono <strong>esercitate</strong>: per le covered call le azioni
+        sono consegnate al strike, per le short put sono acquistate al strike (l'effetto si
+        materializza nel bucket Equity). I bond convergono al valore di rimborso (pull-to-par) e
+        le cedole staccate incrementano il patrimonio. Azioni/ETF/cash restano costanti nello
+        scenario base. Il toggle <strong>Equity</strong> include azioni, ETF e tutti i derivati
+        (sottostante azionario).
       </p>
     </div>
   );
