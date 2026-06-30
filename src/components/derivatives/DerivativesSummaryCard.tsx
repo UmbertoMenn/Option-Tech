@@ -348,7 +348,7 @@ export function DerivativesSummaryCard({
 
           {/* 9. Covered Call / D-R CC da rivendere - LAST */}
           <CompactSection
-            title="COVERED CALL / D-R CC DA RIVENDERE"
+            title="Covered Call da rivendere"
             icon={TrendingUp}
             iconColor="text-green-500"
             items={monitoring.availableCallsToSell}
