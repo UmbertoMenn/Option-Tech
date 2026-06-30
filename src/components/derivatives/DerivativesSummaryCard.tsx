@@ -328,9 +328,27 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 8. Call da rivendere - LAST */}
+          {/* 8. Strategie multi-gamba incomplete */}
           <CompactSection
-            title="Call da rivendere"
+            title="Strategie incomplete"
+            icon={AlertCircle}
+            iconColor="text-orange-500"
+            statusBadge={{ label: 'MANCA GAMBA', colorClass: 'bg-orange-500/20 border-orange-500/50 text-orange-400' }}
+            items={monitoring.incompleteMultiLegStrategies}
+            renderItem={(s, idx) => (
+              <Badge
+                key={idx}
+                variant="outline"
+                className="text-xs bg-orange-500/10 border-orange-500/30"
+              >
+                {s.ticker} {s.strategyName} (manca: {s.missingLegs.join(', ')})
+              </Badge>
+            )}
+          />
+
+          {/* 9. Covered Call / D-R CC da rivendere - LAST */}
+          <CompactSection
+            title="COVERED CALL / D-R CC DA RIVENDERE"
             icon={TrendingUp}
             iconColor="text-green-500"
             items={monitoring.availableCallsToSell}
