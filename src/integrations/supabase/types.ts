@@ -1046,47 +1046,6 @@ export type Database = {
         }
         Relationships: []
       }
-      bond_overrides: {
-        Row: {
-          coupon_rate_pct: number | null
-          created_at: string | null
-          frequency: number
-          id: string
-          isin: string
-          maturity_date: string | null
-          portfolio_id: string
-          updated_at: string | null
-        }
-        Insert: {
-          coupon_rate_pct?: number | null
-          created_at?: string | null
-          frequency?: number
-          id?: string
-          isin: string
-          maturity_date?: string | null
-          portfolio_id: string
-          updated_at?: string | null
-        }
-        Update: {
-          coupon_rate_pct?: number | null
-          created_at?: string | null
-          frequency?: number
-          id?: string
-          isin?: string
-          maturity_date?: string | null
-          portfolio_id?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "bond_overrides_portfolio_id_fkey"
-            columns: ["portfolio_id"]
-            isOneToOne: false
-            referencedRelation: "portfolios"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       put_roll_flags: {
         Row: {
           created_at: string
