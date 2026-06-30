@@ -702,9 +702,19 @@ export function buildSnapshotSections(monitoring: MonitoringResult): { title: st
       items: monitoring.otherStrategiesOOROOB.map(os => `${os.ticker} ${os.strategyName} ${os.status}`),
     });
   }
+  if (monitoring.incompleteMultiLegStrategies.length > 0) {
+    sections.push({
+      title: 'Strategie incomplete',
+      emoji: 'orange',
+      badge: 'MANCA GAMBA',
+      items: monitoring.incompleteMultiLegStrategies.map(
+        s => `${s.ticker} ${s.strategyName} (manca: ${s.missingLegs.join(', ')})`
+      ),
+    });
+  }
   if (monitoring.availableCallsToSell.length > 0) {
     sections.push({
-      title: 'Call da rivendere',
+      title: 'Covered Call / D-R CC da rivendere',
       emoji: 'green',
       items: monitoring.availableCallsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
     });
