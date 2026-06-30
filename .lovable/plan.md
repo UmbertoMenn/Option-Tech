@@ -1,37 +1,20 @@
-## Stato attuale (verificato sul DB live)
+## Problema
+Nelle tabelle delle strategie derivati l'etichetta header "SOTTOSTANTE / STRATEGIA" appare visivamente disallineata rispetto al bordo sinistro della card perché è posizionata nella 3ª colonna della grid (dopo le colonne riservate al chevron e al badge "V"), anziché partire dall'estremità sinistra.
 
-- Tabella `public.put_roll_flags` → **non esiste**
-- Enum `alert_type` → contiene 18 valori, **mancano** `action_put_roll_up_otm` e `distance_put_roll_up`
+## Soluzione
+In `src/pages/Derivatives.tsx` modificare le 7 righe di header grid (linee 665, 725, 777, 820, 863, 998, 1040) in modo che il label "Sottostante / Strategia":
 
-Le due migration SQL sono presenti nel repo (`supabase/migrations/20260623115900_*` e `20260623120000_*`) ma non sono mai state eseguite. Conferma: il **Publish di Lovable non applica file SQL** arrivati via push esterno — deploya solo frontend ed edge functions. Vanno eseguite esplicitamente.
+1. Occupi anche le colonne iniziali vuote tramite `col-span-N` (N = numero di colonne iniziali "spaziatrici" + 1, tipicamente 3 per coveredCalls/longPuts/leapCalls, 2 per ironCondors/doubleDiagonals, 3 o 4 per le altre).
+2. Eliminare i corrispondenti `<span />` placeholder che lo precedono.
+3. Mantenere `text-left` esplicito e l'allineamento con `items-center`.
 
-## Piano
-
-Eseguire le due migration sul Lovable Cloud, in due step separati (obbligatorio: `ALTER TYPE ADD VALUE` non può girare nella stessa transazione che poi usa quei valori).
-
-### Step 1 — Estendere l'enum `alert_type`
-```sql
-ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'action_put_roll_up_otm';
-ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'distance_put_roll_up';
+Esempio (linee 665-668):
+```tsx
+<div className="grid grid-cols-[...]">
+  <span className="col-span-3 text-left">Sottostante / Strategia</span>
+  <span /> {/* colonna dopo (es. icona link) */}
+  ...
 ```
 
-### Step 2 — Creare `put_roll_flags` con RLS + GRANT
-Stessa struttura del file nel repo (tabella keyed by `strategy_key`, UNIQUE per `portfolio_id+strategy_key`, 4 policy RLS scoped all'`auth.uid()` via `portfolios`, indice su `portfolio_id`), con due correzioni necessarie per Lovable Cloud che mancavano nel file originale di Claude:
-
-- Aggiungo i `GRANT` espliciti (obbligatori: senza, PostgREST risponde "permission denied" anche con RLS attiva):
-  ```sql
-  GRANT SELECT, INSERT, UPDATE, DELETE ON public.put_roll_flags TO authenticated;
-  GRANT ALL ON public.put_roll_flags TO service_role;
-  ```
-  Niente grant ad `anon` (tutte le policy sono scoped a `auth.uid()`).
-- Aggiungo trigger `update_updated_at_column` per mantenere `updated_at` (coerente col resto delle tue tabelle).
-
-## Verifica post-migrazione
-
-1. `SELECT to_regclass('public.put_roll_flags')` → deve ritornare il nome tabella.
-2. `enum_range(NULL::alert_type)` → deve includere i due nuovi valori.
-3. Tagga una PUT come "roll-up" dalla UI e controlla che la riga appaia in `put_roll_flags` e che `check-alerts` emetta i nuovi tipi senza errori enum.
-
-## Cosa NON tocco
-
-Solo database. Nessuna modifica a frontend, edge functions, o codice TS. I file in `supabase/migrations/` resteranno come storico nel repo (non li rimuovo).
+## Verifica
+Controllare visivamente le 7 sezioni (Covered Calls, De-Risking CC, Iron Condor, Double Diagonal, Naked Put, LEAP Call, Long Put) per assicurarsi che il label parta dal bordo sinistro come gli altri header e che le colonne successive (Stato, Target, ecc.) restino correttamente allineate sopra i rispettivi valori.

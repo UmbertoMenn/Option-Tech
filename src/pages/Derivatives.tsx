@@ -663,8 +663,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[980px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span /><span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span /><span />
                     <span className="text-center">Stato</span>
                     <span className="text-right">Target</span>
@@ -723,8 +722,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[980px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span /><span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span /><span />
                     <span className="text-center">Stato</span>
                     <span className="text-right">Target</span>
@@ -775,8 +773,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_4.5rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[880px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-2 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
                     <span className="text-center">Scadenza</span>
@@ -818,8 +815,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[880px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-2 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
                     <span className="text-center">Scadenze</span>
@@ -861,9 +857,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[1000px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span />
-                    <span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
                     <span className="text-center">Roll</span>
@@ -996,8 +990,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[800px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span /><span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
                     <span className="text-right">Contratti</span>
@@ -1038,8 +1031,7 @@ export function Derivatives() {
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
                   <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[800px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    <span /><span />
-                    <span>Sottostante / Strategia</span>
+                    <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span /><span />
                     <span className="text-center">Stato</span>
                     <span className="text-right">Contratti</span>
