@@ -1081,6 +1081,44 @@ export type Database = {
           },
         ]
       }
+      put_roll_targets: {
+        Row: {
+          created_at: string | null
+          id: string
+          portfolio_id: string
+          strategy_key: string
+          target: number
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          portfolio_id: string
+          strategy_key: string
+          target: number
+          updated_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          portfolio_id?: string
+          strategy_key?: string
+          target?: number
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "put_roll_targets_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       strategy_alert_toggles: {
         Row: {
           created_at: string | null

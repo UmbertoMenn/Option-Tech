@@ -65,6 +65,7 @@ import {
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
+import { PutRollTargetInput } from '@/components/derivatives/PutRollTargetInput';
 import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
 import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
 import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
@@ -856,13 +857,14 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
-                  <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[920px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[1000px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                     <span />
                     <span />
                     <span>Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
                     <span className="text-center">Roll</span>
+                    <span className="text-right">Target</span>
                     <span />
                     <span className="text-right">Netto unit.</span>
                     <span className="text-right">Contratti</span>
@@ -2849,7 +2851,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[920px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[1000px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -2887,6 +2889,9 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
               <PutRollUpToggle option={option} hideLabel />
             </div>
+            
+            {/* Col 7: Target da recuperare (roll-up) */}
+            <PutRollTargetInput option={option} />
             
             {/* Col 8: Calculator */}
             <Tooltip>
