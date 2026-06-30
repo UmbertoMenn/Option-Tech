@@ -604,7 +604,7 @@ async function computeSectionsFromCache(
   if (callsToSell.length > 0) {
     callsToSell.sort((a, b) => b.availableShares - a.availableShares);
     sections.push({
-      title: "Call da rivendere",
+      title: "Covered Call / D-R CC da rivendere",
       emoji: "green",
       items: callsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
     });

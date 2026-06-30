@@ -36,6 +36,45 @@ const STRATEGY_OPTIONS = [
   { value: 'other', label: 'Altre Strategie' },
 ];
 
+/**
+ * Verifica le sole incompatibilità LOGICHE tra una categoria e le gambe presenti.
+ * NON blocca strategie incomplete (gambe mancanti sono ammesse).
+ * Ritorna `{ ok: true }` o `{ ok: false, reason }`.
+ */
+function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean; reason?: string } {
+  const options = legs.filter(p => p.asset_type === 'derivative');
+  const hasCall = options.some(o => o.option_type === 'call');
+  const hasPut = options.some(o => o.option_type === 'put');
+  const hasShortCall = options.some(o => o.option_type === 'call' && o.quantity < 0);
+  const hasLongCall = options.some(o => o.option_type === 'call' && o.quantity > 0);
+  const hasShortPut = options.some(o => o.option_type === 'put' && o.quantity < 0);
+  const hasLongPut = options.some(o => o.option_type === 'put' && o.quantity > 0);
+
+  switch (category) {
+    case 'naked_put':
+      if (hasCall) return { ok: false, reason: 'Naked Put non può contenere CALL' };
+      if (hasLongPut && !hasShortPut) return { ok: false, reason: 'Naked Put richiede una PUT venduta' };
+      return { ok: true };
+    case 'leap_call':
+      if (hasPut) return { ok: false, reason: 'LEAP Call non può contenere PUT' };
+      if (hasShortCall && !hasLongCall) return { ok: false, reason: 'LEAP Call richiede una CALL comprata' };
+      return { ok: true };
+    case 'protection':
+      if (hasCall) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
+      if (hasShortPut) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
+      return { ok: true };
+    case 'covered_call':
+    case 'derisking_covered_call':
+    case 'iron_condor':
+    case 'double_diagonal':
+    case 'put_spread':
+    case 'diagonal_put_spread':
+    case 'other':
+    default:
+      return { ok: true };
+  }
+}
+
 interface WizardStrategy {
   id: string;
   positions: Position[];
@@ -1144,25 +1183,38 @@ export function StrategyConfigWizard({
                           const rollUpPut = strategy.strategyType === 'naked_put'
                             ? strategy.positions.find(isSoldPut)
                             : undefined;
+                          const compatByType = STRATEGY_OPTIONS.reduce((acc, opt) => {
+                            acc[opt.value] = isCategoryCompatible(opt.value, strategy.positions);
+                            return acc;
+                          }, {} as Record<string, { ok: boolean; reason?: string }>);
+                          const currentCompat = compatByType[strategy.strategyType] || { ok: true };
                           return (
-                            <div key={strategy.id} className="rounded-md border border-dashed border-border p-2.5 space-y-1.5">
+                            <div key={strategy.id} className={`rounded-md border border-dashed p-2.5 space-y-1.5 ${currentCompat.ok ? 'border-border' : 'border-destructive'}`}>
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <Select
                                     value={strategy.strategyType}
                                     onValueChange={(v) => updateStrategyType(strategy.id, v)}
                                   >
-                                    <SelectTrigger className="w-48 h-7 text-xs">
+                                    <SelectTrigger className={`w-48 h-7 text-xs ${!currentCompat.ok ? 'border-destructive text-destructive' : ''}`}>
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      {STRATEGY_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                          {opt.label}
-                                        </SelectItem>
-                                      ))}
+                                      {STRATEGY_OPTIONS.map(opt => {
+                                        const c = compatByType[opt.value];
+                                        return (
+                                          <SelectItem key={opt.value} value={opt.value} disabled={!c.ok}>
+                                            {opt.label}{!c.ok ? ` — ${c.reason}` : ''}
+                                          </SelectItem>
+                                        );
+                                      })}
                                     </SelectContent>
                                   </Select>
+                                  {!currentCompat.ok && (
+                                    <Badge variant="destructive" className="text-[10px]">
+                                      ⚠ {currentCompat.reason}
+                                    </Badge>
+                                  )}
 
                                   {strategy.suggestedType && strategy.suggestedType !== strategy.strategyType && (
                                     <Badge variant="outline" className="text-[10px] text-muted-foreground">

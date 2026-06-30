@@ -125,6 +125,16 @@ export interface ResolvedConfig {
   status: 'matched' | 'partial' | 'unmatched';
 }
 
+export interface IncompleteStrategyPosition {
+  configId: string;
+  strategyType: string;          // 'iron_condor', 'double_diagonal', 'covered_call', 'derisking_covered_call'
+  underlying: string;
+  isSynthetic: boolean;
+  presentLegs: Position[];
+  missingLegs: string[];         // labels human-readable: 'Short Call', 'Long Put', ...
+  linkedStock: Position | null;
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
@@ -136,6 +146,7 @@ export interface DerivativeCategories {
   otherStrategies: OtherStrategyPosition[];
   groupedOtherStrategies: GroupedOtherStrategy[];
   resolvedConfigs: ResolvedConfig[];
+  incompleteStrategies: IncompleteStrategyPosition[];
 }
 
 /**
@@ -212,6 +223,7 @@ export function categorizeDerivatives(
   const otherStrategies: OtherStrategyPosition[] = [];
   const configOtherGroups: GroupedOtherStrategy[] = []; // Per-config groups for config-only mode
   const resolvedConfigs: ResolvedConfig[] = []; // Track 1:1 config→result mapping
+  const incompleteStrategies: IncompleteStrategyPosition[] = [];
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions (NOT ETFs for matching)
@@ -474,6 +486,19 @@ export function categorizeDerivatives(
               });
             }
           }
+
+          // INCOMPLETE: synthetic CC senza Short Call ma con componente sintetica
+          if (calls.length === 0 && (synCall || synPut)) {
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'covered_call',
+              underlying: config.underlying,
+              isSynthetic: true,
+              presentLegs: matchedVirtual,
+              missingLegs: ['Short Call'],
+              linkedStock: linkedStock || null,
+            });
+          }
         } else {
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
@@ -520,14 +545,39 @@ export function categorizeDerivatives(
             });
           } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
             // Synthetic DR-CC without protection put (e.g., +CALL ITM / -CALL):
-            // keep classified as DR-CC sintetica with protectionPut undefined.
+            // keep classified as DR-CC sintetica con protectionPut undefined,
+            // ma segna come incompleta (manca Long Put).
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: undefined,
               isSynthetic: true, syntheticPut, syntheticCall,
             });
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'derisking_covered_call',
+              underlying: config.underlying,
+              isSynthetic: true,
+              presentLegs: matchedVirtual,
+              missingLegs: ['Long Put'],
+              linkedStock: linkedStock || null,
+            });
           } else {
             coveredCalls.push(cc);
           }
+        }
+
+        // INCOMPLETE: DR-CC sintetica senza Short Call ma con componente sintetica
+        if (calls.length === 0 && config.is_synthetic && (syntheticCall || syntheticPut)) {
+          const missing: string[] = ['Short Call'];
+          if (boughtPuts.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'derisking_covered_call',
+            underlying: config.underlying,
+            isSynthetic: true,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
         }
         break;
       }
@@ -563,6 +613,21 @@ export function categorizeDerivatives(
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
           });
+        } else if (matchedVirtual.length > 0) {
+          const missing: string[] = [];
+          if (sc.length === 0) missing.push('Short Call');
+          if (bc.length === 0) missing.push('Long Call');
+          if (sp.length === 0) missing.push('Short Put');
+          if (bp.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'iron_condor',
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
         }
         break;
       }
@@ -580,6 +645,21 @@ export function categorizeDerivatives(
             contracts: Math.abs(sc[0].quantity),
             totalPremium: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.market_value || 0), 0),
             totalProfitLoss: [sc[0], bc[0], sp[0], bp[0]].reduce((s, l) => s + (l.profit_loss || 0), 0),
+          });
+        } else if (matchedVirtual.length > 0) {
+          const missing: string[] = [];
+          if (sc.length === 0) missing.push('Short Call');
+          if (bc.length === 0) missing.push('Long Call');
+          if (sp.length === 0) missing.push('Short Put');
+          if (bp.length === 0) missing.push('Long Put');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'double_diagonal',
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
           });
         }
         break;
@@ -638,7 +718,7 @@ export function categorizeDerivatives(
   // Use per-config groups to preserve separate strategies for the same underlying.
   if (options?.configOnly) {
     console.log(`[ConfigOnly] resolvedConfigs: ${resolvedConfigs.length}, coveredCalls: ${coveredCalls.length}, deRisking: ${deRiskingCoveredCalls.length}, IC: ${ironCondors.length}, DD: ${doubleDiagonals.length}, NP: ${nakedPuts.length}, LC: ${leapCalls.length}, other: ${configOtherGroups.length}`);
-    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs };
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs, incompleteStrategies };
   }
 
   // ============ STRICT CONFIG GUARD ============
@@ -981,7 +1061,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies, resolvedConfigs };
+  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies, resolvedConfigs, incompleteStrategies };
 }
 
 /**
