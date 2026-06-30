@@ -156,7 +156,8 @@ export function DerivativesSummaryCard({
                      monitoring.nakedPutsITM.length > 0 ||
                      monitoring.leapCallsInGain.length > 0 ||
                      monitoring.availableCallsToSell.length > 0 ||
-                     monitoring.otherStrategiesOOROOB.length > 0;
+                     monitoring.otherStrategiesOOROOB.length > 0 ||
+                     monitoring.incompleteMultiLegStrategies.length > 0;
   
   if (!hasContent) {
     return (
