@@ -1257,7 +1257,182 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                   </div>
                 </div>
               </div>
-              
+
+              {/* Bulk price alerts creation */}
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <h4 className="font-medium flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  Crea avvisi massivi
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  Genera automaticamente più avvisi distanziati di una percentuale dal prezzo di partenza.
+                </p>
+
+                <div className="grid gap-3">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Ticker (es. AAPL)"
+                      value={bulkTicker}
+                      onChange={e => {
+                        setBulkTicker(e.target.value.toUpperCase());
+                        setBulkTickerValidation(null);
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleValidateBulkTicker}
+                      disabled={bulkValidatingTicker || !bulkTicker.trim()}
+                    >
+                      {bulkValidatingTicker ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : bulkTickerValidation?.valid ? (
+                        <Check className="w-4 h-4 text-green-500" />
+                      ) : (
+                        'Verifica'
+                      )}
+                    </Button>
+                  </div>
+
+                  {bulkTickerValidation?.valid && bulkTickerValidation.price && (
+                    <p className="text-sm text-muted-foreground">
+                      Prezzo attuale: <span className="font-mono font-medium">${bulkTickerValidation.price.toFixed(2)}</span>
+                      {bulkTickerValidation.currency && bulkTickerValidation.currency !== 'USD' && ` (${bulkTickerValidation.currency})`}
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label>Prezzo di partenza</Label>
+                    <RadioGroup
+                      value={bulkBaseMode}
+                      onValueChange={(v) => setBulkBaseMode(v as 'current' | 'manual')}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="current" id="bulk-current" />
+                        <Label htmlFor="bulk-current" className="cursor-pointer">Prezzo attuale</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="manual" id="bulk-manual" />
+                        <Label htmlFor="bulk-manual" className="cursor-pointer">Prezzo manuale</Label>
+                      </div>
+                    </RadioGroup>
+                    {bulkBaseMode === 'manual' && (
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        placeholder="Prezzo base"
+                        value={bulkManualPrice}
+                        onChange={e => setBulkManualPrice(e.target.value)}
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Step %</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        max="50"
+                        value={bulkStepPct}
+                        onChange={e => setBulkStepPct(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Numero avvisi: {bulkCount}</Label>
+                      <Slider
+                        min={1}
+                        max={20}
+                        step={1}
+                        value={[bulkCount]}
+                        onValueChange={(v) => setBulkCount(v[0])}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Direzione</Label>
+                    <RadioGroup
+                      value={bulkDirection}
+                      onValueChange={(v) => setBulkDirection(v as 'above' | 'below' | 'both')}
+                      className="flex gap-4 flex-wrap"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="above" id="bulk-above" />
+                        <Label htmlFor="bulk-above" className="flex items-center gap-1 cursor-pointer">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          Solo sopra
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="below" id="bulk-below" />
+                        <Label htmlFor="bulk-below" className="flex items-center gap-1 cursor-pointer">
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          Solo sotto
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="both" id="bulk-both" />
+                        <Label htmlFor="bulk-both" className="cursor-pointer">Entrambe</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="bulk-delete-after-trigger"
+                      checked={bulkDeleteAfterTrigger}
+                      onChange={(e) => setBulkDeleteAfterTrigger(e.target.checked)}
+                      className="h-4 w-4 rounded border border-primary"
+                    />
+                    <Label htmlFor="bulk-delete-after-trigger" className="text-sm cursor-pointer">
+                      Elimina regola dopo trigger
+                    </Label>
+                  </div>
+
+                  {bulkPreview.length > 0 && (
+                    <div className="space-y-2 p-3 rounded-md bg-background/50 border">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Anteprima ({bulkPreview.length} avvisi):
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                        {bulkPreview.map((p, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="outline"
+                            className={`font-mono text-xs ${p.direction === 'above' ? 'border-green-500/40 text-green-600 dark:text-green-400' : 'border-red-500/40 text-red-600 dark:text-red-400'}`}
+                          >
+                            {p.direction === 'above' ? '▲' : '▼'} {p.pct > 0 ? '+' : ''}{p.pct.toFixed(1)}% · ${p.price.toFixed(2)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={handleCreateBulkPriceAlerts}
+                    disabled={
+                      batchCreatePriceAlertsMutation.isPending ||
+                      !bulkTicker.trim() ||
+                      bulkBasePrice <= 0 ||
+                      bulkPreview.length === 0
+                    }
+                    className="w-full"
+                  >
+                    {batchCreatePriceAlertsMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                    ) : (
+                      <Plus className="w-4 h-4 mr-1" />
+                    )}
+                    Crea {bulkPreview.length || ''} avvisi
+                  </Button>
+                </div>
+              </div>
+
               {/* Existing price alerts */}
               <div className="space-y-3">
                 <h4 className="font-medium text-sm">Avvisi configurati</h4>
