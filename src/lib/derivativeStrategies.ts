@@ -650,7 +650,7 @@ export function categorizeDerivatives(
   // Use per-config groups to preserve separate strategies for the same underlying.
   if (options?.configOnly) {
     console.log(`[ConfigOnly] resolvedConfigs: ${resolvedConfigs.length}, coveredCalls: ${coveredCalls.length}, deRisking: ${deRiskingCoveredCalls.length}, IC: ${ironCondors.length}, DD: ${doubleDiagonals.length}, NP: ${nakedPuts.length}, LC: ${leapCalls.length}, other: ${configOtherGroups.length}`);
-    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs };
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs, incompleteStrategies };
   }
 
   // ============ STRICT CONFIG GUARD ============
