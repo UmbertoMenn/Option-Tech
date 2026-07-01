@@ -107,16 +107,24 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
     );
   }
 
+  // Clean up "Principale" suffix for display
+  const cleanName = (name: string) => {
+    return name
+      .replace(/portafoglio principale/gi, 'Portafoglio')
+      .replace(/portfolio principale/gi, 'Portafoglio')
+      .trim();
+  };
+
   // Get display name for selector
   const getDisplayName = () => {
     if (isAggregatedView) {
       // Check if it's a per-user aggregate (own or client)
       const selectedId = selectedPortfolio?.id || '';
       if (selectedId === AGGREGATED_PORTFOLIO_ID) return 'Aggregato - Tutti';
-      return selectedPortfolio?.name || 'Il Mio Aggregato';
+      return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Il Mio Aggregato';
     }
-    if (isAdminMode && selectedPortfolio) return `👤 ${selectedPortfolio.name}`;
-    return selectedPortfolio?.name || 'Seleziona Portfolio';
+    if (isAdminMode && selectedPortfolio) return `👤 ${cleanName(selectedPortfolio.name)}`;
+    return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Seleziona Portfolio';
   };
 
   return (
@@ -211,7 +219,7 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
                   {(portfolio.id !== selectedPortfolio?.id || isAggregatedView || isAdminMode) && (
                     <div className="w-4 h-4 shrink-0" />
                   )}
-                  <span className="truncate">{portfolio.name}</span>
+                  <span className="truncate">{cleanName(portfolio.name)}</span>
                   {portfolio.total_value && portfolio.total_value > 0 && (
                     <span className="text-xs text-muted-foreground ml-auto">
                       {formatCurrency(portfolio.total_value)}
@@ -307,7 +315,7 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
                             ) : (
                               <User className="w-3 h-3 text-muted-foreground shrink-0" />
                             )}
-                            <span className="truncate">{p.name}</span>
+                            <span className="truncate">{cleanName(p.name)}</span>
                           </div>
                           {p.total_value && p.total_value > 0 && (
                             <span className="text-xs text-muted-foreground ml-2">
