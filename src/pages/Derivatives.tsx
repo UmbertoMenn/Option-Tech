@@ -189,13 +189,43 @@ function LegsDetailList({ legs, underlyingPrices, stock, labels }: {
   );
 }
 
+/** Risolve ticker+prezzo del sottostante per una riga incompleta, con più fallback:
+ *  1) underlyingPrices per nome/chiave diretta, 2) match normalizzato per nome o ticker,
+ *  3) il titolo collegato realmente detenuto (linkedStock). */
+function resolveIncompleteHeader(
+  inc: IncompleteStrategyPosition,
+  underlyingPrices: Record<string, UnderlyingPrice>,
+): { ticker: string; price: number; cur: string } | null {
+  const first = inc.presentLegs[0];
+  const cur = first ? getOptionCurrency(first) : (inc.linkedStock?.currency || 'USD');
+  const cands = [inc.underlying, first?.underlying, first?.description, inc.linkedStock?.ticker, inc.linkedStock?.description]
+    .filter((x): x is string => !!x);
+  // 1) chiave diretta
+  for (const c of cands) {
+    const v = underlyingPrices[c];
+    if (v && v.price > 0) return { ticker: v.ticker || c, price: v.price, cur };
+  }
+  // 2) match normalizzato per nome o ticker
+  const norm = (x: string) => (x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const wanted = new Set(cands.map(norm));
+  for (const [k, v] of Object.entries(underlyingPrices)) {
+    if (v && v.price > 0 && (wanted.has(norm(k)) || (v.ticker && wanted.has(norm(v.ticker))))) {
+      return { ticker: v.ticker || k, price: v.price, cur };
+    }
+  }
+  // 3) fallback sul titolo collegato realmente detenuto
+  const ls = inc.linkedStock;
+  if (ls) {
+    const price = (ls as { snapshot_price?: number | null }).snapshot_price ?? ls.current_price ?? 0;
+    if (price > 0) return { ticker: ls.ticker || inc.underlying, price, cur: ls.currency || cur };
+  }
+  return null;
+}
+
 /** Riga di una strategia incompleta (gamba mancante), COLLASSABILE come le righe complete. */
 function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrategyPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   const [isOpen, setIsOpen] = useState(false);
-  const first = inc.presentLegs[0];
-  const uTicker = first?.underlying ? underlyingPrices[first.underlying]?.ticker : undefined;
-  const uPrice = (first?.underlying ? underlyingPrices[first.underlying]?.price : 0) || 0;
-  const cur = first ? getOptionCurrency(first) : 'USD';
+  const header = resolveIncompleteHeader(inc, underlyingPrices);
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <div
@@ -207,8 +237,8 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
       >
         {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
         <span className="font-semibold text-sm shrink-0">{inc.underlying}</span>
-        {uPrice > 0 && (
-          <span className="text-xs font-mono font-semibold text-cyan-300 shrink-0">{(uTicker || first?.underlying)}: {formatCurrency(uPrice, cur)}</span>
+        {header && (
+          <span className="text-xs font-mono font-semibold text-cyan-300 shrink-0">{header.ticker}: {formatCurrency(header.price, header.cur)}</span>
         )}
         {inc.isSynthetic && (
           <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500 shrink-0">Sintetica</Badge>
