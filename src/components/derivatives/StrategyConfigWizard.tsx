@@ -898,6 +898,17 @@ export function StrategyConfigWizard({
   };
 
   const handleSave = async () => {
+    // Guard: le strategie devono contenere almeno una gamba derivata,
+    // altrimenti non sono rappresentabili nel motore di monitoraggio e
+    // apparirebbero come "non salvate" alla riapertura del wizard.
+    const invalid = strategies.filter(s => !s.positions.some(p => p.asset_type === 'derivative'));
+    if (invalid.length > 0) {
+      toast.error(
+        `${invalid.length} strateg${invalid.length === 1 ? 'ia' : 'ie'} senza gambe derivate: aggiungi almeno un contratto opzione o rimuovila.`
+      );
+      return;
+    }
+
     const rawConfigs: UpsertConfigParams[] = [];
 
     for (let i = 0; i < strategies.length; i++) {
@@ -936,10 +947,19 @@ export function StrategyConfigWizard({
       }
     }
 
-    // NO deduplication — each strategy is saved as a separate row
-    await onSave(rawConfigs);
-    sessionStorage.removeItem(draftStorageKey);
-    onOpenChange(false);
+    try {
+      console.log('[StrategyConfigWizard] Saving strategies', {
+        count: rawConfigs.length,
+        payload: rawConfigs,
+      });
+      await onSave(rawConfigs);
+      sessionStorage.removeItem(draftStorageKey);
+      onOpenChange(false);
+    } catch (e) {
+      console.error('[StrategyConfigWizard] Save failed', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Salvataggio fallito: ${msg}`);
+    }
   };
 
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
