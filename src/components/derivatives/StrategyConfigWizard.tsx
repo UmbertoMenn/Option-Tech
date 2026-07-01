@@ -820,6 +820,7 @@ export function StrategyConfigWizard({
       isSynthetic: false,
       suggestedType: suggested,
     }]);
+    markGroupTouched(groupKey);
     // Clear selection for this group
     setSelectedIdsByGroup(prev => {
       const next = new Map(prev);
