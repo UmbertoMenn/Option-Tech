@@ -108,9 +108,9 @@ function getOptionCurrency(option: Position): string {
 }
 
 /** Riga compatta per una strategia incompleta (gamba mancante), mostrata DENTRO la sua categoria. */
-function IncompleteStrategyRow({ inc }: { inc: IncompleteStrategyPosition }) {
+function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrategyPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   return (
-    <div className="p-2.5 rounded-lg bg-orange-500/5 border border-orange-500/30 space-y-1.5">
+    <div className="p-3 rounded-lg bg-orange-500/5 border border-orange-500/30 space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-sm">{inc.underlying}</span>
@@ -130,15 +130,63 @@ function IncompleteStrategyRow({ inc }: { inc: IncompleteStrategyPosition }) {
           ))}
         </div>
       </div>
+
       {inc.presentLegs.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="space-y-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Gambe presenti</span>
           {inc.presentLegs.map((leg, i) => {
             const q = leg.quantity || 0;
+            const isSold = q < 0;
+            const cur = getOptionCurrency(leg);
+            const pmc = leg.avg_cost || 0;
+            const px = leg.current_price || 0;
+            const pricePct = pmc > 0 ? ((px - pmc) / pmc) * 100 : null;
+            const profit = isSold ? (pmc - px) : (px - pmc); // >0 = in guadagno
+            const uTicker = leg.underlying ? underlyingPrices[leg.underlying]?.ticker : undefined;
+            const uPrice = (leg.underlying ? underlyingPrices[leg.underlying]?.price : 0) || 0;
             return (
-              <Badge key={i} variant="secondary" className="text-[10px] font-normal">
-                {q >= 0 ? '+' : '−'}{Math.abs(q)} {(leg.option_type || '').toUpperCase()} {formatNumber(leg.strike_price || 0, 0)}
-                {leg.expiry_date ? ` · ${leg.expiry_date}` : ''}
-              </Badge>
+              <div key={i} className="rounded-md bg-background/50 border border-border/50 p-2">
+                <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                  <Badge variant="outline" className={`text-[10px] ${isSold ? 'text-green-500 border-green-500' : 'text-blue-500 border-blue-500'}`}>
+                    {isSold ? 'V' : 'A'}
+                  </Badge>
+                  <span className="text-sm font-medium">{formatOptionDescription(leg)}</span>
+                  {uPrice > 0 && (
+                    <span className="text-xs font-mono font-semibold text-cyan-300">
+                      {(uTicker || leg.underlying)}: {formatCurrency(uPrice, cur)}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-xs">
+                  <div>
+                    <p className="text-muted-foreground">Strike</p>
+                    <p className="font-medium">{formatNumber(leg.strike_price || 0, 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Scadenza</p>
+                    <p className="font-medium">{formatExpiryMMY(leg.expiry_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Contratti</p>
+                    <p className="font-medium">{Math.abs(q)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">PMC</p>
+                    <p className="font-medium">{formatCurrency(pmc, cur)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Prezzo</p>
+                    <p className="font-medium flex items-center gap-1">
+                      {formatCurrency(px, cur)}
+                      {pricePct !== null && (
+                        <span className={`text-[10px] ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {pricePct >= 0 ? '+' : ''}{pricePct.toFixed(1)}%
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -748,7 +796,7 @@ export function Derivatives() {
                     />
                   ))}
                   {incCovered.map((inc, i) => (
-                    <IncompleteStrategyRow key={`inc-cc-${i}`} inc={inc} />
+                    <IncompleteStrategyRow key={`inc-cc-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
               </CardContent>
@@ -805,7 +853,7 @@ export function Derivatives() {
                     />
                   ))}
                   {incDrccMissingCall.map((inc, i) => (
-                    <IncompleteStrategyRow key={`inc-drcc-${i}`} inc={inc} />
+                    <IncompleteStrategyRow key={`inc-drcc-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
               </CardContent>
@@ -850,7 +898,7 @@ export function Derivatives() {
                     <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                   {incIronCondor.map((inc, i) => (
-                    <IncompleteStrategyRow key={`inc-ic-${i}`} inc={inc} />
+                    <IncompleteStrategyRow key={`inc-ic-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
               </CardContent>
@@ -895,7 +943,7 @@ export function Derivatives() {
                     <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                   {incDoubleDiagonal.map((inc, i) => (
-                    <IncompleteStrategyRow key={`inc-dd-${i}`} inc={inc} />
+                    <IncompleteStrategyRow key={`inc-dd-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
               </CardContent>
