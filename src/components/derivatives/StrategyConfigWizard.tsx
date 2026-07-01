@@ -866,6 +866,7 @@ export function StrategyConfigWizard({
       const newPositions = [...st.positions, ...toAdd];
       return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
     }));
+    markGroupTouched(groupKey);
     setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(groupKey); return next; });
   };
 
