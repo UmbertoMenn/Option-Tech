@@ -898,7 +898,16 @@ export function StrategyConfigWizard({
   };
 
   const handleSave = async () => {
-
+    // Guard: le strategie devono contenere almeno una gamba derivata,
+    // altrimenti non sono rappresentabili nel motore di monitoraggio e
+    // apparirebbero come "non salvate" alla riapertura del wizard.
+    const invalid = strategies.filter(s => !s.positions.some(p => p.asset_type === 'derivative'));
+    if (invalid.length > 0) {
+      toast.error(
+        `${invalid.length} strateg${invalid.length === 1 ? 'ia' : 'ie'} senza gambe derivate: aggiungi almeno un contratto opzione o rimuovila.`
+      );
+      return;
+    }
 
     const rawConfigs: UpsertConfigParams[] = [];
 
