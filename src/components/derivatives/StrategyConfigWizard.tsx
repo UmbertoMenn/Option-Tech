@@ -547,6 +547,27 @@ export function StrategyConfigWizard({
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
+  const [touchedGroupKeys, setTouchedGroupKeys] = useState<Set<string>>(new Set());
+
+  const markGroupTouched = useCallback((groupKey: string) => {
+    setTouchedGroupKeys(prev => {
+      if (prev.has(groupKey)) return prev;
+      const next = new Set(prev);
+      next.add(groupKey);
+      return next;
+    });
+  }, []);
+
+  const findGroupKeyForStrategy = useCallback((strategyId: string): string | null => {
+    const strat = strategies.find(s => s.id === strategyId);
+    if (!strat) return null;
+    const posId = strat.positions[0]?.id;
+    if (!posId) return null;
+    for (const [key, ids] of selectedIdsByGroup) { void key; void ids; }
+    // Cerca il gruppo che contiene una qualsiasi delle posizioni della strategia
+    return null; // placeholder: touch è già gestito dagli handler contestuali
+  }, [strategies, selectedIdsByGroup]);
+  void findGroupKeyForStrategy;
 
   // Assigned position ids across all strategies
   const assignedIds = useMemo(() => {
