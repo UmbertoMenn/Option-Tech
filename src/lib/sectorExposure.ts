@@ -905,6 +905,8 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     currency: string;
     value: number;
     valueWithProtection: number;
+    marketValueEUR?: number;              // valore di mercato grezzo (qty × prezzo)
+    capReductionEUR?: number;             // riduzione da cap CC/DR-CC ITM (strutturale)
     // Protection info
     protectionContracts: number;          // Long PUT pure (Protezione pura)
     protectionStrike: number | null;      // Strike Long PUT pure
@@ -1022,28 +1024,31 @@ export function calculateConsolidatedTopHoldings(
 
     const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
 
-    const stockValueEUR = stock.stockValue / stock.exchangeRate;
+    const marketValueEUR = stock.stockValue / stock.exchangeRate;        // valore di mercato grezzo
+    const grossNoPutEUR = stock.riskEURWithoutProtection ?? stock.riskEUR; // capped CC/DR-CC, senza PUT
+    const netEUR = stock.riskEUR;                                         // capped + protezioni PUT
+    const capReductionEUR = Math.max(0, marketValueEUR - grossNoPutEUR);  // riduzione da cap CC/DR-CC ITM
 
-    // SINGLE SOURCE OF TRUTH: leggiamo il saving direttamente dal riskCalculator.
-    // Il calcolo include sia le Long PUT pure sia la PUT di protezione di una DR-CC.
-    // Le PUT comprate dentro spread/condor/diagonali NON sono qui (escluse a monte).
-    const putSavingsEUR = Math.max(0, stock.protectionSavingsEUR ?? 0);
-    const stockValueWithPutProtectionEUR = stockValueEUR - putSavingsEUR;
+    // SINGLE SOURCE OF TRUTH: leggiamo dal riskCalculator. Il "lordo" mantiene il cap CC/DR-CC
+    // ITM (strutturale, non una protezione) e toglie solo le PUT; il "netto" toglie anche le PUT.
+    const putSavingsEUR = Math.max(0, grossNoPutEUR - netEUR);
 
-    holding.stockRisk += stockValueEUR;
-    holding.stockRiskWithProtection += stockValueWithPutProtectionEUR;
+    holding.stockRisk += grossNoPutEUR;
+    holding.stockRiskWithProtection += netEUR;
 
     holding.sources.push({
       type: 'stock',
       name: 'Diretto',
-      exposure: options.includeProtections ? stockValueWithPutProtectionEUR : stockValueEUR,
+      exposure: options.includeProtections ? netEUR : grossNoPutEUR,
     });
     holding.stockDetails.push({
       quantity: stock.stockQuantity,
       price: stock.stockPrice,
       currency: stock.currency,
-      value: stockValueEUR,
-      valueWithProtection: stockValueWithPutProtectionEUR,
+      value: grossNoPutEUR,
+      valueWithProtection: netEUR,
+      marketValueEUR,
+      capReductionEUR,
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
       drccProtectionContracts: stock.drccProtectionContracts || 0,

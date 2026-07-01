@@ -111,7 +111,15 @@ export function HoldingBreakdownDialog({
                         {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
                         <CalcInfo>
                           {(() => {
-                            const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
+                            const mv = stock.marketValueEUR ?? stock.value;
+                            const cap = stock.capReductionEUR ?? 0;
+                            const lines: string[] = [
+                              `Stock ${stock.currency} ${formatNumber(stock.quantity)} × ${formatNumber(stock.price, 2)} → valore di mercato ${formatEUR(mv)}`,
+                            ];
+                            if (cap > 0.5) {
+                              lines.push(`− Cap CC/DR-CC ITM (azioni vincolate allo strike): −${formatEUR(cap)}`);
+                              lines.push(`= Lordo senza PUT: ${formatEUR(stock.value)}`);
+                            }
                             if (includeProtections && stock.hasProtection && (stock.protectionSavingsEUR ?? 0) > 0) {
                               const parts: string[] = [];
                               if (stock.protectionContracts > 0 && stock.protectionStrike != null) {
@@ -120,9 +128,11 @@ export function HoldingBreakdownDialog({
                               if ((stock.drccProtectionContracts ?? 0) > 0 && stock.drccProtectionStrike != null) {
                                 parts.push(`− DR-CC PUT: ${stock.drccProtectionContracts} × strike ${formatNumber(stock.drccProtectionStrike, 0)} × 100`);
                               }
-                              return `Stock (lordo):\n${gross}\nProtezioni:\n${parts.join('\n')}\nRisparmio totale: −${formatEUR(stock.protectionSavingsEUR ?? 0)}\n= ${formatEUR(stock.valueWithProtection)}`;
+                              lines.push(`Protezioni PUT:\n${parts.join('\n')}`);
+                              lines.push(`Risparmio protezioni: −${formatEUR(stock.protectionSavingsEUR ?? 0)}`);
+                              lines.push(`= Netto: ${formatEUR(stock.valueWithProtection)}`);
                             }
-                            return `Stock:\n${gross}`;
+                            return lines.join('\n');
                           })()}
                         </CalcInfo>
                       </div>

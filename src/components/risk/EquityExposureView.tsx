@@ -202,6 +202,54 @@ function buildSynthTooltip(s: {
 }
 
 
+function buildPureStockTooltip(s: {
+  underlying: string;
+  currency: string;
+  exchangeRate: number;
+  stockQuantity: number;
+  stockPrice: number;
+  stockValue: number;
+  riskOriginal: number;
+  riskEUR: number;
+  riskOriginalWithoutProtection?: number;
+  hasProtection: boolean;
+  protectionContracts: number;
+  protectionStrike: number | null;
+  ccCappedShares?: number;
+  ccCapStrike?: number | null;
+  drccCappedShares?: number;
+  drccCapPerShare?: number | null;
+}): string {
+  const cur = s.currency;
+  const fx = s.exchangeRate;
+  const grossNoPut = s.riskOriginalWithoutProtection ?? s.riskOriginal;
+  const capReduction = s.stockValue - grossNoPut;           // riduzione da cap CC/DR-CC ITM
+  const putReduction = grossNoPut - s.riskOriginal;         // riduzione da protezioni PUT
+  const lines: string[] = [
+    `Azione ${s.underlying}`,
+    '='.repeat(36),
+    `${formatNumber(s.stockQuantity)} az. × ${cur} ${formatNumber(s.stockPrice, 2)} = ${cur} ${formatNumber(s.stockValue, 0)}   (valore di mercato)`,
+  ];
+  if (Math.abs(capReduction) > 0.5) {
+    const capBits: string[] = [];
+    if (s.ccCappedShares) capBits.push(`CC: ${formatNumber(s.ccCappedShares)} az. vincolate a strike ${formatNumber(s.ccCapStrike || 0, 2)}`);
+    if (s.drccCappedShares) capBits.push(`DR-CC: ${formatNumber(s.drccCappedShares)} az. a ${formatNumber(s.drccCapPerShare || 0, 2)}/az.`);
+    lines.push(`− Cap CC/DR-CC ITM = −${cur} ${formatNumber(capReduction, 0)}`);
+    if (capBits.length) lines.push(`    (${capBits.join(' • ')})`);
+    lines.push(`= Esposizione lorda (senza PUT): ${cur} ${formatNumber(grossNoPut, 0)}`);
+  }
+  if (s.hasProtection && putReduction > 0.5) {
+    lines.push(`− Protezione PUT${s.protectionStrike != null ? ` (${s.protectionContracts} ctr @ ${formatNumber(s.protectionStrike, 0)})` : ''} = −${cur} ${formatNumber(putReduction, 0)}`);
+  }
+  lines.push(
+    `= Rischio netto: ${cur} ${formatNumber(s.riskOriginal, 0)}`,
+    `FX: 1 ${cur} = 1/${fx.toFixed(4)} EUR`,
+    `Rischio EUR = ${cur} ${formatNumber(s.riskOriginal, 0)} / ${fx.toFixed(4)} = ${formatEUR(s.riskEUR)}`,
+  );
+  return lines.join('\n');
+}
+
+
 export function EquityExposureView({ 
   analysis, 
   portfolioTotalValue,
@@ -260,18 +308,20 @@ export function EquityExposureView({
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
     const pureStocks = stockDetails.filter(s => !s.isETF);
-    
-    // Gross = stock value without considering protections
-    const gross = pureStocks.reduce((sum, s) => 
-      sum + (s.stockValue / s.exchangeRate), 0
+
+    // LORDO = rischio SENZA le protezioni PUT ma CON il cap strutturale CC/DR-CC ITM
+    // (una covered call ITM vincola le azioni allo strike: NON è una protezione PUT, quindi
+    // il cap resta anche con "Protezioni" OFF). Coerente con le sintetiche (riskEURWithoutProtection).
+    const gross = pureStocks.reduce((sum, s) =>
+      sum + (s.riskEURWithoutProtection ?? s.riskEUR), 0
     );
-    
-    // Net = current risk (already net of protections)
+
+    // Netto = rischio corrente (già al netto del cap E delle protezioni PUT)
     const net = pureStocks.reduce((sum, s) => sum + s.riskEUR, 0);
-    
+
     return {
       grossPureStockRisk: gross,
-      protectionSavings: gross - net
+      protectionSavings: gross - net // SOLO risparmio da protezioni PUT (non dal cap CC/DR-CC)
     };
   }, [stockDetails]);
 
@@ -894,10 +944,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                             <CalcInfo>
 {stock.isSynthetic
   ? `Posizione sintetica ${stock.syntheticType?.startsWith('drcc') ? 'DR-CC' : 'CC'} su ${stock.underlying}\n${stock.composition ?? ''}\nRischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`
-  : `Azione ${stock.underlying}
-Valore lordo: ${stock.currency} ${formatNumber(stock.stockQuantity)} × ${formatNumber(stock.stockPrice, 2)} = ${stock.currency} ${formatNumber(stock.stockValue, 0)}
-${stock.hasProtection && stock.protectionStrike != null ? `Protezione: − ${stock.protectionContracts} × ${formatNumber(stock.protectionStrike, 0)} × 100\n` : ''}FX: 1 ${stock.currency} = 1/${stock.exchangeRate.toFixed(4)} EUR
-Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`}
+  : buildPureStockTooltip(stock)}
                             </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
