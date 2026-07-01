@@ -324,7 +324,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     [resolveUnderlying, gpDynamicAliases, bookTickerByName],
   );
 
-  /* ---------- 3. Tickers che ci servono: derivati + equity ---------- */
+  /* ---------- 3. Tickers che ci servono: derivati + equity (+ GP se il toggle è ON) ---------- */
 
   const allTickers = useMemo(() => {
     const set = new Set<string>();
@@ -336,8 +336,21 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       const t = normTick(s.ticker);
       if (t && VALID_TICKER_RE.test(t)) set.add(t);
     });
+    // Azioni della Gestione Patrimoniale: senza questo, il loro ticker canonico
+    // (risolto via resolveGpTicker) non entrava MAI nel set interrogato su
+    // ticker_fundamentals né in quello del fetch on-demand, quindi il beta
+    // restava sempre il fallback DEFAULT_BETA_UNKNOWN (1.00), anche per titoli
+    // con beta reale disponibile o recuperabile.
+    if (inputs.gpEquity) {
+      (gpHoldings || [])
+        .filter((h) => h.asset_type === 'stock')
+        .forEach((h) => {
+          const t = resolveGpTicker(h);
+          if (t && VALID_TICKER_RE.test(t)) set.add(t);
+        });
+    }
     return [...set].sort();
-  }, [derivatives, stocks, etfs, commodities, getOptionUnderlyingKey]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, getOptionUnderlyingKey, resolveGpTicker]);
 
   /* ---------- 4. Spot prices via useUnderlyingPrices ---------- */
 
