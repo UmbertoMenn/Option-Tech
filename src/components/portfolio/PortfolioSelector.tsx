@@ -123,8 +123,30 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
       if (selectedId === AGGREGATED_PORTFOLIO_ID) return 'Aggregato - Tutti';
       return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Il Mio Aggregato';
     }
-    if (isAdminMode && selectedPortfolio) return `👤 ${cleanName(selectedPortfolio.name)}`;
-    return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Seleziona Portfolio';
+
+    // Admin mode: show client username (+ portfolio name if client has multiple)
+    if (isAdminMode && selectedPortfolio) {
+      const client = otherUsers.find(c =>
+        c.portfolios.some(p => p.id === selectedPortfolio.id)
+      );
+      if (client) {
+        const userName = client.name || client.username || 'Utente';
+        if (client.portfolios.length === 1) {
+          return `👤 ${userName}`;
+        }
+        return `👤 ${userName} - ${cleanName(selectedPortfolio.name)}`;
+      }
+      return `👤 ${cleanName(selectedPortfolio.name)}`;
+    }
+
+    // Normal mode: show own username (+ portfolio name if multiple portfolios)
+    const userName = user?.email?.replace('@internal.local', '') || 'Utente';
+    if (portfolios.length === 1) {
+      return userName;
+    }
+    return selectedPortfolio?.name
+      ? `${userName} - ${cleanName(selectedPortfolio.name)}`
+      : userName;
   };
 
   return (
