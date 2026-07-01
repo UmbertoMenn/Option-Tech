@@ -116,7 +116,7 @@ export async function parsePortfolioExcel(file: File, options?: { excludedCashAc
  * Extract the snapshot date from the first rows of the Excel file
  * Priority: Cell C4 first, then scan first 10 rows for date patterns
  */
-function extractSnapshotDate(rows: any[][]): string | null {
+export function extractSnapshotDate(rows: any[][]): string | null {
   // PRIORITY: Check cell C4 specifically (row index 3, column index 2)
   if (rows.length > 3 && rows[3] && rows[3][2] !== undefined && rows[3][2] !== null) {
     const cellC4 = rows[3][2];
@@ -191,7 +191,7 @@ function extractSnapshotDate(rows: any[][]): string | null {
   return null;
 }
 
-function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
+export function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
   cashAccounts: { accountId: string; value: number }[];
