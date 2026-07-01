@@ -549,24 +549,41 @@ export function categorizeDerivatives(
             });
           } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
             // Synthetic DR-CC without protection put (e.g., +CALL ITM / -CALL):
-            // resta DR-CC sintetica (protectionPut undefined) ma marcata incompleta.
-            // Renderizzata dalla riga DR-CC col badge → NON aggiungere a incompleteStrategies
-            // (eviterebbe doppia visualizzazione).
+            // resta DR-CC sintetica (protectionPut undefined) per il RISCHIO, ma per il DISPLAY
+            // va tra le incomplete (riga unificata). Filtrata dalla riga DR-CC normale a valle.
             deRiskingCoveredCalls.push({
               coveredCall: { ...cc, incomplete: true, missingLegs: ['Long Put'] },
               protectionPut: undefined,
               isSynthetic: true, syntheticPut, syntheticCall,
               incomplete: true, missingLegs: ['Long Put'],
             });
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'derisking_covered_call',
+              underlying: config.underlying,
+              isSynthetic: true,
+              presentLegs: [call, syntheticCall, syntheticPut].filter((x): x is Position => !!x),
+              missingLegs: ['Long Put'],
+              linkedStock: linkedStock || null,
+            });
           } else {
             // DR-CC NON sintetica senza Long Put: NON declassare a Covered Call.
             // Resta DR-CC (protectionPut undefined → il rischio cappa allo strike come una CC)
-            // ma marcata come incompleta con badge "Gamba mancante: Long Put".
+            // per il RISCHIO; per il DISPLAY va tra le incomplete (riga unificata col badge).
             deRiskingCoveredCalls.push({
               coveredCall: { ...cc, incomplete: true, missingLegs: ['Long Put'] },
               protectionPut: undefined,
               isSynthetic: false,
               incomplete: true, missingLegs: ['Long Put'],
+            });
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'derisking_covered_call',
+              underlying: config.underlying,
+              isSynthetic: false,
+              presentLegs: [call],
+              missingLegs: ['Long Put'],
+              linkedStock: linkedStock || null,
             });
           }
         }

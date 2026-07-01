@@ -46,6 +46,11 @@ describe('categorizeDerivatives — DR-CC incompleta (gamba mancante)', () => {
     expect(cats.deRiskingCoveredCalls[0].protectionPut).toBeUndefined();
     // NON deve essere finita tra le Covered Call
     expect(cats.coveredCalls.length).toBe(0);
+    // E deve comparire tra le incomplete (per il display unificato), con la call come gamba presente
+    const inc = cats.incompleteStrategies.filter(i => i.strategyType === 'derisking_covered_call');
+    expect(inc.length).toBe(1);
+    expect(inc[0].missingLegs).toContain('Long Put');
+    expect(inc[0].presentLegs.some(l => l.option_type === 'call')).toBe(true);
   });
 
   it('DR-CC completa (call + put) NON è marcata incompleta', () => {

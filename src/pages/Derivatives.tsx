@@ -107,21 +107,116 @@ function getOptionCurrency(option: Position): string {
   return option.currency || 'USD';
 }
 
-/** Riga compatta per una strategia incompleta (gamba mancante), mostrata DENTRO la sua categoria. */
-function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrategyPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
+/** Scheda unificata di una gamba (opzione) — usata sia nelle righe complete che incomplete.
+ *  V (venduta) = verde, A (acquistata) = rosso, coerente con la convenzione della pagina. */
+function LegDetailCard({ leg, underlyingPrices, label }: { leg: Position; underlyingPrices: Record<string, UnderlyingPrice>; label?: string }) {
+  const q = leg.quantity || 0;
+  const isSold = q < 0;
+  const cur = getOptionCurrency(leg);
+  const pmc = leg.avg_cost || 0;
+  const px = leg.current_price || 0;
+  const pricePct = pmc > 0 ? ((px - pmc) / pmc) * 100 : null;
+  const profit = isSold ? (pmc - px) : (px - pmc); // >0 = in guadagno per il lato posizione
+  const uTicker = leg.underlying ? underlyingPrices[leg.underlying]?.ticker : undefined;
+  const uPrice = (leg.underlying ? underlyingPrices[leg.underlying]?.price : 0) || 0;
   return (
-    <div className="p-3 rounded-lg bg-orange-500/5 border border-orange-500/30 space-y-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-sm">{inc.underlying}</span>
-          {inc.isSynthetic && (
-            <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500">Sintetica</Badge>
-          )}
+    <div className="rounded-md bg-background/50 border border-border/50 p-2">
+      <div className="flex items-center gap-2 flex-wrap mb-1.5">
+        <Badge variant="outline" className={`text-[10px] ${isSold ? 'text-green-500 border-green-500' : 'text-red-500 border-red-500'}`}>
+          {isSold ? 'V' : 'A'}
+        </Badge>
+        <span className="text-sm font-medium">{formatOptionDescription(leg)}</span>
+        {label && <span className="text-[10px] text-emerald-500 font-medium">{label}</span>}
+        {uPrice > 0 && (
+          <span className="text-xs font-mono font-semibold text-cyan-300">
+            {(uTicker || leg.underlying)}: {formatCurrency(uPrice, cur)}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-xs">
+        <div><p className="text-muted-foreground">Strike</p><p className="font-medium">{formatNumber(leg.strike_price || 0, 0)}</p></div>
+        <div><p className="text-muted-foreground">Scadenza</p><p className="font-medium">{formatExpiryMMY(leg.expiry_date)}</p></div>
+        <div><p className="text-muted-foreground">Contratti</p><p className="font-medium">{Math.abs(q)}</p></div>
+        <div><p className="text-muted-foreground">PMC</p><p className="font-medium">{formatCurrency(pmc, cur)}</p></div>
+        <div>
+          <p className="text-muted-foreground">Prezzo</p>
+          <p className="font-medium flex items-center gap-1">
+            {formatCurrency(px, cur)}
+            {pricePct !== null && (
+              <span className={`text-[10px] ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {pricePct >= 0 ? '+' : ''}{pricePct.toFixed(1)}%
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Scheda della gamba azionaria (sottostante reale) di una covered call / DR-CC. */
+function StockUnderlyingCard({ stock, cur }: { stock: Position; cur: string }) {
+  return (
+    <div className="rounded-md bg-background/50 border border-border/50 p-2">
+      <div className="flex items-center gap-2 flex-wrap mb-1.5">
+        <Badge variant="outline" className="text-[10px] text-cyan-400 border-cyan-400">AZ</Badge>
+        <span className="text-sm font-medium">{stock.description}</span>
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-xs">
+        <div><p className="text-muted-foreground">Azioni</p><p className="font-medium">{formatNumber(stock.quantity || 0)}</p></div>
+        <div><p className="text-muted-foreground">PMC</p><p className="font-medium">{formatCurrency(stock.avg_cost || 0, stock.currency || cur)}</p></div>
+        <div><p className="text-muted-foreground">Prezzo</p><p className="font-medium">{formatCurrency(stock.current_price || 0, stock.currency || cur)}</p></div>
+      </div>
+    </div>
+  );
+}
+
+/** Lista uniforme di schede-gamba, usata in TUTTE le righe espanse (complete e incomplete). */
+function LegsDetailList({ legs, underlyingPrices, stock, labels }: {
+  legs: Position[];
+  underlyingPrices: Record<string, UnderlyingPrice>;
+  stock?: Position | null;
+  labels?: (string | undefined)[];
+}) {
+  const cur = legs[0] ? getOptionCurrency(legs[0]) : 'USD';
+  return (
+    <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-2">
+      {stock && <StockUnderlyingCard stock={stock} cur={cur} />}
+      {legs.map((leg, i) => (
+        <LegDetailCard key={i} leg={leg} underlyingPrices={underlyingPrices} label={labels?.[i]} />
+      ))}
+    </div>
+  );
+}
+
+/** Riga di una strategia incompleta (gamba mancante), COLLASSABILE come le righe complete. */
+function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrategyPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const first = inc.presentLegs[0];
+  const uTicker = first?.underlying ? underlyingPrices[first.underlying]?.ticker : undefined;
+  const uPrice = (first?.underlying ? underlyingPrices[first.underlying]?.price : 0) || 0;
+  const cur = first ? getOptionCurrency(first) : 'USD';
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+        className="flex items-center gap-2 p-3 rounded-lg border border-orange-500/30 bg-orange-500/5 hover:bg-orange-500/10 cursor-pointer transition-colors"
+      >
+        {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+        <span className="font-semibold text-sm shrink-0">{inc.underlying}</span>
+        {uPrice > 0 && (
+          <span className="text-xs font-mono font-semibold text-cyan-300 shrink-0">{(uTicker || first?.underlying)}: {formatCurrency(uPrice, cur)}</span>
+        )}
+        {inc.isSynthetic && (
+          <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500 shrink-0">Sintetica</Badge>
+        )}
+        <div className="flex items-center gap-1.5 flex-wrap ml-auto">
           <Badge variant="outline" className="text-[10px] bg-orange-500/15 text-orange-500 border-orange-500/40 uppercase tracking-wide">
             <AlertTriangle className="w-3 h-3 mr-1" /> Gamba mancante
           </Badge>
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-orange-500 font-medium">Manca:</span>
           {inc.missingLegs.map((leg, i) => (
             <Badge key={i} variant="outline" className="text-[10px] bg-orange-500/15 text-orange-500 border-orange-500/40">
@@ -130,70 +225,19 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
           ))}
         </div>
       </div>
-
-      {inc.presentLegs.length > 0 && (
-        <div className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Gambe presenti</span>
-          {inc.presentLegs.map((leg, i) => {
-            const q = leg.quantity || 0;
-            const isSold = q < 0;
-            const cur = getOptionCurrency(leg);
-            const pmc = leg.avg_cost || 0;
-            const px = leg.current_price || 0;
-            const pricePct = pmc > 0 ? ((px - pmc) / pmc) * 100 : null;
-            const profit = isSold ? (pmc - px) : (px - pmc); // >0 = in guadagno
-            const uTicker = leg.underlying ? underlyingPrices[leg.underlying]?.ticker : undefined;
-            const uPrice = (leg.underlying ? underlyingPrices[leg.underlying]?.price : 0) || 0;
-            return (
-              <div key={i} className="rounded-md bg-background/50 border border-border/50 p-2">
-                <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                  <Badge variant="outline" className={`text-[10px] ${isSold ? 'text-green-500 border-green-500' : 'text-blue-500 border-blue-500'}`}>
-                    {isSold ? 'V' : 'A'}
-                  </Badge>
-                  <span className="text-sm font-medium">{formatOptionDescription(leg)}</span>
-                  {uPrice > 0 && (
-                    <span className="text-xs font-mono font-semibold text-cyan-300">
-                      {(uTicker || leg.underlying)}: {formatCurrency(uPrice, cur)}
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-xs">
-                  <div>
-                    <p className="text-muted-foreground">Strike</p>
-                    <p className="font-medium">{formatNumber(leg.strike_price || 0, 0)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Scadenza</p>
-                    <p className="font-medium">{formatExpiryMMY(leg.expiry_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Contratti</p>
-                    <p className="font-medium">{Math.abs(q)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">PMC</p>
-                    <p className="font-medium">{formatCurrency(pmc, cur)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Prezzo</p>
-                    <p className="font-medium flex items-center gap-1">
-                      {formatCurrency(px, cur)}
-                      {pricePct !== null && (
-                        <span className={`text-[10px] ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {pricePct >= 0 ? '+' : ''}{pricePct.toFixed(1)}%
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+      <CollapsibleContent>
+        {inc.presentLegs.length > 0 ? (
+          <LegsDetailList legs={inc.presentLegs} underlyingPrices={underlyingPrices} stock={inc.linkedStock} />
+        ) : (
+          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 text-xs text-muted-foreground">
+            Nessuna gamba presente in portafoglio per questa strategia.
+          </div>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
+
 
 export function Derivatives() {
   const { portfolio, positions, isLoading } = usePortfolio();
@@ -383,10 +427,11 @@ export function Derivatives() {
     }
     return m;
   }, [categories.incompleteStrategies]);
-  const incDrccMissingCall = useMemo(
-    () => (incompleteByType['derisking_covered_call'] || []).filter(i => i.missingLegs.includes('Short Call')),
-    [incompleteByType],
+  const completeDrcc = useMemo(
+    () => categories.deRiskingCoveredCalls.filter(dr => !dr.incomplete),
+    [categories.deRiskingCoveredCalls],
   );
+  const incDrcc = useMemo(() => incompleteByType['derisking_covered_call'] || [], [incompleteByType]);
   const incCovered = useMemo(() => incompleteByType['covered_call'] || [], [incompleteByType]);
   const incIronCondor = useMemo(() => incompleteByType['iron_condor'] || [], [incompleteByType]);
   const incDoubleDiagonal = useMemo(() => incompleteByType['double_diagonal'] || [], [incompleteByType]);
@@ -806,7 +851,7 @@ export function Derivatives() {
         )}
 
 
-        {(categories.deRiskingCoveredCalls.length > 0 || incDrccMissingCall.length > 0) && (
+        {(completeDrcc.length > 0 || incDrcc.length > 0) && (
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -818,7 +863,7 @@ export function Derivatives() {
                       <Umbrella className="w-3 h-3 text-emerald-500 absolute -bottom-0.5 -right-0.5" />
                     </div>
                     <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.deRiskingCoveredCalls.length + incDrccMissingCall.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{completeDrcc.length + incDrcc.length}</Badge>
                   </div>
                   {deRiskingOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -842,7 +887,7 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {categories.deRiskingCoveredCalls.map((dr, index) => (
+                  {completeDrcc.map((dr, index) => (
                     <DeRiskingCoveredCallRow 
                       key={index} 
                       deRiskingCC={dr} 
@@ -852,7 +897,7 @@ export function Derivatives() {
                       getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                     />
                   ))}
-                  {incDrccMissingCall.map((inc, i) => (
+                  {incDrcc.map((inc, i) => (
                     <IncompleteStrategyRow key={`inc-drcc-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1462,87 +1507,13 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             </div>
         </div>
         <CollapsibleContent>
-          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground text-xs">Sottostante</p>
-                <p className="font-medium">{underlying.description}</p>
-                {coveredCall.isSynthetic ? (
-                  <p className="text-xs text-orange-400">
-                    {coveredCall.syntheticCall
-                      ? 'Sintetico (CALL acquistata deep ITM)'
-                      : 'Sintetico (PUT venduta deep ITM)'}
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
-                    <p className="text-xs text-muted-foreground">
-                      PMC azioni:{' '}
-                      <span className="text-foreground font-medium">
-                        {formatCurrency(underlying.avg_cost || 0, underlying.currency || getOptionCurrency(option))}
-                      </span>
-                    </p>
-                  </>
-                )}
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Strike</p>
-                <p className="font-medium">{option.strike_price}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Scadenza</p>
-                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
-              </div>
-            </div>
-            {adjustedProfitLossPct !== null && (
-              <div className="text-xs text-muted-foreground">
-                P/L: {formatPercentage(adjustedProfitLossPct)}
-              </div>
-            )}
-            {coveredCall.isSynthetic && (coveredCall.syntheticCall || coveredCall.syntheticPut) && (() => {
-              const sp = (coveredCall.syntheticCall || coveredCall.syntheticPut)!;
-              const isCall = !!coveredCall.syntheticCall;
-              const spPrice = sp.current_price || 0;
-              const spAvgCost = sp.avg_cost || 0;
-              const spChangePct = spAvgCost > 0 ? ((spPrice - spAvgCost) / spAvgCost) * 100 : null;
-              return (
-                <div className="pt-2 border-t border-border/30">
-                  <p className="text-xs text-orange-400 font-medium mb-2">
-                    📌 {isCall ? 'CALL Sintetica (acquistata deep ITM)' : 'PUT Sintetica (venduta deep ITM)'}
-                  </p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground text-xs">Strike</p>
-                      <p className="font-medium">{sp.strike_price}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">Scadenza</p>
-                      <p className="font-medium">{formatExpiryMMY(sp.expiry_date)}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">PMC</p>
-                      <p className="font-medium">{formatCurrency(spAvgCost, getOptionCurrency(sp))}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">Prezzo</p>
-                      <div className="flex items-center gap-1">
-                        <span className="font-medium">{formatCurrency(spPrice, getOptionCurrency(sp))}</span>
-                        {spChangePct !== null && (
-                          <span className={`text-xs font-medium ${spChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            {spChangePct >= 0 ? '+' : ''}{spChangePct.toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
+          {(() => {
+            const detailLegs: Position[] = [option];
+            const detailLabels: (string | undefined)[] = [undefined];
+            const synLeg = coveredCall.syntheticCall || coveredCall.syntheticPut;
+            if (synLeg) { detailLegs.push(synLeg); detailLabels.push('Sintetica'); }
+            return <LegsDetailList legs={detailLegs} labels={detailLabels} underlyingPrices={underlyingPrices} stock={coveredCall.isSynthetic ? null : underlying} />;
+          })()}
         </CollapsibleContent>
       </Collapsible>
       
@@ -1773,107 +1744,14 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             </div>
         </div>
         <CollapsibleContent>
-          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
-            {/* Sold CALL details */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground text-xs">Sottostante</p>
-                <p className="font-medium">{underlying.description}</p>
-                {!isSynthetic && (
-                  <>
-                    <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
-                    <p className="text-xs text-muted-foreground">
-                      PMC azioni:{' '}
-                      <span className="text-foreground font-medium">
-                        {formatCurrency(underlying.avg_cost || 0, underlying.currency || getOptionCurrency(option))}
-                      </span>
-                    </p>
-                  </>
-                )}
-                {isSynthetic && (
-                  <p className="text-xs text-orange-400">
-                    {syntheticCall
-                      ? 'Sintetico (CALL acquistata deep ITM)'
-                      : 'Sintetico (PUT venduta deep ITM)'}
-                  </p>
-                )}
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Strike CALL</p>
-                <p className="font-medium">{option.strike_price}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Scadenza CALL</p>
-                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Prezzo CALL</p>
-                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
-              </div>
-            </div>
-            
-            {/* Protection PUT (only when present) */}
-            {protectionPut && (
-              <div className="pt-2 border-t border-border/30">
-                <p className="text-xs text-emerald-500 font-medium mb-2">🛡️ PUT Protettiva</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Strike PUT</p>
-                    <p className="font-medium">{protectionPut.strike_price}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Scadenza PUT</p>
-                    <p className="font-medium">{formatExpiryMMY(protectionPut.expiry_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">PMC PUT</p>
-                    <p className="font-medium">{formatCurrency(protPutAvgCost, getOptionCurrency(protectionPut))}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Prezzo PUT</p>
-                    <div className="flex items-center gap-1">
-                      <span className="font-medium">{formatCurrency(protPutPrice, getOptionCurrency(protectionPut))}</span>
-                      {protPutChangePct !== null && (
-                        <span className={`text-xs font-medium ${protPutChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {protPutChangePct >= 0 ? '+' : ''}{protPutChangePct.toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-            {/* Synthetic PUT if present */}
-            {(syntheticCall || syntheticPut) && (() => {
-              const sp = (syntheticCall || syntheticPut)!;
-              const isCall = !!syntheticCall;
-              return (
-                <div className="pt-2 border-t border-border/30">
-                  <p className="text-xs text-orange-400 font-medium mb-2">
-                    📌 {isCall ? 'CALL Sintetica (acquistata deep ITM)' : 'PUT Sintetica (venduta deep ITM)'}
-                  </p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground text-xs">Strike</p>
-                      <p className="font-medium">{sp.strike_price}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">Scadenza</p>
-                      <p className="font-medium">{formatExpiryMMY(sp.expiry_date)}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">PMC</p>
-                      <p className="font-medium">{formatCurrency(sp.avg_cost || 0, getOptionCurrency(sp))}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">Prezzo</p>
-                      <p className="font-medium">{formatCurrency(sp.current_price || 0, getOptionCurrency(sp))}</p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
+          {(() => {
+            const detailLegs: Position[] = [option];
+            const detailLabels: (string | undefined)[] = [undefined];
+            if (protectionPut) { detailLegs.push(protectionPut); detailLabels.push('Protettiva'); }
+            const synLeg = syntheticCall || syntheticPut;
+            if (synLeg) { detailLegs.push(synLeg); detailLabels.push('Sintetica'); }
+            return <LegsDetailList legs={detailLegs} labels={detailLabels} underlyingPrices={underlyingPrices} stock={isSynthetic ? null : underlying} />;
+          })()}
         </CollapsibleContent>
       </Collapsible>
       
@@ -2207,77 +2085,11 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           </span>
       </div>
       <CollapsibleContent>
-        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
-          {/* Put Spread */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD (Bull Put)</p>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                  <Badge variant="outline" className="text-xs">Strike {soldPut.strike_price}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, legCurrency)}</span>
-                  <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldPut.avg_cost || 0, legCurrency)}
-                  </span>
-                </div>
-              </div>
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                  <Badge variant="outline" className="text-xs">Strike {boughtPut.strike_price}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtPut.avg_cost || 0, legCurrency)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Call Spread */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD (Bear Call)</p>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                  <Badge variant="outline" className="text-xs">Strike {soldCall.strike_price}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldCall.avg_cost || 0, legCurrency)}
-                  </span>
-                </div>
-              </div>
-              <div className="p-2 rounded bg-background/50 border border-border/30">
-                <div className="flex justify-between items-center">
-                  <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                  <Badge variant="outline" className="text-xs">Strike {boughtCall.strike_price}</Badge>
-                </div>
-                <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtCall.avg_cost || 0, legCurrency)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Summary */}
-          <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
-            <span className="text-muted-foreground">Profit/Loss:</span>
-            <span className={`font-semibold ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`}>
-              {formatCurrency(totalPL, legCurrency)}
-            </span>
-          </div>
-        </div>
+        <LegsDetailList
+          underlyingPrices={underlyingPrices}
+          legs={[soldCall, boughtCall, soldPut, boughtPut]}
+          labels={['Short Call', 'Long Call (protezione)', 'Short Put', 'Long Put (protezione)']}
+        />
       </CollapsibleContent>
       
       <CallPremiumCalculatorDialog
@@ -2467,84 +2279,11 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
 
       </div>
       <CollapsibleContent>
-        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
-          {/* Spreads side by side: PUT on left, CALL on right */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Put Spread - Vertical: sold on top, bought on bottom */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD</p>
-              <div className="flex flex-col gap-2 text-sm">
-                {/* Sold Put - on top */}
-                <div className="p-2 rounded bg-background/50 border border-border/30">
-                  <div className="flex justify-between items-center">
-                    <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                    <Badge variant="outline" className="text-xs">{soldPut.strike_price} {formatExpiryMMY(soldPut.expiry_date)}</Badge>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldPut.avg_cost || 0, legCurrency)}
-                    </span>
-                  </div>
-                </div>
-                {/* Bought Put - on bottom */}
-                <div className="p-2 rounded bg-background/50 border border-border/30">
-                  <div className="flex justify-between items-center">
-                    <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                    <Badge variant="outline" className="text-xs">{boughtPut.strike_price} {formatExpiryMMY(boughtPut.expiry_date)}</Badge>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtPut.avg_cost || 0, legCurrency)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Call Spread - Vertical: sold on top, bought on bottom */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD</p>
-              <div className="flex flex-col gap-2 text-sm">
-                {/* Sold Call - on top */}
-                <div className="p-2 rounded bg-background/50 border border-border/30">
-                  <div className="flex justify-between items-center">
-                    <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-                    <Badge variant="outline" className="text-xs">{soldCall.strike_price} {formatExpiryMMY(soldCall.expiry_date)}</Badge>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(soldCall.avg_cost || 0, legCurrency)}
-                    </span>
-                  </div>
-                </div>
-                {/* Bought Call - on bottom */}
-                <div className="p-2 rounded bg-background/50 border border-border/30">
-                  <div className="flex justify-between items-center">
-                    <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
-                    <Badge variant="outline" className="text-xs">{boughtCall.strike_price} {formatExpiryMMY(boughtCall.expiry_date)}</Badge>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, legCurrency)}</span>
-                    <span className="text-xs text-muted-foreground">
-                      PMC: {formatCurrency(boughtCall.avg_cost || 0, legCurrency)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Summary */}
-          <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
-            <span className="text-muted-foreground">Profit/Loss:</span>
-            <span className={`font-semibold ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`}>
-              {formatCurrency(totalPL, legCurrency)}
-            </span>
-          </div>
-        </div>
+        <LegsDetailList
+          underlyingPrices={underlyingPrices}
+          legs={[soldCall, boughtCall, soldPut, boughtPut]}
+          labels={['Short Call', 'Long Call (protezione)', 'Short Put', 'Long Put (protezione)']}
+        />
       </CollapsibleContent>
       
       <CallPremiumCalculatorDialog
