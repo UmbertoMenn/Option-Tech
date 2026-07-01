@@ -148,7 +148,7 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
                 ) : (
                   <Briefcase className="w-4 h-4 shrink-0" />
                 )}
-                <span className={`truncate ${fullWidth ? '' : 'max-w-[120px]'}`}>
+                <span className={`truncate ${fullWidth ? 'max-w-[140px]' : 'max-w-[120px]'}`}>
                   {getDisplayName()}
                 </span>
               </span>
