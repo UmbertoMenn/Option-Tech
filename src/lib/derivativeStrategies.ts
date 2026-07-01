@@ -37,6 +37,8 @@ export interface CoveredCallPosition {
   isSynthetic?: boolean;
   syntheticPut?: Position;
   syntheticCall?: Position; // Deep ITM bought CALL acting as stock
+  incomplete?: boolean;      // configurata ma manca una gamba
+  missingLegs?: string[];    // etichette gambe mancanti
 }
 
 export interface LongPutPosition {
@@ -100,6 +102,8 @@ export interface DeRiskingCoveredCallPosition {
   isSynthetic: boolean;
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
   syntheticCall?: Position; // Deep ITM bought CALL acting as stock
+  incomplete?: boolean;      // configurata come DR-CC ma manca una gamba (es. Long Put)
+  missingLegs?: string[];    // etichette gambe mancanti
 }
 
 // SyntheticCoveredCallPosition removed - synthetic CCs are now in coveredCalls with isSynthetic flag
@@ -545,35 +549,38 @@ export function categorizeDerivatives(
             });
           } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
             // Synthetic DR-CC without protection put (e.g., +CALL ITM / -CALL):
-            // keep classified as DR-CC sintetica con protectionPut undefined,
-            // ma segna come incompleta (manca Long Put).
+            // resta DR-CC sintetica (protectionPut undefined) ma marcata incompleta.
+            // Renderizzata dalla riga DR-CC col badge → NON aggiungere a incompleteStrategies
+            // (eviterebbe doppia visualizzazione).
             deRiskingCoveredCalls.push({
-              coveredCall: cc, protectionPut: undefined,
+              coveredCall: { ...cc, incomplete: true, missingLegs: ['Long Put'] },
+              protectionPut: undefined,
               isSynthetic: true, syntheticPut, syntheticCall,
-            });
-            incompleteStrategies.push({
-              configId: config.id,
-              strategyType: 'derisking_covered_call',
-              underlying: config.underlying,
-              isSynthetic: true,
-              presentLegs: matchedVirtual,
-              missingLegs: ['Long Put'],
-              linkedStock: linkedStock || null,
+              incomplete: true, missingLegs: ['Long Put'],
             });
           } else {
-            coveredCalls.push(cc);
+            // DR-CC NON sintetica senza Long Put: NON declassare a Covered Call.
+            // Resta DR-CC (protectionPut undefined → il rischio cappa allo strike come una CC)
+            // ma marcata come incompleta con badge "Gamba mancante: Long Put".
+            deRiskingCoveredCalls.push({
+              coveredCall: { ...cc, incomplete: true, missingLegs: ['Long Put'] },
+              protectionPut: undefined,
+              isSynthetic: false,
+              incomplete: true, missingLegs: ['Long Put'],
+            });
           }
         }
 
-        // INCOMPLETE: DR-CC sintetica senza Short Call ma con componente sintetica
-        if (calls.length === 0 && config.is_synthetic && (syntheticCall || syntheticPut)) {
+        // INCOMPLETE: DR-CC senza Short Call (nessuna CALL venduta) ma con altre gambe presenti
+        if (calls.length === 0 && (syntheticCall || syntheticPut || boughtPuts.length > 0 || linkedStock)) {
           const missing: string[] = ['Short Call'];
-          if (boughtPuts.length === 0) missing.push('Long Put');
+          if (!config.is_synthetic && boughtPuts.length === 0) missing.push('Long Put');
+          if (config.is_synthetic && boughtPuts.length === 0) missing.push('Long Put');
           incompleteStrategies.push({
             configId: config.id,
             strategyType: 'derisking_covered_call',
             underlying: config.underlying,
-            isSynthetic: true,
+            isSynthetic: config.is_synthetic,
             presentLegs: matchedVirtual,
             missingLegs: missing,
             linkedStock: linkedStock || null,

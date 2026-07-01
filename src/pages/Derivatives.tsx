@@ -56,6 +56,7 @@ import {
   DerivativeCategories,
   DeRiskingCoveredCallPosition,
   ResolvedConfig,
+  IncompleteStrategyPosition,
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
@@ -106,12 +107,45 @@ function getOptionCurrency(option: Position): string {
   return option.currency || 'USD';
 }
 
-const INCOMPLETE_STRAT_LABEL: Record<string, string> = {
-  iron_condor: 'Iron Condor',
-  double_diagonal: 'Double Diagonal',
-  covered_call: 'Covered Call',
-  derisking_covered_call: 'De-Risking Covered Call',
-};
+/** Riga compatta per una strategia incompleta (gamba mancante), mostrata DENTRO la sua categoria. */
+function IncompleteStrategyRow({ inc }: { inc: IncompleteStrategyPosition }) {
+  return (
+    <div className="p-2.5 rounded-lg bg-orange-500/5 border border-orange-500/30 space-y-1.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm">{inc.underlying}</span>
+          {inc.isSynthetic && (
+            <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500">Sintetica</Badge>
+          )}
+          <Badge variant="outline" className="text-[10px] bg-orange-500/15 text-orange-500 border-orange-500/40 uppercase tracking-wide">
+            <AlertTriangle className="w-3 h-3 mr-1" /> Gamba mancante
+          </Badge>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-orange-500 font-medium">Manca:</span>
+          {inc.missingLegs.map((leg, i) => (
+            <Badge key={i} variant="outline" className="text-[10px] bg-orange-500/15 text-orange-500 border-orange-500/40">
+              {leg}
+            </Badge>
+          ))}
+        </div>
+      </div>
+      {inc.presentLegs.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {inc.presentLegs.map((leg, i) => {
+            const q = leg.quantity || 0;
+            return (
+              <Badge key={i} variant="secondary" className="text-[10px] font-normal">
+                {q >= 0 ? '+' : '−'}{Math.abs(q)} {(leg.option_type || '').toUpperCase()} {formatNumber(leg.strike_price || 0, 0)}
+                {leg.expiry_date ? ` · ${leg.expiry_date}` : ''}
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Derivatives() {
   const { portfolio, positions, isLoading } = usePortfolio();
@@ -180,7 +214,6 @@ export function Derivatives() {
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
-  const [incompleteOpen, setIncompleteOpen] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
   const setWizardOpenPersisted = useCallback((open: boolean) => {
     setWizardOpen(open);
@@ -293,6 +326,22 @@ export function Derivatives() {
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
   }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
+
+  // Strategie incomplete (gamba mancante) raggruppate per tipo, per renderle NELLE loro categorie
+  const incompleteByType = useMemo(() => {
+    const m: Record<string, IncompleteStrategyPosition[]> = {};
+    for (const inc of categories.incompleteStrategies || []) {
+      (m[inc.strategyType] ??= []).push(inc);
+    }
+    return m;
+  }, [categories.incompleteStrategies]);
+  const incDrccMissingCall = useMemo(
+    () => (incompleteByType['derisking_covered_call'] || []).filter(i => i.missingLegs.includes('Short Call')),
+    [incompleteByType],
+  );
+  const incCovered = useMemo(() => incompleteByType['covered_call'] || [], [incompleteByType]);
+  const incIronCondor = useMemo(() => incompleteByType['iron_condor'] || [], [incompleteByType]);
+  const incDoubleDiagonal = useMemo(() => incompleteByType['double_diagonal'] || [], [incompleteByType]);
 
   // Split groupedOtherStrategies into putSpreads, diagonalPutSpreads, and remaining
   const { putSpreads, diagonalPutSpreads, remainingOtherStrategies } = useMemo(() => {
@@ -650,7 +699,7 @@ export function Derivatives() {
         />
         
         {/* Section 1: Covered Call (Collapsible) */}
-        {categories.coveredCalls.length > 0 && (
+        {(categories.coveredCalls.length > 0 || incCovered.length > 0) && (
         <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -659,7 +708,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
                     <CardTitle className="text-xl">Covered Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length + incCovered.length}</Badge>
                   </div>
                   {coveredCallOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -698,6 +747,9 @@ export function Derivatives() {
                       getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                     />
                   ))}
+                  {incCovered.map((inc, i) => (
+                    <IncompleteStrategyRow key={`inc-cc-${i}`} inc={inc} />
+                  ))}
                 </div>
               </CardContent>
             </CollapsibleContent>
@@ -706,7 +758,7 @@ export function Derivatives() {
         )}
 
 
-        {categories.deRiskingCoveredCalls.length > 0 && (
+        {(categories.deRiskingCoveredCalls.length > 0 || incDrccMissingCall.length > 0) && (
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -718,7 +770,7 @@ export function Derivatives() {
                       <Umbrella className="w-3 h-3 text-emerald-500 absolute -bottom-0.5 -right-0.5" />
                     </div>
                     <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.deRiskingCoveredCalls.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.deRiskingCoveredCalls.length + incDrccMissingCall.length}</Badge>
                   </div>
                   {deRiskingOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -752,6 +804,9 @@ export function Derivatives() {
                       getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                     />
                   ))}
+                  {incDrccMissingCall.map((inc, i) => (
+                    <IncompleteStrategyRow key={`inc-drcc-${i}`} inc={inc} />
+                  ))}
                 </div>
               </CardContent>
             </CollapsibleContent>
@@ -760,7 +815,7 @@ export function Derivatives() {
         )}
 
         {/* Section 3: Iron Condor */}
-        {categories.ironCondors.length > 0 && (
+        {(categories.ironCondors.length > 0 || incIronCondor.length > 0) && (
         <Collapsible open={ironCondorOpen} onOpenChange={setIronCondorOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -769,7 +824,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Target className="w-5 h-5 text-amber-500" />
                     <CardTitle className="text-xl">Iron Condor</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.ironCondors.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.ironCondors.length + incIronCondor.length}</Badge>
                   </div>
                   {ironCondorOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -794,6 +849,9 @@ export function Derivatives() {
                   {categories.ironCondors.map((ic, index) => (
                     <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
+                  {incIronCondor.map((inc, i) => (
+                    <IncompleteStrategyRow key={`inc-ic-${i}`} inc={inc} />
+                  ))}
                 </div>
               </CardContent>
             </CollapsibleContent>
@@ -802,7 +860,7 @@ export function Derivatives() {
         )}
 
         {/* Section 3.5: Double Diagonal */}
-        {categories.doubleDiagonals.length > 0 && (
+        {(categories.doubleDiagonals.length > 0 || incDoubleDiagonal.length > 0) && (
         <Collapsible open={doubleDiagonalOpen} onOpenChange={setDoubleDiagonalOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -811,7 +869,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Layers className="w-5 h-5 text-purple-500" />
                     <CardTitle className="text-xl">Double Diagonal</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.doubleDiagonals.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.doubleDiagonals.length + incDoubleDiagonal.length}</Badge>
                   </div>
                   {doubleDiagonalOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -835,6 +893,9 @@ export function Derivatives() {
                   </div>
                   {categories.doubleDiagonals.map((dd, index) => (
                     <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                  {incDoubleDiagonal.map((inc, i) => (
+                    <IncompleteStrategyRow key={`inc-dd-${i}`} inc={inc} />
                   ))}
                 </div>
               </CardContent>
@@ -1096,80 +1157,6 @@ export function Derivatives() {
                   </div>
                   {remainingOtherStrategies.map((group, index) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                  ))}
-                </div>
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-        )}
-
-        {/* Section 8: Strategie Incomplete (Manca Gamba) */}
-        {categories.incompleteStrategies.length > 0 && (
-        <Collapsible open={incompleteOpen} onOpenChange={setIncompleteOpen}>
-          <Card className="border-orange-500/40 bg-card">
-            <CollapsibleTrigger asChild>
-              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <AlertTriangle className="w-5 h-5 text-orange-500" />
-                    <CardTitle className="text-xl">Strategie Incomplete</CardTitle>
-                    <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-500 border-orange-500/40">MANCA GAMBA</Badge>
-                    <Badge variant="secondary" className="text-xs">{categories.incompleteStrategies.length}</Badge>
-                  </div>
-                  {incompleteOpen ? (
-                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  )}
-                </div>
-              </CardHeader>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="pt-0">
-                <div className="text-xs text-muted-foreground mb-3">
-                  Strategie configurate con una o più gambe non presenti in portafoglio. Le gambe presenti sono mostrate; quelle mancanti sono evidenziate in arancione.
-                </div>
-                <div className="space-y-2">
-                  {categories.incompleteStrategies.map((inc, index) => (
-                    <div key={`${inc.configId}-${index}`} className="p-3 rounded-lg bg-muted/40 border border-orange-500/20 space-y-2">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold">{inc.underlying}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {INCOMPLETE_STRAT_LABEL[inc.strategyType] ?? inc.strategyType}
-                          </Badge>
-                          {inc.isSynthetic && (
-                            <Badge variant="outline" className="text-xs text-amber-500 border-amber-500">Sintetica</Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs text-orange-500 font-medium">Manca:</span>
-                          {inc.missingLegs.map((leg, i) => (
-                            <Badge key={i} variant="outline" className="text-xs bg-orange-500/15 text-orange-500 border-orange-500/40">
-                              {leg}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      {inc.presentLegs.length > 0 && (
-                        <div>
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Gambe presenti</span>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {inc.presentLegs.map((leg, i) => {
-                              const q = leg.quantity || 0;
-                              return (
-                                <Badge key={i} variant="secondary" className="text-xs font-normal">
-                                  {q >= 0 ? '+' : '−'}{Math.abs(q)} {(leg.option_type || '').toUpperCase()} {formatNumber(leg.strike_price || 0, 0)}
-                                  {leg.expiry_date ? ` · ${leg.expiry_date}` : ''}
-                                  {leg.current_price != null ? ` · ${getOptionCurrency(leg)} ${formatNumber(leg.current_price, 2)}` : ''}
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
                   ))}
                 </div>
               </CardContent>
@@ -1530,6 +1517,8 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { coveredCall, protectionPut, isSynthetic, syntheticPut, syntheticCall } = deRiskingCC;
+  const drccIncomplete = deRiskingCC.incomplete || coveredCall.incomplete;
+  const drccMissingLegs = deRiskingCC.missingLegs || coveredCall.missingLegs || [];
   const { option, underlying, contractsCovered } = coveredCall;
 
   // ITM/OTM for the sold CALL
@@ -1591,6 +1580,21 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>Synthetic position / short PUT delta -1</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {drccIncomplete && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-orange-500/15 border border-orange-500/40 text-orange-500 text-[10px] font-semibold uppercase tracking-wide cursor-help shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <AlertTriangle className="w-3 h-3" /> Gamba mancante
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>DR-CC configurata ma manca: {drccMissingLegs.join(', ') || 'una gamba'}.</p>
                   </TooltipContent>
                 </Tooltip>
               )}
