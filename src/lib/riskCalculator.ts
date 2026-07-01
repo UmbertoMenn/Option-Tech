@@ -46,6 +46,7 @@ export interface StockRiskDetail {
   ccCapStrike?: number | null;
   drccCappedShares?: number;
   drccCapPerShare?: number | null;
+  drccCallStrike?: number | null;         // Strike medio della CALL venduta del DR-CC (per tooltip)
   // Info Protezione DR-CC (long PUT all'interno di una DR-CC reale)
   drccProtectionStrike?: number | null;   // Strike medio delle PUT di protezione DR-CC
   drccProtectionContracts?: number;       // Contratti totali delle PUT di protezione DR-CC
@@ -282,6 +283,7 @@ export function calculateStockRisk(
     let drccPerShareWeightedSum = 0;
     let drccProtPutContracts = 0;
     let drccProtPutStrikeWeightedSum = 0;
+    let drccCallStrikeWeightedSum = 0;
     for (const dr of drccMatched) {
       const callStrike = dr.coveredCall.option.strike_price || 0;
       const putStrike = dr.protectionPut?.strike_price || 0;
@@ -296,6 +298,7 @@ export function calculateStockRisk(
       drccRiskRequested += perShare * sh;
       drccRiskRequestedNoProt += perShareNoProt * sh;
       drccPerShareWeightedSum += perShare * sh;
+      drccCallStrikeWeightedSum += callStrike * sh;
       // Track DR-CC protection PUT info (for hasProtection flag & tooltips)
       if (dr.protectionPut && putStrike > 0) {
         const protContracts = Math.abs(dr.protectionPut.quantity || 0);
@@ -310,6 +313,9 @@ export function calculateStockRisk(
     const drccPerShare = drccSharesRequested > 0
       ? drccPerShareWeightedSum / drccSharesRequested
       : 0;
+    const drccCallStrike = drccSharesRequested > 0
+      ? drccCallStrikeWeightedSum / drccSharesRequested
+      : null;
     const drccProtectionStrike = drccProtPutContracts > 0
       ? drccProtPutStrikeWeightedSum / drccProtPutContracts
       : null;
@@ -420,6 +426,7 @@ export function calculateStockRisk(
       ccCapStrike: ccShares > 0 ? ccCapStrike : null,
       drccCappedShares: drccShares > 0 ? drccShares : undefined,
       drccCapPerShare: drccShares > 0 ? drccPerShare : null,
+      drccCallStrike: drccShares > 0 ? drccCallStrike : null,
       drccProtectionStrike,
       drccProtectionContracts: drccProtPutContracts,
     });

@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp, ArrowUp } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp, ArrowUp, AlertTriangle } from 'lucide-react';
 
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -106,6 +106,13 @@ function getOptionCurrency(option: Position): string {
   return option.currency || 'USD';
 }
 
+const INCOMPLETE_STRAT_LABEL: Record<string, string> = {
+  iron_condor: 'Iron Condor',
+  double_diagonal: 'Double Diagonal',
+  covered_call: 'Covered Call',
+  derisking_covered_call: 'De-Risking Covered Call',
+};
+
 export function Derivatives() {
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
@@ -173,6 +180,7 @@ export function Derivatives() {
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
+  const [incompleteOpen, setIncompleteOpen] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
   const setWizardOpenPersisted = useCallback((open: boolean) => {
     setWizardOpen(open);
@@ -1088,6 +1096,80 @@ export function Derivatives() {
                   </div>
                   {remainingOtherStrategies.map((group, index) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+        )}
+
+        {/* Section 8: Strategie Incomplete (Manca Gamba) */}
+        {categories.incompleteStrategies.length > 0 && (
+        <Collapsible open={incompleteOpen} onOpenChange={setIncompleteOpen}>
+          <Card className="border-orange-500/40 bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <AlertTriangle className="w-5 h-5 text-orange-500" />
+                    <CardTitle className="text-xl">Strategie Incomplete</CardTitle>
+                    <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-500 border-orange-500/40">MANCA GAMBA</Badge>
+                    <Badge variant="secondary" className="text-xs">{categories.incompleteStrategies.length}</Badge>
+                  </div>
+                  {incompleteOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                <div className="text-xs text-muted-foreground mb-3">
+                  Strategie configurate con una o più gambe non presenti in portafoglio. Le gambe presenti sono mostrate; quelle mancanti sono evidenziate in arancione.
+                </div>
+                <div className="space-y-2">
+                  {categories.incompleteStrategies.map((inc, index) => (
+                    <div key={`${inc.configId}-${index}`} className="p-3 rounded-lg bg-muted/40 border border-orange-500/20 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold">{inc.underlying}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {INCOMPLETE_STRAT_LABEL[inc.strategyType] ?? inc.strategyType}
+                          </Badge>
+                          {inc.isSynthetic && (
+                            <Badge variant="outline" className="text-xs text-amber-500 border-amber-500">Sintetica</Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs text-orange-500 font-medium">Manca:</span>
+                          {inc.missingLegs.map((leg, i) => (
+                            <Badge key={i} variant="outline" className="text-xs bg-orange-500/15 text-orange-500 border-orange-500/40">
+                              {leg}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      {inc.presentLegs.length > 0 && (
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Gambe presenti</span>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {inc.presentLegs.map((leg, i) => {
+                              const q = leg.quantity || 0;
+                              return (
+                                <Badge key={i} variant="secondary" className="text-xs font-normal">
+                                  {q >= 0 ? '+' : '−'}{Math.abs(q)} {(leg.option_type || '').toUpperCase()} {formatNumber(leg.strike_price || 0, 0)}
+                                  {leg.expiry_date ? ` · ${leg.expiry_date}` : ''}
+                                  {leg.current_price != null ? ` · ${getOptionCurrency(leg)} ${formatNumber(leg.current_price, 2)}` : ''}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </CardContent>

@@ -215,36 +215,75 @@ function buildPureStockTooltip(s: {
   hasProtection: boolean;
   protectionContracts: number;
   protectionStrike: number | null;
+  protectionSavingsOriginal?: number;
   ccCappedShares?: number;
   ccCapStrike?: number | null;
   drccCappedShares?: number;
   drccCapPerShare?: number | null;
+  drccCallStrike?: number | null;
+  drccProtectionStrike?: number | null;
 }): string {
   const cur = s.currency;
   const fx = s.exchangeRate;
-  const grossNoPut = s.riskOriginalWithoutProtection ?? s.riskOriginal;
-  const capReduction = s.stockValue - grossNoPut;           // riduzione da cap CC/DR-CC ITM
-  const putReduction = grossNoPut - s.riskOriginal;         // riduzione da protezioni PUT
+  const n = (v: number, d = 0) => formatNumber(v, d);
   const lines: string[] = [
     `Azione ${s.underlying}`,
-    '='.repeat(36),
-    `${formatNumber(s.stockQuantity)} az. × ${cur} ${formatNumber(s.stockPrice, 2)} = ${cur} ${formatNumber(s.stockValue, 0)}   (valore di mercato)`,
+    '='.repeat(38),
+    `Valore di mercato: ${n(s.stockQuantity)} az. × ${cur} ${n(s.stockPrice, 2)} = ${cur} ${n(s.stockValue)}`,
+    '',
   ];
-  if (Math.abs(capReduction) > 0.5) {
-    const capBits: string[] = [];
-    if (s.ccCappedShares) capBits.push(`CC: ${formatNumber(s.ccCappedShares)} az. vincolate a strike ${formatNumber(s.ccCapStrike || 0, 2)}`);
-    if (s.drccCappedShares) capBits.push(`DR-CC: ${formatNumber(s.drccCappedShares)} az. a ${formatNumber(s.drccCapPerShare || 0, 2)}/az.`);
-    lines.push(`− Cap CC/DR-CC ITM = −${cur} ${formatNumber(capReduction, 0)}`);
-    if (capBits.length) lines.push(`    (${capBits.join(' • ')})`);
-    lines.push(`= Esposizione lorda (senza PUT): ${cur} ${formatNumber(grossNoPut, 0)}`);
+
+  let bucketRisk = 0;
+
+  // DR-CC: azioni cappate alla call, con protezione PUT → rischio = call − put
+  if (s.drccCappedShares && s.drccCapPerShare != null) {
+    const sh = s.drccCappedShares;
+    const perShare = s.drccCapPerShare;
+    const risk = perShare * sh;
+    bucketRisk += risk;
+    const callStr = s.drccCallStrike != null ? n(s.drccCallStrike, 2) : '?';
+    const putStr = s.drccProtectionStrike != null ? n(s.drccProtectionStrike, 2) : '?';
+    lines.push(
+      `• ${n(sh)} az. cappate a call ${cur} ${callStr}, protezione PUT a ${cur} ${putStr}`,
+      `   rischio/az = ${callStr} − ${putStr} = ${cur} ${n(perShare, 2)}`,
+      `   → ${n(sh)} × ${n(perShare, 2)} = ${cur} ${n(risk)}`,
+    );
   }
-  if (s.hasProtection && putReduction > 0.5) {
-    lines.push(`− Protezione PUT${s.protectionStrike != null ? ` (${s.protectionContracts} ctr @ ${formatNumber(s.protectionStrike, 0)})` : ''} = −${cur} ${formatNumber(putReduction, 0)}`);
+
+  // CC pura ITM: azioni cappate allo strike (nessuna protezione)
+  if (s.ccCappedShares && s.ccCapStrike != null) {
+    const sh = s.ccCappedShares;
+    const risk = s.ccCapStrike * sh;
+    bucketRisk += risk;
+    lines.push(
+      `• ${n(sh)} az. cappate a strike call ${cur} ${n(s.ccCapStrike, 2)}`,
+      `   → ${n(sh)} × ${n(s.ccCapStrike, 2)} = ${cur} ${n(risk)}`,
+    );
   }
+
+  // Resto (azioni protette da Long PUT e/o scoperte): riconciliazione al netto
+  const residual = s.riskOriginal - bucketRisk;
+  if (residual > 0.5 && (s.drccCappedShares || s.ccCappedShares)) {
+    if (s.protectionContracts > 0 && s.protectionStrike != null) {
+      lines.push(`• Altre az.: protezione Long PUT ${s.protectionContracts} ctr @ ${cur} ${n(s.protectionStrike)} + scoperte = ${cur} ${n(residual)}`);
+    } else {
+      lines.push(`• Altre az. scoperte = ${cur} ${n(residual)}`);
+    }
+  } else if (!s.drccCappedShares && !s.ccCappedShares) {
+    // Nessun cap: solo Long PUT protezione e/o scoperte
+    if (s.hasProtection && s.protectionStrike != null && (s.protectionSavingsOriginal ?? 0) > 0) {
+      lines.push(
+        `Valore lordo: ${cur} ${n(s.stockValue)}`,
+        `− Protezione PUT ${s.protectionContracts} ctr @ ${cur} ${n(s.protectionStrike)} = −${cur} ${n(s.protectionSavingsOriginal ?? 0)}`,
+      );
+    }
+  }
+
   lines.push(
-    `= Rischio netto: ${cur} ${formatNumber(s.riskOriginal, 0)}`,
+    '',
+    `= Rischio netto: ${cur} ${n(s.riskOriginal)}`,
     `FX: 1 ${cur} = 1/${fx.toFixed(4)} EUR`,
-    `Rischio EUR = ${cur} ${formatNumber(s.riskOriginal, 0)} / ${fx.toFixed(4)} = ${formatEUR(s.riskEUR)}`,
+    `Rischio EUR = ${cur} ${n(s.riskOriginal)} / ${fx.toFixed(4)} = ${formatEUR(s.riskEUR)}`,
   );
   return lines.join('\n');
 }
@@ -848,11 +887,11 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                       {(stock.ccCappedShares || stock.drccCappedShares) && (
                         <div className="text-xs text-muted-foreground">
                           {stock.ccCappedShares ? (
-                            <span>Cap CC ITM: {formatNumber(stock.ccCappedShares)} az. @ strike {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
+                            <span>{formatNumber(stock.ccCappedShares)} az. cappate a strike call {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
                           ) : null}
                           {stock.ccCappedShares && stock.drccCappedShares ? ' • ' : ''}
                           {stock.drccCappedShares ? (
-                            <span>Cap DR-CC ITM: {formatNumber(stock.drccCappedShares)} az. @ {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
+                            <span>{formatNumber(stock.drccCappedShares)} az. cappate a call {stock.currency} {formatNumber(stock.drccCallStrike || 0, 2)}, prot. PUT {stock.currency} {formatNumber(stock.drccProtectionStrike || 0, 2)} → rischio {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
                           ) : null}
                         </div>
                       )}
@@ -974,11 +1013,11 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                       {(stock.ccCappedShares || stock.drccCappedShares) && (
                         <div className="text-xs text-muted-foreground">
                           {stock.ccCappedShares ? (
-                            <span>Cap CC ITM: {formatNumber(stock.ccCappedShares)} az. @ strike {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
+                            <span>{formatNumber(stock.ccCappedShares)} az. cappate a strike call {stock.currency} {formatNumber(stock.ccCapStrike || 0, 2)}</span>
                           ) : null}
                           {stock.ccCappedShares && stock.drccCappedShares ? ' • ' : ''}
                           {stock.drccCappedShares ? (
-                            <span>Cap DR-CC ITM: {formatNumber(stock.drccCappedShares)} az. @ {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
+                            <span>{formatNumber(stock.drccCappedShares)} az. cappate a call {stock.currency} {formatNumber(stock.drccCallStrike || 0, 2)}, prot. PUT {stock.currency} {formatNumber(stock.drccProtectionStrike || 0, 2)} → rischio {stock.currency} {formatNumber(stock.drccCapPerShare || 0, 2)}/az.</span>
                           ) : null}
                         </div>
                       )}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { calculateStockRisk } from '@/lib/riskCalculator';
 import { Position } from '@/types/portfolio';
-import { CoveredCallPosition } from '@/lib/derivativeStrategies';
+import { CoveredCallPosition, DeRiskingCoveredCallPosition } from '@/lib/derivativeStrategies';
 
 function pos(p: Partial<Position>): Position {
   return {
@@ -57,5 +57,29 @@ describe('riskCalculator — cap Covered Call ITM sul rischio azioni', () => {
     expect(d.riskOriginal).toBeCloseTo(50000, 0);                 // 500 × 100 (no cap OTM)
     expect(d.riskOriginalWithoutProtection).toBeCloseTo(50000, 0);
     expect(d.ccCappedShares ?? 0).toBe(0);
+  });
+
+  it('DR-CC stile Micron: 100 az cap call 480, prot PUT 280 → 200/az → 20.000', () => {
+    const stock = pos({ asset_type: 'stock', ticker: 'MU', description: 'MICRON TECHNOLOGY',
+      quantity: 100, current_price: 500, currency: 'USD', exchange_rate: 1.08 });
+    const shortCall = pos({ asset_type: 'derivative', option_type: 'call', quantity: -1,
+      strike_price: 480, underlying: 'MU', ticker: 'MU', current_price: 30 });
+    const protPut = pos({ asset_type: 'derivative', option_type: 'put', quantity: 1,
+      strike_price: 280, underlying: 'MU', ticker: 'MU', current_price: 5 });
+    const dr: DeRiskingCoveredCallPosition = {
+      coveredCall: { option: shortCall, underlying: stock, contractsCovered: 1, sharesCovered: 100,
+        isFullyCovered: true, isSynthetic: false },
+      protectionPut: protPut, isSynthetic: false,
+    };
+    const [d] = calculateStockRisk([stock], [], [], [dr], [stock, shortCall, protPut]);
+
+    // rischio/az = call 480 − put 280 = 200 → 100 × 200 = 20.000
+    expect(d.drccCallStrike).toBeCloseTo(480, 0);
+    expect(d.drccProtectionStrike).toBeCloseTo(280, 0);
+    expect(d.drccCapPerShare).toBeCloseTo(200, 0);
+    expect(d.drccCappedShares).toBe(100);
+    expect(d.riskOriginal).toBeCloseTo(20000, 0);
+    // riskEUR = 20.000 / 1.08
+    expect(d.riskEUR).toBeCloseTo(20000 / 1.08, 1);
   });
 });
