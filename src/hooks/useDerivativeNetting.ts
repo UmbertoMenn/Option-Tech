@@ -711,3 +711,158 @@ export function getBreakdownForViewMode(
   const finalValue = baseValue + items.reduce((sum, b) => sum + b.value, 0);
   return { items, finalValue };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DECOMPOSIZIONE PER GAMBA (intrinseco + valore temporale)
+// Usata dalla tabella di dettaglio nel carousel "Valore Portafoglio" della dashboard.
+// Per ogni gamba canonica scompone il contributo al netting in:
+//   • perdita/valore intrinseco  = max(0, S−K)|max(0, K−S) × q × mult / fx   (segno della posizione)
+//   • valore temporale           = MTM − intrinseco                          (segno della posizione)
+// La somma dei contributi conteggiati riconcilia con il netting della vista:
+//   Σ contribEUR (netting_total)     = totalNetting − baseValue
+//   Σ contribEUR (netting_ex_cc_np)  = nettingExCCAndNP − baseValue
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LegDecompositionRow {
+  positionId: string;
+  category: StrategySectionCategory;
+  ticker: string;
+  optionType: 'call' | 'put' | null;
+  strike: number | null;
+  expiry: string | null;
+  /** contratti firmati (>0 long, <0 short) */
+  quantity: number;
+  /** prezzo del sottostante risolto (snapshot linkedStock → underlyingPrices fallback), null se ignoto */
+  spot: number | null;
+  /** prezzo opzione nativo (per azione), snapshot_price → current_price */
+  optionPrice: number;
+  exchangeRate: number;
+  /** mark-to-market pieno della gamba, in EUR, con segno */
+  marketValueEUR: number;
+  /** contributo intrinseco conteggiato nel totale di QUESTA vista (EUR, con segno) */
+  intrinsicCountedEUR: number;
+  /** contributo valore temporale conteggiato nel totale di QUESTA vista (EUR, con segno) */
+  timeValueCountedEUR: number;
+  /** valore temporale ESCLUSO dal totale (CC/NP corte in vista ex CC e NP); 0 altrimenti */
+  timeValueExcludedEUR: number;
+  /** contributo totale della gamba a QUESTA vista = intrinsicCounted + timeValueCounted */
+  contribEUR: number;
+  /** true se la gamba è valutata solo a intrinseco in questa vista (CC/NP corta in ex CC e NP) */
+  atIntrinsic: boolean;
+  /** true se la gamba è OTM ed esclusa integralmente (CC/NP corta OTM in ex CC e NP) */
+  isOTM: boolean;
+}
+
+export function computeLegDecomposition(
+  viewMode: 'netting_total' | 'netting_ex_cc_np',
+  positions: Position[],
+  overrides: DerivativeOverride[] = [],
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  strategyConfigs: StrategyConfiguration[] = []
+): LegDecompositionRow[] {
+  const derivatives = positions.filter(p => p.asset_type === 'derivative');
+  if (derivatives.length === 0) return [];
+
+  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
+  const rows: LegDecompositionRow[] = [];
+
+  for (const leg of legs) {
+    const p = leg.position;
+    const cat = leg.category;
+    const price = p.snapshot_price ?? p.current_price ?? 0;
+    const quantity = p.quantity;
+    const multiplier = 100;
+    const exchangeRate = getEffectiveExchangeRate(p);
+    const marketValueEUR = (price * quantity * multiplier) / exchangeRate;
+    const ticker = p.underlying || p.ticker || p.description || '?';
+
+    const resolveUnderlyingPrice = (): number => {
+      if (leg.associatedUnderlying) {
+        const up = leg.associatedUnderlying.snapshot_price ?? leg.associatedUnderlying.current_price ?? 0;
+        if (up > 0) return up;
+      }
+      const key = p.underlying || p.description || '';
+      if (underlyingPrices) return underlyingPrices[key]?.price ?? 0;
+      return 0;
+    };
+
+    const spotRaw = resolveUnderlyingPrice();
+    const spot = spotRaw > 0 ? spotRaw : null;
+    const strike = p.strike_price ?? null;
+    const isCall = p.option_type === 'call';
+    const isPut = p.option_type === 'put';
+    const contracts = Math.abs(quantity);
+    const sign = quantity >= 0 ? 1 : -1;
+
+    // Intrinseco per azione (magnitudine ≥ 0) e in EUR (magnitudine ≥ 0)
+    let intrinsicPerShare = 0;
+    if (spot != null && strike != null) {
+      intrinsicPerShare = isCall
+        ? Math.max(0, spot - strike)
+        : isPut
+          ? Math.max(0, strike - spot)
+          : 0;
+    }
+    const intrinsicMagEUR = (intrinsicPerShare * contracts * multiplier) / exchangeRate; // ≥ 0
+    const intrinsicSignedEUR = sign * intrinsicMagEUR;                                    // long +, short −
+    const timeValueSignedEUR = marketValueEUR - intrinsicSignedEUR;                       // MTM − intrinseco
+
+    let intrinsicCountedEUR = intrinsicSignedEUR;
+    let timeValueCountedEUR = timeValueSignedEUR;
+    let timeValueExcludedEUR = 0;
+    let contribEUR = marketValueEUR;
+    let atIntrinsic = false;
+    let isOTM = false;
+
+    if (viewMode === 'netting_ex_cc_np') {
+      const isShortCC = (cat === 'covered_call' || cat === 'derisking_cc') && isCall && quantity < 0;
+      const isShortNP = cat === 'naked_put' && isPut && quantity < 0;
+
+      if (isShortCC || isShortNP) {
+        atIntrinsic = true;
+        // ITM secondo la stessa convenzione del netting: CALL ITM ⇔ strike < spot, PUT ITM ⇔ strike ≥ spot
+        const itm = spot != null && strike != null
+          ? (isCall ? strike < spot : strike >= spot)
+          : false;
+        if (itm) {
+          // perdita intrinseca cappata al MTM (il cap scatta solo se l'opzione quota sotto intrinseco)
+          const cappedIntrinsic = Math.max(-intrinsicMagEUR, marketValueEUR);
+          intrinsicCountedEUR = cappedIntrinsic;
+          timeValueCountedEUR = 0;
+          timeValueExcludedEUR = marketValueEUR - cappedIntrinsic; // time value non pagato (hold to expiry)
+          contribEUR = cappedIntrinsic;
+        } else {
+          isOTM = true;
+          intrinsicCountedEUR = 0;
+          timeValueCountedEUR = 0;
+          timeValueExcludedEUR = marketValueEUR; // tutto MTM escluso (OTM: solo time value)
+          contribEUR = 0;
+        }
+      }
+      // altre categorie → MTM pieno, decomposizione naturale (già impostata sopra)
+    }
+    // netting_total → MTM pieno per tutte le gambe (già impostato sopra)
+
+    rows.push({
+      positionId: p.id,
+      category: cat,
+      ticker,
+      optionType: p.option_type ?? null,
+      strike,
+      expiry: p.expiry_date ?? null,
+      quantity,
+      spot,
+      optionPrice: price,
+      exchangeRate,
+      marketValueEUR,
+      intrinsicCountedEUR,
+      timeValueCountedEUR,
+      timeValueExcludedEUR,
+      contribEUR,
+      atIntrinsic,
+      isOTM,
+    });
+  }
+
+  return rows;
+}

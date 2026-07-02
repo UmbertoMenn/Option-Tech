@@ -2,7 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PortfolioDonutChart } from '@/components/dashboard/PortfolioDonutChart';
 import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLegend';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
-import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode, STRATEGY_SECTION_LABELS, StrategySectionCategory } from '@/hooks/useDerivativeNetting';
+import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode, computeLegDecomposition, STRATEGY_SECTION_LABELS, StrategySectionCategory } from '@/hooks/useDerivativeNetting';
+import { NettingLegDetailTable } from '@/components/dashboard/NettingLegDetailTable';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
@@ -323,6 +324,11 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
     );
   }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices, strategyConfigs]);
 
+  const legRows = useMemo(() => {
+    if (viewMode === 'base') return [];
+    return computeLegDecomposition(viewMode, positions, overrides, underlyingPrices, strategyConfigs);
+  }, [viewMode, positions, overrides, underlyingPrices, strategyConfigs]);
+
   const hasDer = positions.some(p => p.asset_type === 'derivative');
 
   const renderChart = () => {
@@ -346,6 +352,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
 
     // Netting views — carousel with bars + pie
     const baseValue = summary?.totalValue ?? 0;
+    const slideCount = 3 + (viewMode === 'netting_total' && isAdmin ? 1 : 0);
 
     return (
       <div className="flex flex-col">
@@ -381,11 +388,15 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             <CarouselItem>
               <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
             </CarouselItem>
+            {/* Slide: Dettaglio per gamba (intrinseco + valore temporale) */}
+            <CarouselItem>
+              <NettingLegDetailTable rows={legRows} viewMode={viewMode as 'netting_total' | 'netting_ex_cc_np'} />
+            </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
             <CarouselPrevious className="static translate-y-0" />
             <div className="flex gap-2">
-              {Array.from({ length: viewMode === 'netting_total' ? 3 : 2 }).map((_, index) => (
+              {Array.from({ length: slideCount }).map((_, index) => (
                 <button
                   key={index}
                   onClick={() => scrollTo(index)}
