@@ -792,56 +792,6 @@ export type Database = {
           },
         ]
       }
-      portfolio_full_snapshots: {
-        Row: {
-          id: string
-          portfolio_id: string
-          snapshot_date: string
-          positions: Json
-          strategy_configurations: Json
-          derivative_overrides: Json
-          gp_holdings: Json
-          cash_value: number
-          gp_total_value: number | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          portfolio_id: string
-          snapshot_date: string
-          positions?: Json
-          strategy_configurations?: Json
-          derivative_overrides?: Json
-          gp_holdings?: Json
-          cash_value?: number
-          gp_total_value?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          portfolio_id?: string
-          snapshot_date?: string
-          positions?: Json
-          strategy_configurations?: Json
-          derivative_overrides?: Json
-          gp_holdings?: Json
-          cash_value?: number
-          gp_total_value?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "portfolio_full_snapshots_portfolio_id_fkey"
-            columns: ["portfolio_id"]
-            isOneToOne: false
-            referencedRelation: "portfolios"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       portfolio_latest_values: {
         Row: {
           equity_exposure_pct: number
