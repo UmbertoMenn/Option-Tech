@@ -642,7 +642,6 @@ export type Database = {
           id: string
           netting_ex_cc: number
           netting_ex_cc_np: number
-          netting_intrinsic_b: number | null
           netting_total: number
           portfolio_id: string
           snapshot_date: string
@@ -659,7 +658,6 @@ export type Database = {
           id?: string
           netting_ex_cc?: number
           netting_ex_cc_np?: number
-          netting_intrinsic_b?: number | null
           netting_total?: number
           portfolio_id: string
           snapshot_date: string
@@ -676,7 +674,6 @@ export type Database = {
           id?: string
           netting_ex_cc?: number
           netting_ex_cc_np?: number
-          netting_intrinsic_b?: number | null
           netting_total?: number
           portfolio_id?: string
           snapshot_date?: string
@@ -796,7 +793,6 @@ export type Database = {
         Row: {
           equity_exposure_pct: number
           netting_ex_cc_np: number
-          netting_intrinsic_b: number | null
           netting_total: number
           portfolio_id: string
           total_value: number
@@ -806,7 +802,6 @@ export type Database = {
         Insert: {
           equity_exposure_pct?: number
           netting_ex_cc_np?: number
-          netting_intrinsic_b?: number | null
           netting_total?: number
           portfolio_id: string
           total_value?: number
@@ -816,7 +811,6 @@ export type Database = {
         Update: {
           equity_exposure_pct?: number
           netting_ex_cc_np?: number
-          netting_intrinsic_b?: number | null
           netting_total?: number
           portfolio_id?: string
           total_value?: number
