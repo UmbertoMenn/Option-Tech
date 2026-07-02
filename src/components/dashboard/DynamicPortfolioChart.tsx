@@ -300,15 +300,15 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       );
     }
 
-    // Netting views — carousel with bars + pie
+    // Netting views — carousel
     const baseValue = summary?.totalValue ?? 0;
-    const slideCount = 3 + (viewMode === 'netting_total' && isAdmin ? 1 : 0);
+    const slideCount = isAdmin && viewMode === 'netting_total' ? 3 : 2;
 
     return (
       <div className="flex flex-col">
         <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
           <CarouselContent>
-            {/* Slide 0 (solo Netting Totale): proiezione patrimonio alle scadenze */}
+            {/* Slide 0 (solo Admin + Netting Totale): proiezione patrimonio alle scadenze */}
             {viewMode === 'netting_total' && isAdmin && (
               <CarouselItem>
                 <PatrimonyProjectionCard
@@ -320,27 +320,13 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 />
               </CarouselItem>
             )}
-            {/* Slide: Simple bars */}
-            <CarouselItem>
-              <SimpleBarsChart baseValue={baseValue} finalValue={finalValue} />
-              <div className="mt-1 text-center">
-                <p className="text-2xl font-bold text-blue-500">
-                  {formatEUR(finalValue)}
-                </p>
-                {NETTING_DESCRIPTIONS[viewMode] && (
-                  <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-                    {NETTING_DESCRIPTIONS[viewMode]}
-                  </p>
-                )}
-              </div>
-            </CarouselItem>
-            {/* Slide: Breakdown chart */}
-            <CarouselItem>
-              <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
-            </CarouselItem>
-            {/* Slide: Dettaglio per gamba (intrinseco + valore temporale) */}
+            {/* Slide 1: Dettaglio per gamba (intrinseco + valore temporale) */}
             <CarouselItem>
               <NettingLegDetailTable rows={legRows} viewMode={viewMode} />
+            </CarouselItem>
+            {/* Slide 2: Breakdown chart */}
+            <CarouselItem>
+              <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
