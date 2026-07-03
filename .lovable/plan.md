@@ -1,60 +1,30 @@
 ## Problema
 
-1. **Salvataggio non persistente**: creando una strategia (spec. da posizioni sotto filtro "Libere") e cliccando *Salva Configurazione*, la strategia sembra non essere memorizzata alla riapertura del wizard.
-2. **Filtro "Libere" espelle la strategia appena creata**: appena si crea una strategia da un gruppo, quel gruppo perde le sue "posizioni libere" e sparisce dalla vista *Libere*. Risultato: la nuova strategia non è più visibile e non si può cambiarne il tipo dalla tendina, obbligando l'utente a passare a *Tutte* e cercarla.
+Al login (utente normale) si osservano due sintomi in sequenza:
+1. Un valore di "Netting Totale" iniziale sbagliato (residuo di stato precedente / cache).
+2. Poi la Dashboard mostra "nessun portafoglio caricato" con tutto a zero, finché non si seleziona manualmente il portafoglio dal menu.
 
-## Soluzione
+Causa: race condition tra il ripristino della sessione Supabase, il caricamento della lista portafogli in `PortfolioContext` e il primo render della Dashboard. `selectedId` parte da `localStorage` (potenzialmente stale/vuoto al primo login), le query `positions`/`portfolio` girano con `portfolio?.id` non ancora valorizzato → ritornano vuoto → Dashboard renderizza lo stato "zero" prima che l'auto-selezione del primo portafoglio scatti.
 
-### A. Filtro "Libere" — mantenere visibili i gruppi appena toccati
+## Fix
 
-- Introdurre in `StrategyConfigWizard` uno stato locale `touchedGroupKeys: Set<string>` (persistito nel `WizardDraft` insieme agli altri campi).
-- Aggiungere il group key al set quando l'utente compie una qualsiasi delle azioni:
-  - `createStrategyFromSelected` (nuova strategia creata dal gruppo)
-  - `addToStrategy` (aggiunta di leg a una strategia del gruppo)
-  - `removeFromStrategy`, `deleteStrategy`, `updateStrategyType`, `toggleSynthetic` (modifica strategia appartenente al gruppo)
-- Modificare il branch `groupFilter === 'unassigned'` in `filteredGroups`:
+1. **`src/contexts/AuthContext.tsx`** — esporre un flag `authReady` che diventa `true` solo dopo che `supabase.auth.getSession()` ha completato il ripristino iniziale (pattern `useAuthReady`). Evita che i consumer partano prima del ripristino sessione.
 
-  ```ts
-  groups = groups.filter(g =>
-    g.positions.some(p => !assignedIds.has(p.id)) || touchedGroupKeys.has(g.key)
-  );
-  ```
+2. **`src/contexts/PortfolioContext.tsx`**
+   - Non leggere `localStorage` per `selectedId` finché `authReady && !!user`; inizializzare a `null` e valorizzarlo dentro l'effetto di auto-selezione.
+   - Pulire `SELECTED_PORTFOLIO_KEY` e le chiavi admin quando `user?.id` cambia rispetto al valore precedente (evita "spillover" da sessione precedente sullo stesso browser).
+   - Esporre `isReady` = `authReady && !portfoliosQuery.isLoading && (portfolios.length === 0 || !!selectedPortfolio)` così i consumer sanno se possono fidarsi dello stato.
+   - Mantenere l'ordinamento attuale (`last_updated desc, created_at desc`) come definizione di "portafoglio principale" per utenti normali.
 
-- Reset di `touchedGroupKeys` alla chiusura del wizard (viene già rimosso il draft in `handleOpenChange` e `handleSave`).
+3. **`src/components/dashboard/Dashboard.tsx`** — se `!isReady` (o `isLoading` del portafoglio) mostrare il `PageLoader`/skeleton invece dello stato "tutto a zero / nessun dato". Questo elimina sia il flash del netting sbagliato sia la schermata vuota.
 
-Effetto: dopo la creazione della strategia il gruppo resta visibile in *Libere* per l'intera sessione, permettendo di scegliere il tipo dalla tendina senza cambiare filtro.
+4. **`src/hooks/usePortfolio.ts`** — abilitare la query `positions` solo quando `portfolio?.id` è valorizzato E `authReady` è vero (già parzialmente così, ma la aggancio esplicita a `authReady` per sicurezza). Nessuna modifica di logica sui calcoli.
 
-### B. Salvataggio strategie — diagnosi e fix
-
-Analisi del flusso attuale (`handleSave` → `useStrategyConfigurations.upsertBatch`):
-
-1. `handleSave` costruisce `rawConfigs` da `strategies`.
-2. `upsertBatchMutation` esegue `delete` di TUTTI i config del portfolio, poi `insert` dei nuovi.
-3. Se il click "Salva" viene fatto mentre il wizard è in un filtro parziale con `filterUnderlyings` **non** settato (il caso del filtro UI Tutte/Libere/Archiviate: non setta la prop), **tutti gli esistenti passano dallo state `strategies`** — devono essere lì grazie a `restoreFromConfigs` all'apertura.
-
-Cause probabili del bug segnalato dopo l'ultima modifica:
-
-- L'utente crea la strategia sotto *Libere*, il gruppo sparisce (bug A). Se poi rimuove un leg pensando di correggere o clicca il cestino dentro un altro gruppo non visibile (perché contratto ma con lo stesso underlying archiviato/collassato), la strategia risulta cancellata silenziosamente.
-- Strategie composte da **sole azioni** (nessuna gamba derivata): `buildSignatures` restituisce `[]`. La riga viene inserita, ma dopo `recomputeLatestSnapshot` altri percorsi (monitoraggio) la scartano perché priva di derivati — l'utente pensa quindi che non sia stata salvata.
-
-Interventi:
-
-1. Correggere il bug A (sopra) elimina il caso più frequente di "strategia scomparsa".
-2. In `handleSave` mostrare in caso di errore un `toast.error` esplicito con il messaggio Supabase (attualmente già presente in `onError`, verificare che non sia mascherato) e aggiungere log `console.error` prima del throw per facilitare la diagnosi.
-3. In `handleSave` **rifiutare** e mostrare toast di errore se una strategia ha 0 derivati (previene ambiguità: le strategie senza leg opzione non sono rappresentabili nel monitoraggio). Il messaggio guida l'utente a includere almeno un contratto o eliminare la voce.
-4. Riprodurre in sandbox (Playwright) l'esatto scenario segnalato (portfolio → apri wizard → filtra *Libere* → crea strategia da un gruppo → Salva → riapri wizard) per verificare la persistenza dopo il fix A.
-
-## File toccati
-
-- `src/components/derivatives/StrategyConfigWizard.tsx`
-  - Nuovo stato `touchedGroupKeys` + persistenza draft
-  - Marcatura del gruppo negli handler di creazione/modifica strategia
-  - `filteredGroups` per *Libere* rilassato con OR su touched
-  - `handleSave`: guard "almeno un derivato per strategia" + log/toast diagnostici
-
-Nessuna modifica a hook, edge functions o schema DB.
+Nessuna modifica su admin landing, storico, aggregati o sul database.
 
 ## Verifica
 
-- Playwright su `/derivatives`: apri wizard, filtra *Libere*, seleziona posizioni di un gruppo, crea strategia → il gruppo resta visibile; imposta il tipo dalla tendina → salva → riapri: la configurazione è presente.
-- Test manuale con strategia legata a stock split (slot 100 azioni) per assicurare che il flusso di persistenza pre-esistente non regressi.
+- Login utente con 1 solo portafoglio → si apre direttamente su quel portafoglio, nessuna schermata "zero" intermedia.
+- Login utente con più portafogli → si apre sul più recente (`last_updated desc`), coerente con il selettore.
+- Refresh a pagina caricata → nessuna regressione (selectedId persiste in localStorage dopo l'auto-selezione).
+- Admin: landing sull'ultimo cliente aggiornato invariata.
