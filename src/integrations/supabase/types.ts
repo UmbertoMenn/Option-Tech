@@ -897,6 +897,7 @@ export type Database = {
           initial_value: number | null
           last_updated: string | null
           name: string
+          restricted_cash_value: number | null
           snapshot_date: string | null
           total_value: number | null
           user_id: string
@@ -914,6 +915,7 @@ export type Database = {
           initial_value?: number | null
           last_updated?: string | null
           name?: string
+          restricted_cash_value?: number | null
           snapshot_date?: string | null
           total_value?: number | null
           user_id: string
@@ -931,6 +933,7 @@ export type Database = {
           initial_value?: number | null
           last_updated?: string | null
           name?: string
+          restricted_cash_value?: number | null
           snapshot_date?: string | null
           total_value?: number | null
           user_id?: string
