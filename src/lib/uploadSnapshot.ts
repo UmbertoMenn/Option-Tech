@@ -18,17 +18,9 @@ interface UploadSnapshotInput {
   portfolioId: string;
   snapshotDate: string; // YYYY-MM-DD
   cashValue: number;
-  /**
-   * true quando la GP è stata aggiornata NELLO STESSO upload dei flussi CSV
-   * (stessa DATA RIFERIMENTO dei titoli): in tal caso la GP è per costruzione
-   * allineata allo snapshot e il check sui timestamp va bypassato — il file
-   * è tipicamente datato al giorno precedente e i timestamp di scrittura
-   * (odierni) risulterebbero sempre "successivi" alla snapshot date.
-   */
-  gpRefreshedInThisUpload?: boolean;
 }
 
-export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValue, gpRefreshedInThisUpload }: UploadSnapshotInput): Promise<void> {
+export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValue }: UploadSnapshotInput): Promise<void> {
   try {
     // 1. Fetch freshly-saved positions
     const { data: positionsRaw, error: posErr } = await supabase
@@ -69,8 +61,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
     }, 0);
     // End-of-day in UTC for the snapshot date
     const snapshotDayEnd = new Date(`${snapshotDate}T23:59:59Z`).getTime();
-    const gpAlignedWithSnapshot = gpRefreshedInThisUpload === true
-      || (latestGpTs > 0 && latestGpTs <= snapshotDayEnd);
+    const gpAlignedWithSnapshot = latestGpTs > 0 && latestGpTs <= snapshotDayEnd;
 
     const gpTotalValue = gpAlignedWithSnapshot ? (portfolioData?.gp_total_value || 0) : 0;
 

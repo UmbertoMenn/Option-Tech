@@ -128,7 +128,7 @@ export function FileUploader() {
 
       // Deduplica liquidità per accountId (prima occorrenza vince).
       // Conti senza ID riconoscibile vengono trattati come distinti.
-      const seenAccounts = new Map<string, { value: number; restricted: boolean }>();
+      const seenAccounts = new Map<string, number>();
       let anonCash = 0;
       let anonCount = 0;
       let dedupCount = 0;
@@ -141,7 +141,7 @@ export function FileUploader() {
             continue;
           }
           if (!seenAccounts.has(id)) {
-            seenAccounts.set(id, { value: acc.value, restricted: !!acc.restricted });
+            seenAccounts.set(id, acc.value);
           } else {
             dedupCount += 1;
           }
@@ -151,24 +151,7 @@ export function FileUploader() {
       console.log(
         `[FileUploader] liquidità: ${seenAccounts.size} conti, ${anonCount} senza ID, ${dedupCount} duplicati rimossi`,
       );
-      const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v.value, 0) + anonCash;
-      // Liquidità vincolata (conti "A9...", garanzia derivati): inclusa in cashValue,
-      // salvata separatamente per la visualizzazione in dashboard.
-      const restrictedCashValue = Array.from(seenAccounts.values())
-        .filter(v => v.restricted)
-        .reduce((s, v) => s + v.value, 0);
-
-      // GP dai flussi CSV: depositi "08..." (titoli) + conti "B0..." (liquidità)
-      const gpHoldingsFromCsv = parsed.flatMap(p => p.gpHoldings || []);
-      const seenGpCash = new Map<string, number>();
-      for (const p of parsed) {
-        for (const acc of (p.gpCashAccounts || [])) {
-          const id = (acc.accountId || '').trim();
-          if (id && !seenGpCash.has(id)) seenGpCash.set(id, acc.value);
-        }
-      }
-      const gpCashFromCsv = Array.from(seenGpCash.values()).reduce((s, v) => s + v, 0);
-      const hasGpFromCsv = gpHoldingsFromCsv.length > 0 || gpCashFromCsv !== 0;
+      const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v, 0) + anonCash;
 
       if (positions.length === 0) {
         toast.error('Nessuna posizione trovata');
@@ -184,66 +167,6 @@ export function FileUploader() {
         .update(updateData)
         .eq('id', targetPortfolioId);
 
-      // Liquidità vincolata: update separato e non bloccante — se la colonna
-      // restricted_cash_value non è ancora stata migrata, l'upload principale
-      // non deve fallire.
-      try {
-        const { error: restrictedErr } = await supabase
-          .from('portfolios')
-          .update({ restricted_cash_value: restrictedCashValue })
-          .eq('id', targetPortfolioId);
-        if (restrictedErr) console.error('[FileUploader] restricted_cash_value non salvata:', restrictedErr.message);
-      } catch (restrictedErr) {
-        console.error('[FileUploader] restricted_cash_value non salvata:', restrictedErr);
-      }
-
-      // GP dai flussi CSV: sostituisce le holdings e aggiorna i totali PRIMA
-      // dello snapshot, così saveFullSnapshot congela la GP aggiornata.
-      if (hasGpFromCsv) {
-        const gpCashHoldings = gpCashFromCsv !== 0
-          ? [{
-              asset_type: 'cash' as const,
-              description: 'Liquidità GP',
-              quantity: 0,
-              market_value: gpCashFromCsv,
-              price: null,
-              currency: 'EUR',
-              exchange_rate: 1,
-              weight_pct: null,
-              ticker_code: null,
-              price_date: snapshotDate,
-            }]
-          : [];
-        const allGpHoldings = [...gpHoldingsFromCsv, ...gpCashHoldings];
-        const gpTotalValue = allGpHoldings.reduce((s, h) => s + (h.market_value || 0), 0);
-
-        await supabase.from('gp_holdings').delete().eq('portfolio_id', targetPortfolioId);
-        const { error: gpInsertError } = await supabase.from('gp_holdings').insert(
-          allGpHoldings.map(h => ({
-            portfolio_id: targetPortfolioId,
-            asset_type: h.asset_type,
-            description: h.description,
-            quantity: h.quantity,
-            market_value: h.market_value,
-            price: h.price,
-            currency: h.currency,
-            exchange_rate: h.exchange_rate,
-            weight_pct: h.weight_pct,
-            ticker_code: h.ticker_code,
-            price_date: h.price_date,
-          }))
-        );
-        if (gpInsertError) {
-          console.error('[FileUploader] Errore inserimento GP da CSV:', gpInsertError.message);
-        } else {
-          await supabase.from('portfolios').update({
-            gp_total_value: gpTotalValue,
-            gp_cash_value: gpCashFromCsv,
-          }).eq('id', targetPortfolioId);
-          console.log(`[FileUploader] GP da CSV: ${allGpHoldings.length} holdings aggiornate`);
-        }
-      }
-
       if (!error) {
         await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
@@ -258,7 +181,6 @@ export function FileUploader() {
             portfolioId: targetPortfolioId,
             snapshotDate,
             cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
-            gpRefreshedInThisUpload: hasGpFromCsv,
           });
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
@@ -374,7 +296,6 @@ export function FileUploader() {
     accept: {
       'application/vnd.ms-excel': ['.xls'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'text/csv': ['.csv'],
     },
     maxFiles: 2,
     disabled: isProcessing,
