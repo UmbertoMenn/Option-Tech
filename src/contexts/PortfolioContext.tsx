@@ -392,6 +392,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries({ queryKey: ['deposits'] });
   }, [portfolios, queryClient]);
 
+  const isReady =
+    !!user &&
+    hasInitialized &&
+    !portfoliosQuery.isLoading &&
+    (isAdminMode ? !adminPortfolioQuery.isLoading : true);
+
   return (
     <PortfolioContext.Provider
       value={{
@@ -402,12 +408,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         deletePortfolio,
         renamePortfolio,
         isLoading: portfoliosQuery.isLoading,
+        isReady,
         // Admin mode
         isAdminMode,
         adminViewUserId,
         setAdminViewPortfolio,
         exitAdminMode,
         isAggregatedView,
+
         selectedPortfolioId: selectedId,
         historicalViewDate,
         isHistoricalView,
