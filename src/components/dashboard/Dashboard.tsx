@@ -46,9 +46,10 @@ export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+  const { isAggregatedView, selectedPortfolioId, isReady: isPortfolioReady } = usePortfolioContext();
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const { portfolio, positions, summary: rawSummary, isLoading, isHistoricalView } = usePortfolio();
+
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
   const { gpHoldings, gpSummary } = useGPHoldings();
