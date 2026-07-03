@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +34,7 @@ interface PortfolioContextType {
   deletePortfolio: (id: string) => Promise<void>;
   renamePortfolio: (id: string, name: string) => Promise<void>;
   isLoading: boolean;
+  isReady: boolean;
   // Admin mode
   isAdminMode: boolean;
   adminViewUserId: string | null;
@@ -47,6 +48,7 @@ interface PortfolioContextType {
   enterHistoricalView: (date: string) => void;
   exitHistoricalView: () => void;
 }
+
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
@@ -140,16 +142,26 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const portfolios = portfoliosQuery.data || [];
 
-  // Reset quando user cambia (logout)
+  // Reset quando user cambia (logout o switch account): scarta selezioni
+  // orfane dalla sessione precedente per evitare che vengano usate come base
+  // per l'auto-selezione al login successivo.
+  const lastUserIdRef = useRef<string | null>(user?.id ?? null);
   useEffect(() => {
-    if (!user) {
+    const currentId = user?.id ?? null;
+    if (currentId !== lastUserIdRef.current) {
+      lastUserIdRef.current = currentId;
       setSelectedId(null);
       setHasInitialized(false);
       setAdminViewUserId(null);
       sessionStorage.removeItem(ADMIN_VIEW_USER_KEY);
       sessionStorage.removeItem(ADMIN_VIEW_PORTFOLIO_KEY);
+      sessionStorage.removeItem(HISTORICAL_VIEW_DATE_KEY);
+      sessionStorage.removeItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
+      // localStorage del portafoglio personale viene rivalutato dall'effetto di
+      // auto-selezione: se non appartiene al nuovo utente, verrà scartato lì.
     }
-  }, [user]);
+  }, [user?.id]);
+
 
   // Auto-selezione robusta - PRIORITÀ: selectedId attuale > localStorage > fallback
   useEffect(() => {
@@ -390,6 +402,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries({ queryKey: ['deposits'] });
   }, [portfolios, queryClient]);
 
+  const isReady =
+    !!user &&
+    hasInitialized &&
+    !portfoliosQuery.isLoading &&
+    (isAdminMode ? !adminPortfolioQuery.isLoading : true);
+
   return (
     <PortfolioContext.Provider
       value={{
@@ -400,12 +418,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         deletePortfolio,
         renamePortfolio,
         isLoading: portfoliosQuery.isLoading,
+        isReady,
         // Admin mode
         isAdminMode,
         adminViewUserId,
         setAdminViewPortfolio,
         exitAdminMode,
         isAggregatedView,
+
         selectedPortfolioId: selectedId,
         historicalViewDate,
         isHistoricalView,

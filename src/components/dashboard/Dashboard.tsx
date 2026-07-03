@@ -46,9 +46,10 @@ export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+  const { isAggregatedView, selectedPortfolioId, isReady: isPortfolioReady } = usePortfolioContext();
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const { portfolio, positions, summary: rawSummary, isLoading, isHistoricalView } = usePortfolio();
+
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
   const { gpHoldings, gpSummary } = useGPHoldings();
@@ -278,9 +279,13 @@ export function Dashboard() {
     new Date(excelDate) < new Date(lastSavedSnapshotDate)
   );
 
-  if (isLoading) {
+  // Attende sia il ripristino della lista portafogli (auto-selezione del principale)
+  // sia il caricamento delle posizioni del portafoglio corrente, così da evitare
+  // un flash con "tutto a zero" al login prima che la selezione sia completa.
+  if (!isPortfolioReady || isLoading) {
     return <DashboardSkeleton />;
   }
+
 
   return (
     <div className="min-h-screen bg-background">
