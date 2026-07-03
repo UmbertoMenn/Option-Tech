@@ -279,9 +279,13 @@ export function Dashboard() {
     new Date(excelDate) < new Date(lastSavedSnapshotDate)
   );
 
-  if (isLoading) {
+  // Attende sia il ripristino della lista portafogli (auto-selezione del principale)
+  // sia il caricamento delle posizioni del portafoglio corrente, così da evitare
+  // un flash con "tutto a zero" al login prima che la selezione sia completa.
+  if (!isPortfolioReady || isLoading) {
     return <DashboardSkeleton />;
   }
+
 
   return (
     <div className="min-h-screen bg-background">
