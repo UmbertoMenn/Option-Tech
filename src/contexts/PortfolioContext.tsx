@@ -34,6 +34,7 @@ interface PortfolioContextType {
   deletePortfolio: (id: string) => Promise<void>;
   renamePortfolio: (id: string, name: string) => Promise<void>;
   isLoading: boolean;
+  isReady: boolean;
   // Admin mode
   isAdminMode: boolean;
   adminViewUserId: string | null;
@@ -47,6 +48,7 @@ interface PortfolioContextType {
   enterHistoricalView: (date: string) => void;
   exitHistoricalView: () => void;
 }
+
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
