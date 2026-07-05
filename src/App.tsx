@@ -23,6 +23,7 @@ const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ de
 const OptionAnalyzer = lazy(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazy(() => import("@/pages/Simulator"));
+const OAuthConsent = lazy(() => import("@/pages/OAuthConsent"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -81,6 +82,7 @@ function InProgressRouteGuard() {
 function AppRoutes() {
   const { user, loading, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(
     () => sessionStorage.getItem('disclaimerAccepted') === 'true'
   );
@@ -92,11 +94,33 @@ function AppRoutes() {
     }
   }, [user]);
 
+  // Dopo il login (e disclaimer accettato), se c'è un intent OAuth salvato
+  // riportiamo l'utente alla pagina di consenso originale.
+  useEffect(() => {
+    if (!user || !disclaimerAccepted) return;
+    const next = sessionStorage.getItem('oauth_next');
+    if (!next) return;
+    sessionStorage.removeItem('oauth_next');
+    if (next.startsWith('/') && !next.startsWith('//')) {
+      navigate(next, { replace: true });
+    }
+  }, [user, disclaimerAccepted, navigate]);
+
   const handleAcceptDisclaimer = () => {
     sessionStorage.setItem('disclaimerAccepted', 'true');
     setDisclaimerAccepted(true);
     toast.success('Benvenuto!');
   };
+
+  // La pagina di consenso OAuth deve poter renderizzare anche senza sessione:
+  // gestisce internamente il login (salva `oauth_next` e mostra AuthForm).
+  if (location.pathname === '/.lovable/oauth/consent') {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <OAuthConsent />
+      </Suspense>
+    );
+  }
 
   // Reset password is now handled by admin, redirect to login
   if (location.pathname === '/reset-password') {
