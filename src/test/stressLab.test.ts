@@ -10,6 +10,8 @@ import {
   occMargin,
   effIVMap,
   nettingPatrimonialDelta,
+  marginCallShock,
+  BOND_MARGIN_HAIRCUT,
   StressLeg,
   StressEquity,
   StressUnderlyingMap,
@@ -536,5 +538,71 @@ describe('stressLab — netting Ex CC e NP (intrinseco hold-to-expiry)', () => {
     expect(below.optEUR).toBeCloseTo(15000, 4); // intrinseco 150 → 0
     // perdita = (strike − spot)·azioni = (350 − 300)·100 = 5000
     expect(below.totEUR).toBeCloseTo(-5000, 4);
+  });
+});
+
+describe('marginCallShock — soglia margin call (cash + bond·95%)', () => {
+  it('BOND_MARGIN_HAIRCUT è 0,95', () => {
+    expect(BOND_MARGIN_HAIRCUT).toBe(0.95);
+  });
+
+  it('interpola linearmente il primo attraversamento margine > cover', () => {
+    const pts = [
+      { x: 0, margin: 100 },
+      { x: -10, margin: 200 },
+      { x: -20, margin: 400 }, // cover 300 → a metà tra −10 e −20
+    ];
+    expect(marginCallShock(pts, 300)).toBeCloseTo(-15, 6);
+  });
+
+  it('ritorna la x del primo punto se già in margin call a shock 0', () => {
+    const pts = [
+      { x: 0, margin: 500 },
+      { x: -10, margin: 700 },
+    ];
+    expect(marginCallShock(pts, 300)).toBe(0);
+  });
+
+  it('ritorna null se la soglia non viene mai superata', () => {
+    const pts = [
+      { x: 0, margin: 100 },
+      { x: -10, margin: 150 },
+      { x: -20, margin: 180 },
+    ];
+    expect(marginCallShock(pts, 300)).toBeNull();
+  });
+
+  it('ritorna null con cover non positiva o senza punti', () => {
+    expect(marginCallShock([], 100)).toBeNull();
+    expect(marginCallShock([{ x: 0, margin: 50 }], 0)).toBeNull();
+    expect(marginCallShock([{ x: 0, margin: 50 }], -10)).toBeNull();
+  });
+
+  it('non scatta su attraversamenti al ribasso (margine che RIENTRA sotto cover)', () => {
+    // sale sopra cover tra −10 e −20, poi rientra: il punto restituito è il PRIMO attraversamento
+    const pts = [
+      { x: 0, margin: 100 },
+      { x: -10, margin: 250 },
+      { x: -20, margin: 350 },
+      { x: -30, margin: 280 },
+      { x: -40, margin: 500 },
+    ];
+    expect(marginCallShock(pts, 300)).toBeCloseTo(-15, 6);
+  });
+
+  it('coerenza con la definizione cover = cash + bond × 0,95', () => {
+    const cash = 100_000;
+    const bonds = 200_000;
+    const cover = cash + bonds * BOND_MARGIN_HAIRCUT; // 290k
+    const pts = [
+      { x: 0, margin: 200_000 },
+      { x: -10, margin: 290_000 }, // esattamente = cover → NON ancora margin call (serve >)
+      { x: -20, margin: 380_000 },
+    ];
+    const mc = marginCallShock(pts, cover);
+    // attraversamento tra −10 (=cover, non oltre) e −20
+    expect(mc).not.toBeNull();
+    expect(mc as number).toBeLessThanOrEqual(-10);
+    expect(mc as number).toBeGreaterThan(-20);
   });
 });

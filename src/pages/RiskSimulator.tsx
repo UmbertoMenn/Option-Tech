@@ -29,6 +29,8 @@ import {
   coupledDV1M,
   termFactor,
   T0M,
+  marginCallShock,
+  BOND_MARGIN_HAIRCUT,
   StressUnderlyingMap,
 } from '@/lib/stressLab';
 
@@ -344,7 +346,12 @@ function StressLabContent() {
   const [nakedPct, setNakedPct] = useState(0.2);
 
   const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown } = data;
-  const bondCashBase = (patrimonyBreakdown?.bondsEUR ?? 0) + (patrimonyBreakdown?.cashEUR ?? 0);
+  /* Copertura del margine = cash + bond valorizzati al 95% (haircut prudenziale
+   * banca; cash GP escluso). La margin call scatta quando il margine richiesto
+   * supera questa soglia. */
+  const marginCover =
+    (patrimonyBreakdown?.cashEUR ?? 0) +
+    (patrimonyBreakdown?.bondsEUR ?? 0) * BOND_MARGIN_HAIRCUT;
   const r = riskFree;
 
   // Sottostanti per lo SCENARIO attivo: in modalità 'titoli' i nomi si muovono
@@ -440,7 +447,7 @@ function StressLabContent() {
    *  - marNow (margine iniziale) e marCurve (curva margine vs shock) NON dipendono dallo
    *    shock corrente d → si ricalcolano solo se cambiano portafoglio/override/orizzonte;
    *  - marScen/marPnlMTM dipendono da d → poche chiamate per tick. */
-  const { marNow, marCurve } = useMemo(() => {
+  const { marNow, marCurve, marginCallX } = useMemo(() => {
     const fxR = fxRange / 100;
     const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
     const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false };
@@ -448,18 +455,29 @@ function StressLabContent() {
     const sig0s: Record<number, number> = {};
     base.rows.forEach((x) => (sig0s[x.i] = x.sig0));
     const now = occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
-    const pts: { d: number; Margine: number }[] = [];
-    for (let x = -35; x <= 15.01; x += 2.5) {
+    // Scan esteso fino a −95%: serve sia alla curva sia a trovare la margin call
+    // anche quando scatta oltre il range di default −35%.
+    const all: { d: number; Margine: number }[] = [];
+    for (let x = -95; x <= 15.01; x += 2.5) {
       const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days });
       const sgs: Record<number, number> = {};
       s.rows.forEach((row) => (sgs[row.i] = row.sig1));
-      pts.push({
+      all.push({
         d: x,
         Margine: Math.round(occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total),
       });
     }
-    return { marNow: now, marCurve: pts };
-  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman]);
+    // Margin call: margine richiesto > cash + bond·95%, scandendo da 0 verso il basso.
+    const downside = all
+      .filter((p) => p.d <= 0.01)
+      .sort((a, b) => b.d - a.d)
+      .map((p) => ({ x: p.d, margin: p.Margine }));
+    const mcX = marginCallShock(downside, marginCover);
+    // La curva mostrata parte da −35%, o più a sinistra se serve a includere la margin call.
+    const chartMin =
+      mcX != null ? Math.max(-95, Math.min(-35, Math.floor((mcX - 6) / 5) * 5)) : -35;
+    return { marNow: now, marCurve: all.filter((p) => p.d >= chartMin - 0.01), marginCallX: mcX };
+  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover]);
 
   const { marScen, marPnlMTM } = useMemo(() => {
     const fxR = fxRange / 100;
@@ -609,8 +627,12 @@ function StressLabContent() {
     return null;
   }, [legs, eq, unders, effIV, volMode, dVman, prm, totalPatrimony]);
 
-  // Estremo sinistro della curva: abbastanza profondo da mostrare la riga di rovina.
-  const curveMin = ruinX != null ? Math.max(-95, Math.min(-35, Math.floor((ruinX - 6) / 5) * 5)) : -35;
+  // Estremo sinistro della curva: abbastanza profondo da mostrare sia la riga di
+  // rovina sia quella di margin call.
+  const leftMost = Math.min(ruinX ?? Infinity, marginCallX ?? Infinity);
+  const curveMin = Number.isFinite(leftMost)
+    ? Math.max(-95, Math.min(-35, Math.floor((leftMost - 6) / 5) * 5))
+    : -35;
 
   const curve = useMemo(() => {
     // Shock di mercato trasmesso ai titoli via beta reale (unders).
@@ -1570,9 +1592,10 @@ function StressLabContent() {
               style={{
                 padding: '14px 16px',
                 border: `1px solid ${
-                  bondCashBase > 0 &&
-                  marScen.total / Math.max(bondCashBase, 1) >
-                    (marNow.total / bondCashBase) * 1.2
+                  marginCover > 0 &&
+                  (marScen.total > marginCover ||
+                    marScen.total / Math.max(marginCover, 1) >
+                      (marNow.total / marginCover) * 1.2)
                     ? C.dn
                     : C.border
                 }`,
@@ -1587,10 +1610,12 @@ function StressLabContent() {
                   margine sale proprio mentre il patrimonio si svuota.
                   <br />
                   <br />
-                  <b>Incidenza su bond + cash</b> (riga piccola): margine / valore di bond + cash (escluso cash
-                  GP). È il rapporto che fa scattare la <b>richiesta di reintegro</b>: nel crash il numeratore
-                  cresce mentre bond e cash restano stabili, quindi l'incidenza accelera. Il bordo diventa rosso
-                  quando lo scenario la fa salire oltre +20% rispetto a oggi.
+                  <b>Incidenza su cash + bond·95%</b> (riga piccola): margine / copertura disponibile, dove la
+                  copertura = cash + <b>bond valorizzati al 95%</b> (haircut prudenziale; cash GP escluso). La{' '}
+                  <b>margin call</b> scatta quando il margine richiesto supera questa copertura, cioè quando
+                  l'incidenza passa il <b>100%</b>: nel crash il numeratore cresce mentre bond e cash restano
+                  stabili, quindi l'incidenza accelera. Il bordo diventa rosso in margin call a scenario o se
+                  lo scenario fa salire l'incidenza oltre +20% rispetto a oggi.
                 </Info>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, margin: '6px 0 2px' }}>
@@ -1613,26 +1638,33 @@ function StressLabContent() {
                   borderTop: `1px solid ${C.border}`,
                 }}
               >
-                incidenza bond+cash{' '}
+                incidenza cash+bond·95%{' '}
                 <span style={{ color: C.mut }}>
-                  {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
+                  {marginCover > 0 ? fmtN((marNow.total / marginCover) * 100, 0) : '—'}% →{' '}
                 </span>
                 <span
                   style={{
                     fontWeight: 800,
                     color:
-                      bondCashBase > 0 &&
-                      marScen.total / Math.max(bondCashBase, 1) >
-                        (marNow.total / bondCashBase) * 1.2
+                      marginCover > 0 &&
+                      (marScen.total > marginCover ||
+                        marScen.total / Math.max(marginCover, 1) >
+                          (marNow.total / marginCover) * 1.2)
                         ? C.dn
                         : C.text,
                   }}
                 >
-                  {bondCashBase > 0
-                    ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
+                  {marginCover > 0
+                    ? fmtN((marScen.total / Math.max(marginCover, 1)) * 100, 0)
                     : '—'}
                   %
                 </span>
+                <div style={{ marginTop: 3 }}>
+                  margin call (marg. &gt; cash+bond·95%){' '}
+                  <span style={{ fontWeight: 800, color: marginCallX != null ? '#A855F7' : C.mut }}>
+                    {marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
+                  </span>
+                </div>
               </div>
             </Panel>
           </div>
@@ -1725,6 +1757,11 @@ function StressLabContent() {
             <br />
             La <b>riga rossa</b> segna lo shock di mercato a cui il P&L = <b>−100% del patrimonio</b> (rovina).
             Il badge mostra anche lo <b>shock titoli</b> corrispondente = beta titoli ponderato × shock mercato.
+            <br />
+            <br />
+            La <b>riga viola tratteggiata</b> segna la <b>margin call</b>: lo shock di mercato a cui il margine
+            richiesto supera la copertura disponibile = <b>cash + bond valorizzati al 95%</b> (haircut
+            prudenziale; cash GP escluso).
           </Info>
         }
         headerRight={
@@ -1803,6 +1840,34 @@ function StressLabContent() {
                         </text>
                         <text x={lx + 8} y={ly + 30} fill={C.text} fontFamily={MONO} fontSize={10}>
                           shock mercato {sgn(ruinX as number, 1)}%
+                        </text>
+                        <text x={lx + 8} y={ly + 43} fill={C.text} fontFamily={MONO} fontSize={10}>
+                          shock titoli {sgn(tShock, 1)}%
+                        </text>
+                      </g>
+                    );
+                  }}
+                />
+              )}
+              {marginCallX != null && (
+                <ReferenceLine
+                  x={marginCallX}
+                  stroke="#A855F7"
+                  strokeWidth={2.5}
+                  strokeDasharray="7 4"
+                  label={(props: { viewBox?: { x?: number; y?: number; height?: number } }) => {
+                    const vb = props.viewBox || {};
+                    const lx = (vb.x ?? 0) + 7;
+                    const ly = (vb.y ?? 0) + 64; // sotto l'eventuale badge di rovina
+                    const tShock = betaPort * (marginCallX as number);
+                    return (
+                      <g>
+                        <rect x={lx} y={ly} width={210} height={50} rx={5} fill="#1C2030" stroke="#A855F7" strokeWidth={1} />
+                        <text x={lx + 8} y={ly + 16} fill="#A855F7" fontFamily={MONO} fontSize={10.5} fontWeight={700}>
+                          Margin call (marg. &gt; cash+bond·95%)
+                        </text>
+                        <text x={lx + 8} y={ly + 30} fill={C.text} fontFamily={MONO} fontSize={10}>
+                          shock mercato {sgn(marginCallX as number, 1)}%
                         </text>
                         <text x={lx + 8} y={ly + 43} fill={C.text} fontFamily={MONO} fontSize={10}>
                           shock titoli {sgn(tShock, 1)}%
@@ -2059,13 +2124,19 @@ function StressLabContent() {
             </span>
           </span>
           <span style={{ color: C.mut }}>
-            incidenza su bond+cash{' '}
+            incidenza su cash+bond·95%{' '}
             <span style={{ color: C.text, fontWeight: 700 }}>
-              {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
-              {bondCashBase > 0
-                ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
+              {marginCover > 0 ? fmtN((marNow.total / marginCover) * 100, 0) : '—'}% →{' '}
+              {marginCover > 0
+                ? fmtN((marScen.total / Math.max(marginCover, 1)) * 100, 0)
                 : '—'}
               %
+            </span>
+          </span>
+          <span style={{ color: C.mut }}>
+            margin call (marg. &gt; cash+bond·95%){' '}
+            <span style={{ fontWeight: 700, color: marginCallX != null ? '#A855F7' : C.text }}>
+              {marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
             </span>
           </span>
         </div>
@@ -2075,6 +2146,8 @@ function StressLabContent() {
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
               <XAxis
                 dataKey="d"
+                type="number"
+                domain={['dataMin', 'dataMax']}
                 tick={{ fill: C.mut, fontSize: 11, fontFamily: MONO }}
                 tickFormatter={(v) => v + '%'}
                 stroke={C.border2}
@@ -2103,6 +2176,36 @@ function StressLabContent() {
                 strokeDasharray="2 4"
                 label={{ value: 'attuale', fill: C.mut, fontSize: 10, position: 'insideTopRight' }}
               />
+              {marginCover > 0 && (
+                <ReferenceLine
+                  y={marginCover}
+                  stroke="#A855F7"
+                  strokeDasharray="6 4"
+                  ifOverflow="extendDomain"
+                  label={{
+                    value: 'copertura: cash + bond·95%',
+                    fill: '#A855F7',
+                    fontSize: 10,
+                    fontFamily: MONO,
+                    position: 'insideBottomRight',
+                  }}
+                />
+              )}
+              {marginCallX != null && (
+                <ReferenceLine
+                  x={marginCallX}
+                  stroke="#A855F7"
+                  strokeWidth={2}
+                  strokeDasharray="7 4"
+                  label={{
+                    value: `margin call ${sgn(marginCallX, 1)}%`,
+                    fill: '#A855F7',
+                    fontSize: 10,
+                    fontFamily: MONO,
+                    position: 'insideTopLeft',
+                  }}
+                />
+              )}
               <Line type="monotone" dataKey="Margine" stroke={C.dn} strokeWidth={2.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>

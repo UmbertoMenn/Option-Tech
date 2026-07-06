@@ -833,3 +833,37 @@ export function isPriceBelowIntrinsic(
   const intr = isCall ? Math.max(0, S - K) : Math.max(0, K - S);
   return px < intr * 0.99;
 }
+
+/* ===========================================================================
+ * MARGIN CALL
+ * ========================================================================= */
+
+/** Haircut prudenziale sui bond a copertura del margine: valorizzati al 95%. */
+export const BOND_MARGIN_HAIRCUT = 0.95;
+
+/**
+ * Trova lo shock di mercato a cui scatta la margin call: primo punto in cui il
+ * margine richiesto supera la copertura disponibile (cash + bond × 0,95).
+ *
+ * `points` è la scansione del margine da x = 0 verso shock più negativi
+ * (ordine di severità crescente). Ritorna la x del primo attraversamento
+ * margine > cover, interpolata linearmente tra i due punti a cavallo della
+ * soglia; la x del primo punto se già in margin call in partenza; null se la
+ * soglia non viene mai superata o se cover ≤ 0.
+ */
+export function marginCallShock(
+  points: { x: number; margin: number }[],
+  cover: number,
+): number | null {
+  if (!points.length || cover <= 0) return null;
+  if (points[0].margin > cover) return points[0].x;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (a.margin <= cover && b.margin > cover) {
+      const t = (cover - a.margin) / (b.margin - a.margin);
+      return a.x + t * (b.x - a.x);
+    }
+  }
+  return null;
+}
