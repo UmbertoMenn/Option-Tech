@@ -1821,7 +1821,12 @@ function StressLabContent() {
                 formatter={(v: number, n: string) => [plPct ? fmtN(v, 2) + '%' : fmtEUR(v), n]}
               />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: SANS }} />
-              <ReferenceLine x={d} stroke={C.amber} strokeDasharray="4 3" />
+              <ReferenceLine
+                x={0}
+                stroke={C.mut}
+                strokeDasharray="2 4"
+                label={{ value: 'attuale', fill: C.mut, fontSize: 10, fontFamily: MONO, position: 'insideTopRight' }}
+              />
               {ruinX != null && (
                 <ReferenceLine
                   x={ruinX}
@@ -1862,7 +1867,7 @@ function StressLabContent() {
                     const tShock = betaPort * (marginCallX as number);
                     return (
                       <g>
-                        <rect x={lx} y={ly} width={210} height={50} rx={5} fill="#1C2030" stroke="#A855F7" strokeWidth={1} />
+                        <rect x={lx} y={ly} width={248} height={50} rx={5} fill="#1C2030" stroke="#A855F7" strokeWidth={1} />
                         <text x={lx + 8} y={ly + 16} fill="#A855F7" fontFamily={MONO} fontSize={10.5} fontWeight={700}>
                           Margin call (marg. &gt; cash+bond·95%)
                         </text>
