@@ -3,6 +3,7 @@ import { Activity } from "lucide-react";
 import { AppHeaderMenu } from "@/components/layout/AppHeaderMenu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
+import { premiumDecomposition } from "@/lib/optionEdge";
 
 /* ============================ MATH CORE ============================ */
 const SQRT2PI = Math.sqrt(2 * Math.PI);
@@ -169,6 +170,32 @@ function MetricDual({ label, a, b, aLab = "Annua", bLab = "A scadenza", color = 
     </div>
   );
 }
+function MetricEdgeCard({ label, market, real, edge, sub, info }: {
+  label: React.ReactNode; market: number; real: number; edge: number; sub: React.ReactNode; info: React.ReactNode;
+}) {
+  const ok = isFinite(real) && isFinite(edge);
+  const col = !ok ? C.dim : edge > 0 ? C.green : C.red;
+  return (
+    <div style={{ position: "relative", background: C.panel, border: `1px solid ${ok ? col : C.border}`, borderRadius: 8, padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingRight: 18 }}>{label}</div>
+      <InfoIcon info={info} />
+      <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>Mercato</div>
+          <div style={{ fontFamily: mono, fontSize: 16, fontWeight: 600, color: C.text }}>{fmt(market)}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, borderLeft: `1px solid ${C.border}`, paddingLeft: 12 }}>
+          <div style={{ fontSize: 9.5, color: C.dim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>Reale</div>
+          <div style={{ fontFamily: mono, fontSize: 16, fontWeight: 600, color: C.teal }}>{ok ? fmt(real) : "—"}</div>
+        </div>
+      </div>
+      <div style={{ fontFamily: mono, fontSize: 21, fontWeight: 600, color: col, lineHeight: 1.1 }}>
+        {ok ? (edge >= 0 ? "+" : "") + fmt(edge) : "—"}
+      </div>
+      <div style={{ fontSize: 11.5, color: C.dim, marginTop: 5, fontFamily: mono }}>{sub}</div>
+    </div>
+  );
+}
 function GroupTitle({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1.2, margin: "18px 0 9px", fontWeight: 600 }}>{children}</div>;
 }
@@ -257,8 +284,10 @@ export function OptionAnalyzer() {
     const inside = type === "CALL" ? S0 >= barrier : S0 <= barrier;
     const noRoll = inside ? 0 : 1 - pTouch(S0, barrier, T, m, sig);
 
+    const decomp = premiumDecomposition({ S: S0, K, T, r, m, iv, rv: sig, type, marketPremium: prem });
+
     return { T, r, sig, beta, muCapm, mCapm, m, iv, premCall, premPut, rcCall, rcPut, evCall, evPut,
-      muStarCall, muStarPut, dren, mean, median, breachReal, breachImpl, gain, noRoll, barrier, beLevel, expiry, days };
+      muStarCall, muStarPut, dren, mean, median, breachReal, breachImpl, gain, noRoll, barrier, beLevel, expiry, days, decomp };
   }, [type, S0, K, prem, expIdx, RV, beta1y, rf, erp, q, buff, useMu, muManual, expiries]);
 
   const c = calc;
@@ -594,6 +623,27 @@ export function OptionAnalyzer() {
               sub={selEV >= 0 ? "μ dal lato giusto → edge +" : "μ dal lato sbagliato → edge −"}
               info="μ* è la deriva che azzera l'edge reale." />
             <Metric label="Edge Reale" value={(selEV >= 0 ? "+" : "") + fmt(selEV)} color={evColor(selEV)} big edge info="= premio incassato − valore reale." />
+          </div>
+
+          <GroupTitle>Destrutturazione del premio di mercato · dov'è l'edge</GroupTitle>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3,1fr)", gap: 10 }}>
+            <MetricEdgeCard
+              label={<>1 · Edge da volatilità</>}
+              market={prem} real={c.decomp.bsRealVol} edge={c.decomp.edgeVol}
+              sub={<>vol reale RV · deriva B&S (r)</>}
+              info="Premio di mercato vs premio Black-Scholes ricalcolato con la volatilità reale RV, tenendo la deriva risk-neutral. Isola quanto dell'edge viene dal premio di varianza (IV − RV) tradotto in valuta." />
+            <MetricEdgeCard
+              label={<>2 · Edge da deriva</>}
+              market={prem} real={c.decomp.realDriftImplVol} edge={c.decomp.edgeDrift}
+              sub={<>vol implicita IV · deriva reale <span style={{ textTransform: "none" }}>μ</span></>}
+              info="Premio di mercato vs valore atteso con la IV di mercato ma deriva reale μ del titolo. Isola quanto dell'edge viene dalla direzione attesa: μ > r favorisce chi vende PUT, penalizza chi vende CALL." />
+            <MetricEdgeCard
+              label={<>3 · Edge totale</>}
+              market={prem} real={c.decomp.realDriftRealVol} edge={c.decomp.edgeTotal}
+              sub={isFinite(c.decomp.interaction)
+                ? <>= vol {(c.decomp.edgeVol >= 0 ? "+" : "") + fmt(c.decomp.edgeVol)} + deriva {(c.decomp.edgeDrift >= 0 ? "+" : "") + fmt(c.decomp.edgeDrift)} + interaz. {(c.decomp.interaction >= 0 ? "+" : "") + fmt(c.decomp.interaction)}</>
+                : <>vol reale RV · deriva reale <span style={{ textTransform: "none" }}>μ</span></>}
+              info="Premio di mercato vs valore reale completo (vol reale RV e deriva reale μ): coincide con l'Edge Reale. Si scompone in edge da volatilità + edge da deriva + un termine di interazione vol×deriva, in genere piccolo." />
           </div>
 
           <GroupTitle>Probabilità · misura reale (<span style={{ textTransform: "none" }}>μ</span>, RV)</GroupTitle>
