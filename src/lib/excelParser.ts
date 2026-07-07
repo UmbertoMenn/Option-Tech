@@ -1,6 +1,9 @@
 import { Position, AssetType } from '@/types/portfolio';
 import { parseExcelNumber, parseExcelDate } from './formatters';
+import { Position, AssetType } from '@/types/portfolio';
+import { parseExcelNumber, parseExcelDate } from './formatters';
 import { getOptionExpirationDateISO } from './optionExpiry';
+import type { GPHolding } from './gpExcelParser';
 
 interface ExcelRow {
   [key: string]: string | number | null | undefined;
@@ -51,7 +54,7 @@ function isLikelyETFByISIN(isin: string | undefined): boolean {
  * Advanced ETF detection based on description and ISIN
  * Uses word boundary for short patterns to avoid false positives (e.g. NETFLIX)
  */
-function isETF(description: string, isin?: string): boolean {
+export function isETF(description: string, isin?: string): boolean {
   const descUpper = description.toUpperCase();
   
   // Check short patterns with word boundary
@@ -79,12 +82,36 @@ function isETF(description: string, isin?: string): boolean {
   return false;
 }
 
-export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): Promise<{
+export interface ParsedPortfolioFile {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
-  cashAccounts: { accountId: string; value: number }[];
+  cashAccounts: { accountId: string; value: number; restricted?: boolean }[];
   snapshotDate: string | null;
-}> {
+  /** Somma dei conti "A9..." (Liquidità vincolata), già inclusa in cashValue. Solo flussi CSV. */
+  restrictedCashValue: number;
+  /** Posizioni GP dai depositi "08...". Solo flussi CSV. */
+  gpHoldings: GPHolding[];
+  /** Conti liquidità GP "B0...". Solo flussi CSV. */
+  gpCashAccounts: { accountId: string; value: number }[];
+}
+
+export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): Promise<ParsedPortfolioFile> {
+  // Nuovi flussi CSV (FlussoSaldiContiCash / FlussoSaldiContiTitoli)
+  if (/\.csv$/i.test(file.name)) {
+    const { parseFlussiCsvText } = await import('./flussiCsvParser');
+    const text = await file.text();
+    const res = parseFlussiCsvText(text, options);
+    return {
+      positions: res.positions,
+      cashValue: res.cashValue,
+      cashAccounts: res.cashAccounts,
+      snapshotDate: res.snapshotDate,
+      restrictedCashValue: res.restrictedCashValue,
+      gpHoldings: res.gpHoldings,
+      gpCashAccounts: res.gpCashAccounts,
+    };
+  }
+
   // Dynamic import of xlsx library (using @e965/xlsx for security patches)
   const XLSX = await import('@e965/xlsx');
   
@@ -102,7 +129,13 @@ export async function parsePortfolioExcel(file: File, options?: { excludedCashAc
         
         const snapshotDate = extractSnapshotDate(jsonData);
         const result = parsePortfolioData(jsonData, options);
-        resolve({ ...result, snapshotDate });
+        resolve({
+          ...result,
+          snapshotDate,
+          restrictedCashValue: 0,
+          gpHoldings: [],
+          gpCashAccounts: [],
+        });
       } catch (error) {
         reject(error);
       }

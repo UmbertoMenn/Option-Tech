@@ -167,8 +167,14 @@ export function usePortfolio() {
     ? (fullSnapshot?.positions ?? [])
     : (positionsQuery.data || []);
 
+  // Liquidità vincolata: valorizzata solo nella vista live del singolo
+  // portafoglio (gli snapshot storici e le viste aggregate non la tracciano).
+  const restrictedCashValue = (!isHistoricalActive && !isAggregatedView)
+    ? Number((portfolio as (Portfolio & { restricted_cash_value?: number | null }) | null)?.restricted_cash_value ?? 0)
+    : 0;
+
   const summary: PortfolioSummary | null = (isHistoricalActive ? fullSnapshot : positionsQuery.data)
-    ? calculateSummary(effectivePositions, effectivePortfolio?.cash_value || 0)
+    ? calculateSummary(effectivePositions, effectivePortfolio?.cash_value || 0, restrictedCashValue)
     : null;
 
   const updatePositionsMutation = useMutation({
@@ -275,7 +281,7 @@ export function usePortfolio() {
   };
 }
 
-function calculateSummary(positions: Position[], cashValue: number): PortfolioSummary {
+function calculateSummary(positions: Position[], cashValue: number, restrictedCashValue = 0): PortfolioSummary {
   const byAssetType = new Map<AssetType, { value: number; profitLoss: number }>();
   let totalValue = cashValue;
   let totalProfitLoss = 0;
@@ -301,5 +307,5 @@ function calculateSummary(positions: Position[], cashValue: number): PortfolioSu
   const investedValue = totalValue - cashValue;
   const totalProfitLossPct = investedValue > 0 ? (totalProfitLoss / (investedValue - totalProfitLoss)) * 100 : 0;
   
-  return { totalValue, cashValue, investedValue, totalProfitLoss, totalProfitLossPct, byAssetType: byAssetTypeArray };
+  return { totalValue, cashValue, restrictedCashValue, investedValue, totalProfitLoss, totalProfitLossPct, byAssetType: byAssetTypeArray };
 }

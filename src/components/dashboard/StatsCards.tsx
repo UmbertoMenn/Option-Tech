@@ -211,6 +211,11 @@ export function StatsCards({
       icon: Wallet,
       change: null,
       subtext: snapshotDate ? `al ${formatDate(snapshotDate)}` : null,
+      // Liquidità vincolata (conti "A9...", garanzia operatività in derivati):
+      // concorre alla liquidità totale, mostrata solo se > 1 €.
+      extraSubtext: (summary.restrictedCashValue ?? 0) > 1
+        ? `Liquidità vincolata: ${formatCurrency(summary.restrictedCashValue!)}`
+        : null,
     },
     {
       key: 'iniziale',
@@ -331,6 +336,11 @@ export function StatsCards({
                   {'subtext' in stat && stat.subtext && (
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {stat.subtext}
+                    </p>
+                  )}
+                  {'extraSubtext' in stat && stat.extraSubtext && (
+                    <p className="text-xs text-amber-500 mt-0.5" title="Liquidità a garanzia dell'operatività in derivati (inclusa nella liquidità totale)">
+                      {stat.extraSubtext}
                     </p>
                   )}
                   {'change' in stat && stat.change && (

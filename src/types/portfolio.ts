@@ -43,11 +43,15 @@ export interface Portfolio {
   snapshot_date: string | null;
   gp_total_value?: number | null;
   gp_cash_value?: number | null;
+  /** Liquidità vincolata (conti "A9...", garanzia operatività in derivati). Inclusa in cash_value. */
+  restricted_cash_value?: number | null;
 }
 
 export interface PortfolioSummary {
   totalValue: number;
   cashValue: number;
+  /** Quota vincolata della liquidità (già inclusa in cashValue). */
+  restrictedCashValue?: number;
   investedValue: number;
   totalProfitLoss: number;
   totalProfitLossPct: number;
