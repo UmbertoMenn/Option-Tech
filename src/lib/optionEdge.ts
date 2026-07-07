@@ -13,7 +13,7 @@
  * Identità: edgeTotal = edgeVol + edgeDrift + interaction
  * (l'interazione è il termine incrociato vol×deriva, in genere piccolo).
  */
-import { bsPrice, cdf } from './blackScholes';
+import { cdf } from './blackScholes';
 
 export type OptionSide = 'CALL' | 'PUT';
 
@@ -44,6 +44,45 @@ export function realOptionValue(
     : K * Math.exp(-r * T) * cdf(-d2) - S * Math.exp((m - r) * T) * cdf(-d1);
 }
 
+/**
+ * Prezzo Black-Scholes-Merton (europeo con dividend yield continuo q).
+ * Equivale al valore attuariale con deriva risk-neutral del prezzo r − q.
+ */
+export function mertonPrice(
+  S: number,
+  K: number,
+  T: number,
+  r: number,
+  q: number,
+  sigma: number,
+  type: OptionSide,
+): number {
+  return realOptionValue(S, K, T, r, r - q, sigma, type);
+}
+
+/**
+ * IV implicita Black-Scholes-Merton (bisezione). NaN se il premio non è risolvibile.
+ */
+export function mertonImpliedVol(
+  marketPremium: number,
+  S: number,
+  K: number,
+  T: number,
+  r: number,
+  q: number,
+  type: OptionSide,
+): number {
+  if (T <= 0 || marketPremium <= 0) return NaN;
+  const f = (sig: number) => mertonPrice(S, K, T, r, q, sig, type) - marketPremium;
+  let lo = 0.0001, hi = 5;
+  if (f(lo) > 0 || f(hi) < 0) return NaN;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (f(mid) > 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export interface PremiumDecompositionParams {
   S: number;
   K: number;
@@ -56,6 +95,8 @@ export interface PremiumDecompositionParams {
   iv: number;
   /** volatilità reale/realizzata (decimale) */
   rv: number;
+  /** dividend yield continuo (decimale, es. 0.02) — usato nel lato B&S-Merton */
+  q?: number;
   type: OptionSide;
   /** premio di mercato incassato */
   marketPremium: number;
@@ -80,8 +121,8 @@ export interface PremiumDecomposition {
 
 export function premiumDecomposition(p: PremiumDecompositionParams): PremiumDecomposition {
   const { S, K, T, r, m, iv, rv, type, marketPremium } = p;
-  const bsType = type === 'CALL' ? 'call' : 'put';
-  const bsRealVol = bsPrice(S, K, T, r, rv, bsType);
+  const q = p.q ?? 0;
+  const bsRealVol = mertonPrice(S, K, T, r, q, rv, type);
   const realDriftImplVol = isFinite(iv) ? realOptionValue(S, K, T, r, m, iv, type) : NaN;
   const realDriftRealVol = realOptionValue(S, K, T, r, m, rv, type);
   const edgeVol = marketPremium - bsRealVol;

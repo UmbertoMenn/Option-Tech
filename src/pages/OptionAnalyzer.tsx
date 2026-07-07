@@ -22,20 +22,20 @@ function erf(x: number): number {
 const N = (x: number) => 0.5 * (1 + erf(x / Math.SQRT2));
 const npdf = (x: number) => Math.exp(-(x * x) / 2) / SQRT2PI;
 
-function bsCall(S: number, K: number, T: number, r: number, sig: number) {
-  if (sig <= 0 || T <= 0) return Math.max(S - K * Math.exp(-r * T), 0);
-  const d1 = (Math.log(S / K) + (r + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
+function bsCall(S: number, K: number, T: number, r: number, q: number, sig: number) {
+  if (sig <= 0 || T <= 0) return Math.max(S * Math.exp(-q * Math.max(T, 0)) - K * Math.exp(-r * Math.max(T, 0)), 0);
+  const d1 = (Math.log(S / K) + (r - q + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
   const d2 = d1 - sig * Math.sqrt(T);
-  return S * N(d1) - K * Math.exp(-r * T) * N(d2);
+  return S * Math.exp(-q * T) * N(d1) - K * Math.exp(-r * T) * N(d2);
 }
-function bsPut(S: number, K: number, T: number, r: number, sig: number) {
-  if (sig <= 0 || T <= 0) return Math.max(K * Math.exp(-r * T) - S, 0);
-  const d1 = (Math.log(S / K) + (r + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
+function bsPut(S: number, K: number, T: number, r: number, q: number, sig: number) {
+  if (sig <= 0 || T <= 0) return Math.max(K * Math.exp(-r * Math.max(T, 0)) - S * Math.exp(-q * Math.max(T, 0)), 0);
+  const d1 = (Math.log(S / K) + (r - q + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
   const d2 = d1 - sig * Math.sqrt(T);
-  return K * Math.exp(-r * T) * N(-d2) - S * N(-d1);
+  return K * Math.exp(-r * T) * N(-d2) - S * Math.exp(-q * T) * N(-d1);
 }
-function impliedVol(prem: number, S: number, K: number, T: number, r: number, type: "CALL" | "PUT") {
-  const f = (sig: number) => (type === "CALL" ? bsCall(S, K, T, r, sig) : bsPut(S, K, T, r, sig)) - prem;
+function impliedVol(prem: number, S: number, K: number, T: number, r: number, q: number, type: "CALL" | "PUT") {
+  const f = (sig: number) => (type === "CALL" ? bsCall(S, K, T, r, q, sig) : bsPut(S, K, T, r, q, sig)) - prem;
   let lo = 0.0001, hi = 5;
   if (f(lo) > 0 || f(hi) < 0) return NaN;
   for (let i = 0; i < 100; i++) {
@@ -273,6 +273,7 @@ export function OptionAnalyzer() {
       } else {
         setRvWindows(null);
         setRvSel(null);
+        setFetchErr("Risposta senza finestre RV: la Edge Function fetch-ticker-fundamentals live è una versione vecchia, va rideployata.");
       }
       setFetchInfo({ name: data.name, asof: data.asof, currency: data.currency, betaSource: data.betaSource, divYieldSource: data.divYieldSource });
     } catch (e: any) {
@@ -291,9 +292,10 @@ export function OptionAnalyzer() {
     const muCapm = rf / 100 + beta * (erp / 100);
     const mCapm = muCapm - q / 100;
     const m = useMu ? muManual / 100 : mCapm;
-    const iv = impliedVol(prem, S0, K, T, r, type);
-    const premCall = isFinite(iv) ? bsCall(S0, K, T, r, iv) : NaN;
-    const premPut = isFinite(iv) ? bsPut(S0, K, T, r, iv) : NaN;
+    const qd = q / 100;
+    const iv = impliedVol(prem, S0, K, T, r, qd, type);
+    const premCall = isFinite(iv) ? bsCall(S0, K, T, r, qd, iv) : NaN;
+    const premPut = isFinite(iv) ? bsPut(S0, K, T, r, qd, iv) : NaN;
     const rcCall = realCall(S0, K, T, r, m, sig);
     const rcPut = realPut(S0, K, T, r, m, sig);
     const evCall = premCall - rcCall;
@@ -304,7 +306,7 @@ export function OptionAnalyzer() {
     const mean = S0 * Math.exp(m * T);
     const median = S0 * Math.exp((m - dren) * T);
     const d2r = (Math.log(S0 / K) + (m - dren) * T) / (sig * Math.sqrt(T));
-    const d2i = (Math.log(S0 / K) + (r - (iv * iv) / 2) * T) / (iv * Math.sqrt(T));
+    const d2i = (Math.log(S0 / K) + (r - qd - (iv * iv) / 2) * T) / (iv * Math.sqrt(T));
     const breachReal = type === "CALL" ? N(d2r) : N(-d2r);
     const breachImpl = type === "CALL" ? N(d2i) : N(-d2i);
     const beLevel = type === "CALL" ? K + prem : K - prem;
@@ -314,9 +316,9 @@ export function OptionAnalyzer() {
     const inside = type === "CALL" ? S0 >= barrier : S0 <= barrier;
     const noRoll = inside ? 0 : 1 - pTouch(S0, barrier, T, m, sig);
 
-    const decomp = premiumDecomposition({ S: S0, K, T, r, m, iv, rv: sig, type, marketPremium: prem });
+    const decomp = premiumDecomposition({ S: S0, K, T, r, m, iv, rv: sig, q: qd, type, marketPremium: prem });
 
-    return { T, r, sig, beta, muCapm, mCapm, m, iv, premCall, premPut, rcCall, rcPut, evCall, evPut,
+    return { T, r, qd, sig, beta, muCapm, mCapm, m, iv, premCall, premPut, rcCall, rcPut, evCall, evPut,
       muStarCall, muStarPut, dren, mean, median, breachReal, breachImpl, gain, noRoll, barrier, beLevel, expiry, days, decomp };
   }, [type, S0, K, prem, expIdx, RV, beta1y, rf, rShort, erp, q, buff, useMu, muManual, expiries]);
 
@@ -352,14 +354,14 @@ export function OptionAnalyzer() {
     const lo = S0 * 0.7, hi = S0 * 1.3, n = 70, out: { K: number; edge: number; itm: number }[] = [];
     for (let i = 0; i <= n; i++) {
       const Kx = lo + ((hi - lo) * i) / n;
-      const mp = type === "CALL" ? bsCall(S0, Kx, c.T, c.r, c.iv) : bsPut(S0, Kx, c.T, c.r, c.iv);
+      const mp = type === "CALL" ? bsCall(S0, Kx, c.T, c.r, c.qd, c.iv) : bsPut(S0, Kx, c.T, c.r, c.qd, c.iv);
       const rv = type === "CALL" ? realCall(S0, Kx, c.T, c.r, c.m, c.sig) : realPut(S0, Kx, c.T, c.r, c.m, c.sig);
       const d2r = (Math.log(S0 / Kx) + (c.m - c.dren) * c.T) / (c.sig * Math.sqrt(c.T));
       const itm = type === "CALL" ? N(d2r) : N(-d2r);
       out.push({ K: Kx, edge: mp - rv, itm });
     }
     return { pts: out, lo, hi };
-  }, [S0, c.iv, c.T, c.r, c.m, c.sig, c.dren, type]);
+  }, [S0, c.iv, c.T, c.r, c.qd, c.m, c.sig, c.dren, type]);
 
   const driftData = useMemo(() => {
     const lo = -0.2, hi = 0.6, n = 90, out: { mu: number; edge: number }[] = [];
@@ -557,7 +559,7 @@ export function OptionAnalyzer() {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 0.3 }}>Cruscotto Opzioni <span style={{ color: C.dim, fontWeight: 400 }}>· decisione strike</span></div>
-          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>IV implicita dal premio (sconto al tasso breve ^IRX) · μ via CAPM (rf 10a) · RV a finestre · valore reale, EV, μ*, probabilità con d₂ reale</div>
+          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>IV implicita dal premio (BSM: tasso breve ^IRX, dividendi q) · μ via CAPM (rf 10a) · RV a finestre · valore reale, EV, μ*, probabilità con d₂ reale</div>
         </div>
         <div style={{ fontFamily: mono, fontSize: 12, color: C.dim }}>
           scad. {c.expiry.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })} · {c.days} gg · T = {fmt(c.T, 3)} a
@@ -593,20 +595,24 @@ export function OptionAnalyzer() {
           <Field label="Prezzo attuale" value={S0} onChange={setS0} suffix="$" />
           <Field label="Volatilità realizzata RV" value={RV} onChange={(v: any) => { setRV(v); setRvSel(null); }} suffix="%"
             hint={rvSel ? `finestra ${RV_WINDOW_DEFS.find((w) => w.key === rvSel)?.label ?? rvSel}` : "annua"} />
-          {rvWindows && (
-            <div style={{ display: "flex", gap: 4, marginTop: -6, marginBottom: 12 }}>
-              {rvWindows.map((w) => (
-                <button key={w.key} onClick={() => { setRV(Math.round(w.value * 100) / 100); setRvSel(w.key); }}
-                  title={`RV annualizzata sugli ultimi ${w.label === "1a" ? "12 mesi" : w.label} di borsa`}
-                  style={{ flex: 1, minWidth: 0, padding: "4px 2px", borderRadius: 6, cursor: "pointer", fontSize: 10, fontFamily: mono, lineHeight: 1.3,
-                    border: `1px solid ${rvSel === w.key ? C.blue : C.border}`,
-                    background: rvSel === w.key ? C.blue : C.panel2,
-                    color: rvSel === w.key ? "#fff" : C.dim }}>
-                  {w.label}<br />{w.value.toFixed(1)}%
+          <div style={{ display: "flex", gap: 4, marginTop: -6, marginBottom: 12 }}>
+            {RV_WINDOW_DEFS.map((wd) => {
+              const win = rvWindows?.find((x) => x.key === wd.key);
+              const active = rvSel === wd.key;
+              return (
+                <button key={wd.key} disabled={!win}
+                  onClick={() => { if (win) { setRV(Math.round(win.value * 100) / 100); setRvSel(wd.key); } }}
+                  title={win ? `RV annualizzata sugli ultimi ${wd.label === "1a" ? "12 mesi" : wd.label} di borsa` : "Carica un ticker per calcolare le finestre RV"}
+                  style={{ flex: 1, minWidth: 0, padding: "4px 2px", borderRadius: 6, cursor: win ? "pointer" : "default", fontSize: 10, fontFamily: mono, lineHeight: 1.3,
+                    border: `1px solid ${active ? C.blue : C.border}`,
+                    background: active ? C.blue : C.panel2,
+                    color: active ? "#fff" : win ? C.text : C.dim,
+                    opacity: win ? 1 : 0.45 }}>
+                  {wd.label}<br />{win ? win.value.toFixed(1) + "%" : "—"}
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
 
           <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1, margin: "6px 0 8px" }}>Opzione</div>
           <Field label="Strike" value={K} onChange={setK} suffix="$" />
@@ -646,7 +652,7 @@ export function OptionAnalyzer() {
 
           <GroupTitle>Volatilità</GroupTitle>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: 10 }}>
-            <MetricDual label="IV implicita" a={pct(c.iv)} b={isFinite(c.iv) ? pct(c.iv * rt) : "—"} color={C.blue} info="Volatilità implicita ricavata invertendo Black-Scholes dal premio inserito." />
+            <MetricDual label="IV implicita" a={pct(c.iv)} b={isFinite(c.iv) ? pct(c.iv * rt) : "—"} color={C.blue} info="Volatilità implicita ricavata invertendo Black-Scholes-Merton (con dividend yield q) dal premio inserito." />
             <MetricDual label="RV reale" a={pct(c.sig)} b={pct(c.sig * rt)} info="Volatilità realizzata del sottostante. Finestra selezionabile nel pannello (1m/3m/6m/1a): per opzioni corte usa una finestra vicina alla scadenza." />
             <MetricDual label="Premio di varianza" a={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * 100).toFixed(1) + " pt" : "—"} b={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * rt * 100).toFixed(1) + " pt" : "—"} color={vp > 0 ? C.green : C.red} edge info="IV − RV in punti: l'edge di chi vende." />
           </div>
@@ -677,7 +683,7 @@ export function OptionAnalyzer() {
               label={<>1 · Edge da volatilità</>}
               market={prem} real={c.decomp.bsRealVol} edge={c.decomp.edgeVol}
               sub={<>vol reale RV · deriva B&S (r)</>}
-              info="Premio di mercato vs premio Black-Scholes ricalcolato con la volatilità reale RV, tenendo la deriva risk-neutral. Isola quanto dell'edge viene dal premio di varianza (IV − RV) tradotto in valuta." />
+              info="Premio di mercato vs premio Black-Scholes-Merton ricalcolato con la volatilità reale RV, tenendo la deriva risk-neutral (r − q). Isola quanto dell'edge viene dal premio di varianza (IV − RV) tradotto in valuta." />
             <MetricEdgeCard
               label={<>2 · Edge da deriva</>}
               market={prem} real={c.decomp.realDriftImplVol} edge={c.decomp.edgeDrift}
