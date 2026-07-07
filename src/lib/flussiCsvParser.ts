@@ -22,6 +22,7 @@
 import { Position, AssetType } from '@/types/portfolio';
 import { parseExcelNumber } from './formatters';
 import { isETF } from './excelParser';
+import { getOptionExpirationDateISO } from './optionExpiry';
 import type { GPHolding } from './gpExcelParser';
 
 export type ParsedPosition = Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>;
@@ -194,8 +195,8 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult): void {
     const [, tickerRaw, mm, yy, cp, strikeRaw] = optionMatch;
     const ticker = tickerRaw.toUpperCase();
     const year = 2000 + parseInt(yy, 10);
-    // Giorno 21: stessa approssimazione (terzo venerdì) del formato US precedente
-    const expiryDate = `${year}-${mm}-21`;
+    // Scadenza reale (terzo venerdì, holiday-adjusted): vedi optionExpiry.ts
+    const expiryDate = getOptionExpirationDateISO(year, parseInt(mm, 10) - 1);
     const strikePrice = parseFloat(strikeRaw);
     const optionType: 'call' | 'put' = cp.toUpperCase() === 'C' ? 'call' : 'put';
     const contracts = nominale; // con segno: negativo = venduta

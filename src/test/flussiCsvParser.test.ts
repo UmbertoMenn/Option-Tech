@@ -93,12 +93,13 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(btp.market_value).toBeCloseTo(95061.85 + 795.58, 2);
   });
 
-  it('parsa il descrittore opzione [TICKER][MM/YY][C|P][STRIKE]', () => {
+  it('parsa il descrittore opzione [TICKER][MM/YY][C|P][STRIKE] con scadenza reale (terzo venerdì)', () => {
     const res = parseFlussiCsvText(TITOLI_CSV);
     const aaplCall = res.positions.find(p => p.underlying === 'AAPL')!;
     expect(aaplCall.option_type).toBe('call');
     expect(aaplCall.strike_price).toBe(300);
-    expect(aaplCall.expiry_date).toBe('2027-12-21');
+    // Dicembre 2027: terzo venerdì reale = 17 (non 21, nessuna festività USA vicina)
+    expect(aaplCall.expiry_date).toBe('2027-12-17');
     expect(aaplCall.quantity).toBe(-3); // contratti con segno
     expect(aaplCall.current_price).toBeCloseTo(44.55, 2);
     // market value = |contratti| * 100 * premio / cambio
@@ -106,10 +107,14 @@ describe('parseFlussiCsvText — file titoli', () => {
 
     const uber = res.positions.find(p => p.underlying === 'UBER')!;
     expect(uber.strike_price).toBeCloseTo(82.5, 2); // strike decimale
+    // Agosto 2026: terzo venerdì reale = 21 (nessuna collisione con festività)
+    expect(uber.expiry_date).toBe('2026-08-21');
 
     const nvdaPut = res.positions.find(p => p.underlying === 'NVDA')!;
     expect(nvdaPut.option_type).toBe('put');
     expect(nvdaPut.quantity).toBe(9); // comprata
+    // Stesso mese/anno di AAPL -> stessa scadenza reale
+    expect(nvdaPut.expiry_date).toBe('2027-12-17');
   });
 
   it('smista i depositi "08..." nelle holdings GP', () => {
