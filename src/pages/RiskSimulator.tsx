@@ -33,6 +33,7 @@ import {
   BOND_MARGIN_HAIRCUT,
   StressUnderlyingMap,
 } from '@/lib/stressLab';
+import { occSphMargin } from '@/lib/occSphMargin';
 
 /* ============================== THEME ==============================
  * Colori legati alle CSS vars tematiche (definite in src/index.css per
@@ -478,6 +479,31 @@ function StressLabContent() {
       mcX != null ? Math.max(-95, Math.min(-35, Math.floor((mcX - 6) / 5) * 5)) : -35;
     return { marNow: now, marCurve: all.filter((p) => p.d >= chartMin - 0.01), marginCallX: mcX };
   }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover]);
+
+  /* ---------- Margine OCCSPH (strategy-based puro, gerarchia rigida) ----------
+   * Calcolo statico a stato base (prezzi correnti, nessuno scenario): serve per
+   * la riconciliazione col benchmark banca/Spheres. Trace completa nel log
+   * [OccSphDiag] per il confronto strategia-per-strategia. */
+  const occSph = useMemo(() => {
+    const res = occSphMargin(legs, eq, unders, { fxUSD: fx.USD, nakedPct });
+    if (res.trace.length) {
+      // eslint-disable-next-line no-console
+      console.log('[OccSphDiag] margine OCCSPH per strategia (USD nativi):');
+      // eslint-disable-next-line no-console
+      console.table(
+        res.trace.map((t) => ({
+          sottostante: t.u,
+          strategia: t.kind,
+          gambe: t.legs.join(' + '),
+          premio: Math.round(t.premium),
+          minimo: Math.round(t.minimum),
+          addizionale: Math.round(t.additional),
+          margine: Math.round(t.margin),
+        })),
+      );
+    }
+    return res;
+  }, [legs, eq, unders, fx.USD, nakedPct]);
 
   const { marScen, marPnlMTM } = useMemo(() => {
     const fxR = fxRange / 100;
@@ -2146,6 +2172,28 @@ function StressLabContent() {
             <span style={{ fontWeight: 700, color: marginCallX != null ? '#A855F7' : C.text }}>
               {marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
             </span>
+          </span>
+          <span style={{ color: C.mut, display: 'inline-flex', alignItems: 'center' }}>
+            OCCSPH (strategy puro){' '}
+            <span style={{ color: C.text, fontWeight: 700, marginLeft: 4 }}>
+              {fmtEUR(occSph.total)}
+            </span>{' '}
+            <span style={{ fontSize: 10.5, marginLeft: 4 }}>
+              (premio {fmtN(occSph.premium / 1000, 0)}k + add. {fmtN(occSph.additional / 1000, 0)}k
+              + min. {fmtN(occSph.minimum / 1000, 0)}k)
+            </span>
+            <Info title="Margine OCCSPH — strategy-based puro con gerarchia rigida" w={420}>
+              Replica della metodologia strategy-based OCC/Sphere (spec ION Appendix 3), statica a
+              prezzi correnti, senza scan di rivalutazione. Pipeline con consumo progressivo delle
+              quantità: <b>pre-processing covered</b> (le azioni coprono le call corte più ITM,
+              escluse GP) → <b>spread</b> a stessa scadenza (debit → 0, credit → ampiezza − credito)
+              → <b>straddle</b> → <b>strangle/guts</b> (lato naked peggiore per intero + premio
+              dell'altro lato) → <b>butterfly</b> → <b>single-leg</b> naked. Scomposizione
+              premio / minimo (floor 10%) / margine addizionale come richiesto dalla spec. Usa lo
+              stesso <i>Mantenimento short nude</i> del motore ibrido: taralo finché questo valore ≈
+              il Reg-T della banca. Trace completa per strategia nel log <i>[OccSphDiag]</i> della
+              console.
+            </Info>
           </span>
         </div>
         <div style={{ width: '100%', height: 200, marginBottom: 14 }}>
