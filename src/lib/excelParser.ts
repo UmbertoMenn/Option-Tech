@@ -1,5 +1,6 @@
 import { Position, AssetType } from '@/types/portfolio';
 import { parseExcelNumber, parseExcelDate } from './formatters';
+import { getOptionExpirationDateISO } from './optionExpiry';
 
 interface ExcelRow {
   [key: string]: string | number | null | undefined;
@@ -297,16 +298,34 @@ export function parsePortfolioData(rows: any[][], options?: { excludedCashAccoun
 
 // Parse EUREX/IDEM expiry format like "MAR26", "DEC25", "JUN27"
 function parseEurexExpiry(expiryStr: string): string | undefined {
-  const months: Record<string, string> = {
-    JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-    JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+  const monthIndex: Record<string, number> = {
+    JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+    JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11
   };
   const match = expiryStr.trim().toUpperCase().match(/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})$/);
-  if (match && months[match[1]]) {
+  if (match && monthIndex[match[1]] !== undefined) {
     const year = parseInt(match[2]) + 2000;
-    return `${year}-${months[match[1]]}-20`; // Third Friday approximation
+    // Terzo venerdì reale, holiday-adjusted sul calendario USA (vedi optionExpiry.ts).
+    // Nota: EUREX/IDEM seguono calendari festivi europei che possono differire
+    // in casi rari diversi dal Good Friday; approssimazione comunque migliore
+    // del fisso "giorno 20" precedente.
+    return getOptionExpirationDateISO(year, monthIndex[match[1]]);
   }
   return undefined;
+}
+
+// Converte un mese abbreviato USA + anno a 2 cifre (es. "DEC", "25") nella
+// scadenza reale (terzo venerdì, holiday-adjusted). Sostituisce il vecchio
+// fisso "giorno 21".
+function monthAbbrevToRealExpiry(monthAbbrev: string, yy: string): string | undefined {
+  const monthIndex: Record<string, number> = {
+    JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+    JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11
+  };
+  const idx = monthIndex[monthAbbrev.toUpperCase()];
+  if (idx === undefined) return undefined;
+  const year = parseInt(yy, 10) + 2000;
+  return getOptionExpirationDateISO(year, idx);
 }
 
 // Parse DD/MM/YYYY date format
@@ -422,12 +441,7 @@ function parseDerivativeRow(
     // Parse expiry - try MMM/YY first, then DD/MM/YYYY
     const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
     if (expiryMatch) {
-      const months: Record<string, string> = {
-        JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-        JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
-      };
-      const year = parseInt(expiryMatch[2]) + 2000;
-      expiryDate = `${year}-${months[expiryMatch[1]]}-21`;
+      expiryDate = monthAbbrevToRealExpiry(expiryMatch[1], expiryMatch[2]);
     } else {
       // Try DD/MM/YYYY format (e.g., "20/03/2026")
       expiryDate = parseDDMMYYYY(description);
@@ -536,12 +550,7 @@ function parsePositionRow(
       // Parse expiry - try MMM/YY first, then DD/MM/YYYY
       const expiryMatch = descUpper.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\/(\d{2})/);
       if (expiryMatch) {
-        const months: Record<string, string> = {
-          JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
-          JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
-        };
-        const year = parseInt(expiryMatch[2]) + 2000;
-        expiryDate = `${year}-${months[expiryMatch[1]]}-21`;
+        expiryDate = monthAbbrevToRealExpiry(expiryMatch[1], expiryMatch[2]);
       } else {
         expiryDate = parseDDMMYYYY(description);
       }
