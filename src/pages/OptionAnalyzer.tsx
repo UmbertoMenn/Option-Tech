@@ -206,7 +206,16 @@ interface FetchInfo {
   asof?: string | null;
   currency?: string | null;
   betaSource?: string | null;
+  divYieldSource?: string | null;
 }
+
+interface RvWindow { key: string; label: string; calDays: number; value: number }
+const RV_WINDOW_DEFS = [
+  { key: "1m", label: "1m", calDays: 30 },
+  { key: "3m", label: "3m", calDays: 91 },
+  { key: "6m", label: "6m", calDays: 182 },
+  { key: "1y", label: "1a", calDays: 365 },
+];
 
 export function OptionAnalyzer() {
   const isMobile = useIsMobile();
@@ -217,8 +226,11 @@ export function OptionAnalyzer() {
   const [prem, setPrem] = useState(5.0);
   const [expIdx, setExpIdx] = useState(2);
   const [RV, setRV] = useState(50);
+  const [rvWindows, setRvWindows] = useState<RvWindow[] | null>(null);
+  const [rvSel, setRvSel] = useState<string | null>(null);
   const [beta1y, setBeta1y] = useState(1.3);
   const [rf, setRf] = useState(4);
+  const [rShort, setRShort] = useState(4);
   const [erp, setErp] = useState(5.5);
   const [q, setQ] = useState(0);
   const [buff, setBuff] = useState(1);
@@ -244,8 +256,25 @@ export function OptionAnalyzer() {
       if (typeof data.rv === "number") setRV(data.rv);
       if (typeof data.beta === "number") setBeta1y(data.beta);
       if (typeof data.riskFree === "number") setRf(data.riskFree);
+      if (typeof data.riskFreeShort === "number") setRShort(data.riskFreeShort);
       if (typeof data.erp === "number") setErp(data.erp);
-      setFetchInfo({ name: data.name, asof: data.asof, currency: data.currency, betaSource: data.betaSource });
+      if (typeof data.divYield === "number") setQ(Math.round(data.divYield * 100) / 100);
+      // Finestre RV multiple: auto-seleziono quella più vicina all'orizzonte dell'opzione
+      const ws: RvWindow[] = RV_WINDOW_DEFS
+        .filter((w) => typeof data.rvWindows?.[w.key] === "number" && isFinite(data.rvWindows[w.key]))
+        .map((w) => ({ ...w, value: data.rvWindows[w.key] }));
+      if (ws.length) {
+        setRvWindows(ws);
+        const dte = Math.max(Math.round((expiries[expIdx].getTime() - Date.now()) / 86400000), 1);
+        let best = ws[0];
+        for (const w of ws) if (Math.abs(w.calDays - dte) < Math.abs(best.calDays - dte)) best = w;
+        setRV(Math.round(best.value * 100) / 100);
+        setRvSel(best.key);
+      } else {
+        setRvWindows(null);
+        setRvSel(null);
+      }
+      setFetchInfo({ name: data.name, asof: data.asof, currency: data.currency, betaSource: data.betaSource, divYieldSource: data.divYieldSource });
     } catch (e: any) {
       setFetchErr("Impossibile caricare automaticamente (" + (e?.message || e) + "). Inserisci i valori a mano.");
     }
@@ -256,7 +285,8 @@ export function OptionAnalyzer() {
     const expiry = expiries[expIdx];
     const T = Math.max((expiry.getTime() - Date.now()) / (365.25 * 86400000), 1 / 365);
     const days = Math.max(Math.round((expiry.getTime() - Date.now()) / 86400000), 0);
-    const r = rf / 100, sig = RV / 100;
+    // r breve (^IRX) per sconto e inversione IV delle opzioni corte; rf (10y) resta nel CAPM.
+    const r = rShort / 100, sig = RV / 100;
     const beta = beta1y;
     const muCapm = rf / 100 + beta * (erp / 100);
     const mCapm = muCapm - q / 100;
@@ -288,7 +318,7 @@ export function OptionAnalyzer() {
 
     return { T, r, sig, beta, muCapm, mCapm, m, iv, premCall, premPut, rcCall, rcPut, evCall, evPut,
       muStarCall, muStarPut, dren, mean, median, breachReal, breachImpl, gain, noRoll, barrier, beLevel, expiry, days, decomp };
-  }, [type, S0, K, prem, expIdx, RV, beta1y, rf, erp, q, buff, useMu, muManual, expiries]);
+  }, [type, S0, K, prem, expIdx, RV, beta1y, rf, rShort, erp, q, buff, useMu, muManual, expiries]);
 
   const c = calc;
   const selEV = type === "CALL" ? c.evCall : c.evPut;
@@ -527,7 +557,7 @@ export function OptionAnalyzer() {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 0.3 }}>Cruscotto Opzioni <span style={{ color: C.dim, fontWeight: 400 }}>· decisione strike</span></div>
-          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>IV implicita dal premio · μ via CAPM · valore reale, EV, μ*, probabilità con d₂ reale</div>
+          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>IV implicita dal premio (sconto al tasso breve ^IRX) · μ via CAPM (rf 10a) · RV a finestre · valore reale, EV, μ*, probabilità con d₂ reale</div>
         </div>
         <div style={{ fontFamily: mono, fontSize: 12, color: C.dim }}>
           scad. {c.expiry.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })} · {c.days} gg · T = {fmt(c.T, 3)} a
@@ -561,7 +591,22 @@ export function OptionAnalyzer() {
 
           <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Sottostante</div>
           <Field label="Prezzo attuale" value={S0} onChange={setS0} suffix="$" />
-          <Field label="Volatilità realizzata RV" value={RV} onChange={setRV} suffix="%" hint="annua" />
+          <Field label="Volatilità realizzata RV" value={RV} onChange={(v: any) => { setRV(v); setRvSel(null); }} suffix="%"
+            hint={rvSel ? `finestra ${RV_WINDOW_DEFS.find((w) => w.key === rvSel)?.label ?? rvSel}` : "annua"} />
+          {rvWindows && (
+            <div style={{ display: "flex", gap: 4, marginTop: -6, marginBottom: 12 }}>
+              {rvWindows.map((w) => (
+                <button key={w.key} onClick={() => { setRV(Math.round(w.value * 100) / 100); setRvSel(w.key); }}
+                  title={`RV annualizzata sugli ultimi ${w.label === "1a" ? "12 mesi" : w.label} di borsa`}
+                  style={{ flex: 1, minWidth: 0, padding: "4px 2px", borderRadius: 6, cursor: "pointer", fontSize: 10, fontFamily: mono, lineHeight: 1.3,
+                    border: `1px solid ${rvSel === w.key ? C.blue : C.border}`,
+                    background: rvSel === w.key ? C.blue : C.panel2,
+                    color: rvSel === w.key ? "#fff" : C.dim }}>
+                  {w.label}<br />{w.value.toFixed(1)}%
+                </button>
+              ))}
+            </div>
+          )}
 
           <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1, margin: "6px 0 8px" }}>Opzione</div>
           <Field label="Strike" value={K} onChange={setK} suffix="$" />
@@ -577,12 +622,13 @@ export function OptionAnalyzer() {
               ))}
             </select>
           </label>
+          <Field label="Risk-free breve r" value={rShort} onChange={setRShort} suffix="%" hint="^IRX 3m · sconto/IV" />
 
           <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1, margin: "6px 0 8px" }}>CAPM · deriva reale</div>
           <Field label="Beta" value={beta1y} onChange={setBeta1y} hint={fetchInfo?.betaSource || "Yahoo/GuruFocus"} />
-          <Field label="Risk-free r" value={rf} onChange={setRf} suffix="%" />
+          <Field label="Risk-free CAPM" value={rf} onChange={setRf} suffix="%" hint="10 anni" />
           <Field label="Premio rischio mercato" value={erp} onChange={setErp} suffix="%" />
-          <Field label="Dividend yield" value={q} onChange={setQ} suffix="%" hint="opz." />
+          <Field label="Dividend yield" value={q} onChange={setQ} suffix="%" hint={fetchInfo?.divYieldSource || "opz."} />
 
           <div style={{ fontSize: 11, color: C.dim, textTransform: "uppercase", letterSpacing: 1, margin: "6px 0 8px" }}>Roll</div>
           <Field label="Cuscinetto allo strike" value={buff} onChange={setBuff} suffix="%" hint="non rollare" />
@@ -601,7 +647,7 @@ export function OptionAnalyzer() {
           <GroupTitle>Volatilità</GroupTitle>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(3,1fr)", gap: 10 }}>
             <MetricDual label="IV implicita" a={pct(c.iv)} b={isFinite(c.iv) ? pct(c.iv * rt) : "—"} color={C.blue} info="Volatilità implicita ricavata invertendo Black-Scholes dal premio inserito." />
-            <MetricDual label="RV reale" a={pct(c.sig)} b={pct(c.sig * rt)} info="Volatilità realizzata del sottostante." />
+            <MetricDual label="RV reale" a={pct(c.sig)} b={pct(c.sig * rt)} info="Volatilità realizzata del sottostante. Finestra selezionabile nel pannello (1m/3m/6m/1a): per opzioni corte usa una finestra vicina alla scadenza." />
             <MetricDual label="Premio di varianza" a={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * 100).toFixed(1) + " pt" : "—"} b={isFinite(vp) ? (vp >= 0 ? "+" : "") + (vp * rt * 100).toFixed(1) + " pt" : "—"} color={vp > 0 ? C.green : C.red} edge info="IV − RV in punti: l'edge di chi vende." />
           </div>
 

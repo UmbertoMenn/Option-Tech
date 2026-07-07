@@ -14,7 +14,14 @@ interface Result {
   beta: number | null;
   betaSource: string | null;
   rv: number | null;
+  /** RV per finestra: chiavi 1m/3m/6m/1y, valori in % annui */
+  rvWindows: Record<string, number> | null;
   riskFree: number | null;
+  /** Tasso breve (^IRX per USD) per sconto/inversione IV delle opzioni, in % */
+  riskFreeShort: number | null;
+  /** Dividend yield in %, media multi-fonte */
+  divYield: number | null;
+  divYieldSource: string | null;
   erp: number | null;
   erpCountry: string | null;
   asof: string;
@@ -28,6 +35,9 @@ const VALID_TICKER_RE = /^[A-Z0-9.\-^=]{1,12}$/;
 const RF_TICKER: Record<string, string> = {
   USD: "^TNX", EUR: "IT10Y.B", GBP: "GB10Y.B", CHF: "CH10YT=RR", JPY: "JP10Y.B", CAD: "CA10YT=RR",
 };
+// Tasso breve per lo sconto/inversione IV delle opzioni (scadenze 1-6 mesi).
+// ^IRX = T-bill USA 13 settimane. Per le altre valute fallback sul 10y.
+const RF_SHORT_TICKER: Record<string, string> = { USD: "^IRX" };
 const CURRENCY_TO_COUNTRY: Record<string, string> = {
   USD: "United States", EUR: "Italy", GBP: "United Kingdom", CHF: "Switzerland", JPY: "Japan", CAD: "Canada",
 };
@@ -79,8 +89,15 @@ async function yahooChart1y(ticker: string, auth: { crumb: string; cookie: strin
     const r = await fetch(url, { headers: yahooHeaders(auth) });
     if (!r.ok) { await r.text(); return null; }
     const j = await r.json();
-    const closes: (number | null)[] = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    return closes.filter((x): x is number => typeof x === "number" && x > 0);
+    const res = j?.chart?.result?.[0];
+    // adjclose: rettificato per dividendi/split -> i log-rendimenti non contengono
+    // il salto artificiale dello stacco. Fallback su close se adjclose assente.
+    const adjRaw: (number | null)[] = res?.indicators?.adjclose?.[0]?.adjclose ?? [];
+    const closeRaw: (number | null)[] = res?.indicators?.quote?.[0]?.close ?? [];
+    const adj = adjRaw.filter((x): x is number => typeof x === "number" && x > 0);
+    const closes = closeRaw.filter((x): x is number => typeof x === "number" && x > 0);
+    if (adj.length >= 30 && adj.length >= closes.length * 0.9) return adj;
+    return closes.length ? closes : null;
   } catch { return null; }
 }
 
@@ -108,6 +125,25 @@ function annualizedVol(closes: number[]): number | null {
   return Math.sqrt(variance) * Math.sqrt(252) * 100;
 }
 
+// Finestre RV in giorni di borsa: ~1 mese, 3 mesi, 6 mesi, 1 anno.
+const RV_WINDOWS = [
+  { key: "1m", days: 21 },
+  { key: "3m", days: 63 },
+  { key: "6m", days: 126 },
+  { key: "1y", days: 252 },
+] as const;
+
+/** Vol annualizzata close-to-close sugli ultimi `windowDays` giorni di borsa (min 15 rendimenti). */
+function annualizedVolWindow(closes: number[], windowDays: number): number | null {
+  const slice = closes.length > windowDays + 1 ? closes.slice(-(windowDays + 1)) : closes;
+  if (slice.length < 16) return null;
+  const rets: number[] = [];
+  for (let i = 1; i < slice.length; i++) rets.push(Math.log(slice[i] / slice[i - 1]));
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1);
+  return Math.sqrt(variance) * Math.sqrt(252) * 100;
+}
+
 async function guruFocusBeta(ticker: string): Promise<number | null> {
   try {
     const r = await fetch(`https://www.gurufocus.com/term/beta/${encodeURIComponent(ticker)}`, {
@@ -124,7 +160,7 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
-async function tradingViewBeta(ticker: string): Promise<number | null> {
+async function tradingViewScan(ticker: string, columns: string[]): Promise<(number | null)[] | null> {
   try {
     const sr = await fetch(
       `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(ticker)}&type=stock`,
@@ -143,17 +179,47 @@ async function tradingViewBeta(ticker: string): Promise<number | null> {
     const sc = await fetch("https://scanner.tradingview.com/global/scan", {
       method: "POST",
       headers: { "User-Agent": UA, "Content-Type": "application/json", "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" },
-      body: JSON.stringify({ symbols: { tickers: [full] }, columns: ["beta_1_year"] }),
+      body: JSON.stringify({ symbols: { tickers: [full] }, columns }),
     });
     if (!sc.ok) return null;
     const j = await sc.json();
-    const v = j?.data?.[0]?.d?.[0];
-    if (typeof v === "number" && isFinite(v) && Math.abs(v) < 10) return v;
+    const d = j?.data?.[0]?.d;
+    return Array.isArray(d) ? d.map((v: any) => (typeof v === "number" && isFinite(v) ? v : null)) : null;
+  } catch { return null; }
+}
+
+async function tradingViewBeta(ticker: string): Promise<number | null> {
+  const d = await tradingViewScan(ticker, ["beta_1_year"]);
+  const v = d?.[0];
+  if (typeof v === "number" && Math.abs(v) < 10) return v;
+  return null;
+}
+
+async function tradingViewDivYield(ticker: string): Promise<number | null> {
+  const d = await tradingViewScan(ticker, ["dividends_yield_current", "dividends_yield"]);
+  for (const v of d ?? []) {
+    if (typeof v === "number" && v >= 0 && v < 25) return v;
+  }
+  return null;
+}
+
+async function guruFocusDivYield(ticker: string): Promise<number | null> {
+  try {
+    const r = await fetch(`https://www.gurufocus.com/term/yield/${encodeURIComponent(ticker)}`, {
+      headers: { "User-Agent": UA },
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/Dividend\s*Yield\s*%?[^0-9<>%-]{0,60}?(\d+\.\d+)/i);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (isFinite(v) && v >= 0 && v < 25) return v;
+    }
     return null;
   } catch { return null; }
 }
 
-async function investingBeta(ticker: string): Promise<number | null> {
+async function investingEquityHtml(ticker: string): Promise<string | null> {
   try {
     const headers = {
       "User-Agent": UA,
@@ -178,21 +244,50 @@ async function investingBeta(ticker: string): Promise<number | null> {
       headers: { "User-Agent": UA, "Accept": "text/html", "Accept-Language": "en-US,en;q=0.9" },
     });
     if (!pr.ok) return null;
-    const html = await pr.text();
-    const patterns = [
-      /Beta[^<>\n]{0,80}?<[^>]*>\s*(-?\d+\.\d+)/i,
-      /"Beta"\s*[:,]\s*"?(-?\d+\.\d+)"?/i,
-      />Beta<[\s\S]{0,200}?(-?\d+\.\d+)/i,
-    ];
-    for (const re of patterns) {
-      const m = html.match(re);
-      if (m) {
-        const v = parseFloat(m[1]);
-        if (isFinite(v) && Math.abs(v) < 10) return v;
-      }
-    }
-    return null;
+    return await pr.text();
   } catch { return null; }
+}
+
+function investingBetaFromHtml(html: string): number | null {
+  const patterns = [
+    /Beta[^<>\n]{0,80}?<[^>]*>\s*(-?\d+\.\d+)/i,
+    /"Beta"\s*[:,]\s*"?(-?\d+\.\d+)"?/i,
+    />Beta<[\s\S]{0,200}?(-?\d+\.\d+)/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (isFinite(v) && Math.abs(v) < 10) return v;
+    }
+  }
+  return null;
+}
+
+function investingDivYieldFromHtml(html: string): number | null {
+  const patterns = [
+    /Dividend\s*\(Yield\)[\s\S]{0,160}?\(\s*([\d.,]+)\s*%\s*\)/i,
+    /"dividendYield"\s*[:,]\s*"?([\d.]+)"?/i,
+    />Yield<[\s\S]{0,200}?(\d+\.\d+)\s*%/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m) {
+      const v = parseFloat(String(m[1]).replace(",", "."));
+      if (isFinite(v) && v >= 0 && v < 25) return v;
+    }
+  }
+  return null;
+}
+
+async function investingBeta(ticker: string): Promise<number | null> {
+  const html = await investingEquityHtml(ticker);
+  return html ? investingBetaFromHtml(html) : null;
+}
+
+async function investingDivYield(ticker: string): Promise<number | null> {
+  const html = await investingEquityHtml(ticker);
+  return html ? investingDivYieldFromHtml(html) : null;
 }
 
 /**
@@ -216,6 +311,28 @@ function combineBeta(
     ? "Yahoo Finance"
     : parts.map((p) => p.name).join("+");
   return { beta: avg, source: src };
+}
+
+/** Combina il dividend yield da Yahoo + GuruFocus + TradingView + Investing con media semplice (valori in %). */
+function combineDivYield(
+  yahoo: number | null,
+  guru: number | null,
+  tv: number | null,
+  inv: number | null,
+): { value: number | null; source: string | null } {
+  const parts: { name: string; v: number }[] = [];
+  if (typeof yahoo === "number" && isFinite(yahoo)) parts.push({ name: "Yahoo", v: yahoo });
+  if (typeof guru === "number" && isFinite(guru)) parts.push({ name: "GuruFocus", v: guru });
+  if (typeof tv === "number" && isFinite(tv)) parts.push({ name: "TradingView", v: tv });
+  if (typeof inv === "number" && isFinite(inv)) parts.push({ name: "Investing", v: inv });
+  if (!parts.length) return { value: null, source: null };
+  // Se una fonte diverge molto dalla mediana (>2 pt), scartala: gli scraper a volte agganciano il numero sbagliato.
+  const sorted = [...parts].sort((a, b) => a.v - b.v);
+  const median = sorted[Math.floor(sorted.length / 2)].v;
+  const kept = parts.filter((p) => Math.abs(p.v - median) <= 2);
+  const avg = kept.reduce((a, b) => a + b.v, 0) / kept.length;
+  const src = kept.length === 1 && kept[0].name === "Yahoo" ? "Yahoo Finance" : kept.map((p) => p.name).join("+");
+  return { value: avg, source: src };
 }
 
 async function fetchERPDamodaran(): Promise<Record<string, { erp: number; currency?: string }>> {
@@ -307,14 +424,16 @@ serve(async (req) => {
     name = name ?? cached?.name ?? null;
     currency = currency ?? cached?.currency ?? "USD";
 
-    // 2. Beta — media Yahoo + GuruFocus + TradingView (refresh mensile, o force).
+    // 2. Summary Yahoo (serve per beta e dividend yield)
+    const sum = await yahooSummary(ticker, auth);
+
+    // 3. Beta — media Yahoo + GuruFocus + TradingView (refresh mensile, o force).
     // RISPETTA il flag beta_manual: se admin ha inserito beta a mano, NON sovrascrivere.
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
     const isManual = !!cached?.beta_manual;
     if (!isManual && (force || beta == null || now - betaUpdatedAt > MONTH_MS)) {
-      const sum = await yahooSummary(ticker, auth);
       const yBeta: number | null =
         (typeof sum?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(sum.defaultKeyStatistics.beta.raw))
           ? sum.defaultKeyStatistics.beta.raw
@@ -330,18 +449,23 @@ serve(async (req) => {
       }
     }
 
-    // 3. RV — refresh giornaliero
+    // 4. RV — chart sempre fetchato (serve per le finestre multiple); cache come fallback.
     let rv: number | null = cached?.rv ?? null;
     let rvUpdatedAt = cached?.rv_updated_at ? new Date(cached.rv_updated_at).getTime() : 0;
-    if (!rv || now - rvUpdatedAt > DAY_MS) {
-      const closes = await yahooChart1y(ticker, auth);
-      if (closes) {
-        const v = annualizedVol(closes);
-        if (v != null) { rv = v; rvUpdatedAt = now; }
+    let rvWindows: Record<string, number> | null = null;
+    const closes = await yahooChart1y(ticker, auth);
+    if (closes) {
+      const w: Record<string, number> = {};
+      for (const { key, days } of RV_WINDOWS) {
+        const v = annualizedVolWindow(closes, days);
+        if (v != null) w[key] = v;
       }
+      if (Object.keys(w).length) rvWindows = w;
+      const v1y = w["1y"] ?? annualizedVol(closes);
+      if (v1y != null) { rv = v1y; rvUpdatedAt = now; }
     }
 
-    // 4. Risk-free
+    // 5. Risk-free: 10y per il CAPM, tasso breve (^IRX) per sconto/inversione IV
     let riskFree: number | null = null;
     const rfTk = RF_TICKER[currency] ?? "^TNX";
     const rfQ = await yahooQuote(rfTk, auth);
@@ -350,8 +474,29 @@ serve(async (req) => {
       const us = await yahooQuote("^TNX", auth);
       if (us?.regularMarketPrice != null) riskFree = Number(us.regularMarketPrice);
     }
+    let riskFreeShort: number | null = null;
+    const rfsTk = RF_SHORT_TICKER[currency] ?? "^IRX";
+    const rfsQ = await yahooQuote(rfsTk, auth);
+    if (rfsQ?.regularMarketPrice != null) riskFreeShort = Number(rfsQ.regularMarketPrice);
+    if (riskFreeShort == null) riskFreeShort = riskFree;
 
-    // 5. ERP
+    // 6. Dividend yield — media multi-fonte (Yahoo + GuruFocus + TradingView + Investing)
+    const yDivRaw =
+      (typeof sum?.summaryDetail?.dividendYield?.raw === "number" && isFinite(sum.summaryDetail.dividendYield.raw))
+        ? sum.summaryDetail.dividendYield.raw * 100
+        : (typeof sum?.summaryDetail?.trailingAnnualDividendYield?.raw === "number" && isFinite(sum.summaryDetail.trailingAnnualDividendYield.raw))
+          ? sum.summaryDetail.trailingAnnualDividendYield.raw * 100
+          : null;
+    const yDiv = yDivRaw != null && yDivRaw >= 0 && yDivRaw < 25 ? yDivRaw : null;
+    const [gDiv, tvDiv, invDiv] = await Promise.all([
+      guruFocusDivYield(ticker), tradingViewDivYield(ticker), investingDivYield(ticker),
+    ]);
+    const dy = combineDivYield(yDiv, gDiv, tvDiv, invDiv);
+    // Nessuna fonte -> titolo senza dividendo: 0 esplicito, non null.
+    const divYield = dy.value ?? 0;
+    const divYieldSource = dy.source ?? "nessuna fonte (0%)";
+
+    // 7. ERP
     const country = CURRENCY_TO_COUNTRY[currency] ?? "United States";
     let erpRow = await getCachedERP(supabase, country);
     if (!erpRow || now - new Date(erpRow.updated_at).getTime() > DAY_MS) {
@@ -371,7 +516,8 @@ serve(async (req) => {
     });
 
     const result: Result = {
-      ticker, name, currency, price, beta, betaSource, rv, riskFree, erp,
+      ticker, name, currency, price, beta, betaSource, rv, rvWindows,
+      riskFree, riskFreeShort, divYield, divYieldSource, erp,
       erpCountry: country, asof: new Date().toISOString().slice(0, 10),
     };
     return new Response(JSON.stringify(result), {
