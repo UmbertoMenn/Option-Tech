@@ -2,6 +2,8 @@
  * Parser per i nuovi flussi CSV della banca (dal 07/2026):
  *  - FlussoSaldiContiCash_*.csv   → saldi dei conti correnti
  *  - FlussoSaldiContiTitoli_*.csv → posizioni dei depositi titoli
+ *  - FlussoMovContiCash_*.csv     → movimenti dei conti correnti (bonifici,
+ *                                    giroconti, commissioni, POS, ecc.)
  *
  * Formato: separatore ';', decimali con virgola, valori testuali prefissati
  * da apostrofo (es. '03211, '02225971281).
@@ -18,6 +20,14 @@
  * descrittore nel campo ISIN: [TICKER][MM/YY][C|P][STRIKE]. La quantità
  * (numero contratti, con segno) è nel campo VALORE NOMINALE e il premio
  * per azione nel campo PREZZO.
+ *
+ * Il file Movimenti Cash riporta ogni operazione sul conto (DESCRIZIONE
+ * OPERAZIONE / DESCRIZIONE CAUSALE libere, non un enum fisso). Le righe che
+ * rappresentano un vero movimento di capitale del cliente — bonifico in
+ * entrata/uscita o giroconto — vengono riconosciute tramite pattern
+ * testuali flessibili (vedi classifyCashMovement) e proposte come
+ * versamenti/prelievi candidati. Tutto il resto (commissioni, canoni,
+ * acquisti POS, interessi, ecc.) viene ignorato.
  */
 import { Position, AssetType } from '@/types/portfolio';
 import { parseExcelNumber } from './formatters';
@@ -34,6 +44,36 @@ export interface FlussiCashAccount {
   restricted?: boolean;
 }
 
+/** Un movimento di capitale (bonifico o giroconto) individuato nel file Movimenti Cash. */
+export interface FlussiCashMovement {
+  accountId: string;
+  /** true per conti GP ("B0...") — vedi note di testata */
+  isGP?: boolean;
+  /** true per conti vincolati ("A9...") */
+  restricted?: boolean;
+  /** Data valuta (usata come data del movimento ai fini versamenti/prelievi), ISO */
+  movementDate: string;
+  /** Data contabile, ISO */
+  accountingDate: string;
+  /** Importo firmato (positivo = entrata/versamento, negativo = uscita/prelievo) */
+  amount: number;
+  currency: string;
+  operationId: string;
+  description: string;
+  causaleCode: string;
+  causaleDescription: string;
+  kind: 'bonifico' | 'giroconto';
+}
+
+/** Versamento/prelievo candidato, pronto per l'inserimento in tabella `deposits`. */
+export interface DepositCandidate {
+  deposit_date: string;
+  amount: number;
+  description: string;
+  /** Movimenti sorgente aggregati in questa riga (stesso conto, stessa data valuta) */
+  sourceMovements: FlussiCashMovement[];
+}
+
 export interface FlussiParseResult {
   positions: ParsedPosition[];
   /** Conti di liquidità del portafoglio (ordinari + vincolati, GP esclusa) */
@@ -46,9 +86,16 @@ export interface FlussiParseResult {
   /** Conti liquidità GP ("B0...") */
   gpCashAccounts: FlussiCashAccount[];
   snapshotDate: string | null;
+  /** Movimenti di capitale (bonifici/giroconti) individuati nel file Movimenti Cash */
+  cashMovements: FlussiCashMovement[];
 }
 
 export interface FlussiParseOptions {
+  /**
+   * Conti da escludere (match per sottostringa sul NUMERO CONTO). Applicata sia
+   * alle righe di saldo (liquidità) sia alle righe di movimento (versamenti/prelievi):
+   * le eccezioni cliente restano valide su entrambi i flussi.
+   */
   excludedCashAccounts?: string[];
   excludedCashPatterns?: { mid: string; last: string }[];
 }
@@ -68,12 +115,19 @@ function splitCsvLine(line: string): string[] {
   return line.replace(/\r$/, '').split(';').map(c => c.trim());
 }
 
-/** Riconosce dal testo se si tratta di uno dei due flussi CSV. */
-export function detectFlussiCsvType(text: string): 'cash' | 'titoli' | null {
+export type FlussiCsvType = 'cash' | 'titoli' | 'mov_cash';
+
+/** Riconosce dal testo di quale dei flussi CSV si tratta. */
+export function detectFlussiCsvType(text: string): FlussiCsvType | null {
   const firstLine = text.slice(0, 400).split(/\r?\n/)[0]?.toUpperCase() ?? '';
-  if (!firstLine.startsWith('DATA RIFERIMENTO;')) return null;
-  if (firstLine.includes('SALDO EURO')) return 'cash';
-  if (firstLine.includes('CODICE TITOLO')) return 'titoli';
+  if (firstLine.startsWith('DATA RIFERIMENTO;')) {
+    if (firstLine.includes('SALDO EURO')) return 'cash';
+    if (firstLine.includes('CODICE TITOLO')) return 'titoli';
+    return null;
+  }
+  if (firstLine.startsWith('DATA INIZIO PERIODO;') && firstLine.includes('DESCRIZIONE OPERAZIONE')) {
+    return 'mov_cash';
+  }
   return null;
 }
 
@@ -109,6 +163,7 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     gpHoldings: [],
     gpCashAccounts: [],
     snapshotDate: null,
+    cashMovements: [],
   };
   if (!type) return result;
 
@@ -124,8 +179,10 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
 
     if (type === 'cash') {
       parseCashRow(cells, result, options);
-    } else {
+    } else if (type === 'titoli') {
       parseTitoliRow(cells, result);
+    } else {
+      parseMovCashRow(cells, result, options);
     }
   }
 
@@ -279,4 +336,106 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult): void {
     snapshot_price: prezzo || undefined,
     snapshot_market_value: marketValueEUR || undefined,
   } as ParsedPosition);
+}
+
+// ============================================================================
+// File Movimenti Cash: DATA INIZIO PERIODO;DATA FINE PERIODO;COD ABI;
+//   DATA CONTABILE;DATA VALUTA;ANNO;NUMERO CONTO;NUMERO OPERAZIONE;
+//   DESCRIZIONE OPERAZIONE;SEGNO;IMPORTO ORIGINARIO;DIVISA IMPORTO ORIGINARIO;
+//   IMPORTO MOVIMENTO CONTO;DIVISA IMPORTO;CODICE CAUSALE;DESCRIZIONE CAUSALE;IBAN;
+// ============================================================================
+
+/**
+ * Riconoscimento flessibile di bonifici e giroconti: la banca non usa un
+ * codice causale stabile per queste operazioni, quindi si matcha sul testo
+ * libero (DESCRIZIONE OPERAZIONE + DESCRIZIONE CAUSALE), case-insensitive e
+ * a "word boundary" per tollerare varianti (es. "BONIFICO A VOSTRO FAVORE",
+ * "BONIFICO DISPOSTO", "VS BONIFICO ESTERO", "GIROCONTO INTERNO", ecc.).
+ */
+const BONIFICO_RE = /\bBONIFIC[OI]\b/i;
+const GIROCONTO_RE = /\bGIROCONT[OI]\b/i;
+// Spese/commissioni *relative* a un bonifico (es. "COMMISSIONI PER BONIFICO
+// ESTERO") non sono il movimento di capitale in sé: vanno escluse per non
+// generare un falso prelievo che duplica quello reale.
+const FEE_ON_TRANSFER_RE = /\b(COMMISSION[EI]|SPES[AE]|COMPETENZ[EA]|ADDEBITO PER)\b/i;
+
+function classifyCashMovement(description: string, causaleDescription: string): 'bonifico' | 'giroconto' | null {
+  const haystack = `${description} ${causaleDescription}`.toUpperCase();
+  const isBonifico = BONIFICO_RE.test(haystack);
+  const isGiroconto = GIROCONTO_RE.test(haystack);
+  if (!isBonifico && !isGiroconto) return null;
+  if (FEE_ON_TRANSFER_RE.test(haystack)) return null; // spesa/commissione, non il movimento stesso
+  return isBonifico ? 'bonifico' : 'giroconto';
+}
+
+function parseMovCashRow(cells: string[], result: FlussiParseResult, options?: FlussiParseOptions): void {
+  const accountId = stripQuote(cells[6] || '');
+  if (!accountId) return;
+
+  // Stesse eccezioni cliente (silvias, maurog, ...) già usate per la liquidità.
+  if (isExcludedAccount(accountId, options)) {
+    console.log('[FlussiCsv] Movimento escluso da regola conto cliente');
+    return;
+  }
+
+  const description = (cells[8] || '').trim();
+  const causaleCode = stripQuote(cells[14] || '');
+  const causaleDescription = (cells[15] || '').trim();
+
+  const kind = classifyCashMovement(description, causaleDescription);
+  if (!kind) return;
+
+  const amount = parseExcelNumber(cells[12]); // già firmato (+ entrata / - uscita)
+  if (!amount) return;
+
+  const movementDate = parseItalianDate(cells[4]) || parseItalianDate(cells[3]);
+  if (!movementDate) return;
+
+  const upperAccount = accountId.toUpperCase();
+
+  result.cashMovements.push({
+    accountId,
+    isGP: upperAccount.startsWith('B0'),
+    restricted: upperAccount.startsWith('A9'),
+    movementDate,
+    accountingDate: parseItalianDate(cells[3]) || movementDate,
+    amount,
+    currency: (cells[13] || 'EUR').trim() || 'EUR',
+    operationId: stripQuote(cells[7] || ''),
+    description,
+    causaleCode,
+    causaleDescription,
+    kind,
+  });
+}
+
+/**
+ * Aggrega i movimenti (bonifici/giroconti) individuati in candidati
+ * versamento/prelievo, uno per data valuta (netting infragiornaliero).
+ *
+ * Nota: la tabella `deposits` ha oggi il vincolo UNIQUE(portfolio_id,
+ * deposit_date), quindi più movimenti nello stesso giorno DEVONO confluire
+ * in un'unica riga: l'aggregazione per data qui non è un'approssimazione
+ * ma un requisito dello schema attuale. Se in futuro serve tracciare ogni
+ * bonifico separatamente, va prima rimosso/modificato quel vincolo.
+ */
+export function buildDepositCandidates(movements: FlussiCashMovement[]): DepositCandidate[] {
+  const byDate = new Map<string, FlussiCashMovement[]>();
+  for (const m of movements) {
+    const list = byDate.get(m.movementDate) ?? [];
+    list.push(m);
+    byDate.set(m.movementDate, list);
+  }
+
+  const candidates: DepositCandidate[] = [];
+  for (const [deposit_date, sourceMovements] of byDate) {
+    const amount = sourceMovements.reduce((s, m) => s + m.amount, 0);
+    const description = sourceMovements
+      .map(m => m.description || m.causaleDescription)
+      .filter(Boolean)
+      .join(' | ');
+    candidates.push({ deposit_date, amount, description, sourceMovements });
+  }
+
+  return candidates.sort((a, b) => a.deposit_date.localeCompare(b.deposit_date));
 }

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseFlussiCsvText, detectFlussiCsvType } from '@/lib/flussiCsvParser';
+import { parseFlussiCsvText, detectFlussiCsvType, buildDepositCandidates } from '@/lib/flussiCsvParser';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 const CASH_CSV = [
   'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
@@ -127,5 +129,130 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(msft.ticker_code).toBe('010696');
     // Nessuna posizione GP finisce tra le posizioni di portafoglio
     expect(res.positions.some(p => p.description === 'MICROSOFT INC.')).toBe(false);
+  });
+});
+
+// ============================================================================
+// File Movimenti Cash (FlussoMovContiCash) — versamenti/prelievi automatici
+// ============================================================================
+const MOV_HEADER =
+  'DATA INIZIO PERIODO;DATA FINE PERIODO;COD ABI;DATA CONTABILE;DATA VALUTA;ANNO;' +
+  'NUMERO CONTO;NUMERO OPERAZIONE;DESCRIZIONE OPERAZIONE;SEGNO;IMPORTO ORIGINARIO;' +
+  'DIVISA IMPORTO ORIGINARIO;IMPORTO MOVIMENTO CONTO;DIVISA IMPORTO;CODICE CAUSALE;' +
+  'DESCRIZIONE CAUSALE;IBAN;';
+
+const MOV_CASH_CSV = [
+  MOV_HEADER,
+  // Bonifico in entrata (versamento)
+  "07/07/2026;07/07/2026;'03211;06/07/2026;06/07/2026;2026;'52805213452;'26000167999001;" +
+    "BONIFICO A VOSTRO FAVORE - MARIO ROSSI;+;15000,0;EUR;15000,0;EUR;00001200;BONIFICO IN VOSTRO FAVORE;IT39W0321101600052805213452",
+  // Bonifico in uscita (prelievo)
+  "07/07/2026;07/07/2026;'03211;06/07/2026;06/07/2026;2026;'52805213452;'26000167999002;" +
+    "VOSTRA DISPOSIZIONE DI BONIFICO - VERSO IT60X0542811101000000123456;-;-5000,0;EUR;-5000,0;EUR;00001210;BONIFICO DISPOSTO;IT39W0321101600052805213452",
+  // Giroconto interno (stesso giorno del bonifico in entrata, stesso conto -> deve nettare insieme)
+  "07/07/2026;07/07/2026;'03211;06/07/2026;06/07/2026;2026;'52805213452;'26000167999003;" +
+    "GIROCONTO A VOSTRO FAVORE;+;2500,0;EUR;2500,0;EUR;00001300;GIROCONTO;IT39W0321101600052805213452",
+  // Commissione SUL bonifico (non un movimento di capitale: deve essere ignorata)
+  "07/07/2026;07/07/2026;'03211;06/07/2026;06/07/2026;2026;'52805213452;'26000167999004;" +
+    "COMMISSIONI PER BONIFICO ESTERO;-;-15,0;EUR;-15,0;EUR;00001220;ADDEBITO PER COMMISSIONI SU BONIFICO;IT39W0321101600052805213452",
+  // Operazione ordinaria, non un movimento di capitale
+  "07/07/2026;07/07/2026;'03211;05/07/2026;05/07/2026;2026;'52805213452;'26000167999005;" +
+    "ACQUISTO TRAMITE POS - POS 0207 ESSELUNGA;-;-42,3;EUR;-42,3;EUR;20000007;ACQUISTO TRAMITE POS;IT39W0321101600052805213452",
+  // Bonifico su un secondo conto/giorno diverso
+  "07/07/2026;07/07/2026;'03211;05/07/2026;03/07/2026;2026;'52225971282;'26000167999006;" +
+    "BONIFICO A VOSTRO FAVORE - GIROCONTO DA ALTRO ISTITUTO;+;8000,0;EUR;8000,0;EUR;00001200;BONIFICO IN VOSTRO FAVORE;IT61N0321101600052225971282",
+].join('\r\n');
+
+describe('detectFlussiCsvType — file Movimenti Cash', () => {
+  it('riconosce il file movimenti cash', () => {
+    expect(detectFlussiCsvType(MOV_CASH_CSV)).toBe('mov_cash');
+  });
+});
+
+describe('parseFlussiCsvText — file Movimenti Cash', () => {
+  it('individua bonifici e giroconti, ignorando le altre operazioni', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    // 4 movimenti di capitale: bonifico +15000, bonifico -5000, giroconto +2500, bonifico +8000
+    expect(res.cashMovements).toHaveLength(4);
+
+    const kinds = res.cashMovements.map(m => m.kind);
+    expect(kinds.filter(k => k === 'bonifico')).toHaveLength(3);
+    expect(kinds.filter(k => k === 'giroconto')).toHaveLength(1);
+  });
+
+  it('usa il segno di IMPORTO MOVIMENTO CONTO per distinguere entrata/uscita', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    const entrata = res.cashMovements.find(m => m.operationId === '26000167999001');
+    const uscita = res.cashMovements.find(m => m.operationId === '26000167999002');
+    expect(entrata?.amount).toBeCloseTo(15000, 2);
+    expect(uscita?.amount).toBeCloseTo(-5000, 2);
+  });
+
+  it('usa la data valuta come data del movimento', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    const m = res.cashMovements.find(m => m.operationId === '26000167999006');
+    expect(m?.movementDate).toBe('2026-07-03'); // data valuta, non data contabile (05/07)
+  });
+
+  it('esclude commissioni/spese relative a un bonifico (non sono il movimento di capitale)', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    expect(res.cashMovements.some(m => m.operationId === '26000167999004')).toBe(false);
+  });
+
+  it('ignora operazioni ordinarie (POS, commissioni, canoni) — nessun falso positivo', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    expect(res.cashMovements.some(m => m.operationId === '26000167999005')).toBe(false);
+  });
+
+  it('applica le eccezioni sui conti cliente (silvias/maurog) anche ai movimenti', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV, { excludedCashAccounts: ['52805213452'] });
+    // Restano solo i movimenti del secondo conto, non escluso
+    expect(res.cashMovements).toHaveLength(1);
+    expect(res.cashMovements[0].accountId).toBe('52225971282');
+  });
+
+  it('applica le eccezioni per pattern (mid/last) anche ai movimenti', () => {
+    // accountId '52805213452' (11 cifre): con mid.length=3, midStart=floor((11-3)/2)=4
+    // → slice(4,7) = '521'; ultime 3 cifre = '452'.
+    const res = parseFlussiCsvText(MOV_CASH_CSV, {
+      excludedCashPatterns: [{ mid: '521', last: '452' }],
+    });
+    expect(res.cashMovements.every(m => m.accountId !== '52805213452')).toBe(true);
+  });
+
+  it('nessun falso positivo su un estratto conto reale privo di bonifici/giroconti', () => {
+    const realCsv = readFileSync(
+      join(__dirname, 'fixtures/FlussoMovContiCash_sample.csv'),
+      'utf-8'
+    );
+    expect(detectFlussiCsvType(realCsv)).toBe('mov_cash');
+    const res = parseFlussiCsvText(realCsv);
+    // Il file reale contiene solo commissioni, canoni e acquisti POS
+    expect(res.cashMovements).toHaveLength(0);
+  });
+});
+
+describe('buildDepositCandidates', () => {
+  it('aggrega (netta) i movimenti dello stesso giorno in un unico candidato versamento/prelievo', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    const candidates = buildDepositCandidates(res.cashMovements);
+
+    // Due date distinte: 2026-07-06 (bonifico +15000, bonifico -5000, giroconto +2500) e 2026-07-03 (+8000)
+    expect(candidates).toHaveLength(2);
+
+    const day1 = candidates.find(c => c.deposit_date === '2026-07-06')!;
+    expect(day1.amount).toBeCloseTo(15000 - 5000 + 2500, 2);
+    expect(day1.sourceMovements).toHaveLength(3);
+
+    const day2 = candidates.find(c => c.deposit_date === '2026-07-03')!;
+    expect(day2.amount).toBeCloseTo(8000, 2);
+    expect(day2.sourceMovements).toHaveLength(1);
+  });
+
+  it('ordina i candidati per data crescente', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV);
+    const candidates = buildDepositCandidates(res.cashMovements);
+    const dates = candidates.map(c => c.deposit_date);
+    expect(dates).toEqual([...dates].sort());
   });
 });
