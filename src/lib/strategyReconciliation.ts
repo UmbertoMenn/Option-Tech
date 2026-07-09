@@ -1,6 +1,6 @@
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
-import { normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
+import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 
 export interface LegStatus {
   signature: PositionSignature;
@@ -45,8 +45,18 @@ const EXPECTED_LEG_COUNTS: Record<string, number> = {
   other: 1,
 };
 
-function normalizeUnderlying(text: string): string {
-  return getCanonicalKey(text) || normalizeForMatching(text);
+/**
+ * Chiave di raggruppamento sottostante, instradata attraverso il resolver
+ * canonico condiviso (`tickerIdentity.ts`) invece di un alias-map locale.
+ * Questo evita che lo stesso titolo appaia sotto due chiavi diverse quando
+ * una config è salvata col nome esteso azienda (es. "ADVANCED MICRO DEVIC",
+ * tipico delle covered call create dal nome descrizione dell'azione) mentre
+ * le posizioni derivate usano il ticker breve (es. "AMD", dal descrittore
+ * opzione): senza questo allineamento le due config finiscono in gruppi
+ * "underlying" distinti e non si riconciliano mai tra loro.
+ */
+function normalizeUnderlying(text: string, linkedStock?: Position | null): string {
+  return getCanonicalTickerKey({ rawTicker: text, rawName: text, linkedStock: linkedStock || null });
 }
 
 function signaturesMatch(sig: PositionSignature, pos: Position): boolean {
@@ -139,10 +149,20 @@ export function reconcileConfigs(
   const derivativePositions = currentPositions.filter(p => p.asset_type === 'derivative');
   const items: ReconciliationItem[] = [];
 
+  // Lookup posizione per id (per risolvere l'azione collegata delle config)
+  const positionById = new Map<string, Position>();
+  for (const p of currentPositions) positionById.set(p.id, p);
+  const resolveLinkedStock = (config: StrategyConfiguration): Position | null => {
+    if (!config.linked_stock_id) return null;
+    return positionById.get(config.linked_stock_id)
+      || currentPositions.find(p => p.id.startsWith(config.linked_stock_id + '__slot_'))
+      || null;
+  };
+
   // Group configs by underlying (normalized)
   const configsByUnderlying = new Map<string, StrategyConfiguration[]>();
   for (const config of configs) {
-    const key = normalizeUnderlying(config.underlying);
+    const key = normalizeUnderlying(config.underlying, resolveLinkedStock(config));
     if (!configsByUnderlying.has(key)) configsByUnderlying.set(key, []);
     configsByUnderlying.get(key)!.push(config);
   }
@@ -162,7 +182,12 @@ export function reconcileConfigs(
     
     for (const config of cfgs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      if (signatures.length === 0) continue;
+      // NOTA: nessun early-return su signatures vuote. Il ciclo missing-leg
+      // sotto è naturalmente un no-op su un array vuoto, ma il rilevamento
+      // delle gambe "new" DEVE comunque girare — una covered call salvata
+      // con firme vuote (stock-only) è esattamente il caso in cui una nuova
+      // call venduta su quel sottostante va riconosciuta come sua gamba,
+      // non smarrita perché la config non genera nessun item.
 
       const legs: LegStatus[] = [];
       const matchedPositionIds = new Set<string>();

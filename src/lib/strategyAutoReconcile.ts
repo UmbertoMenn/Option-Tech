@@ -50,7 +50,7 @@
  */
 import { StrategyConfiguration, PositionSignature, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
 import { ReconciliationItem } from '@/lib/strategyReconciliation';
-import { normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
+import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { Position } from '@/types/portfolio';
 
 export interface AutoReconcileResult {
@@ -70,8 +70,15 @@ export interface AutoReconcileContext {
   underlyingPrices?: Record<string, { price?: number | null }>;
 }
 
-function normalizeUnderlying(text: string): string {
-  return getCanonicalKey(text) || normalizeForMatching(text);
+/**
+ * Chiave di raggruppamento sottostante — vedi nota gemella in
+ * strategyReconciliation.ts: instradata sul resolver canonico condiviso
+ * per evitare che una config salvata col nome esteso azienda finisca in
+ * un gruppo diverso dalle posizioni derivate sullo stesso titolo (che
+ * usano il ticker breve).
+ */
+function normalizeUnderlying(text: string, linkedStock?: Position | null): string {
+  return getCanonicalTickerKey({ rawTicker: text, rawName: text, linkedStock: linkedStock || null });
 }
 
 function expiryToTime(expiry: string): number {
@@ -226,6 +233,17 @@ export function autoReconcileStrategies(
   /** Config create in questo run, indicizzate per (underlyingKey, tipo iniziale) per il chaining */
   const runCreated: { underlyingKey: string; params: UpsertConfigParams }[] = [];
 
+  // Lookup posizione per id (per risolvere l'azione collegata delle config,
+  // stesso pattern di strategyReconciliation.ts)
+  const positionById = new Map<string, Position>();
+  for (const p of allPositions) positionById.set(p.id, p);
+  const resolveLinkedStock = (config: StrategyConfiguration): Position | null => {
+    if (!config.linked_stock_id) return null;
+    return positionById.get(config.linked_stock_id)
+      || allPositions.find(p => p.id.startsWith(config.linked_stock_id + '__slot_'))
+      || null;
+  };
+
   let anyChange = false;
 
   /** Firme correnti di una config esistente (originali sopravvissute + accodate) */
@@ -239,7 +257,7 @@ export function autoReconcileStrategies(
   // ------------------------------------------------------------------
   const itemsByUnderlying = new Map<string, ReconciliationItem[]>();
   for (const item of items) {
-    const key = normalizeUnderlying(item.underlying);
+    const key = normalizeUnderlying(item.underlying, resolveLinkedStock(item.config));
     if (!itemsByUnderlying.has(key)) itemsByUnderlying.set(key, []);
     itemsByUnderlying.get(key)!.push(item);
   }
@@ -375,7 +393,7 @@ export function autoReconcileStrategies(
     const leftovers = [...newByPosId.values()].filter(n => n.qty > 0);
     if (leftovers.length > 0) {
       const configsForUnderlying = configs.filter(
-        c => normalizeUnderlying(c.underlying) === underlyingKey && !deletedConfigIds.has(c.id),
+        c => normalizeUnderlying(c.underlying, resolveLinkedStock(c)) === underlyingKey && !deletedConfigIds.has(c.id),
       );
 
       const createConfig = (strategyType: string, sigs: PositionSignature[], linkedStockId: string | null = null): UpsertConfigParams => {
