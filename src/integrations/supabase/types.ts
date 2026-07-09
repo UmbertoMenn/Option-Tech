@@ -284,6 +284,77 @@ export type Database = {
           },
         ]
       }
+      call_buybacks: {
+        Row: {
+          buyback_date: string
+          buyback_price: number
+          created_at: string
+          currency: string
+          descriptor: string
+          exchange_rate: number
+          expiry_date: string
+          id: string
+          market_price: number | null
+          market_price_updated_at: string | null
+          portfolio_id: string
+          quantity: number
+          resell_date: string | null
+          resell_price: number | null
+          resold_quantity: number
+          strike: number
+          underlying: string
+          updated_at: string
+        }
+        Insert: {
+          buyback_date: string
+          buyback_price: number
+          created_at?: string
+          currency?: string
+          descriptor: string
+          exchange_rate?: number
+          expiry_date: string
+          id?: string
+          market_price?: number | null
+          market_price_updated_at?: string | null
+          portfolio_id: string
+          quantity: number
+          resell_date?: string | null
+          resell_price?: number | null
+          resold_quantity?: number
+          strike: number
+          underlying: string
+          updated_at?: string
+        }
+        Update: {
+          buyback_date?: string
+          buyback_price?: number
+          created_at?: string
+          currency?: string
+          descriptor?: string
+          exchange_rate?: number
+          expiry_date?: string
+          id?: string
+          market_price?: number | null
+          market_price_updated_at?: string | null
+          portfolio_id?: string
+          quantity?: number
+          resell_date?: string | null
+          resell_price?: number | null
+          resold_quantity?: number
+          strike?: number
+          underlying?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_buybacks_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       covered_call_premiums: {
         Row: {
           contracts_count: number
