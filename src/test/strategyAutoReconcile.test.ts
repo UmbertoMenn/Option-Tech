@@ -691,6 +691,66 @@ describe('autoReconcileStrategies — regole concordate (rounds interattivi)', (
   });
 });
 
+describe('autoReconcileStrategies — bug reale: covered call salvata col nome esteso azienda', () => {
+  // Riproduce esattamente il caso trovato in produzione: la covered call ha
+  // underlying="ADVANCED MICRO DEVIC" (nome esteso, da stock.description) e
+  // firme vuote, mentre la call venduta reale arriva con underlying="AMD"
+  // (ticker, dal descrittore opzione). Senza il resolver canonico condiviso,
+  // le due finiscono in gruppi "underlying" diversi e non si incontrano mai.
+  it('call venduta con underlying=ticker si aggancia alla covered call salvata con underlying=nome esteso', () => {
+    const stock = { id: 'stock_amd', asset_type: 'stock', description: 'ADVANCED MICRO DEVIC', ticker: 'AMD', quantity: 400 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'ADVANCED MICRO DEVIC', // nome esteso, come in produzione
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_amd',
+        position_signatures: [], // vuota: la call è "sparita" perché mai stata qui
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'AMD', option_type: 'call', strike_price: 520, expiry_date: '2027-12-17', quantity: -4 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.hasAutoChanges).toBe(true);
+    // Deve esserci UNA sola config covered_call con la gamba, non una
+    // 'other' separata: l'azione collegata deve far riconoscere lo stesso
+    // sottostante nonostante i due testi diversi.
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call')!;
+    expect(cc).toBeDefined();
+    expect(cc.position_signatures).toHaveLength(1);
+    expect(cc.position_signatures[0].strike).toBe(520);
+    expect(res.resolvedConfigs!.some(c => c.strategy_type === 'other')).toBe(false);
+  });
+
+  it('azione collegata SENZA ticker popolato → risoluzione per nome via resolver canonico', () => {
+    // Caso limite realistico: il ticker della posizione azionaria non è
+    // stato risolto (capita con alcuni broker/asset esotici), resta solo
+    // la descrizione estesa. Deve comunque risolvere allo stesso ticker
+    // canonico del descrittore opzione.
+    const stock = { id: 'stock_tsla', asset_type: 'stock', description: 'TESLA INC', ticker: null, quantity: 200 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'TESLA INC',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_tsla',
+        position_signatures: [],
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'TSLA', option_type: 'call', strike_price: 480, expiry_date: '2027-12-17', quantity: -2 }),
+    ];
+
+    const res = run(configs, positions);
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call')!;
+    expect(cc).toBeDefined();
+    expect(cc.position_signatures).toHaveLength(1);
+    expect(res.resolvedConfigs!.some(c => c.strategy_type === 'other')).toBe(false);
+  });
+});
+
 describe('autoReconcileStrategies — nessuna modifica', () => {
   it('config allineate allo snapshot → nessuna azione', () => {
     const configs = [
