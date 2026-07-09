@@ -177,7 +177,7 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
         const derivs = snap.filter(p => p.asset_type === 'derivative');
         const pOverrides = overridesByPortfolio.get(pid) || [];
         const pConfigs = configsByPortfolio.get(pid) || [];
-        const cats = categorizeDerivatives(derivs, snap, pOverrides, pConfigs);
+        const cats = categorizeDerivatives(derivs, snap, pOverrides, pConfigs, { dynamicAliases });
         const resolver = buildResolver(snap);
         const result = analyzePortfolioRisk(snap, cats, resolver);
 
@@ -206,7 +206,7 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     // Single portfolio / user aggregate: standard logic
     const snapshotPositions = toSnapshotPositions(positions);
     const derivatives = snapshotPositions.filter(p => p.asset_type === 'derivative');
-    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides, strategyConfigs);
+    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides, strategyConfigs, { dynamicAliases });
     const resolver = buildResolver(snapshotPositions);
     return analyzePortfolioRisk(snapshotPositions, categories, resolver);
   }, [positions, overrides, strategyConfigs, isGlobalAggregate, underlyingPrices, dynamicAliases]);

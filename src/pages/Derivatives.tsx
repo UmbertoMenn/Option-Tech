@@ -41,6 +41,8 @@ import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { reconcileConfigs } from '@/lib/strategyReconciliation';
 import { autoReconcileStrategies } from '@/lib/strategyAutoReconcile';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
+import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
 import { toast } from 'sonner';
 import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
@@ -277,6 +279,11 @@ export function Derivatives() {
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
+  const { allMappings } = useUnderlyingMappings();
+  const dynamicAliases = useMemo(
+    () => buildDynamicAliasMap(allMappings.data || []),
+    [allMappings.data],
+  );
   const archiveMutation = useArchiveUnderlying();
   const unarchiveMutation = useUnarchiveUnderlying();
   
@@ -416,7 +423,7 @@ export function Derivatives() {
         const portfolioDerivatives = portfolioPositions.filter(p => p.asset_type === 'derivative');
         const portfolioOverrides = overridesByPortfolio.get(pid) || [];
         const portfolioConfigs = strategyConfigs.filter(c => c.portfolio_id === pid);
-        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs, { configOnly: true });
+        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs, { configOnly: true, dynamicAliases });
 
         merged.coveredCalls.push(...result.coveredCalls);
         merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
@@ -433,7 +440,7 @@ export function Derivatives() {
 
       raw = merged;
     } else {
-      raw = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
+      raw = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true, dynamicAliases });
     }
     
     return {
@@ -449,7 +456,7 @@ export function Derivatives() {
       leapCalls: sortByOptionUnderlying(raw.leapCalls),
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
-  }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
+  }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView, dynamicAliases]);
 
   // Strategie incomplete (gamba mancante) raggruppate per tipo, per renderle NELLE loro categorie
   const incompleteByType = useMemo(() => {
@@ -596,8 +603,8 @@ export function Derivatives() {
   // Reconciliation: compare saved configs vs current positions
   const reconciliationItems = useMemo(() => {
     if (!hasConfigurations || strategyConfigs.length === 0 || positions.length === 0) return [];
-    return reconcileConfigs(strategyConfigs, positions);
-  }, [hasConfigurations, strategyConfigs, positions]);
+    return reconcileConfigs(strategyConfigs, positions, dynamicAliases);
+  }, [hasConfigurations, strategyConfigs, positions, dynamicAliases]);
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -662,7 +669,7 @@ export function Derivatives() {
 
     reconciliationCheckedRef.current = true;
 
-    const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions, underlyingPrices);
+    const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions, underlyingPrices, dynamicAliases);
 
     if (!result.hasAutoChanges) {
       // Nulla di automatizzabile: comportamento precedente (dialog)
@@ -695,7 +702,7 @@ export function Derivatives() {
       .finally(() => {
         autoReconcileRunningRef.current = false;
       });
-  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, positions, underlyingPrices, handleSaveConfigs]);
+  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, handleSaveConfigs]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;

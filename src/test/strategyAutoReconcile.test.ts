@@ -751,6 +751,39 @@ describe('autoReconcileStrategies — bug reale: covered call salvata col nome e
   });
 });
 
+describe('autoReconcileStrategies — risoluzione via underlying_mappings (no alias statico)', () => {
+  it('PGR: covered call "PROGRESSIVE CORP" si aggancia alla call venduta "PGR" tramite mappa dinamica (PGR NON è più nella lista statica)', () => {
+    // Prova che la corrispondenza nome-esteso→ticker arriva da
+    // underlying_mappings, non dalla lista hardcoded. Se questo test passa
+    // senza PGR nella lista statica, il resolver dinamico funziona.
+    const dynamicAliases = new Map<string, string>([
+      ['PROGRESSIVE CORP', 'PGR'],
+      ['PROGRESSIVE', 'PGR'],
+    ]);
+    const stock = { id: 'stock_pgr', asset_type: 'stock', description: 'PROGRESSIVE CORP', ticker: null, quantity: 200 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'PROGRESSIVE CORP',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_pgr',
+        position_signatures: [],
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'PGR', option_type: 'call', strike_price: 220, expiry_date: '2026-09-18', quantity: -2 }),
+    ];
+
+    const items = reconcileConfigs(configs, positions, dynamicAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, dynamicAliases);
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call')!;
+    expect(cc).toBeDefined();
+    expect(cc.position_signatures).toHaveLength(1);
+    expect(cc.position_signatures[0].strike).toBe(220);
+    expect(res.resolvedConfigs!.some(c => c.strategy_type === 'other')).toBe(false);
+  });
+});
+
 describe('autoReconcileStrategies — nessuna modifica', () => {
   it('config allineate allo snapshot → nessuna azione', () => {
     const configs = [

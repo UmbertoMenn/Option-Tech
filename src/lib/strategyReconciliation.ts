@@ -48,15 +48,22 @@ const EXPECTED_LEG_COUNTS: Record<string, number> = {
 /**
  * Chiave di raggruppamento sottostante, instradata attraverso il resolver
  * canonico condiviso (`tickerIdentity.ts`) invece di un alias-map locale.
- * Questo evita che lo stesso titolo appaia sotto due chiavi diverse quando
- * una config è salvata col nome esteso azienda (es. "ADVANCED MICRO DEVIC",
- * tipico delle covered call create dal nome descrizione dell'azione) mentre
- * le posizioni derivate usano il ticker breve (es. "AMD", dal descrittore
- * opzione): senza questo allineamento le due config finiscono in gruppi
- * "underlying" distinti e non si riconciliano mai tra loro.
+ * Riceve le mappe dinamiche da `underlying_mappings` (backend): è LÌ che
+ * vivono già le corrispondenze nome-esteso→ticker popolate dagli upload
+ * (es. "PROGRESSIVE CORP"→PGR), quindi non serve mantenere liste statiche
+ * a mano. Questo evita che lo stesso titolo appaia sotto due chiavi diverse
+ * quando una config è salvata col nome esteso azienda mentre le posizioni
+ * derivate usano il ticker breve.
  */
-function normalizeUnderlying(text: string, linkedStock?: Position | null): string {
-  return getCanonicalTickerKey({ rawTicker: text, rawName: text, linkedStock: linkedStock || null });
+function normalizeUnderlying(
+  text: string,
+  linkedStock?: Position | null,
+  dynamicAliases?: Map<string, string> | Record<string, string>,
+): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, linkedStock: linkedStock || null },
+    { dynamicAliases },
+  );
 }
 
 function signaturesMatch(sig: PositionSignature, pos: Position): boolean {
@@ -145,6 +152,7 @@ function formatPositionLabel(p: Position): string {
 export function reconcileConfigs(
   configs: StrategyConfiguration[],
   currentPositions: Position[],
+  dynamicAliases?: Map<string, string> | Record<string, string>,
 ): ReconciliationItem[] {
   const derivativePositions = currentPositions.filter(p => p.asset_type === 'derivative');
   const items: ReconciliationItem[] = [];
@@ -162,7 +170,7 @@ export function reconcileConfigs(
   // Group configs by underlying (normalized)
   const configsByUnderlying = new Map<string, StrategyConfiguration[]>();
   for (const config of configs) {
-    const key = normalizeUnderlying(config.underlying, resolveLinkedStock(config));
+    const key = normalizeUnderlying(config.underlying, resolveLinkedStock(config), dynamicAliases);
     if (!configsByUnderlying.has(key)) configsByUnderlying.set(key, []);
     configsByUnderlying.get(key)!.push(config);
   }
@@ -171,7 +179,7 @@ export function reconcileConfigs(
   const positionsByUnderlying = new Map<string, Position[]>();
   for (const pos of derivativePositions) {
     const raw = pos.underlying || pos.description || '';
-    const key = normalizeUnderlying(raw);
+    const key = normalizeUnderlying(raw, null, dynamicAliases);
     if (!positionsByUnderlying.has(key)) positionsByUnderlying.set(key, []);
     positionsByUnderlying.get(key)!.push(pos);
   }

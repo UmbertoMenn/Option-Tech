@@ -1,6 +1,31 @@
 import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
+import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
+
+/**
+ * Mappe dinamiche da `underlying_mappings` (backend), passate opzionalmente
+ * a categorizeDerivatives. Modulo-scope per non dover propagare il parametro
+ * attraverso decine di helper interni: impostato all'inizio di ogni chiamata
+ * a categorizeDerivatives e letto da resolveUnderlyingKey.
+ */
+let _dynamicAliases: Map<string, string> | Record<string, string> | undefined;
+
+/**
+ * Chiave canonica di un sottostante, instradata sul resolver condiviso
+ * (`tickerIdentity.ts`) con le mappe dinamiche da `underlying_mappings`.
+ * Sostituisce il vecchio pattern `getCanonicalKey(x) || normalizeForMatching(x)`
+ * che copriva solo ~8 aziende in SPECIAL_ALIASES e lasciava che una config
+ * salvata col nome esteso ("PROGRESSIVE CORP") e una posizione col ticker
+ * ("PGR") finissero sotto chiavi diverse. Opzionalmente accetta l'azione
+ * collegata: è il segnale più affidabile (source 'linked_stock').
+ */
+function resolveUnderlyingKey(text: string, linkedStock?: Position | null): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, linkedStock: linkedStock || null },
+    { dynamicAliases: _dynamicAliases },
+  );
+}
 
 /**
  * Filters positions to only those matching the saved position_signatures of a config.
@@ -208,7 +233,25 @@ export function categorizeDerivatives(
   allPositions: Position[],
   overrides: DerivativeOverride[] = [],
   strategyConfigs: StrategyConfiguration[] = [],
-  options?: { configOnly?: boolean }
+  options?: { configOnly?: boolean; dynamicAliases?: Map<string, string> | Record<string, string> }
+): DerivativeCategories {
+  // Mappe dinamiche da underlying_mappings per l'intera esecuzione (vedi
+  // resolveUnderlyingKey). Reset a fine funzione per non contaminare chiamate
+  // successive che non le passano.
+  _dynamicAliases = options?.dynamicAliases;
+  try {
+  return categorizeDerivativesImpl(derivatives, allPositions, overrides, strategyConfigs, options);
+  } finally {
+    _dynamicAliases = undefined;
+  }
+}
+
+function categorizeDerivativesImpl(
+  derivatives: Position[],
+  allPositions: Position[],
+  overrides: DerivativeOverride[] = [],
+  strategyConfigs: StrategyConfiguration[] = [],
+  options?: { configOnly?: boolean; dynamicAliases?: Map<string, string> | Record<string, string> }
 ): DerivativeCategories {
   // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
   const filteredDerivatives = derivatives.filter(d => {
@@ -238,12 +281,16 @@ export function categorizeDerivatives(
   const configCoveredIds = new Set<string>();
   const precomputeUsedQty = new Map<string, number>();
   for (const config of strategyConfigs) {
-    const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    const linkedStockForKey = config.linked_stock_id
+      ? (allPositions.find(p => p.id === config.linked_stock_id)
+         || allPositions.find(p => p.id.startsWith(config.linked_stock_id + '__slot_')) || null)
+      : null;
+    const configKey = resolveUnderlyingKey(config.underlying, linkedStockForKey);
     const sigsForPrecompute = (config.position_signatures as unknown as PositionSignature[]) || [];
     const stockSlotIdsForPrecompute = (config.linked_stock_slot_ids as unknown as string[]) || [];
     if (sigsForPrecompute.length === 0 && stockSlotIdsForPrecompute.length === 0 && !config.linked_stock_id) continue;
     const candidates = filteredDerivatives.filter(d => {
-      const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+      const posKey = resolveUnderlyingKey(d.underlying || d.description);
       return posKey === configKey;
     });
     for (const sig of sigsForPrecompute) {
@@ -306,14 +353,14 @@ export function categorizeDerivatives(
           let isPartial = false;
           
           if (linkedStock && linkedStock.quantity > 0) {
-            const underlyingKey = normalizeForMatching(position.underlying || position.description);
+            const underlyingKey = resolveUnderlyingKey(position.underlying || position.description);
             const stockContracts = Math.floor(linkedStock.quantity / 100);
             const longPutContracts = position.quantity;
             const otherLongPuts = derivatives.filter(d => 
               d.id !== position.id &&
               d.option_type === 'put' &&
               d.quantity > 0 &&
-              normalizeForMatching(d.underlying || d.description) === underlyingKey
+              resolveUnderlyingKey(d.underlying || d.description) === underlyingKey
             );
             const totalLongPutContracts = longPutContracts + otherLongPuts.reduce((sum, p) => sum + p.quantity, 0);
             isPartial = stockContracts - totalLongPutContracts > 0;
@@ -367,7 +414,11 @@ export function categorizeDerivatives(
   const configUsedQty = new Map<string, number>();
 
   for (const config of strategyConfigs) {
-    const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    const linkedStockForKey = config.linked_stock_id
+      ? (allPositions.find(p => p.id === config.linked_stock_id)
+         || allPositions.find(p => p.id.startsWith(config.linked_stock_id + '__slot_')) || null)
+      : null;
+    const configKey = resolveUnderlyingKey(config.underlying, linkedStockForKey);
     const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
     const stockSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
     if (sigs.length === 0 && stockSlotIds.length === 0 && !config.linked_stock_id) continue;
@@ -375,7 +426,7 @@ export function categorizeDerivatives(
     // Pool: derivatives for this underlying not fully consumed by overrides
     const pool = filteredDerivatives.filter(d => {
       if (usedDerivatives.has(d.id)) return false;
-      const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+      const posKey = resolveUnderlyingKey(d.underlying || d.description);
       return posKey === configKey;
     });
 
@@ -434,6 +485,34 @@ export function categorizeDerivatives(
     }
     if (!linkedStock && matchedVirtual.length > 0) {
       linkedStock = findUnderlyingStock(matchedVirtual[0], stockPositions);
+    }
+
+    // ADOZIONE SHORT CALL per covered call / de-risking STOCK-ONLY.
+    // Una CC/DR-CC salvata con la sola gamba azionaria (position_signatures
+    // vuote, tipico quando la config è stata creata dalla descrizione
+    // dell'azione) non ha firme che matchino la call venduta reale: senza
+    // questo passo verrebbe marcata "gamba mancante" anche quando la call
+    // esiste eccome tra le posizioni. Qui, se la config ha l'azione
+    // collegata e nessuna short call tra le matched, si adotta una call
+    // venduta libera sullo stesso sottostante (chiave canonica), così il
+    // ramo covered_call sotto la tratta come gamba presente.
+    if (
+      (config.strategy_type === 'covered_call' || config.strategy_type === 'derisking_covered_call') &&
+      linkedStock &&
+      !matchedVirtual.some(d => d.option_type === 'call' && d.quantity < 0)
+    ) {
+      const stockKey = resolveUnderlyingKey(linkedStock.description || '', linkedStock);
+      for (const d of filteredDerivatives) {
+        if (usedDerivatives.has(d.id)) continue;
+        if ((d.option_type || '').toLowerCase() !== 'call' || d.quantity >= 0) continue;
+        if (resolveUnderlyingKey(d.underlying || d.description || '') !== stockKey) continue;
+        const alreadyUsed = configUsedQty.get(d.id) || 0;
+        const avail = Math.abs(d.quantity) - alreadyUsed;
+        if (avail <= 0) continue;
+        configUsedQty.set(d.id, alreadyUsed + avail);
+        matchedVirtual.push({ ...d, quantity: -avail });
+        usedDerivatives.add(d.id);
+      }
     }
 
     if (matchedVirtual.length === 0 && !linkedStock) {
@@ -868,11 +947,17 @@ export function categorizeDerivatives(
   // positions will fall through to STEP 6.5 → "Altre Strategie".
   const hasStrictConfigs = strategyConfigs.length > 0;
   const configuredUnderlyingKeys = new Set(
-    strategyConfigs.map(c => getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying))
+    strategyConfigs.map(c => {
+      const ls = c.linked_stock_id
+        ? (allPositions.find(p => p.id === c.linked_stock_id)
+           || allPositions.find(p => p.id.startsWith(c.linked_stock_id + '__slot_')) || null)
+        : null;
+      return resolveUnderlyingKey(c.underlying, ls);
+    })
   );
   const isConfiguredUnderlying = (d: Position) => {
     if (!hasStrictConfigs) return false;
-    const k = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+    const k = resolveUnderlyingKey(d.underlying || d.description);
     return configuredUnderlyingKeys.has(k);
   };
 
@@ -934,7 +1019,7 @@ export function categorizeDerivatives(
   for (const d of filteredDerivatives) {
     if (usedDerivatives.has(d.id)) continue;
     if (isConfiguredUnderlying(d)) continue;
-    const underlyingKey = normalizeForMatching(d.underlying || d.description);
+    const underlyingKey = resolveUnderlyingKey(d.underlying || d.description);
 
     if (!allOptionsByUnderlying.has(underlyingKey)) {
       allOptionsByUnderlying.set(underlyingKey, []);
@@ -1002,7 +1087,7 @@ export function categorizeDerivatives(
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of remainingDerivatives) {
-    const underlying = normalizeForMatching(d.underlying || d.description);
+    const underlying = resolveUnderlyingKey(d.underlying || d.description);
     
     if (!groupedByUnderlying.has(underlying)) {
       groupedByUnderlying.set(underlying, []);
@@ -1063,7 +1148,7 @@ export function categorizeDerivatives(
   const regrouped = new Map<string, Position[]>();
   
   for (const d of afterFourLegRemaining) {
-    const underlying = normalizeForMatching(d.underlying || d.description);
+    const underlying = resolveUnderlyingKey(d.underlying || d.description);
     if (!regrouped.has(underlying)) {
       regrouped.set(underlying, []);
     }
@@ -1137,7 +1222,7 @@ export function categorizeDerivatives(
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
-    const underlyingKey = normalizeForMatching(option.underlying || option.description);
+    const underlyingKey = resolveUnderlyingKey(option.underlying || option.description);
     
     // Check if this is a bought PUT that was deferred from Step 2 (potential strategy)
     // If it wasn't used in Steps 3-5, it becomes a protection (fallback)
@@ -1191,7 +1276,7 @@ export function categorizeDerivatives(
   if (hasStrictConfigs) {
     const orphans = filteredDerivatives.filter(d => 
       !usedDerivatives.has(d.id) && 
-      configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description))
+      configuredUnderlyingKeys.has(resolveUnderlyingKey(d.underlying || d.description))
     );
     for (const opt of orphans) {
       otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
@@ -1212,7 +1297,7 @@ function groupOtherStrategiesByUnderlying(otherStrategies: OtherStrategyPosition
   const grouped = new Map<string, OtherStrategyPosition[]>();
   
   for (const os of otherStrategies) {
-    const underlyingKey = normalizeForMatching(os.option.underlying || os.option.description);
+    const underlyingKey = resolveUnderlyingKey(os.option.underlying || os.option.description);
     
     if (!grouped.has(underlyingKey)) {
       grouped.set(underlyingKey, []);
@@ -1810,6 +1895,19 @@ function matchOptionToStocks(option: Position, candidates: Position[]): Position
       return stockCanonical === optionCanonical;
     });
     if (canonicalMatch) return canonicalMatch;
+  }
+
+  // 1b) Canonical ticker-key match via the shared resolver (uses
+  //     underlying_mappings when provided). Copre i casi in cui l'opzione
+  //     porta il ticker (es. underlying "CEG") e l'azione ha il nome esteso
+  //     ("CONSTELLATION ENERGY") ma ticker "CEG": stesso tickerKey.
+  const optionKey = resolveUnderlyingKey(option.underlying || option.description || '');
+  if (optionKey && !optionKey.startsWith('NAME:')) {
+    const keyMatch = candidates.find(stock =>
+      resolveUnderlyingKey(stock.description || '', stock) === optionKey
+      || resolveUnderlyingKey(stock.ticker || '', stock) === optionKey,
+    );
+    if (keyMatch) return keyMatch;
   }
 
   // 2) Simple containment: if option contains stock ticker or normalized name

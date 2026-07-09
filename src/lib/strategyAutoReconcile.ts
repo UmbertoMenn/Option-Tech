@@ -72,13 +72,20 @@ export interface AutoReconcileContext {
 
 /**
  * Chiave di raggruppamento sottostante — vedi nota gemella in
- * strategyReconciliation.ts: instradata sul resolver canonico condiviso
- * per evitare che una config salvata col nome esteso azienda finisca in
- * un gruppo diverso dalle posizioni derivate sullo stesso titolo (che
- * usano il ticker breve).
+ * strategyReconciliation.ts. Instradata sul resolver canonico condiviso
+ * con le mappe dinamiche da `underlying_mappings` (backend), così le
+ * corrispondenze nome-esteso→ticker già presenti a DB non vanno duplicate
+ * in liste statiche.
  */
-function normalizeUnderlying(text: string, linkedStock?: Position | null): string {
-  return getCanonicalTickerKey({ rawTicker: text, rawName: text, linkedStock: linkedStock || null });
+function normalizeUnderlying(
+  text: string,
+  linkedStock?: Position | null,
+  dynamicAliases?: Map<string, string> | Record<string, string>,
+): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, linkedStock: linkedStock || null },
+    { dynamicAliases },
+  );
 }
 
 function expiryToTime(expiry: string): number {
@@ -98,24 +105,32 @@ function bucketKey(optionType: string, quantitySign: number): string {
 }
 
 /** Trova l'azione/ETF in portafoglio corrispondente a un sottostante (posizione base, senza slot). */
-function findStockForUnderlying(underlying: string, allPositions: Position[]): Position | undefined {
-  const key = normalizeUnderlying(underlying);
+function findStockForUnderlying(
+  underlying: string,
+  allPositions: Position[],
+  dynamicAliases?: Map<string, string> | Record<string, string>,
+): Position | undefined {
+  const key = normalizeUnderlying(underlying, null, dynamicAliases);
   return allPositions.find(p => {
     if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return false;
     if (/__slot_\d+$/.test(p.id)) return false;
-    const stockKey = normalizeUnderlying(p.ticker || p.description || '');
+    const stockKey = normalizeUnderlying(p.ticker || p.description || '', null, dynamicAliases);
     return stockKey.length > 0 && (stockKey === key || stockKey.includes(key) || key.includes(stockKey));
   });
 }
 
 /** Prezzo spot del sottostante, con fallback su matching normalizzato. */
-function spotPriceFor(underlying: string, prices?: Record<string, { price?: number | null }>): number | null {
+function spotPriceFor(
+  underlying: string,
+  prices?: Record<string, { price?: number | null }>,
+  dynamicAliases?: Map<string, string> | Record<string, string>,
+): number | null {
   if (!prices) return null;
   const direct = prices[underlying]?.price;
   if (typeof direct === 'number' && direct > 0) return direct;
-  const key = normalizeUnderlying(underlying);
+  const key = normalizeUnderlying(underlying, null, dynamicAliases);
   for (const [k, v] of Object.entries(prices)) {
-    if (normalizeUnderlying(k) === key && typeof v?.price === 'number' && v.price > 0) return v.price;
+    if (normalizeUnderlying(k, null, dynamicAliases) === key && typeof v?.price === 'number' && v.price > 0) return v.price;
   }
   return null;
 }
@@ -212,6 +227,7 @@ export function autoReconcileStrategies(
   items: ReconciliationItem[],
   allPositions: Position[] = [],
   underlyingPrices?: Record<string, { price?: number | null }>,
+  dynamicAliases?: Map<string, string> | Record<string, string>,
 ): AutoReconcileResult {
   const changes: string[] = [];
   const unresolvedItems: ReconciliationItem[] = [];
@@ -257,7 +273,7 @@ export function autoReconcileStrategies(
   // ------------------------------------------------------------------
   const itemsByUnderlying = new Map<string, ReconciliationItem[]>();
   for (const item of items) {
-    const key = normalizeUnderlying(item.underlying, resolveLinkedStock(item.config));
+    const key = normalizeUnderlying(item.underlying, resolveLinkedStock(item.config), dynamicAliases);
     if (!itemsByUnderlying.has(key)) itemsByUnderlying.set(key, []);
     itemsByUnderlying.get(key)!.push(item);
   }
@@ -393,7 +409,7 @@ export function autoReconcileStrategies(
     const leftovers = [...newByPosId.values()].filter(n => n.qty > 0);
     if (leftovers.length > 0) {
       const configsForUnderlying = configs.filter(
-        c => normalizeUnderlying(c.underlying, resolveLinkedStock(c)) === underlyingKey && !deletedConfigIds.has(c.id),
+        c => normalizeUnderlying(c.underlying, resolveLinkedStock(c), dynamicAliases) === underlyingKey && !deletedConfigIds.has(c.id),
       );
 
       const createConfig = (strategyType: string, sigs: PositionSignature[], linkedStockId: string | null = null): UpsertConfigParams => {
@@ -482,7 +498,7 @@ export function autoReconcileStrategies(
               runCc.position_signatures.push(sig);
               changes.push(`${underlyingLabel}: aggiunta gamba ${sigLabel(sig)} alla covered call appena creata`);
             } else {
-              const stock = findStockForUnderlying(underlyingLabel, allPositions);
+              const stock = findStockForUnderlying(underlyingLabel, allPositions, dynamicAliases);
               if (stock) createConfig('covered_call', [sig], stock.id);
               else createConfig('other', [sig]);
             }
@@ -508,7 +524,7 @@ export function autoReconcileStrategies(
             changes.push(`${underlyingLabel}: la covered call appena creata diventa de-risking (${sigLabel(sig)})`);
           } else if (drcc) {
             // Check copertura: parziale → accorpa, completa → protection separata
-            if (isDeRiskingProtectionPartial(drcc, liveSigsOf(drcc.id), allPositions, underlyingPrices)) {
+            if (isDeRiskingProtectionPartial(drcc, liveSigsOf(drcc.id), allPositions, underlyingPrices, dynamicAliases)) {
               appendToExisting(drcc, sig, 'protezione integrata (copertura parziale)');
             } else {
               createConfig('protection', [sig]);
@@ -602,6 +618,7 @@ export function isDeRiskingProtectionPartial(
   currentSigs: PositionSignature[],
   allPositions: Position[],
   underlyingPrices?: Record<string, { price?: number | null }>,
+  dynamicAliases?: Map<string, string> | Record<string, string>,
 ): boolean {
   const { soldPuts, boughtPuts, boughtCalls } = countLegs(currentSigs);
 
@@ -617,11 +634,11 @@ export function isDeRiskingProtectionPartial(
     }
   }
   if (shares === 0) {
-    const stock = findStockForUnderlying(config.underlying, allPositions);
+    const stock = findStockForUnderlying(config.underlying, allPositions, dynamicAliases);
     if (stock) shares = Math.abs(stock.quantity || 0);
   }
 
-  const spot = spotPriceFor(config.underlying, underlyingPrices);
+  const spot = spotPriceFor(config.underlying, underlyingPrices, dynamicAliases);
   const itmShortPutContracts = soldPuts.reduce((s, sig) => {
     const itm = spot === null ? true : sig.strike > spot; // prezzo ignoto → conta come ITM
     return s + (itm ? (sig.quantity_abs || 1) : 0);
