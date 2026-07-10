@@ -5,13 +5,16 @@
  * DECISION TABLE DEFINITIVA (concordata con l'utente, luglio 2026):
  *
  *  0. RIPARAZIONE (self-healing) — config esistente SENZA azione collegata
- *     le cui gambe sono SOLO call vendute (eventualmente + put comprate),
- *     con azione/ETF libera in portafoglio sullo stesso sottostante e
- *     nessuna covered call già presente → l'azione viene collegata e il
- *     retype finale la trasforma in covered_call / derisking_covered_call.
+ *     le cui gambe sono SOLO call vendute (eventualmente + put comprate):
+ *     a) se esiste una covered_call/de-risking sullo stesso sottostante
+ *        SENZA call vendute (stock-only) → le gambe vi confluiscono e la
+ *        config orfana viene eliminata (merge);
+ *     b) altrimenti, con azione/ETF libera in portafoglio → l'azione viene
+ *        collegata e il retype finale la trasforma in covered_call /
+ *        derisking_covered_call.
  *     Sana le config 'other' create da versioni precedenti del
- *     classificatore (caso andreas/CRM) e gira anche SENZA item di
- *     riconciliazione.
+ *     classificatore (caso andreas/CRM e duplicati AMD/MU/NFLX/NVDA/PGR/
+ *     TSLA/UNH) e gira anche SENZA item di riconciliazione.
  *
  *  1. ROLL — gamba "missing" sostituita dalla gamba "new" più vicina con
  *     stesso underlying/tipo/segno (appaiamento monotono per strike e
@@ -299,13 +302,30 @@ export function autoReconcileStrategies(
       if (soldCalls.length === 0 || soldPuts.length > 0 || boughtCalls.length > 0) continue;
 
       const key = normalizeUnderlying(c.underlying, null, dynamicAliases);
-      const ccExists = configs.some(o =>
+      const ccTarget = configs.find(o =>
         o.id !== c.id &&
+        !deletedConfigIds.has(o.id) &&
         (o.strategy_type === 'covered_call' || o.strategy_type === 'derisking_covered_call') &&
         normalizeUnderlying(o.underlying, resolveLinkedStock(o), dynamicAliases) === key,
       );
-      if (ccExists) continue;
 
+      if (ccTarget) {
+        // 0a) MERGE: la CC esistente è stock-only (nessuna call venduta)?
+        const targetSigs = ((ccTarget.position_signatures as unknown as PositionSignature[]) || []);
+        const targetLegs = countLegs(targetSigs);
+        if (targetLegs.soldCalls.length > 0) continue; // CC già completa: non toccare
+
+        if (!appendedSigs.has(ccTarget.id)) appendedSigs.set(ccTarget.id, []);
+        for (const s of sigs) appendedSigs.get(ccTarget.id)!.push({ ...s });
+        touchedConfigIds.add(ccTarget.id);
+        deletedConfigIds.add(c.id);
+        repairedTypes.set(ccTarget.id, classifyConfigType([...targetSigs, ...sigs], true, ccTarget.strategy_type));
+        changes.push(`${ccTarget.underlying} (${ccTarget.strategy_type}): assorbita config ${c.strategy_type} orfana (${sigs.map(sigLabel).join(', ')}) — riparazione covered call`);
+        anyChange = true;
+        continue;
+      }
+
+      // 0b) LINK: nessuna CC esistente → collega l'azione libera
       const stock = findStockForUnderlying(c.underlying, allPositions, dynamicAliases);
       if (!stock || alreadyLinkedStockIds.has(stock.id)) continue;
 

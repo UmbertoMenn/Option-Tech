@@ -879,14 +879,50 @@ describe('autoReconcileStrategies — REGOLA 0: riparazione covered call smarrit
     expect(drcc!.linked_stock_id).toBe('stock_crm');
   });
 
-  it('NESSUNA riparazione se esiste già una covered call sul sottostante', () => {
+  it('MERGE: CC stock-only esistente sul sottostante → assorbe le gambe della config "other" orfana, che viene eliminata', () => {
+    // Caso reale andreas: CC "ADVANCED MICRO DEVIC" stock-only + other "AMD" con la call
     const configs = [
       makeConfig({
         underlying: 'SALESFORCE INC',
         strategy_type: 'covered_call',
         linked_stock_id: 'stock_crm',
         position_signatures: [],
-        id: 'cfg_cc_esistente',
+        id: 'cfg_cc_stockonly',
+      }),
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+        ],
+        id: 'cfg_other_orfana',
+      }),
+    ];
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    expect(res.hasAutoChanges).toBe(true);
+    expect(res.resolvedConfigs!).toHaveLength(1);
+    const cc = res.resolvedConfigs![0];
+    expect(cc.strategy_type).toBe('covered_call');
+    expect(cc.linked_stock_id).toBe('stock_crm');
+    expect(cc.position_signatures).toHaveLength(1);
+    expect(cc.position_signatures[0].strike).toBe(180);
+  });
+
+  it('NESSUN merge se la CC esistente ha già la sua call venduta', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'SALESFORCE INC',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_crm',
+        position_signatures: [
+          { option_type: 'call', strike: 200, expiry: '2026-12-18', quantity_sign: -1, quantity_abs: 3 },
+        ],
+        id: 'cfg_cc_completa',
       }),
       makeConfig({
         underlying: 'CRM',
@@ -898,12 +934,12 @@ describe('autoReconcileStrategies — REGOLA 0: riparazione covered call smarrit
     ];
     const positions = [
       crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 200, expiry_date: '2026-12-18', quantity: -3 }),
       makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
     ];
     const items = reconcileConfigs(configs, positions, crmAliases);
     const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
-    // La CC esiste già (stock-only, adotterà la call in visualizzazione):
-    // la config 'other' NON viene toccata dalla Regola 0
+    // La CC ha già la sua call: la config 'other' NON viene toccata dalla Regola 0
     const otherStillThere = !res.hasAutoChanges
       || res.resolvedConfigs!.some(c => c.strategy_type === 'other' && c.linked_stock_id === null);
     expect(otherStillThere).toBe(true);
