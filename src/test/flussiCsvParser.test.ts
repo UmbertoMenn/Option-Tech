@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFlussiCsvText, detectFlussiCsvType, buildDepositCandidates } from '@/lib/flussiCsvParser';
+import { parseFlussiCsvText, detectFlussiCsvType, buildDepositCandidates, pairInternalTransfers, FlussiCashMovement } from '@/lib/flussiCsvParser';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -347,5 +347,85 @@ describe('parseFlussiCsvText — file Movimenti Titoli', () => {
     );
     const res = parseFlussiCsvText(realCsv, { excludedCashAccounts: ['02278918441'] });
     expect(res.titoliOptionTrades).toHaveLength(0);
+  });
+});
+
+describe('pairInternalTransfers — giroconti interni cash ↔ GP', () => {
+  const mov = (partial: Partial<FlussiCashMovement> & { accountId: string; movementDate: string; amount: number; kind: 'bonifico' | 'giroconto' }): FlussiCashMovement => ({
+    isGP: partial.accountId.toUpperCase().startsWith('B0'),
+    restricted: false,
+    accountingDate: partial.movementDate,
+    currency: 'EUR',
+    operationId: '',
+    description: partial.kind.toUpperCase(),
+    causaleCode: '',
+    causaleDescription: '',
+    ...partial,
+  });
+
+  it('esclude la coppia giroconto uscita cash / entrata GP, stessa data e importo', () => {
+    const movements = [
+      mov({ accountId: 'A1234', movementDate: '2026-07-06', amount: -1000, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-06', amount: 1000, kind: 'giroconto' }),
+      mov({ accountId: 'A1234', movementDate: '2026-07-06', amount: -500, kind: 'bonifico' }),
+    ];
+    const { external, internalPairs } = pairInternalTransfers(movements);
+    expect(internalPairs).toHaveLength(1);
+    expect(external).toHaveLength(1);
+    expect(external[0].amount).toBe(-500);
+
+    // Lo scenario segnalato: prima veniva registrato un netto sbagliato che
+    // mescolava il travaso interno; ora il candidato del giorno è solo il
+    // prelievo reale.
+    const candidates = buildDepositCandidates(movements);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].amount).toBeCloseTo(-500, 2);
+  });
+
+  it('appaia gambe con data valuta diversa entro 5 giorni', () => {
+    const movements = [
+      mov({ accountId: 'A1234', movementDate: '2026-07-06', amount: -2500, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-08', amount: 2500, kind: 'giroconto' }),
+    ];
+    const { external, internalPairs } = pairInternalTransfers(movements);
+    expect(internalPairs).toHaveLength(1);
+    expect(external).toHaveLength(0);
+    expect(buildDepositCandidates(movements)).toHaveLength(0);
+  });
+
+  it('NON appaia oltre i 5 giorni, importi diversi o stesso conto', () => {
+    const movements = [
+      mov({ accountId: 'A1234', movementDate: '2026-07-01', amount: -1000, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-20', amount: 1000, kind: 'giroconto' }), // troppo lontano
+      mov({ accountId: 'A1234', movementDate: '2026-07-01', amount: -300, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-01', amount: 350, kind: 'giroconto' }),  // importo diverso
+      mov({ accountId: 'A1234', movementDate: '2026-07-02', amount: -700, kind: 'giroconto' }),
+      mov({ accountId: 'A1234', movementDate: '2026-07-02', amount: 700, kind: 'giroconto' }),  // stesso conto
+    ];
+    const { internalPairs } = pairInternalTransfers(movements);
+    expect(internalPairs).toHaveLength(0);
+  });
+
+  it('i BONIFICI non vengono mai appaiati (anche se speculari): un bonifico esterno verso la GP è un versamento', () => {
+    const movements = [
+      mov({ accountId: 'A1234', movementDate: '2026-07-06', amount: -1000, kind: 'bonifico' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-06', amount: 1000, kind: 'bonifico' }),
+    ];
+    const { external, internalPairs } = pairInternalTransfers(movements);
+    expect(internalPairs).toHaveLength(0);
+    expect(external).toHaveLength(2);
+  });
+
+  it('con due candidati positivi preferisce quello a data valuta identica', () => {
+    const movements = [
+      mov({ accountId: 'A1234', movementDate: '2026-07-06', amount: -1000, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-08', amount: 1000, kind: 'giroconto' }),
+      mov({ accountId: 'B0999', movementDate: '2026-07-06', amount: 1000, kind: 'giroconto' }),
+    ];
+    const { external, internalPairs } = pairInternalTransfers(movements);
+    expect(internalPairs).toHaveLength(1);
+    expect(internalPairs[0][1].movementDate).toBe('2026-07-06');
+    expect(external).toHaveLength(1);
+    expect(external[0].movementDate).toBe('2026-07-08');
   });
 });

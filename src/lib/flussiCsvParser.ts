@@ -452,9 +452,64 @@ function parseMovCashRow(cells: string[], result: FlussiParseResult, options?: F
  * ma un requisito dello schema attuale. Se in futuro serve tracciare ogni
  * bonifico separatamente, va prima rimosso/modificato quel vincolo.
  */
+/**
+ * Accoppia i GIROCONTI interni tra conti del cliente: due giroconti su conti
+ * DIVERSI, con importo uguale e segno opposto, sono uno spostamento interno
+ * (es. conto cash ↔ conto GP "B0...") e NON un movimento di capitale del
+ * cliente. Vanno esclusi entrambi dal registro versamenti/prelievi: la GP
+ * entra nel total_value del portafoglio, quindi un travaso interno non
+ * cambia il capitale investito ma — se contato — corrompe contributi e TWR.
+ *
+ * Appaiamento deterministico: stessa data valuta prima, poi tolleranza fino
+ * a 5 giorni di calendario (le due gambe possono avere valute diverse).
+ * I giroconti NON appaiati (controparte esterna) e tutti i bonifici restano
+ * movimenti di capitale a tutti gli effetti, GP inclusa.
+ */
+export function pairInternalTransfers(movements: FlussiCashMovement[]): {
+  external: FlussiCashMovement[];
+  internalPairs: [FlussiCashMovement, FlussiCashMovement][];
+} {
+  const giroconti = movements
+    .map((m, idx) => ({ m, idx }))
+    .filter(x => x.m.kind === 'giroconto');
+  const pairedIdx = new Set<number>();
+  const internalPairs: [FlussiCashMovement, FlussiCashMovement][] = [];
+
+  const dayDiff = (a: string, b: string) =>
+    Math.abs((new Date(a).getTime() - new Date(b).getTime()) / 86_400_000);
+
+  const negatives = giroconti.filter(x => x.m.amount < 0)
+    .sort((a, b) => a.m.movementDate.localeCompare(b.m.movementDate));
+  const positives = giroconti.filter(x => x.m.amount > 0)
+    .sort((a, b) => a.m.movementDate.localeCompare(b.m.movementDate));
+
+  for (const neg of negatives) {
+    let best: { idx: number; dist: number } | null = null;
+    for (const pos of positives) {
+      if (pairedIdx.has(pos.idx)) continue;
+      if (pos.m.accountId === neg.m.accountId) continue;
+      if (Math.abs(pos.m.amount + neg.m.amount) > 0.005) continue;
+      const dist = dayDiff(pos.m.movementDate, neg.m.movementDate);
+      if (dist > 5) continue;
+      if (!best || dist < best.dist) best = { idx: pos.idx, dist };
+      if (dist === 0) break; // stessa data valuta: non può esserci di meglio
+    }
+    if (best) {
+      pairedIdx.add(neg.idx);
+      pairedIdx.add(best.idx);
+      const posMov = giroconti.find(x => x.idx === best!.idx)!.m;
+      internalPairs.push([neg.m, posMov]);
+    }
+  }
+
+  const external = movements.filter((_, idx) => !pairedIdx.has(idx));
+  return { external, internalPairs };
+}
+
 export function buildDepositCandidates(movements: FlussiCashMovement[]): DepositCandidate[] {
+  const { external } = pairInternalTransfers(movements);
   const byDate = new Map<string, FlussiCashMovement[]>();
-  for (const m of movements) {
+  for (const m of external) {
     const list = byDate.get(m.movementDate) ?? [];
     list.push(m);
     byDate.set(m.movementDate, list);

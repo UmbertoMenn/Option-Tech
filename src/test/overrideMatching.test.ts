@@ -94,7 +94,7 @@ describe('computeRemappedLinkedStock', () => {
     expect(result.linked_stock_id).toBeNull();
   });
 
-  it('rimappa ogni slot id (stock split su più gambe) preservando l\'ordine', () => {
+  it('rimappa ogni slot id (stock split su più gambe) preservando ordine E suffisso __slot_N', () => {
     const oldA = pos({ id: 'old-a', asset_type: 'stock', isin: 'US1' });
     const oldB = pos({ id: 'old-b', asset_type: 'stock', isin: 'US2' });
     const newA = pos({ id: 'new-a', asset_type: 'stock', isin: 'US1' });
@@ -107,7 +107,24 @@ describe('computeRemappedLinkedStock', () => {
     const result = computeRemappedLinkedStock(config, [oldA, oldB], [newA, newB]);
 
     expect(result.changed).toBe(true);
-    expect(result.linked_stock_slot_ids).toEqual(['new-a', 'new-b']);
+    expect(result.linked_stock_slot_ids).toEqual(['new-a__slot_0', 'new-b__slot_1']);
+    expect(result.linked_stock_id).toBe('new-a');
+  });
+
+  it('due slot dello STESSO titolo (200 azioni su 2 covered call) restano slot distinti dopo il remap', () => {
+    // Bug segnalato: gli slot collassavano su un riferimento duplicato alla
+    // posizione base e le config oltre la prima perdevano il titolo.
+    const oldA = pos({ id: 'old-a', asset_type: 'stock', isin: 'US1' });
+    const newA = pos({ id: 'new-a', asset_type: 'stock', isin: 'US1' });
+    const config: StrategyConfigLinkedStock = {
+      id: 'cfg-1', linked_stock_id: 'old-a',
+      linked_stock_slot_ids: ['old-a__slot_0', 'old-a__slot_1'],
+    };
+
+    const result = computeRemappedLinkedStock(config, [oldA], [newA]);
+
+    expect(result.changed).toBe(true);
+    expect(result.linked_stock_slot_ids).toEqual(['new-a__slot_0', 'new-a__slot_1']);
     expect(result.linked_stock_id).toBe('new-a');
   });
 });

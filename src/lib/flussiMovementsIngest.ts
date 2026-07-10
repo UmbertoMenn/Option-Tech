@@ -4,15 +4,17 @@
  * - Movimenti CASH → versamenti/prelievi automatici nella tabella `deposits`.
  *   Semantica idempotente: upsert per (portfolio_id, deposit_date) con
  *   SOSTITUZIONE dell'importo — ricaricare lo stesso file non raddoppia.
- *   Presupposto: i movimenti di una stessa data valuta arrivano interi in
- *   un unico file (estrazione per periodo della banca).
+ *   Le righe inserite A MANO (source='manual' o legacy) non vengono MAI
+ *   sovrascritte; i giroconti interni tra conti del cliente (cash ↔ GP)
+ *   vengono esclusi in coppia. Presupposto: i movimenti di una stessa data
+ *   valuta arrivano interi in un unico file (estrazione per periodo).
  *
  * - Movimenti TITOLI → riacquisti call CC/DR-CC nella tabella
  *   `call_buybacks` (idempotente per portfolio/descrittore/data) e
  *   applicazione delle rivendite ai riacquisti aperti (FIFO per data).
  */
 import { supabase } from '@/integrations/supabase/client';
-import { FlussiCashMovement, FlussiTitoliOptionTrade, buildDepositCandidates } from '@/lib/flussiCsvParser';
+import { FlussiCashMovement, FlussiTitoliOptionTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
 import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
@@ -20,30 +22,62 @@ import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 export interface CashIngestResult {
   depositsUpserted: number;
   totalAmount: number;
+  /** Date con un versamento/prelievo inserito A MANO: mai sovrascritte dal CSV */
+  skippedManualDates: string[];
+  /** Coppie di giroconti interni (es. cash ↔ GP) escluse dal registro */
+  internalTransfersExcluded: number;
 }
 
 export async function ingestCashMovements(
   portfolioId: string,
   movements: FlussiCashMovement[],
 ): Promise<CashIngestResult> {
+  const { internalPairs } = pairInternalTransfers(movements);
   const candidates = buildDepositCandidates(movements);
-  if (candidates.length === 0) return { depositsUpserted: 0, totalAmount: 0 };
+  if (candidates.length === 0) {
+    return { depositsUpserted: 0, totalAmount: 0, skippedManualDates: [], internalTransfersExcluded: internalPairs.length };
+  }
 
-  const rows = candidates.map(c => ({
-    portfolio_id: portfolioId,
-    deposit_date: c.deposit_date,
-    amount: c.amount,
-    description: c.description || 'Da movimenti conto (automatico)',
-  }));
-
-  const { error } = await supabase
+  // Le righe inserite a mano dal titolare (source = 'manual', o legacy senza
+  // source) sono canoniche: il CSV non le tocca MAI. Vengono sovrascritte
+  // solo le righe create da un precedente ingest CSV (source = 'csv_auto'),
+  // per mantenere l'idempotenza del ricaricamento dello stesso file.
+  const { data: existing, error: readErr } = await supabase
     .from('deposits')
-    .upsert(rows as never[], { onConflict: 'portfolio_id,deposit_date' });
-  if (error) throw new Error(`Errore salvataggio versamenti/prelievi: ${error.message}`);
+    .select('deposit_date, source' as '*')
+    .eq('portfolio_id', portfolioId)
+    .in('deposit_date', candidates.map(c => c.deposit_date));
+  if (readErr) throw new Error(`Errore lettura versamenti esistenti: ${readErr.message}`);
+
+  const manualDates = new Set(
+    ((existing || []) as unknown as { deposit_date: string; source?: string | null }[])
+      .filter(r => (r.source ?? 'manual') !== 'csv_auto')
+      .map(r => r.deposit_date),
+  );
+
+  const toUpsert = candidates.filter(c => !manualDates.has(c.deposit_date));
+  const skippedManualDates = candidates.filter(c => manualDates.has(c.deposit_date)).map(c => c.deposit_date);
+
+  if (toUpsert.length > 0) {
+    const rows = toUpsert.map(c => ({
+      portfolio_id: portfolioId,
+      deposit_date: c.deposit_date,
+      amount: c.amount,
+      description: c.description || 'Da movimenti conto (automatico)',
+      source: 'csv_auto',
+    }));
+
+    const { error } = await supabase
+      .from('deposits')
+      .upsert(rows as never[], { onConflict: 'portfolio_id,deposit_date' });
+    if (error) throw new Error(`Errore salvataggio versamenti/prelievi: ${error.message}`);
+  }
 
   return {
-    depositsUpserted: rows.length,
-    totalAmount: rows.reduce((s, r) => s + r.amount, 0),
+    depositsUpserted: toUpsert.length,
+    totalAmount: toUpsert.reduce((s, c) => s + c.amount, 0),
+    skippedManualDates,
+    internalTransfersExcluded: internalPairs.length,
   };
 }
 

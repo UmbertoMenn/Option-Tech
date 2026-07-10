@@ -140,6 +140,12 @@ export function FileUploader() {
           } else {
             movementSummary.push('nessun bonifico/giroconto nei movimenti cash');
           }
+          if (res.skippedManualDates.length > 0) {
+            movementSummary.push(`${res.skippedManualDates.length} date con versamenti manuali preservati (${res.skippedManualDates.join(', ')})`);
+          }
+          if (res.internalTransfersExcluded > 0) {
+            movementSummary.push(`${res.internalTransfersExcluded} giroconti interni esclusi`);
+          }
         } else {
           const res = await ingestTitoliTrades(targetPortfolioId, parsed.titoliOptionTrades);
           const parts: string[] = [];

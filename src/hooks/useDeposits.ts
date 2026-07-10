@@ -50,14 +50,16 @@ export function useDeposits(portfolioId: string | undefined) {
     mutationFn: async (entry: DepositInput & { id?: string }) => {
       if (!portfolioId) throw new Error('Portfolio non trovato');
       if (entry.id) {
+        // La modifica manuale prende possesso della riga: source='manual'
+        // la protegge dalle sovrascritture dei futuri upload CSV.
         const { data, error } = await supabase
-          .from('deposits').update({ deposit_date: entry.deposit_date, amount: entry.amount, description: entry.description || null })
+          .from('deposits').update({ deposit_date: entry.deposit_date, amount: entry.amount, description: entry.description || null, source: 'manual' } as never)
           .eq('id', entry.id).select().single();
         if (error) throw error;
         return data;
       } else {
         const { data, error } = await supabase
-          .from('deposits').insert({ portfolio_id: portfolioId, deposit_date: entry.deposit_date, amount: entry.amount, description: entry.description || null })
+          .from('deposits').insert({ portfolio_id: portfolioId, deposit_date: entry.deposit_date, amount: entry.amount, description: entry.description || null, source: 'manual' } as never)
           .select().single();
         if (error) throw error;
         return data;

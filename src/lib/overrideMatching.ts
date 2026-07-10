@@ -276,21 +276,26 @@ export function computeRemappedLinkedStock(
 ): { linked_stock_id: string | null; linked_stock_slot_ids: string[]; changed: boolean } {
   const oldSlotIds = config.linked_stock_slot_ids || [];
   const usingSlots = oldSlotIds.length > 0;
-  // slot id format: `${positionId}__slot_N` — la base è l'id posizione reale da rimappare.
+  // slot id format: `${positionId}__slot_N` — la base è l'id posizione reale da
+  // rimappare; il suffisso __slot_N identifica lo slot da 100 azioni e va
+  // PRESERVATO (gli indici slot sono deterministici per posizione).
   const idsToRemap = usingSlots
-    ? oldSlotIds.map(s => s.replace(/__slot_\d+$/, ''))
-    : (config.linked_stock_id ? [config.linked_stock_id] : []);
+    ? oldSlotIds.map(s => ({ base: s.replace(/__slot_\d+$/, ''), suffix: s.match(/__slot_\d+$/)?.[0] ?? '' }))
+    : (config.linked_stock_id ? [{ base: config.linked_stock_id, suffix: '' }] : []);
 
   if (idsToRemap.length === 0) {
     return { linked_stock_id: config.linked_stock_id ?? null, linked_stock_slot_ids: oldSlotIds, changed: false };
   }
 
-  const newIds: string[] = [];
-  for (const oldId of idsToRemap) {
-    const newId = findMatchingStock(oldId, oldPositions, newPositions);
-    if (newId) newIds.push(newId);
+  const newSlotIds: string[] = [];
+  let newLinkedStockId: string | null = null;
+  for (const { base, suffix } of idsToRemap) {
+    const newId = findMatchingStock(base, oldPositions, newPositions);
+    if (newId) {
+      newSlotIds.push(newId + suffix);
+      if (newLinkedStockId === null) newLinkedStockId = newId; // sempre l'id base, senza suffisso
+    }
   }
-  const newLinkedStockId = newIds[0] ?? null;
 
   if (!usingSlots) {
     // Formato legacy (solo linked_stock_id, nessuno slot): non sintetizzare un array di
@@ -302,11 +307,11 @@ export function computeRemappedLinkedStock(
     };
   }
 
-  const changed = newIds.length !== oldSlotIds.length
-    || newIds.some((id, i) => id !== oldSlotIds[i])
+  const changed = newSlotIds.length !== oldSlotIds.length
+    || newSlotIds.some((id, i) => id !== oldSlotIds[i])
     || newLinkedStockId !== (config.linked_stock_id ?? null);
 
-  return { linked_stock_id: newLinkedStockId, linked_stock_slot_ids: newIds, changed };
+  return { linked_stock_id: newLinkedStockId, linked_stock_slot_ids: newSlotIds, changed };
 }
 
 /**
