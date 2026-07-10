@@ -803,3 +803,187 @@ describe('autoReconcileStrategies — nessuna modifica', () => {
     expect(res.unresolvedItems).toHaveLength(0);
   });
 });
+
+describe('autoReconcileStrategies — REGOLA 0: riparazione covered call smarrite (caso andreas/CRM)', () => {
+  const crmAliases = new Map<string, string>([
+    ['SALESFORCE INC', 'CRM'],
+    ['SALESFORCE', 'CRM'],
+  ]);
+  const crmStock = { id: 'stock_crm', asset_type: 'stock', ticker: 'CRM', description: 'SALESFORCE INC', quantity: 300 } as unknown as Position;
+  const crmPositions = [
+    crmStock,
+    makeOption({ underlying: 'CRM', option_type: 'put', strike_price: 160, expiry_date: '2026-07-17', quantity: -1 }),
+    makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+    makeOption({ underlying: 'CRM', option_type: 'put', strike_price: 145, expiry_date: '2026-09-18', quantity: -1 }),
+    makeOption({ underlying: 'CRM', option_type: 'put', strike_price: 180, expiry_date: '2026-11-20', quantity: -3 }),
+  ];
+  const crmConfigs = () => [
+    makeConfig({
+      underlying: 'CRM',
+      strategy_type: 'naked_put',
+      position_signatures: [
+        { option_type: 'put', strike: 160, expiry: '2026-07-17', quantity_sign: -1, quantity_abs: 1 },
+        { option_type: 'put', strike: 145, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 },
+        { option_type: 'put', strike: 180, expiry: '2026-11-20', quantity_sign: -1, quantity_abs: 3 },
+      ],
+    }),
+    makeConfig({
+      underlying: 'CRM',
+      strategy_type: 'other',
+      position_signatures: [
+        { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+      ],
+    }),
+  ];
+
+  it('config "other" con sola call venduta + azione libera → collegata e riclassificata covered_call ANCHE SENZA item', () => {
+    const configs = crmConfigs();
+    const items = reconcileConfigs(configs, crmPositions, crmAliases);
+    expect(items).toHaveLength(0); // stato "coerente": nessun item, prima restava congelato
+
+    const res = autoReconcileStrategies(configs, items, crmPositions, undefined, crmAliases);
+    expect(res.hasAutoChanges).toBe(true);
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call');
+    expect(cc).toBeDefined();
+    expect(cc!.linked_stock_id).toBe('stock_crm');
+    expect(cc!.position_signatures).toHaveLength(1);
+    expect(cc!.position_signatures[0].option_type).toBe('call');
+    // La naked_put resta intatta
+    const np = res.resolvedConfigs!.find(c => c.strategy_type === 'naked_put');
+    expect(np).toBeDefined();
+    expect(np!.position_signatures).toHaveLength(3);
+    expect(res.resolvedConfigs!.some(c => c.strategy_type === 'other')).toBe(false);
+  });
+
+  it('call venduta + put comprata senza azioni → riparata come derisking_covered_call', () => {
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+      makeOption({ underlying: 'CRM', option_type: 'put', strike_price: 150, expiry_date: '2026-08-21', quantity: 3 }),
+    ];
+    const configs = [
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+          { option_type: 'put', strike: 150, expiry: '2026-08-21', quantity_sign: 1, quantity_abs: 3 },
+        ],
+      }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    expect(res.hasAutoChanges).toBe(true);
+    const drcc = res.resolvedConfigs!.find(c => c.strategy_type === 'derisking_covered_call');
+    expect(drcc).toBeDefined();
+    expect(drcc!.linked_stock_id).toBe('stock_crm');
+  });
+
+  it('NESSUNA riparazione se esiste già una covered call sul sottostante', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'SALESFORCE INC',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_crm',
+        position_signatures: [],
+        id: 'cfg_cc_esistente',
+      }),
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+        ],
+      }),
+    ];
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    // La CC esiste già (stock-only, adotterà la call in visualizzazione):
+    // la config 'other' NON viene toccata dalla Regola 0
+    const otherStillThere = !res.hasAutoChanges
+      || res.resolvedConfigs!.some(c => c.strategy_type === 'other' && c.linked_stock_id === null);
+    expect(otherStillThere).toBe(true);
+  });
+
+  it('NESSUNA riparazione se l\'azione è già collegata ad altra config', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'SALESFORCE INC',
+        strategy_type: 'buy_and_hold',
+        linked_stock_id: 'stock_crm',
+        position_signatures: [],
+        id: 'cfg_bh',
+      }),
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+        ],
+      }),
+    ];
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    if (res.hasAutoChanges) {
+      const other = res.resolvedConfigs!.find(c => c.strategy_type === 'other');
+      expect(other?.linked_stock_id ?? null).toBeNull();
+    }
+  });
+
+  it('config con put VENDUTE tra le gambe → mai riparata (non è una covered call smarrita)', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+          { option_type: 'put', strike: 160, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 },
+        ],
+      }),
+    ];
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+      makeOption({ underlying: 'CRM', option_type: 'put', strike_price: 160, expiry_date: '2026-08-21', quantity: -1 }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    if (res.hasAutoChanges) {
+      expect(res.resolvedConfigs!.every(c => c.linked_stock_id === null)).toBe(true);
+    } else {
+      expect(res.resolvedConfigs).toBeNull();
+    }
+  });
+
+  it('riparazione + nuova gamba nello stesso run: la seconda call venduta si accoda alla config riparata', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'CRM',
+        strategy_type: 'other',
+        position_signatures: [
+          { option_type: 'call', strike: 180, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 3 },
+        ],
+      }),
+    ];
+    const positions = [
+      crmStock,
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 180, expiry_date: '2026-08-21', quantity: -3 }),
+      makeOption({ underlying: 'CRM', option_type: 'call', strike_price: 200, expiry_date: '2026-10-16', quantity: -1 }),
+    ];
+    const items = reconcileConfigs(configs, positions, crmAliases);
+    const res = autoReconcileStrategies(configs, items, positions, undefined, crmAliases);
+    expect(res.hasAutoChanges).toBe(true);
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call');
+    expect(cc).toBeDefined();
+    expect(cc!.linked_stock_id).toBe('stock_crm');
+    expect(cc!.position_signatures).toHaveLength(2);
+  });
+});

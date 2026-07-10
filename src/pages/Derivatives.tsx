@@ -274,9 +274,9 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
 
 
 export function Derivatives() {
-  const { portfolio, positions, isLoading } = usePortfolio();
+  const { portfolio, positions, isLoading, isHistoricalView } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
-  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
+  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving, isLoading: isConfigsLoading } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
   const { allMappings } = useUnderlyingMappings();
@@ -665,15 +665,21 @@ export function Derivatives() {
     if (reconciliationCheckedRef.current) return;
     if (justSavedRef.current) { justSavedRef.current = false; return; }
     if (autoReconcileRunningRef.current) return;
-    if (reconciliationItems.length === 0 || isLoading || wizardOpen) return;
+    if (isLoading || isConfigsLoading || wizardOpen) return;
+    if (isHistoricalView) return; // vista storica: sola lettura, niente riparazioni
+    // Gira anche SENZA item di riconciliazione: la Regola 0 (riparazione
+    // covered call smarrite) opera sulle config esistenti. Serve però che
+    // config e posizioni siano caricate.
+    if (strategyConfigs.length === 0 || positions.length === 0) return;
 
     reconciliationCheckedRef.current = true;
 
     const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions, underlyingPrices, dynamicAliases);
 
     if (!result.hasAutoChanges) {
-      // Nulla di automatizzabile: comportamento precedente (dialog)
-      setReconciliationOpen(true);
+      // Nulla di automatizzabile: comportamento precedente (dialog),
+      // ma solo se c'erano item genuini da riconciliare
+      if (reconciliationItems.length > 0) setReconciliationOpen(true);
       return;
     }
 
@@ -702,7 +708,7 @@ export function Derivatives() {
       .finally(() => {
         autoReconcileRunningRef.current = false;
       });
-  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, handleSaveConfigs]);
+  }, [reconciliationItems, isLoading, isConfigsLoading, isHistoricalView, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, handleSaveConfigs]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;

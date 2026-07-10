@@ -4,6 +4,15 @@
  *
  * DECISION TABLE DEFINITIVA (concordata con l'utente, luglio 2026):
  *
+ *  0. RIPARAZIONE (self-healing) — config esistente SENZA azione collegata
+ *     le cui gambe sono SOLO call vendute (eventualmente + put comprate),
+ *     con azione/ETF libera in portafoglio sullo stesso sottostante e
+ *     nessuna covered call già presente → l'azione viene collegata e il
+ *     retype finale la trasforma in covered_call / derisking_covered_call.
+ *     Sana le config 'other' create da versioni precedenti del
+ *     classificatore (caso andreas/CRM) e gira anche SENZA item di
+ *     riconciliazione.
+ *
  *  1. ROLL — gamba "missing" sostituita dalla gamba "new" più vicina con
  *     stesso underlying/tipo/segno (appaiamento monotono per strike e
  *     scadenza, per bucket). I roll con AUMENTO di quantità tengono i
@@ -269,6 +278,47 @@ export function autoReconcileStrategies(
   ];
 
   // ------------------------------------------------------------------
+  // REGOLA 0: RIPARAZIONE covered call smarrite — config senza azione
+  // collegata con sole call vendute (± put comprate), azione libera in
+  // portafoglio, nessuna CC esistente sul sottostante → collega l'azione.
+  // Il retype finale (Regola 4) la riclassifica covered_call/de-risking.
+  // ------------------------------------------------------------------
+  const repairedLinkedStock = new Map<string, string>();
+  const repairedTypes = new Map<string, string>();
+  {
+    const alreadyLinkedStockIds = new Set<string>();
+    for (const c of configs) {
+      if (c.linked_stock_id) alreadyLinkedStockIds.add(c.linked_stock_id);
+      for (const sid of c.linked_stock_slot_ids || []) alreadyLinkedStockIds.add(sid);
+    }
+    for (const c of configs) {
+      if (c.linked_stock_id || (c.linked_stock_slot_ids || []).length > 0) continue;
+      const sigs = ((c.position_signatures as unknown as PositionSignature[]) || []);
+      if (sigs.length === 0) continue;
+      const { soldPuts, soldCalls, boughtCalls } = countLegs(sigs);
+      if (soldCalls.length === 0 || soldPuts.length > 0 || boughtCalls.length > 0) continue;
+
+      const key = normalizeUnderlying(c.underlying, null, dynamicAliases);
+      const ccExists = configs.some(o =>
+        o.id !== c.id &&
+        (o.strategy_type === 'covered_call' || o.strategy_type === 'derisking_covered_call') &&
+        normalizeUnderlying(o.underlying, resolveLinkedStock(o), dynamicAliases) === key,
+      );
+      if (ccExists) continue;
+
+      const stock = findStockForUnderlying(c.underlying, allPositions, dynamicAliases);
+      if (!stock || alreadyLinkedStockIds.has(stock.id)) continue;
+
+      repairedLinkedStock.set(c.id, stock.id);
+      repairedTypes.set(c.id, classifyConfigType(sigs, true, c.strategy_type));
+      alreadyLinkedStockIds.add(stock.id);
+      touchedConfigIds.add(c.id);
+      changes.push(`${c.underlying} (${c.strategy_type}): azione ${stock.ticker || stock.description} collegata — riparazione covered call`);
+      anyChange = true;
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Raggruppa gli item per sottostante normalizzato
   // ------------------------------------------------------------------
   const itemsByUnderlying = new Map<string, ReconciliationItem[]>();
@@ -435,7 +485,7 @@ export function autoReconcileStrategies(
         anyChange = true;
       };
       const findExistingOfType = (...types: string[]) =>
-        configsForUnderlying.find(c => types.includes(c.strategy_type));
+        configsForUnderlying.find(c => types.includes(repairedTypes.get(c.id) || c.strategy_type));
       const findRunCreatedOfType = (...types: string[]) =>
         runCreated.find(rc => rc.underlyingKey === underlyingKey && types.includes(rc.params.strategy_type))?.params;
 
@@ -579,7 +629,8 @@ export function autoReconcileStrategies(
       ...(workingSigs.get(c.id) || []).filter((s): s is PositionSignature => s !== null),
       ...(appendedSigs.get(c.id) || []),
     ];
-    const hasLinkedStock = !!c.linked_stock_id || (c.linked_stock_slot_ids || []).length > 0;
+    const effectiveLinkedStockId = repairedLinkedStock.get(c.id) ?? c.linked_stock_id;
+    const hasLinkedStock = !!effectiveLinkedStockId || (c.linked_stock_slot_ids || []).length > 0;
     let strategyType = c.strategy_type;
     if (touchedConfigIds.has(c.id)) {
       const newType = classifyConfigType(finalSigs, hasLinkedStock, c.strategy_type);
@@ -593,7 +644,7 @@ export function autoReconcileStrategies(
       strategy_type: strategyType,
       position_signatures: finalSigs,
       is_synthetic: c.is_synthetic,
-      linked_stock_id: c.linked_stock_id,
+      linked_stock_id: effectiveLinkedStockId,
       linked_stock_slot_ids: c.linked_stock_slot_ids || [],
       sort_order: c.sort_order,
     });
