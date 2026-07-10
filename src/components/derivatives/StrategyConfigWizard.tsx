@@ -573,6 +573,18 @@ export function StrategyConfigWizard({
     for (const p of allAvailable) {
       keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore));
     }
+    const resolveConfigKey = (config: StrategyConfiguration, keyMap: Map<string, string>, positions: Position[]) => {
+      const slotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      const baseFromSlot = slotIds[0]?.replace(/__slot_\d+$/, '');
+      const linkedStock = positions.find(p =>
+        (p.asset_type === 'stock' || p.asset_type === 'etf') &&
+        (p.id === config.linked_stock_id || (!!baseFromSlot && p.id === baseFromSlot))
+      );
+      if (linkedStock) {
+        return keyMap.get(linkedStock.id) || getUnderlyingKey(linkedStock, derivsOnlyRestore);
+      }
+      return getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    };
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
     const autoSplitIds = new Set<string>();
@@ -584,7 +596,7 @@ export function StrategyConfigWizard({
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
       const slotIdsForCheck = (config.linked_stock_slot_ids as unknown as string[]) || [];
       if (signatures.length === 0 && slotIdsForCheck.length === 0 && !config.linked_stock_id) continue;
-      const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+      const configUnderlyingKey = resolveConfigKey(config, keyMapRestore, allAvailable);
 
       // Check options
       for (const sig of signatures) {
@@ -661,7 +673,7 @@ export function StrategyConfigWizard({
       const savedSlotIdsForRestore = (config.linked_stock_slot_ids as unknown as string[]) || [];
       if (signatures.length === 0 && savedSlotIdsForRestore.length === 0 && !config.linked_stock_id) continue;
 
-      const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+      const configUnderlyingKey = resolveConfigKey(config, keyMapRestore2, restorePositions);
       const groupPositions = restorePositions.filter(p => keyMapRestore2.get(p.id) === configUnderlyingKey);
 
       const matched: Position[] = [];

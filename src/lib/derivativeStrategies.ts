@@ -501,6 +501,13 @@ function categorizeDerivativesImpl(
     if (!linkedStock && config.linked_stock_id) {
       linkedStock = allPositions.find(p => p.id === config.linked_stock_id) || null;
     }
+    if (!linkedStock) {
+      const configStockKey = resolveUnderlyingKey(config.underlying, linkedStockForKey);
+      linkedStock = stockPositions.find(s =>
+        resolveUnderlyingKey(s.description || '', s) === configStockKey ||
+        resolveUnderlyingKey(s.ticker || '', s) === configStockKey
+      ) || null;
+    }
     if (!linkedStock && matchedVirtual.length > 0) {
       linkedStock = findUnderlyingStock(matchedVirtual[0], stockPositions);
     }

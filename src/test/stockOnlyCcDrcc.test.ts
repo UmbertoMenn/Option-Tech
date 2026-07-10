@@ -61,6 +61,54 @@ describe('categorizeDerivatives — CC/DR-CC con sola gamba azionaria', () => {
     expect(inc[0].missingLegs).toContain('Short Call');
     expect(inc[0].missingLegs).toContain('Long Put');
   });
+
+  it('CC stock-only resta visibile come incompleta anche se linked_stock_id è obsoleto ma underlying combacia', () => {
+    const stock = pos({ id: 'stock-amd', asset_type: 'stock', ticker: 'AMD', description: 'ADVANCED MICRO DEVIC', quantity: 400, current_price: 170 });
+    const config = cfg({
+      strategy_type: 'covered_call',
+      underlying: 'ADVANCED MICRO DEVIC',
+      linked_stock_id: 'stock-non-piu-valido',
+      linked_stock_slot_ids: [],
+      position_signatures: [],
+    });
+
+    const cats = categorizeDerivatives([], [stock], [], [config]);
+
+    const inc = cats.incompleteStrategies.filter(i => i.strategyType === 'covered_call');
+    expect(inc.length).toBe(1);
+    expect(inc[0].missingLegs).toContain('Short Call');
+    expect(inc[0].linkedStock?.id).toBe(stock.id);
+  });
+
+  it('CC stock-only adotta una short call aggregata senza duplicarla in altre categorie', () => {
+    const stock = pos({ id: 'stock-amd', asset_type: 'stock', ticker: 'AMD', description: 'ADVANCED MICRO DEVIC', quantity: 400, current_price: 170 });
+    const shortCall = pos({
+      id: 'opt-amd-c520',
+      option_type: 'call',
+      quantity: -4,
+      strike_price: 520,
+      expiry_date: '2027-12-17',
+      underlying: 'AMD',
+      ticker: 'AMD',
+      current_price: 10,
+    });
+    const config = cfg({
+      strategy_type: 'covered_call',
+      underlying: 'ADVANCED MICRO DEVIC',
+      linked_stock_id: stock.id,
+      linked_stock_slot_ids: [stock.id],
+      position_signatures: [],
+    });
+
+    const cats = categorizeDerivatives([shortCall], [stock, shortCall], [], [config], { configOnly: true });
+
+    expect(cats.coveredCalls).toHaveLength(1);
+    expect(cats.coveredCalls[0].option.id).toBe(shortCall.id);
+    expect(cats.coveredCalls[0].contractsCovered).toBe(4);
+    expect(cats.nakedPuts).toHaveLength(0);
+    expect(cats.leapCalls).toHaveLength(0);
+    expect(cats.groupedOtherStrategies).toHaveLength(0);
+  });
 });
 
 describe('computeMonitoring — niente duplicati tra "call da rivendere" e "strategie incomplete"', () => {
