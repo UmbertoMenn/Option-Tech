@@ -93,7 +93,21 @@ export interface ParsedPortfolioFile {
   gpCashAccounts: { accountId: string; value: number }[];
 }
 
-export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid?: string; last: string }[] }): Promise<ParsedPortfolioFile> {
+export interface PortfolioParseOptions {
+  excludedCashAccounts?: string[];
+  excludedCashPatterns?: { mid?: string; last: string }[];
+  excludedPositionDescriptions?: string[];
+  includeGpCashInCash?: boolean;
+}
+
+function isExcludedPosition(description: string, options?: PortfolioParseOptions): boolean {
+  const normalized = description.trim().replace(/\s+/g, ' ').toUpperCase();
+  return options?.excludedPositionDescriptions?.some(
+    excluded => excluded.trim().replace(/\s+/g, ' ').toUpperCase() === normalized,
+  ) ?? false;
+}
+
+export async function parsePortfolioExcel(file: File, options?: PortfolioParseOptions): Promise<ParsedPortfolioFile> {
   // Nuovi flussi CSV (FlussoSaldiContiCash / FlussoSaldiContiTitoli)
   if (/\.csv$/i.test(file.name)) {
     const { parseFlussiCsvText } = await import('./flussiCsvParser');
@@ -223,7 +237,7 @@ export function extractSnapshotDate(rows: any[][]): string | null {
   return null;
 }
 
-export function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid?: string; last: string }[] }): {
+export function parsePortfolioData(rows: any[][], options?: PortfolioParseOptions): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
   cashAccounts: { accountId: string; value: number }[];
@@ -312,7 +326,7 @@ export function parsePortfolioData(rows: any[][], options?: { excludedCashAccoun
       if (rowStr.includes('OPTION CALL') || rowStr.includes('OPTION PUT') ||
           rowStr.includes('EUREX,') || rowStr.includes('IDEM,')) {
         const position = parseDerivativeRow(row, headerRow);
-        if (position && position.description) {
+        if (position && position.description && !isExcludedPosition(position.description, options)) {
           positions.push(position);
         }
         continue;
@@ -321,7 +335,7 @@ export function parsePortfolioData(rows: any[][], options?: { excludedCashAccoun
     
     // Parse regular position data
     const position = parsePositionRow(row, headerRow, currentSection);
-    if (position && position.description) {
+    if (position && position.description && !isExcludedPosition(position.description, options)) {
       positions.push(position);
     }
   }

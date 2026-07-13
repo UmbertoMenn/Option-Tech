@@ -155,6 +155,10 @@ export interface FlussiParseOptions {
    * comparire anche al centro del numero conto.
    */
   excludedCashPatterns?: { mid?: string; last: string }[];
+  /** Descrizioni titolo da non includere nelle posizioni o holdings GP. */
+  excludedPositionDescriptions?: string[];
+  /** Include i conti B0 nella liquidità ordinaria invece di classificarli come GP. */
+  includeGpCashInCash?: boolean;
 }
 
 /** Rimuove l'apostrofo iniziale usato come marcatore testuale. */
@@ -205,6 +209,13 @@ function isExcludedAccount(accountId: string, options?: FlussiParseOptions): boo
   return !!byList || !!byPattern;
 }
 
+function isExcludedPosition(description: string, options?: FlussiParseOptions): boolean {
+  const normalized = description.trim().replace(/\s+/g, ' ').toUpperCase();
+  return options?.excludedPositionDescriptions?.some(
+    excluded => excluded.trim().replace(/\s+/g, ' ').toUpperCase() === normalized,
+  ) ?? false;
+}
+
 /** Word-boundary "ETC" (es. "ETC-INVESCO PHYSICAL") → commodity. */
 function isETC(description: string): boolean {
   return /\bETC\b/.test(description.toUpperCase());
@@ -243,7 +254,7 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     if (type === 'cash') {
       parseCashRow(cells, result, options);
     } else if (type === 'titoli') {
-      parseTitoliRow(cells, result);
+      parseTitoliRow(cells, result, options);
     } else if (type === 'mov_cash') {
       parseMovCashRow(cells, result, options);
     } else {
@@ -269,15 +280,15 @@ function parseCashRow(cells: string[], result: FlussiParseResult, options?: Flus
   const sign = (cells[4] || '+').trim() === '-' ? -1 : 1;
   const value = sign * parseExcelNumber(cells[5]);
 
-  // Conto GP ("B0...") → liquidità della Gestione Patrimoniale
-  if (accountId.toUpperCase().startsWith('B0')) {
-    result.gpCashAccounts.push({ accountId, value });
-    return;
-  }
-
   // Esclusioni configurate (stessa semantica del parser Excel)
   if (isExcludedAccount(accountId, options)) {
     console.log('[FlussiCsv] Conto liquidità escluso da regola');
+    return;
+  }
+
+  // Conto GP ("B0...") → liquidità della Gestione Patrimoniale
+  if (accountId.toUpperCase().startsWith('B0') && !options?.includeGpCashInCash) {
+    result.gpCashAccounts.push({ accountId, value });
     return;
   }
 
@@ -290,7 +301,7 @@ function parseCashRow(cells: string[], result: FlussiParseResult, options?: Flus
 // File Titoli: DATA;ABI;CONTO;COD TITOLO;DESCRIZIONE;ISIN;DIVISA;
 //              VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO
 // ============================================================================
-function parseTitoliRow(cells: string[], result: FlussiParseResult): void {
+function parseTitoliRow(cells: string[], result: FlussiParseResult, options?: FlussiParseOptions): void {
   const accountId = stripQuote(cells[2] || '');
   const codiceTitolo = stripQuote(cells[3] || '');
   const description = (cells[4] || '').trim();
@@ -303,6 +314,8 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult): void {
   const cambio = cambioRaw > 0 ? cambioRaw : 1;
   const prezzo = parseExcelNumber(cells[11]);
   const rateo = parseExcelNumber(cells[12]);
+
+  if (isExcludedPosition(description, options)) return;
 
   const isGP = accountId.toUpperCase().startsWith('08');
   const optionMatch = isinField.match(OPTION_DESCRIPTOR_RE);

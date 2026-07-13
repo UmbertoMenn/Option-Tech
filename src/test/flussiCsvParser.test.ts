@@ -97,6 +97,23 @@ describe('parseFlussiCsvText — file cash', () => {
     expect(res.gpCashAccounts).toHaveLength(1);
   });
 
+  it('per silvias somma anche i conti B0 ed esclude solo il suffisso 452', () => {
+    const csv = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
+      "01/07/2026;'03211;'52225971282;EUR;+;77844,00;IT61",
+      "01/07/2026;'03211;'B0H00099999;EUR;+;2704,00;IT00",
+      "01/07/2026;'03211;'52805213452;EUR;+;50000,00;IT00",
+    ].join('\r\n');
+    const res = parseFlussiCsvText(csv, {
+      excludedCashPatterns: [{ last: '452' }],
+      includeGpCashInCash: true,
+    });
+
+    expect(res.cashValue).toBeCloseTo(80548, 2);
+    expect(res.cashAccounts).toHaveLength(2);
+    expect(res.gpCashAccounts).toHaveLength(0);
+  });
+
   it('applica il segno negativo', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
@@ -117,6 +134,21 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(byType('etf')).toHaveLength(1);
     expect(byType('commodity')).toHaveLength(1);
     expect(byType('derivative')).toHaveLength(3);
+  });
+
+  it('esclude BION ON dalle posizioni e dalle holdings GP quando configurato', () => {
+    const csv = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
+      "01/07/2026;'03211;'02225971281;'010605;BION ON;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'08H00012345;'010605; BION   ON ;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'02225971281;'010696;APPLE INC;US0378331005;USD;0,0;10,0;2000,0;1,0;200,0;0,0;",
+    ].join('\r\n');
+    const res = parseFlussiCsvText(csv, {
+      excludedPositionDescriptions: ['BION ON'],
+    });
+
+    expect(res.positions.map(position => position.description)).toEqual(['APPLE INC']);
+    expect(res.gpHoldings).toHaveLength(0);
   });
 
   it('converte i controvalori in EUR con il cambio', () => {
