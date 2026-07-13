@@ -133,6 +133,10 @@ export interface FlussiParseResult {
   gpHoldings: GPHolding[];
   /** Conti liquidità GP ("B0...") */
   gpCashAccounts: FlussiCashAccount[];
+  /** Il file titoli contiene almeno una riga valida di un deposito GP "08...". */
+  gpSnapshotPresent: boolean;
+  /** Il file titoli contiene almeno una riga valida di una posizione ordinaria. */
+  positionsSnapshotPresent: boolean;
   snapshotDate: string | null;
   /** Movimenti di capitale (bonifici/giroconti) individuati nel file Movimenti Cash */
   cashMovements: FlussiCashMovement[];
@@ -157,6 +161,8 @@ export interface FlussiParseOptions {
   excludedCashPatterns?: { mid?: string; last: string }[];
   /** Descrizioni titolo da non includere nelle posizioni o holdings GP. */
   excludedPositionDescriptions?: string[];
+  /** ISIN titolo da non includere nelle posizioni o holdings GP. */
+  excludedPositionIsins?: string[];
   /** Include i conti B0 nella liquidità ordinaria invece di classificarli come GP. */
   includeGpCashInCash?: boolean;
 }
@@ -209,11 +215,16 @@ function isExcludedAccount(accountId: string, options?: FlussiParseOptions): boo
   return !!byList || !!byPattern;
 }
 
-function isExcludedPosition(description: string, options?: FlussiParseOptions): boolean {
+function isExcludedPosition(description: string, isin: string, options?: FlussiParseOptions): boolean {
   const normalized = description.trim().replace(/\s+/g, ' ').toUpperCase();
-  return options?.excludedPositionDescriptions?.some(
+  const excludedByDescription = options?.excludedPositionDescriptions?.some(
     excluded => excluded.trim().replace(/\s+/g, ' ').toUpperCase() === normalized,
   ) ?? false;
+  const normalizedIsin = stripQuote(isin).toUpperCase();
+  const excludedByIsin = options?.excludedPositionIsins?.some(
+    excluded => stripQuote(excluded).toUpperCase() === normalizedIsin,
+  ) ?? false;
+  return excludedByDescription || excludedByIsin;
 }
 
 /** Word-boundary "ETC" (es. "ETC-INVESCO PHYSICAL") → commodity. */
@@ -234,6 +245,8 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     restrictedCashValue: 0,
     gpHoldings: [],
     gpCashAccounts: [],
+    gpSnapshotPresent: false,
+    positionsSnapshotPresent: false,
     snapshotDate: null,
     cashMovements: [],
     titoliOptionTrades: [],
@@ -305,7 +318,7 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult, options?: Fl
   const accountId = stripQuote(cells[2] || '');
   const codiceTitolo = stripQuote(cells[3] || '');
   const description = (cells[4] || '').trim();
-  const isinField = (cells[5] || '').trim();
+  const isinField = stripQuote(cells[5] || '');
   const currency = (cells[6] || 'EUR').trim() || 'EUR';
   const nominale = parseExcelNumber(cells[7]);
   const quantita = parseExcelNumber(cells[8]);
@@ -315,9 +328,17 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult, options?: Fl
   const prezzo = parseExcelNumber(cells[11]);
   const rateo = parseExcelNumber(cells[12]);
 
-  if (isExcludedPosition(description, options)) return;
-
   const isGP = accountId.toUpperCase().startsWith('08');
+  if (codiceTitolo || description || isinField) {
+    if (isGP) {
+      result.gpSnapshotPresent = true;
+    } else {
+      result.positionsSnapshotPresent = true;
+    }
+  }
+
+  if (isExcludedPosition(description, isinField, options)) return;
+
   const optionMatch = isinField.match(OPTION_DESCRIPTOR_RE);
 
   // ---- Opzioni (derivati) ----

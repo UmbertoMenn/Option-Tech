@@ -16,36 +16,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
-
-/**
- * Eccezioni conti liquidità per cliente.
- * - Per UUID utente: regole legacy già in produzione.
- * - Per username (profiles.username): regole nuove — per `silvias` va escluso
- *   SOLO il conto che finisce per '452' (conto personale, fuori dal
- *   patrimonio del portafoglio). Per `maurog` va escluso il conto con
- *   '2789' al centro e che finisce per '0'. `mid` assente = match sul
- *   solo suffisso.
- */
-const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> = {
-  '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
-};
-
-const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
-  silvias: {
-    excludedCashPatterns: [{ last: '452' }],
-    excludedPositionDescriptions: ['BION ON', 'BION ON SPA'],
-    includeGpCashInCash: true,
-  },
-  maurog: {
-    excludedCashPatterns: [{ mid: '2789', last: '0' }],
-  },
-};
+import {
+  getEffectiveUploadUserId,
+  getPortfolioParseOptions,
+  shouldRefreshGpSnapshot,
+  shouldRefreshPositionsSnapshot,
+} from '@/lib/portfolioUpload';
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
 async function resolveParseOptions(userId: string | undefined): Promise<PortfolioParseOptions> {
-  const options: PortfolioParseOptions = {
-    excludedCashPatterns: [...(EXCLUDED_CASH_PATTERNS[userId || ''] || [])],
-  };
+  const options = getPortfolioParseOptions(userId);
   if (!userId) return options;
   try {
     const { data: profile } = await supabase
@@ -56,12 +36,7 @@ async function resolveParseOptions(userId: string | undefined): Promise<Portfoli
     const username = (profile?.username || profile?.email?.replace('@internal.local', '') || '')
       .trim()
       .toLowerCase();
-    const usernameOptions = PARSE_OPTIONS_BY_USERNAME[username];
-    if (usernameOptions) {
-      options.excludedCashPatterns?.push(...(usernameOptions.excludedCashPatterns || []));
-      options.excludedPositionDescriptions = usernameOptions.excludedPositionDescriptions;
-      options.includeGpCashInCash = usernameOptions.includeGpCashInCash;
-    }
+    return getPortfolioParseOptions(userId, username);
   } catch (err) {
     console.error('[FileUploader] Impossibile risolvere lo username per le esclusioni conti:', err);
   }
@@ -131,7 +106,7 @@ export function FileUploader() {
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
+  const effectiveUserId = getEffectiveUploadUserId(isAdminMode, adminViewUserId, user?.id);
 
   // ============ PORTFOLIO UPLOAD (1 o 2 file) ============
   const onDropPortfolio = useCallback(async (acceptedFiles: File[]) => {
@@ -308,9 +283,11 @@ export function FileUploader() {
         }
       }
       const gpCashFromCsv = Array.from(seenGpCash.values()).reduce((s, v) => s + v, 0);
-      const hasGpFromCsv = gpHoldingsFromCsv.length > 0 || gpCashFromCsv !== 0;
+      const hasGpFromCsv = shouldRefreshGpSnapshot(parsed);
+      const hasGpTitoliSource = parsed.some(p => p.gpSnapshotPresent);
+      const hasPositionsSource = shouldRefreshPositionsSnapshot(parsed);
 
-      if (positions.length === 0) {
+      if (positions.length === 0 && !hasGpTitoliSource && !hasPositionsSource) {
         toast.error('Nessuna posizione trovata');
         return;
       }
@@ -357,30 +334,39 @@ export function FileUploader() {
         const allGpHoldings = [...gpHoldingsFromCsv, ...gpCashHoldings];
         const gpTotalValue = allGpHoldings.reduce((s, h) => s + (h.market_value || 0), 0);
 
-        await supabase.from('gp_holdings').delete().eq('portfolio_id', targetPortfolioId);
-        const { error: gpInsertError } = await supabase.from('gp_holdings').insert(
-          allGpHoldings.map(h => ({
-            portfolio_id: targetPortfolioId,
-            asset_type: h.asset_type,
-            description: h.description,
-            quantity: h.quantity,
-            market_value: h.market_value,
-            price: h.price,
-            currency: h.currency,
-            exchange_rate: h.exchange_rate,
-            weight_pct: h.weight_pct,
-            ticker_code: h.ticker_code,
-            price_date: h.price_date,
-          }))
-        );
-        if (gpInsertError) {
-          console.error('[FileUploader] Errore inserimento GP da CSV:', gpInsertError.message);
+        const { error: gpDeleteError } = await supabase
+          .from('gp_holdings')
+          .delete()
+          .eq('portfolio_id', targetPortfolioId);
+        if (gpDeleteError) {
+          console.error('[FileUploader] Errore cancellazione GP precedente:', gpDeleteError.message);
         } else {
-          await supabase.from('portfolios').update({
-            gp_total_value: gpTotalValue,
-            gp_cash_value: gpCashFromCsv,
-          }).eq('id', targetPortfolioId);
-          console.log(`[FileUploader] GP da CSV: ${allGpHoldings.length} holdings aggiornate`);
+          const gpInsertResult = allGpHoldings.length > 0
+            ? await supabase.from('gp_holdings').insert(
+                allGpHoldings.map(h => ({
+                  portfolio_id: targetPortfolioId,
+                  asset_type: h.asset_type,
+                  description: h.description,
+                  quantity: h.quantity,
+                  market_value: h.market_value,
+                  price: h.price,
+                  currency: h.currency,
+                  exchange_rate: h.exchange_rate,
+                  weight_pct: h.weight_pct,
+                  ticker_code: h.ticker_code,
+                  price_date: h.price_date,
+                }))
+              )
+            : { error: null };
+          if (gpInsertResult.error) {
+            console.error('[FileUploader] Errore inserimento GP da CSV:', gpInsertResult.error.message);
+          } else {
+            await supabase.from('portfolios').update({
+              gp_total_value: gpTotalValue,
+              gp_cash_value: gpCashFromCsv,
+            }).eq('id', targetPortfolioId);
+            console.log(`[FileUploader] GP da CSV: ${allGpHoldings.length} holdings aggiornate`);
+          }
         }
       }
 
@@ -389,7 +375,9 @@ export function FileUploader() {
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       }
 
-      await updatePositionsAsync({ positions, targetPortfolioId });
+      if (positions.length > 0 || hasPositionsSource) {
+        await updatePositionsAsync({ positions, targetPortfolioId });
+      }
       setUploadSuccess(true);
 
       if (snapshotDate) {
