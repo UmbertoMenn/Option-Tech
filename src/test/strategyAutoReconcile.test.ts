@@ -47,6 +47,21 @@ function run(configs: StrategyConfiguration[], positions: Position[]) {
 }
 
 describe('autoReconcileStrategies — roll di una gamba (caso dominante)', () => {
+  it('non modifica una configurazione bloccata', () => {
+    const config = makeConfig({
+      underlying: 'MU',
+      strategy_type: 'naked_put',
+      config_locked: true,
+      position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1 }],
+    });
+    const positions = [makeOption({ underlying: 'MU', option_type: 'put', strike_price: 960, expiry_date: '2026-08-21', quantity: -1 })];
+
+    const result = run([config], positions);
+
+    expect(result.hasAutoChanges).toBe(false);
+    expect(result.resolvedConfigs).toBeNull();
+  });
+
   it('naked put MU: roll P900 → P960 stessa scadenza (stesso caso del file movimenti reale)', () => {
     const configs = [
       makeConfig({

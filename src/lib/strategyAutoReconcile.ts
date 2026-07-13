@@ -241,13 +241,21 @@ export function autoReconcileStrategies(
   underlyingPrices?: Record<string, { price?: number | null }>,
   dynamicAliases?: Map<string, string> | Record<string, string>,
 ): AutoReconcileResult {
+  const editableConfigs = configs.filter(c => !c.config_locked);
+  const lockedConfigs = configs.filter(c => c.config_locked);
   const changes: string[] = [];
   const unresolvedItems: ReconciliationItem[] = [];
+  if (configs.length > 0 && editableConfigs.length === 0) {
+    return { resolvedConfigs: null, changes, unresolvedItems, hasAutoChanges: false };
+  }
+  const lockedUnderlyingKeys = new Set(
+    lockedConfigs.map(config => normalizeUnderlying(config.underlying, null, dynamicAliases)),
+  );
 
   // Config di lavoro: mappa id -> firme mutabili (deep copy)
   const workingSigs = new Map<string, (PositionSignature | null)[]>();
   const configById = new Map<string, StrategyConfiguration>();
-  for (const c of configs) {
+  for (const c of editableConfigs) {
     configById.set(c.id, c);
     workingSigs.set(
       c.id,
@@ -290,11 +298,11 @@ export function autoReconcileStrategies(
   const repairedTypes = new Map<string, string>();
   {
     const alreadyLinkedStockIds = new Set<string>();
-    for (const c of configs) {
+    for (const c of editableConfigs) {
       if (c.linked_stock_id) alreadyLinkedStockIds.add(c.linked_stock_id);
       for (const sid of c.linked_stock_slot_ids || []) alreadyLinkedStockIds.add(sid);
     }
-    for (const c of configs) {
+    for (const c of editableConfigs) {
       if (c.linked_stock_id || (c.linked_stock_slot_ids || []).length > 0) continue;
       const sigs = ((c.position_signatures as unknown as PositionSignature[]) || []);
       if (sigs.length === 0) continue;
@@ -302,7 +310,7 @@ export function autoReconcileStrategies(
       if (soldCalls.length === 0 || soldPuts.length > 0 || boughtCalls.length > 0) continue;
 
       const key = normalizeUnderlying(c.underlying, null, dynamicAliases);
-      const ccTarget = configs.find(o =>
+      const ccTarget = editableConfigs.find(o =>
         o.id !== c.id &&
         !deletedConfigIds.has(o.id) &&
         (o.strategy_type === 'covered_call' || o.strategy_type === 'derisking_covered_call') &&
@@ -343,6 +351,10 @@ export function autoReconcileStrategies(
   // ------------------------------------------------------------------
   const itemsByUnderlying = new Map<string, ReconciliationItem[]>();
   for (const item of items) {
+    if (
+      item.config.config_locked ||
+      lockedUnderlyingKeys.has(normalizeUnderlying(item.underlying, null, dynamicAliases))
+    ) continue;
     const key = normalizeUnderlying(item.underlying, resolveLinkedStock(item.config), dynamicAliases);
     if (!itemsByUnderlying.has(key)) itemsByUnderlying.set(key, []);
     itemsByUnderlying.get(key)!.push(item);
@@ -478,7 +490,7 @@ export function autoReconcileStrategies(
     // ------------------------------------------------------------------
     const leftovers = [...newByPosId.values()].filter(n => n.qty > 0);
     if (leftovers.length > 0) {
-      const configsForUnderlying = configs.filter(
+      const configsForUnderlying = editableConfigs.filter(
         c => normalizeUnderlying(c.underlying, resolveLinkedStock(c), dynamicAliases) === underlyingKey && !deletedConfigIds.has(c.id),
       );
 
@@ -643,7 +655,7 @@ export function autoReconcileStrategies(
   // + REGOLA 4: retype dalla struttura risultante per le config toccate
   // ------------------------------------------------------------------
   const resolvedConfigs: UpsertConfigParams[] = [];
-  for (const c of configs) {
+  for (const c of editableConfigs) {
     if (deletedConfigIds.has(c.id)) continue;
     const finalSigs = [
       ...(workingSigs.get(c.id) || []).filter((s): s is PositionSignature => s !== null),
@@ -667,6 +679,21 @@ export function autoReconcileStrategies(
       linked_stock_id: effectiveLinkedStockId,
       linked_stock_slot_ids: c.linked_stock_slot_ids || [],
       sort_order: c.sort_order,
+      config_locked: false,
+      override_canceled_at: c.override_canceled_at,
+    });
+  }
+  for (const c of lockedConfigs) {
+    resolvedConfigs.push({
+      underlying: c.underlying,
+      strategy_type: c.strategy_type,
+      position_signatures: c.position_signatures,
+      is_synthetic: c.is_synthetic,
+      linked_stock_id: c.linked_stock_id,
+      linked_stock_slot_ids: c.linked_stock_slot_ids || [],
+      sort_order: c.sort_order,
+      config_locked: true,
+      override_canceled_at: c.override_canceled_at,
     });
   }
   const maxSort = configs.reduce((m, c) => Math.max(m, c.sort_order || 0), 0);

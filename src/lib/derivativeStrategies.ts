@@ -346,6 +346,26 @@ function categorizeDerivativesImpl(
           });
           usedDerivatives.add(position.id);
         }
+
+        // ============ STEP 0b: Apply Multi-Leg Overrides ============
+        for (const override of overrides.filter(o => o.override_type === 'multi_leg')) {
+          if (!override.strategy_type) continue;
+          const soldPut = filteredDerivatives.find(d => d.id === override.sold_put_id);
+          const boughtPut = filteredDerivatives.find(d => d.id === override.bought_put_id);
+          const soldCall = filteredDerivatives.find(d => d.id === override.sold_call_id);
+          const boughtCall = filteredDerivatives.find(d => d.id === override.bought_call_id);
+          if (!soldPut || !boughtPut || !soldCall || !boughtCall) continue;
+          const legs = [soldPut, boughtPut, soldCall, boughtCall];
+          const contracts = Math.abs(soldCall.quantity);
+          const totalPremium = legs.reduce((sum, leg) => sum + (leg.market_value || 0), 0);
+          const totalProfitLoss = legs.reduce((sum, leg) => sum + (leg.profit_loss || 0), 0);
+          if (override.strategy_type === 'iron_condor') {
+            ironCondors.push({ underlying: soldCall.underlying || soldCall.description, expiryDate: soldCall.expiry_date || '', soldPut, boughtPut, soldCall, boughtCall, contracts, totalPremium, totalProfitLoss });
+          } else {
+            doubleDiagonals.push({ underlying: soldCall.underlying || soldCall.description, soldExpiryDate: soldCall.expiry_date || '', boughtExpiryDate: boughtCall.expiry_date || '', soldPut, boughtPut, soldCall, boughtCall, contracts, totalPremium, totalProfitLoss });
+          }
+          legs.forEach(leg => usedDerivatives.add(leg.id));
+        }
         break;
         
       case 'protection':
@@ -1027,9 +1047,24 @@ function categorizeDerivativesImpl(
           isFullyCovered: contractsCovered === contractsSold
         });
         
-        usedDerivatives.add(call.id);
+        if (contractsCovered === contractsSold) usedDerivatives.add(call.id);
       }
     }
+  }
+
+  // ============ STEP 1.5: Promote covered calls with a long put to DR-CC ============
+  for (let i = coveredCalls.length - 1; i >= 0; i--) {
+    const coveredCall = coveredCalls[i];
+    const key = resolveUnderlyingKey(coveredCall.option.underlying || coveredCall.option.description);
+    const protectionPut = filteredDerivatives.find(d =>
+      !usedDerivatives.has(d.id) &&
+      d.option_type === 'put' && d.quantity > 0 &&
+      resolveUnderlyingKey(d.underlying || d.description) === key
+    );
+    if (!protectionPut) continue;
+    coveredCalls.splice(i, 1);
+    deRiskingCoveredCalls.push({ coveredCall, protectionPut, isSynthetic: false });
+    usedDerivatives.add(protectionPut.id);
   }
   
   // ============ STEP 2: Find Protezioni (Long PUT) ============

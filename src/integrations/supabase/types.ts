@@ -1387,11 +1387,13 @@ export type Database = {
       }
       strategy_configurations: {
         Row: {
+          config_locked: boolean
           created_at: string | null
           id: string
           is_synthetic: boolean
           linked_stock_id: string | null
           linked_stock_slot_ids: Json
+          override_canceled_at: string | null
           portfolio_id: string
           position_signatures: Json
           sort_order: number
@@ -1400,11 +1402,13 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          config_locked?: boolean
           created_at?: string | null
           id?: string
           is_synthetic?: boolean
           linked_stock_id?: string | null
           linked_stock_slot_ids?: Json
+          override_canceled_at?: string | null
           portfolio_id: string
           position_signatures?: Json
           sort_order?: number
@@ -1413,11 +1417,13 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          config_locked?: boolean
           created_at?: string | null
           id?: string
           is_synthetic?: boolean
           linked_stock_id?: string | null
           linked_stock_slot_ids?: Json
+          override_canceled_at?: string | null
           portfolio_id?: string
           position_signatures?: Json
           sort_order?: number

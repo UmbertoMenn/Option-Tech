@@ -73,4 +73,17 @@ describe('categorizeDerivatives — DR-CC incompleta (gamba mancante)', () => {
     expect(cats.deRiskingCoveredCalls[0].incomplete ?? false).toBe(false);
     expect(cats.deRiskingCoveredCalls[0].protectionPut?.strike_price).toBe(250);
   });
+
+  it('senza configurazione, azione + short call + long put diventa DR-CC', () => {
+    const stock = pos({ asset_type: 'stock', ticker: 'CEG', description: 'CONSTELLATION ENERGY', quantity: 100, current_price: 300 });
+    const shortCall = pos({ option_type: 'call', quantity: -1, strike_price: 320, expiry_date: '2026-12-18', underlying: 'CEG' });
+    const longPut = pos({ option_type: 'put', quantity: 1, strike_price: 250, expiry_date: '2026-12-18', underlying: 'CEG' });
+
+    const cats = categorizeDerivatives([shortCall, longPut], [stock, shortCall, longPut], [], []);
+
+    expect(cats.deRiskingCoveredCalls).toHaveLength(1);
+    expect(cats.deRiskingCoveredCalls[0].protectionPut?.id).toBe(longPut.id);
+    expect(cats.coveredCalls).toHaveLength(0);
+    expect(cats.longPuts).toHaveLength(0);
+  });
 });

@@ -276,7 +276,7 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
 export function Derivatives() {
   const { portfolio, positions, isLoading, isHistoricalView } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
-  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving, isLoading: isConfigsLoading } = useStrategyConfigurations();
+  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, cancelOverride, isSaving: isConfigSaving, isLoading: isConfigsLoading } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
   const { allMappings } = useUnderlyingMappings();
@@ -287,52 +287,15 @@ export function Derivatives() {
   const archiveMutation = useArchiveUnderlying();
   const unarchiveMutation = useUnarchiveUnderlying();
   
-  // Wrapper: save configs AND delete conflicting single overrides + block reconciliation auto-open
+  // Manual configurations do not delete the user's existing overrides.
   const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
-    // Find all derivative position IDs covered by the new configs
-    const allDerivs = positions.filter(p => p.asset_type === 'derivative');
-    const coveredPositionIds = new Set<string>();
-    
-    for (const config of configs) {
-      const configKey = (config.underlying || '').toUpperCase().trim();
-      for (const d of allDerivs) {
-        const posUnderlying = (d.underlying || d.description || '').toUpperCase().trim();
-        if (!posUnderlying.includes(configKey) && !configKey.includes(posUnderlying)) continue;
-        const sigs = config.position_signatures || [];
-        for (const sig of sigs) {
-          if (
-            (d.option_type || '').toLowerCase() === sig.option_type.toLowerCase() &&
-            Math.abs((d.strike_price || 0) - sig.strike) < 0.01 &&
-            (d.expiry_date || '') === sig.expiry &&
-            (d.quantity >= 0 ? 1 : -1) === sig.quantity_sign
-          ) {
-            coveredPositionIds.add(d.id);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Delete conflicting single overrides for these positions
-    if (coveredPositionIds.size > 0 && portfolio?.id) {
-      const conflicting = overrides.filter(
-        o => o.override_type === 'single' && o.position_id && coveredPositionIds.has(o.position_id)
-      );
-      if (conflicting.length > 0) {
-        const { supabase } = await import('@/integrations/supabase/client');
-        const ids = conflicting.map(o => o.id);
-        await supabase.from('derivative_overrides').delete().in('id', ids);
-        console.log(`[SaveConfigs] Deleted ${ids.length} conflicting single overrides`);
-      }
-    }
-    
     // Block reconciliation from auto-opening after this save
     justSavedRef.current = true;
     reconciliationCheckedRef.current = true;
     
     // Save the configs
     await upsertBatch(configs);
-  }, [positions, overrides, portfolio?.id, upsertBatch]);
+  }, [upsertBatch]);
   
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   
@@ -603,7 +566,11 @@ export function Derivatives() {
   // Reconciliation: compare saved configs vs current positions
   const reconciliationItems = useMemo(() => {
     if (!hasConfigurations || strategyConfigs.length === 0 || positions.length === 0) return [];
-    return reconcileConfigs(strategyConfigs, positions, dynamicAliases);
+    return reconcileConfigs(
+      strategyConfigs.filter(config => !config.config_locked),
+      positions,
+      dynamicAliases,
+    );
   }, [hasConfigurations, strategyConfigs, positions, dynamicAliases]);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -837,6 +804,15 @@ export function Derivatives() {
             </Button>
           )}
         </div>
+        {strategyConfigs.some(config => config.config_locked) && (
+          <div className="flex flex-wrap gap-2">
+            {strategyConfigs.filter(config => config.config_locked).map(config => (
+              <Button key={config.id} variant="outline" size="sm" onClick={() => cancelOverride(config.id)}>
+                Annulla override {config.underlying}
+              </Button>
+            ))}
+          </div>
+        )}
 
         {/* Empty state: no configurations saved yet */}
         {!hasConfigurations && derivatives.length > 0 && (

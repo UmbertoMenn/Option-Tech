@@ -26,6 +26,8 @@ export interface StrategyConfiguration {
   linked_stock_id: string | null;
   linked_stock_slot_ids: string[];
   sort_order: number;
+  config_locked: boolean;
+  override_canceled_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +40,8 @@ export interface UpsertConfigParams {
   linked_stock_id?: string | null;
   linked_stock_slot_ids?: string[];
   sort_order?: number;
+  config_locked?: boolean;
+  override_canceled_at?: string | null;
 }
 
 export const STRATEGY_TYPE_LABELS: Record<string, string> = {
@@ -112,6 +116,8 @@ export function useStrategyConfigurations() {
           linked_stock_id: params.linked_stock_id || null,
           linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
           sort_order: params.sort_order ?? 0,
+          config_locked: params.config_locked ?? true,
+          override_canceled_at: params.override_canceled_at ?? null,
         })
         .select().single();
       if (error) throw error;
@@ -136,7 +142,7 @@ export function useStrategyConfigurations() {
       if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       
-      // Delete existing configs for this portfolio first
+      // Full replacement is intentional: callers include untouched configs too.
       await supabase.from('strategy_configurations').delete().eq('portfolio_id', portfolioId);
       
       if (configs.length === 0) return;
@@ -151,15 +157,17 @@ export function useStrategyConfigurations() {
         linked_stock_id: c.linked_stock_id || null,
         linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
         sort_order: c.sort_order ?? index,
+        config_locked: c.config_locked ?? true,
+        override_canceled_at: c.override_canceled_at ?? null,
       }));
       
       const { error } = await supabase.from('strategy_configurations').insert(rows);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, configs) => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Configurazione strategie salvata');
-      if (portfolioId) {
+      if (portfolioId && configs.some(config => !config.config_locked)) {
         recomputeLatestSnapshot(portfolioId).then(() => {
           queryClient.invalidateQueries({ queryKey: ['historical-data'] });
         });
@@ -183,12 +191,29 @@ export function useStrategyConfigurations() {
         recomputeLatestSnapshot(portfolioId).then(() => {
           queryClient.invalidateQueries({ queryKey: ['historical-data'] });
         });
+
       }
     },
     onError: (error) => {
       console.error('Failed to delete strategy configuration:', error);
       toast.error('Errore nel rimuovere la configurazione');
     },
+  });
+
+  const cancelOverrideMutation = useMutation({
+    mutationFn: async (configId: string) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
+      const { error } = await supabase
+        .from('strategy_configurations')
+        .update({ config_locked: false, override_canceled_at: new Date().toISOString() })
+        .eq('id', configId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
+      toast.success('Override annullato: la strategia può essere riconciliata automaticamente');
+    },
+    onError: () => toast.error("Impossibile annullare l'override"),
   });
 
   const getConfigForUnderlying = (underlying: string): StrategyConfiguration | undefined => {
@@ -204,6 +229,7 @@ export function useStrategyConfigurations() {
     upsertConfig: upsertMutation.mutateAsync,
     upsertBatch: upsertBatchMutation.mutateAsync,
     deleteConfig: deleteMutation.mutateAsync,
+    cancelOverride: cancelOverrideMutation.mutateAsync,
     getConfigForUnderlying,
     isSaving: upsertMutation.isPending || upsertBatchMutation.isPending,
   };
