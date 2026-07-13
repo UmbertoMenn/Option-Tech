@@ -795,6 +795,7 @@ export function Derivatives() {
               currentPositions={positions}
               onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
+              archivedKeys={archivedItems.map(a => a.key)}
             />
           </ErrorBoundary>
         )}
