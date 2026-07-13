@@ -14,8 +14,10 @@
  *   applicazione delle rivendite ai riacquisti aperti (FIFO per data).
  */
 import { supabase } from '@/integrations/supabase/client';
-import { FlussiCashMovement, FlussiTitoliOptionTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
+import { FlussiCashMovement, FlussiTitoliOptionTrade, FlussiTitoliStockTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
 import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
+import { applyStockTradesToBasis, detectEarlyAssignments, CostBasisEntry, EarlyAssignment, PutPositionLite } from '@/lib/costBasis';
+import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
@@ -195,4 +197,169 @@ export async function ingestTitoliTrades(
   }
 
   return { buybacksUpserted, resellsApplied };
+}
+
+export interface CostBasisIngestResult {
+  tradesApplied: number;
+  assignmentsDetected: number;
+  warnings: string[];
+}
+
+/**
+ * Aggiorna lo store PMC (stock_cost_basis) dai movimenti titoli.
+ *
+ * - Idempotente: ogni movimento applicato viene registrato nel ledger
+ *   cost_basis_trades con chiave naturale univoca; ricaricare lo stesso file
+ *   non riapplica nulla.
+ * - Rileva le assegnazioni anticipate di put confrontando le put short
+ *   pre-upload (DB) con quelle del saldo aggiornato (file nello stesso
+ *   batch): le vendite di azioni che chiudono un lotto assegnato NON toccano
+ *   PMC/quantità del titolo preesistente.
+ * - newSnapshotPositions: posizioni del saldo aggiornato appena parsate
+ *   (stesso batch di upload). Se assente, il rilevamento assegnazioni è
+ *   disattivato e tutte le vendite sono trattate come normali.
+ */
+export async function ingestStockTradesCostBasis(
+  portfolioId: string,
+  stockTrades: FlussiTitoliStockTrade[],
+  optionTrades: FlussiTitoliOptionTrade[],
+  newSnapshotPositions?: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker'>[],
+): Promise<CostBasisIngestResult> {
+  if (stockTrades.length === 0) return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
+
+  // Chiavi di risoluzione: ISIN quando disponibile (deterministico), altrimenti
+  // chiave canonica del ticker via resolver (mai alias hardcoded).
+  const stockKey = (t: FlussiTitoliStockTrade): string =>
+    t.isin ? t.isin.toUpperCase() : getCanonicalTickerKey({ description: t.description });
+  const optionKey = (underlyingTicker: string): string =>
+    getCanonicalTickerKey({ rawTicker: underlyingTicker });
+
+  // ---- Ledger di idempotenza: inserisce le chiavi naturali; i conflitti
+  // (già applicati in un upload precedente) vengono esclusi. ----
+  const ledgerRows = stockTrades.map(t => ({
+    portfolio_id: portfolioId,
+    basis_key: stockKey(t),
+    trade_date: t.tradeDate,
+    side: t.side,
+    quantity: t.quantity,
+    price: t.price,
+  }));
+  const { data: inserted, error: ledgerErr } = await supabase
+    .from('cost_basis_trades' as never)
+    .upsert(ledgerRows as never[], {
+      onConflict: 'portfolio_id,basis_key,trade_date,side,quantity,price',
+      ignoreDuplicates: true,
+    })
+    .select('basis_key, trade_date, side, quantity, price');
+  if (ledgerErr) throw new Error(`Errore ledger PMC: ${ledgerErr.message}`);
+
+  const newLedgerKeys = new Set(
+    ((inserted || []) as unknown as { basis_key: string; trade_date: string; side: string; quantity: number; price: number }[])
+      .map(r => `${r.basis_key}|${r.trade_date}|${r.side}|${r.quantity}|${r.price}`),
+  );
+  const freshTrades = stockTrades.filter(t =>
+    newLedgerKeys.has(`${stockKey(t)}|${t.tradeDate}|${t.side}|${t.quantity}|${t.price}`),
+  );
+  if (freshTrades.length === 0) {
+    return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
+  }
+
+  // ---- Rilevamento assegnazioni anticipate (richiede il saldo aggiornato) ----
+  const toPutLite = (
+    rows: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker'>[],
+  ): PutPositionLite[] =>
+    rows
+      .filter(p => p.asset_type === 'derivative' && p.option_type === 'put' && p.quantity < 0 && p.strike_price && p.expiry_date)
+      .map(p => ({
+        underlyingKey: getCanonicalTickerKey({ rawTicker: p.ticker, underlyingName: p.underlying, description: p.description }),
+        strike: Number(p.strike_price),
+        expiryDate: String(p.expiry_date),
+        shortContracts: Math.abs(Number(p.quantity)),
+      }));
+
+  let assignments: EarlyAssignment[] = [];
+  if (newSnapshotPositions && newSnapshotPositions.length > 0) {
+    const { data: oldPositions } = await supabase
+      .from('positions')
+      .select('asset_type, option_type, quantity, strike_price, expiry_date, underlying, description, ticker')
+      .eq('portfolio_id', portfolioId)
+      .eq('asset_type', 'derivative');
+    assignments = detectEarlyAssignments(
+      toPutLite((oldPositions || []) as unknown as Position[]),
+      toPutLite(newSnapshotPositions),
+      freshTrades,
+      optionTrades,
+      stockKey,
+      optionKey,
+    );
+    if (assignments.length > 0) {
+      console.log('[CostBasis] assegnazioni anticipate rilevate:', assignments.map(a => `${a.underlyingKey} ${a.contracts}×100 @ strike ${a.strike}`));
+    }
+  }
+
+  // ---- Applica alla media ponderata ----
+  const { data: existingRows, error: readErr } = await supabase
+    .from('stock_cost_basis' as never)
+    .select('*')
+    .eq('portfolio_id', portfolioId);
+  if (readErr) throw new Error(`Errore lettura PMC: ${readErr.message}`);
+
+  const existing: CostBasisEntry[] = ((existingRows || []) as unknown as {
+    basis_key: string; isin: string | null; description: string | null;
+    pmc: number; quantity: number; currency: string | null;
+  }[]).map(r => ({
+    basisKey: r.basis_key,
+    isin: r.isin,
+    description: r.description,
+    pmc: Number(r.pmc),
+    quantity: Number(r.quantity),
+    currency: r.currency,
+  }));
+
+  const result = applyStockTradesToBasis(existing, freshTrades, assignments, stockKey);
+  for (const w of result.warnings) console.warn('[CostBasis]', w);
+
+  // Marca nel ledger le vendite nettate come chiusure di assegnazione
+  for (const t of result.assignmentCloses) {
+    await supabase
+      .from('cost_basis_trades' as never)
+      .update({ kind: 'assignment_close' } as never)
+      .eq('portfolio_id', portfolioId)
+      .eq('basis_key', stockKey(t))
+      .eq('trade_date', t.tradeDate)
+      .eq('side', t.side)
+      .eq('quantity', t.quantity)
+      .eq('price', t.price);
+  }
+
+  // Upsert dello store: solo le chiavi toccate dai trade nuovi
+  const touchedKeys = new Set([
+    ...result.normalTrades.map(stockKey),
+    ...result.assignmentCloses.map(stockKey),
+  ]);
+  const upserts = Array.from(result.entries.values())
+    .filter(e => touchedKeys.has(e.basisKey))
+    .map(e => ({
+      portfolio_id: portfolioId,
+      basis_key: e.basisKey,
+      isin: e.isin,
+      description: e.description,
+      pmc: e.pmc,
+      quantity: e.quantity,
+      currency: e.currency,
+      source: 'movements',
+      updated_at: new Date().toISOString(),
+    }));
+  if (upserts.length > 0) {
+    const { error: upsertErr } = await supabase
+      .from('stock_cost_basis' as never)
+      .upsert(upserts as never[], { onConflict: 'portfolio_id,basis_key' });
+    if (upsertErr) throw new Error(`Errore salvataggio PMC: ${upsertErr.message}`);
+  }
+
+  return {
+    tradesApplied: result.normalTrades.length + result.assignmentCloses.length,
+    assignmentsDetected: assignments.length,
+    warnings: result.warnings,
+  };
 }

@@ -100,6 +100,28 @@ export interface FlussiTitoliOptionTrade {
   tradeDate: string;
 }
 
+/** Compravendita di titoli (azioni/ETF) nel file Movimenti Titoli: righe con ISIN valorizzato. */
+export interface FlussiTitoliStockTrade {
+  accountId: string;
+  isin: string;
+  /** DESC TITOLO: denominazione del titolo */
+  description: string;
+  /** 'ACQ' = acquisto, 'VEN' = vendita */
+  side: 'ACQ' | 'VEN';
+  /** Quantità (positiva) */
+  quantity: number;
+  /** Prezzo per azione (PREZZO SECCO), nella divisa del titolo */
+  price: number;
+  currency: string;
+  exchangeRate: number;
+  /** Controvalore lordo in EUR */
+  grossEUR: number;
+  /** Commissioni (EUR) */
+  commission: number;
+  /** DATA OPERAZIONE, ISO */
+  tradeDate: string;
+}
+
 export interface FlussiParseResult {
   positions: ParsedPosition[];
   /** Conti di liquidità del portafoglio (ordinari + vincolati, GP esclusa) */
@@ -116,6 +138,8 @@ export interface FlussiParseResult {
   cashMovements: FlussiCashMovement[];
   /** Operazioni su opzioni individuate nel file Movimenti Titoli */
   titoliOptionTrades: FlussiTitoliOptionTrade[];
+  /** Compravendite di titoli (azioni/ETF, righe con ISIN) nel file Movimenti Titoli */
+  titoliStockTrades: FlussiTitoliStockTrade[];
 }
 
 export interface FlussiParseOptions {
@@ -195,6 +219,7 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     snapshotDate: null,
     cashMovements: [],
     titoliOptionTrades: [],
+    titoliStockTrades: [],
   };
   if (!type) return result;
 
@@ -608,10 +633,30 @@ function parseMovTitoliRow(cells: string[], result: FlussiParseResult, options?:
   if (causale !== 'ACQ' && causale !== 'VEN') return; // DIV, cedole, ecc. esclusi
 
   const isin = stripQuote(cells[4] || '').trim();
-  if (isin) return; // le opzioni USA hanno ISIN vuoto
-
   const tradeDate = parseItalianDate(cells[8]) || parseItalianDate(cells[6]);
   if (!tradeDate) return;
+
+  if (isin) {
+    // Riga con ISIN = compravendita titoli (azioni/ETF): alimenta il calcolo
+    // del PMC. Le opzioni USA hanno ISIN vuoto e vengono gestite sotto.
+    const quantity = Math.abs(parseExcelNumber(cells[11]));
+    const price = parseExcelNumber(cells[12]);
+    if (!quantity || !price) return;
+    result.titoliStockTrades.push({
+      accountId,
+      isin,
+      description: stripQuote(cells[5] || '').trim(),
+      side: causale as 'ACQ' | 'VEN',
+      quantity,
+      price,
+      currency: (cells[13] || 'USD').trim() || 'USD',
+      exchangeRate: parseExcelNumber(cells[16]) || 1,
+      grossEUR: parseExcelNumber(cells[23]),
+      commission: parseExcelNumber(cells[19]),
+      tradeDate,
+    });
+    return;
+  }
 
   const decoded = decodeOptionDescriptor(cells[5] || '', tradeDate);
   if (!decoded) return; // non è un descrittore opzione riconoscibile

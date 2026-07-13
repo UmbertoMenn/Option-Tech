@@ -7,7 +7,8 @@ import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
 import { parseGPExcel } from '@/lib/gpExcelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
-import { ingestCashMovements, ingestTitoliTrades } from '@/lib/flussiMovementsIngest';
+import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
+import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions } from '@/lib/costBasisStore';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -126,15 +127,22 @@ export function FileUploader() {
         snapshotFiles.push(f);
       }
 
-      // ---- Movimenti: processati PRIMA dei saldi, così i riacquisti call
-      // vengono confrontati con le posizioni PRE-aggiornamento (la call
-      // venduta è ancora presente). Idempotenti: ricaricare lo stesso file
-      // non raddoppia nulla. ----
+      // ---- Parse degli snapshot PRIMA dei movimenti: il rilevamento delle
+      // assegnazioni anticipate confronta le put del saldo aggiornato con
+      // quelle pre-upload nel DB (che i movimenti non hanno ancora toccato). ----
+      const parsed = snapshotFiles.length > 0
+        ? await Promise.all(snapshotFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns })))
+        : [];
+      const parsedSnapshotPositions = parsed.flatMap(p => p.positions);
+
+      // ---- Movimenti: processati PRIMA dell'aggiornamento posizioni, così i
+      // riacquisti call e i PMC vengono confrontati con lo stato PRE-upload.
+      // Idempotenti: ricaricare lo stesso file non raddoppia nulla. ----
       const movementSummary: string[] = [];
       for (const m of movementTexts) {
-        const parsed = parseFlussiCsvText(m.text, { excludedCashPatterns: excludedPatterns });
+        const parsedMov = parseFlussiCsvText(m.text, { excludedCashPatterns: excludedPatterns });
         if (m.type === 'mov_cash') {
-          const res = await ingestCashMovements(targetPortfolioId, parsed.cashMovements);
+          const res = await ingestCashMovements(targetPortfolioId, parsedMov.cashMovements);
           if (res.depositsUpserted > 0) {
             movementSummary.push(`${res.depositsUpserted} versamenti/prelievi (${res.totalAmount.toLocaleString('it-IT', { maximumFractionDigits: 0 })} €)`);
           } else {
@@ -147,10 +155,33 @@ export function FileUploader() {
             movementSummary.push(`${res.internalTransfersExcluded} giroconti interni esclusi`);
           }
         } else {
-          const res = await ingestTitoliTrades(targetPortfolioId, parsed.titoliOptionTrades);
+          const res = await ingestTitoliTrades(targetPortfolioId, parsedMov.titoliOptionTrades);
           const parts: string[] = [];
           if (res.buybacksUpserted > 0) parts.push(`${res.buybacksUpserted} riacquisti call tracciati`);
           if (res.resellsApplied > 0) parts.push(`${res.resellsApplied} contratti rivenduti applicati`);
+
+          // PMC: acquisti/vendite titoli aggiornano la media ponderata; le
+          // vendite che chiudono lotti assegnati (assegnazione anticipata di
+          // put) vengono nettate a parte senza toccare il PMC.
+          try {
+            const cb = await ingestStockTradesCostBasis(
+              targetPortfolioId,
+              parsedMov.titoliStockTrades,
+              parsedMov.titoliOptionTrades,
+              parsedSnapshotPositions.length > 0 ? parsedSnapshotPositions : undefined,
+            );
+            if (cb.tradesApplied > 0) parts.push(`${cb.tradesApplied} operazioni titoli applicate al PMC`);
+            if (cb.assignmentsDetected > 0) parts.push(`${cb.assignmentsDetected} assegnazioni anticipate rilevate`);
+            for (const w of cb.warnings) {
+              toast.warning('PMC', { description: w });
+            }
+          } catch (cbErr) {
+            console.error('[FileUploader] aggiornamento PMC fallito:', cbErr);
+            toast.error('Aggiornamento PMC non riuscito', {
+              description: cbErr instanceof Error ? cbErr.message : 'errore sconosciuto',
+            });
+          }
+
           movementSummary.push(parts.length > 0 ? parts.join(', ') : 'nessun riacquisto call nei movimenti titoli');
         }
       }
@@ -166,10 +197,6 @@ export function FileUploader() {
         return;
       }
 
-      const parsed = await Promise.all(
-        snapshotFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
-      );
-
       // Verifica che le snapshot date siano coerenti
       const dates = parsed.map(p => p.snapshotDate).filter((d): d is string => !!d);
       const uniqueDates = Array.from(new Set(dates));
@@ -183,6 +210,24 @@ export function FileUploader() {
 
       // Merge posizioni (concatenazione semplice)
       const positions = parsed.flatMap(p => p.positions);
+
+      // ---- PMC ----
+      // 1. Se l'upload contiene PMC (vecchio file Excel): sincronizza lo store
+      //    (fonte 'excel') — è il riallineamento.
+      // 2. Applica lo store alle posizioni senza PMC (flussi CSV): i saldi
+      //    banca non includono più il prezzo di carico.
+      try {
+        const { synced } = await syncCostBasisStoreFromPositions(targetPortfolioId, positions);
+        if (synced > 0) console.log(`[CostBasis] store sincronizzato da Excel: ${synced} titoli`);
+        const store = await fetchCostBasisStore(targetPortfolioId);
+        const { applied } = applyCostBasisToPositions(positions, store);
+        if (applied > 0) console.log(`[CostBasis] PMC applicato a ${applied} posizioni dallo store`);
+      } catch (pmcErr) {
+        console.error('[FileUploader] gestione PMC fallita:', pmcErr);
+        toast.warning('PMC non applicati', {
+          description: pmcErr instanceof Error ? pmcErr.message : 'errore sconosciuto',
+        });
+      }
 
       // Deduplica liquidità per accountId (prima occorrenza vince).
       // Conti senza ID riconoscibile vengono trattati come distinti.

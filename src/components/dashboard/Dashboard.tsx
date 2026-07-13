@@ -16,7 +16,8 @@ import { useCallBuybacks, openCallBuybacksValueEUR } from '@/hooks/useCallBuybac
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon, Info, Upload } from 'lucide-react';
+import { PmcUploadDialog } from '@/components/dashboard/PmcUploadDialog';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
@@ -49,7 +50,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const { isAggregatedView, selectedPortfolioId, isReady: isPortfolioReady } = usePortfolioContext();
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
-  const { portfolio, positions, summary: rawSummary, isLoading, isHistoricalView } = usePortfolio();
+  const { portfolio, positions, summary: rawSummary, isLoading, isHistoricalView, isReadOnly } = usePortfolio();
 
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
@@ -113,6 +114,7 @@ export function Dashboard() {
 
   // Centralized state for unified carousel
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [pmcDialogOpen, setPmcDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('netting_total');
   const [includeCallBuybacks, setIncludeCallBuybacks] = useState(false);
   const portfolioIds = useMemo(
@@ -481,13 +483,30 @@ export function Dashboard() {
         {positions.length > 0 && (
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-lg">Posizioni</CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-lg">Posizioni</CardTitle>
+                {!isReadOnly && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs"
+                    onClick={() => setPmcDialogOpen(true)}
+                  >
+                    <Upload className="w-3.5 h-3.5 mr-1.5" /> Carica PMC (Excel)
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <PositionsTable positions={positions} gpHoldings={gpHoldings} />
             </CardContent>
           </Card>
         )}
+        <PmcUploadDialog
+          portfolioId={portfolio?.id}
+          open={pmcDialogOpen}
+          onOpenChange={setPmcDialogOpen}
+        />
       </main>
     </div>
   );

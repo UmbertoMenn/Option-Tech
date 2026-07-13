@@ -361,6 +361,100 @@ export type Database = {
           },
         ]
       }
+      cost_basis_trades: {
+        Row: {
+          basis_key: string
+          created_at: string
+          id: string
+          kind: string
+          portfolio_id: string
+          price: number
+          quantity: number
+          side: string
+          trade_date: string
+        }
+        Insert: {
+          basis_key: string
+          created_at?: string
+          id?: string
+          kind?: string
+          portfolio_id: string
+          price: number
+          quantity: number
+          side: string
+          trade_date: string
+        }
+        Update: {
+          basis_key?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          portfolio_id?: string
+          price?: number
+          quantity?: number
+          side?: string
+          trade_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cost_basis_trades_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_cost_basis: {
+        Row: {
+          basis_key: string
+          created_at: string
+          currency: string | null
+          description: string | null
+          id: string
+          isin: string | null
+          pmc: number
+          portfolio_id: string
+          quantity: number
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          basis_key: string
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          isin?: string | null
+          pmc: number
+          portfolio_id: string
+          quantity?: number
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          basis_key?: string
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          isin?: string | null
+          pmc?: number
+          portfolio_id?: string
+          quantity?: number
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_cost_basis_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       covered_call_premiums: {
         Row: {
           contracts_count: number
