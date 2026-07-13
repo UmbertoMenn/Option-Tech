@@ -24,7 +24,7 @@ function cfg(c: Partial<StrategyConfiguration>): StrategyConfiguration {
     id: 'cfg1', portfolio_id: 'pf1', underlying: 'CEG',
     strategy_type: 'covered_call', position_signatures: [],
     is_synthetic: false, linked_stock_id: null, linked_stock_slot_ids: [],
-    sort_order: 0, created_at: '', updated_at: '',
+    sort_order: 0, config_locked: true, override_canceled_at: null, created_at: '', updated_at: '',
     ...c,
   };
 }
