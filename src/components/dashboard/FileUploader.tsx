@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
-import { parseGPExcel } from '@/lib/gpExcelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
 import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
 import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions } from '@/lib/costBasisStore';
@@ -17,13 +16,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from '@/components/ui/carousel';
 
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
@@ -87,8 +79,6 @@ function DropzoneContent({
 export function FileUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [isProcessingGP, setIsProcessingGP] = useState(false);
-  const [uploadGPSuccess, setUploadGPSuccess] = useState(false);
   const { portfolio, updatePositionsAsync } = usePortfolio();
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
@@ -395,83 +385,6 @@ export function FileUploader() {
     }
   }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient, effectiveUserId, navigate]);
 
-  // ============ GP UPLOAD ============
-  const onDropGP = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-
-    const targetPortfolioId = portfolio?.id;
-    if (!targetPortfolioId) {
-      toast.error('Nessun portfolio selezionato');
-      return;
-    }
-
-    setIsProcessingGP(true);
-    setUploadGPSuccess(false);
-
-    try {
-      const { holdings, cashValue, totalValue } = await parseGPExcel(file);
-      
-      if (holdings.length === 0) {
-        toast.error('Nessuna posizione GP trovata');
-        return;
-      }
-
-      // Delete old GP holdings for this portfolio
-      await supabase.from('gp_holdings').delete().eq('portfolio_id', targetPortfolioId);
-
-      // Insert new GP holdings
-      const { error: insertError } = await supabase.from('gp_holdings').insert(
-        holdings.map(h => ({
-          portfolio_id: targetPortfolioId,
-          asset_type: h.asset_type,
-          description: h.description,
-          quantity: h.quantity,
-          market_value: h.market_value,
-          price: h.price,
-          currency: h.currency,
-          exchange_rate: h.exchange_rate,
-          weight_pct: h.weight_pct,
-          ticker_code: h.ticker_code,
-          price_date: h.price_date,
-        }))
-      );
-
-      if (insertError) throw insertError;
-
-      // Update portfolio GP totals
-      await supabase.from('portfolios').update({
-        gp_total_value: totalValue,
-        gp_cash_value: cashValue,
-      }).eq('id', targetPortfolioId);
-
-      await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
-      await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
-      await queryClient.invalidateQueries({ queryKey: ['gp-holdings'] });
-
-      // NB: lo snapshot storico NON viene aggiornato qui.
-      // Lo snapshot in historical_data è legato esclusivamente all'upload del
-      // file Portafoglio principale, per evitare disallineamenti tra le card
-      // (ricalcolate live) e i grafici storici (basati sullo snapshot DB).
-
-      setUploadGPSuccess(true);
-      toast.success('Gestione Patrimoniale caricata!', {
-        description: `${holdings.length} posizioni importate.`,
-      });
-      toast.warning('Snapshot storico non aggiornato', {
-        description: 'Lo snapshot storico verrà aggiornato solo dopo aver caricato un nuovo file Portafoglio.',
-        duration: 8000,
-      });
-    } catch (error) {
-      console.error('Error parsing GP file:', error);
-      toast.error('Errore elaborazione file GP', {
-        description: 'Assicurati che il file sia nel formato corretto.',
-      });
-    } finally {
-      setIsProcessingGP(false);
-    }
-  }, [portfolio?.id, queryClient]);
-
   const portfolioDropzone = useDropzone({
     onDrop: onDropPortfolio,
     accept: {
@@ -483,63 +396,26 @@ export function FileUploader() {
     disabled: isProcessing,
   });
 
-  const gpDropzone = useDropzone({
-    onDrop: onDropGP,
-    accept: {
-      'application/vnd.ms-excel': ['.xls'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-    },
-    maxFiles: 1,
-    disabled: isProcessingGP,
-  });
-
   return (
     <Card className="border-dashed border-2 border-border hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground text-center mb-3 px-2">
-          Se è presente una Gestione Patrimoniale, carica <strong>prima la GP</strong> e poi il Portafoglio: lo snapshot storico viene generato dall'upload del Portafoglio e include la GP solo se già aggiornata.
+          Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
         </p>
-        <Carousel opts={{ loop: false }}>
-          <CarouselContent>
-            {/* Slide 1: Portfolio Upload */}
-            <CarouselItem>
-              <div
-                {...portfolioDropzone.getRootProps()}
-                className={`flex flex-col items-center justify-center gap-3 py-6 cursor-pointer rounded-lg transition-colors ${
-                  portfolioDropzone.isDragActive ? 'bg-primary/5' : ''
-                } ${isProcessing ? 'opacity-50 cursor-wait' : ''}`}
-              >
-                <input {...portfolioDropzone.getInputProps()} />
-                <DropzoneContent
-                  isProcessing={isProcessing}
-                  uploadSuccess={uploadSuccess}
-                  isDragActive={portfolioDropzone.isDragActive}
-                  label="Carica Portfolio (fino a 4 file)"
-                />
-              </div>
-            </CarouselItem>
-
-            {/* Slide 2: GP Upload */}
-            <CarouselItem>
-              <div
-                {...gpDropzone.getRootProps()}
-                className={`flex flex-col items-center justify-center gap-3 py-6 cursor-pointer rounded-lg transition-colors ${
-                  gpDropzone.isDragActive ? 'bg-primary/5' : ''
-                } ${isProcessingGP ? 'opacity-50 cursor-wait' : ''}`}
-              >
-                <input {...gpDropzone.getInputProps()} />
-                <DropzoneContent
-                  isProcessing={isProcessingGP}
-                  uploadSuccess={uploadGPSuccess}
-                  isDragActive={gpDropzone.isDragActive}
-                  label="Carica GP"
-                />
-              </div>
-            </CarouselItem>
-          </CarouselContent>
-          <CarouselPrevious className="left-1 h-6 w-6" />
-          <CarouselNext className="right-1 h-6 w-6" />
-        </Carousel>
+        <div
+          {...portfolioDropzone.getRootProps()}
+          className={`flex flex-col items-center justify-center gap-3 py-6 cursor-pointer rounded-lg transition-colors ${
+            portfolioDropzone.isDragActive ? 'bg-primary/5' : ''
+          } ${isProcessing ? 'opacity-50 cursor-wait' : ''}`}
+        >
+          <input {...portfolioDropzone.getInputProps()} />
+          <DropzoneContent
+            isProcessing={isProcessing}
+            uploadSuccess={uploadSuccess}
+            isDragActive={portfolioDropzone.isDragActive}
+            label="Carica Portfolio (fino a 4 CSV)"
+          />
+        </div>
       </CardContent>
     </Card>
   );

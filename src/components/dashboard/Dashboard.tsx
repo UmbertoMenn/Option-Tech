@@ -24,7 +24,6 @@ import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
-import { GpSnapshotMissingBanner } from '@/components/dashboard/GpSnapshotMissingBanner';
 import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
 import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
@@ -435,9 +434,8 @@ export function Dashboard() {
               </div>
               {!isHistoricalView && (
                 <div className="space-y-3">
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
-                  <GpSnapshotMissingBanner />
-                  <FileUploader />
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
+                <FileUploader />
                   <Button
                     variant="outline"
                     size="sm"

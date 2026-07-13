@@ -57,6 +57,28 @@ describe('parseFlussiCsvText — file cash', () => {
     expect(res.cashValue).toBeCloseTo(0.01, 2);
   });
 
+  it('applica le eccezioni per pattern (mid/last) anche ai saldi cash', () => {
+    // Aggiunge un conto '52805213452' al CSV di saldo: con mid.length=3,
+    // midStart=floor((11-3)/2)=4 → slice(4,7)='521'; ultime 3 cifre='452'.
+    const csvWithSilvia = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
+      "01/07/2026;'03211;'A9H00015278;EUR;+;0,01;IT17G03211010010A9H00015278",
+      "01/07/2026;'03211;'52225971282;EUR;+;81729,04;IT61N0321101600052225971282",
+      "01/07/2026;'03211;'52805213452;EUR;+;50000,00;IT00X0321101600052805213452",
+      "01/07/2026;'03211;'B0H00099999;EUR;+;12345,67;IT00X0321101600B0H00099999",
+    ].join('\r\n');
+    const res = parseFlussiCsvText(csvWithSilvia, {
+      excludedCashPatterns: [{ mid: '521', last: '452' }],
+    });
+    // Il conto 52805213452 deve essere escluso dalla liquidità portafoglio
+    expect(res.cashAccounts.some(a => a.accountId === '52805213452')).toBe(false);
+    // Gli altri conti ordinari/vincolati restano inclusi
+    expect(res.cashValue).toBeCloseTo(81729.04 + 0.01, 2);
+    // Il conto GP (B0) non è toccato dall'esclusione cash
+    expect(res.gpCashAccounts).toHaveLength(1);
+    expect(res.gpCashAccounts[0].value).toBeCloseTo(12345.67, 2);
+  });
+
   it('applica il segno negativo', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
@@ -129,6 +151,20 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(msft.ticker_code).toBe('010696');
     // Nessuna posizione GP finisce tra le posizioni di portafoglio
     expect(res.positions.some(p => p.description === 'MICROSOFT INC.')).toBe(false);
+  });
+
+  it('le esclusioni cash pattern non impattano le holdings titoli né le holdings GP', () => {
+    // Anche se il conto titoli '02225971281' non corrisponde al pattern 452,
+    // questo test documenta che excludedCashPatterns non ha effetto sui titoli.
+    // Il conto GP '08H00012345' è su un deposito separato e deve restare.
+    const res = parseFlussiCsvText(TITOLI_CSV, {
+      excludedCashPatterns: [{ mid: '521', last: '452' }],
+    });
+    // Tutti i titoli del portafoglio restano invariati
+    expect(res.positions).toHaveLength(7);
+    // Le holdings GP restano invariate
+    expect(res.gpHoldings).toHaveLength(1);
+    expect(res.gpHoldings[0].description).toBe('MICROSOFT INC.');
   });
 });
 
