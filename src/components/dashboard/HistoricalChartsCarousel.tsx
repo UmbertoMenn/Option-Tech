@@ -22,8 +22,18 @@ import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTo
 import { PerformanceEvolutionChart } from './charts/PerformanceEvolutionChart';
 import { YearlyReturnChart } from './charts/YearlyReturnChart';
 import { PortfolioEvolutionChart } from './charts/PortfolioEvolutionChart';
-import { TrendingUp, BarChart3, LineChart } from 'lucide-react';
+import { TrendingUp, BarChart3, LineChart, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatEUR } from '@/lib/formatters';
+
+export interface PatrimonyComponents {
+  liquidity: number;
+  stocks: number;
+  bonds: number;
+  gp: number;
+  derivatives: number;
+  total: number;
+}
 
 interface HistoricalChartsCarouselProps {
   historicalData: HistoricalDataEntry[];
@@ -32,6 +42,7 @@ interface HistoricalChartsCarouselProps {
   currentValue: number;
   currentDate: string | null;
   deposits: DepositEntry[];
+  patrimonyComponents?: PatrimonyComponents;
 }
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
@@ -55,6 +66,13 @@ const slides = [
   },
 ];
 
+const componentsSlide = {
+  id: 'components',
+  title: 'Componenti Patrimonio',
+  icon: Wallet,
+  description: 'Ripartizione del patrimonio per componente (Netting Totale)',
+};
+
 export function HistoricalChartsCarousel({
   historicalData,
   viewMode,
@@ -62,9 +80,14 @@ export function HistoricalChartsCarousel({
   currentValue,
   currentDate,
   deposits,
+  patrimonyComponents,
 }: HistoricalChartsCarouselProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
+
+  const showComponentsSlide = viewMode === 'netting_total' && !!patrimonyComponents;
+  const activeSlides = showComponentsSlide ? [...slides, componentsSlide] : slides;
+  const activeSlide = activeSlides[current] ?? activeSlides[0];
 
   const onSelect = useCallback(() => {
     if (!api) return;
@@ -79,6 +102,16 @@ export function HistoricalChartsCarousel({
       api.off('select', onSelect);
     };
   }, [api, onSelect]);
+
+  // Se la slide componenti scompare (cambio vista) mentre è selezionata, torna alla prima
+  useEffect(() => {
+    if (!api) return;
+    api.reInit();
+    if (api.selectedScrollSnap() >= activeSlides.length) {
+      api.scrollTo(0);
+      setCurrent(0);
+    }
+  }, [api, activeSlides.length]);
 
   const scrollTo = useCallback(
     (index: number) => {
@@ -110,10 +143,10 @@ export function HistoricalChartsCarousel({
         <div className="flex items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
               {(() => {
-                const IconComponent = slides[current].icon;
+                const IconComponent = activeSlide.icon;
                 return IconComponent ? <IconComponent className="w-5 h-5" /> : null;
               })()}
-              {slides[current].title}
+              {activeSlide.title}
             </CardTitle>
             <div className="flex items-center gap-1.5">
               <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
@@ -129,7 +162,7 @@ export function HistoricalChartsCarousel({
               <NettingViewInfoTooltip />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{slides[current].description}</p>
+          <p className="text-xs text-muted-foreground">{activeSlide.description}</p>
         </CardHeader>
         <CardContent className="pt-0">
           <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
@@ -155,11 +188,44 @@ export function HistoricalChartsCarousel({
                   />
                 </div>
               </CarouselItem>
+              {showComponentsSlide && patrimonyComponents && (
+                <CarouselItem>
+                  <div className="h-[250px] flex flex-col justify-center max-w-md mx-auto px-4">
+                    <div className="space-y-2">
+                      {[
+                        { label: 'Liquidità', value: patrimonyComponents.liquidity },
+                        { label: 'Azioni', value: patrimonyComponents.stocks },
+                        { label: 'Obbligazioni', value: patrimonyComponents.bonds },
+                        { label: 'GP (conto 08...)', value: patrimonyComponents.gp },
+                        { label: 'Derivati', value: patrimonyComponents.derivatives },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">{label}</span>
+                          <span
+                            className={cn(
+                              'font-mono font-medium tabular-nums',
+                              value < 0 && 'text-destructive'
+                            )}
+                          >
+                            {formatEUR(value)}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between text-sm border-t border-border pt-2 mt-2">
+                        <span className="font-semibold">Totale (Netting Totale)</span>
+                        <span className="font-mono font-semibold tabular-nums">
+                          {formatEUR(patrimonyComponents.total)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CarouselItem>
+              )}
             </CarouselContent>
             <div className="flex items-center justify-center gap-4 mt-4">
               <CarouselPrevious className="static translate-y-0" />
               <div className="flex gap-2">
-                {slides.map((_, index) => (
+                {activeSlides.map((_, index) => (
                   <button
                     key={index}
                     onClick={() => scrollTo(index)}
