@@ -12,6 +12,8 @@ import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
 import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields, ManualCallBuybackInput } from '@/hooks/useCallBuybacks';
 import { toast } from 'sonner';
+import { getOptionExpirationDateISO } from '@/lib/optionExpiry';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -137,25 +139,41 @@ function BuybackRow({
   const [buybackPrice, setBuybackPrice] = useState(String(b.buyback_price));
   const [quantity, setQuantity] = useState(String(b.quantity));
   const [strike, setStrike] = useState(String(b.strike));
-  const [expiry, setExpiry] = useState(b.expiry_date);
+  const initMonth = String(new Date(b.expiry_date + 'T00:00:00').getMonth() + 1);
+  const initYear = String(new Date(b.expiry_date + 'T00:00:00').getFullYear());
+  const [expMonth, setExpMonth] = useState(initMonth);
+  const [expYear, setExpYear] = useState(initYear);
+
+  const MONTHS = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+  const nowYear = new Date().getFullYear();
+  const YEARS = Array.from(new Set([nowYear, nowYear + 1, nowYear + 2, parseInt(initYear, 10)])).sort();
+
+  const parsePrice = (s: string): number => {
+    const t = s.trim();
+    if (!t) return NaN;
+    if (t.includes(',')) return parseFloat(t.replace(/\./g, '').replace(',', '.'));
+    return parseFloat(t);
+  };
 
   const beginEdit = () => {
     setBuybackPrice(String(b.buyback_price));
     setQuantity(String(b.quantity));
     setStrike(String(b.strike));
-    setExpiry(b.expiry_date);
+    setExpMonth(String(new Date(b.expiry_date + 'T00:00:00').getMonth() + 1));
+    setExpYear(String(new Date(b.expiry_date + 'T00:00:00').getFullYear()));
     setEditing(true);
   };
 
   const save = () => {
-    const bp = parseFloat(buybackPrice.replace(',', '.'));
+    const bp = parsePrice(buybackPrice);
     const qty = parseInt(quantity, 10);
-    const stk = parseFloat(strike.replace(',', '.'));
+    const stk = parsePrice(strike);
+    const newExpiry = getOptionExpirationDateISO(parseInt(expYear, 10), parseInt(expMonth, 10));
     const fields: CallBuybackEditableFields = {};
     if (Number.isFinite(bp) && bp !== b.buyback_price) fields.buyback_price = bp;
     if (Number.isFinite(qty) && qty > 0 && qty !== b.quantity) fields.quantity = qty;
     if (Number.isFinite(stk) && stk > 0 && stk !== b.strike) fields.strike = stk;
-    if (expiry && expiry !== b.expiry_date) fields.expiry_date = expiry;
+    if (newExpiry && newExpiry !== b.expiry_date) fields.expiry_date = newExpiry;
     if (Object.keys(fields).length > 0) onSaveFields(fields);
     setEditing(false);
   };
@@ -171,7 +189,7 @@ function BuybackRow({
           <Checkbox checked={included} disabled aria-label="Inclusione (bloccata in modifica)" />
         </td>
         <td className="py-1 pr-2">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             <span className="text-muted-foreground">{b.underlying} C</span>
             <Input
               value={strike}
@@ -180,13 +198,22 @@ function BuybackRow({
               inputMode="decimal"
               aria-label="Strike"
             />
-            <Input
-              type="date"
-              value={expiry}
-              onChange={e => setExpiry(e.target.value)}
-              className="h-6 w-32 text-xs px-1"
-              aria-label="Scadenza"
-            />
+            <Select value={expMonth} onValueChange={setExpMonth}>
+              <SelectTrigger className="h-6 w-16 text-xs px-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MONTHS.map((m, idx) => (
+                  <SelectItem key={idx} value={String(idx + 1)} className="text-xs">{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={expYear} onValueChange={setExpYear}>
+              <SelectTrigger className="h-6 w-20 text-xs px-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {YEARS.map(y => (
+                  <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </td>
         <td className="text-right py-1 px-2">
@@ -281,115 +308,158 @@ function BuybackRow({
   );
 }
 
+interface AvailableCallItem {
+  ticker: string;
+  availableContracts: number;
+}
+
+interface TickerMeta {
+  currency: string;
+  exchangeRate: number;
+}
+
 /**
- * Form inline per inserire manualmente una call da rivendere (riacquisto).
- * Il prezzo di mercato NON si inserisce qui: lo popola il cron opzioni
- * (chiave OCC underlying+strike+scadenza). Il cambio è prefillato dalle
- * posizioni della stessa valuta, editabile.
+ * Form inline per registrare una call da rivendere collegandola a un
+ * sottostante GIÀ presente tra le "call da rivendere" (BABA/CEG/…): si sceglie
+ * il ticker dall'elenco, la quantità è prefillata dai contratti disponibili,
+ * la scadenza si indica come mese/anno (viene calcolato il terzo venerdì reale).
+ * Valuta e cambio sono derivati automaticamente dal sottostante. Il prezzo di
+ * mercato lo aggiorna il cron opzioni (chiave sottostante+strike+scadenza).
  */
 function AddBuybackForm({
-  tickerOptions,
-  currencyRates,
+  items,
+  tickerMeta,
   onSubmit,
   onCancel,
 }: {
-  tickerOptions: string[];
-  currencyRates: Record<string, number>;
+  items: AvailableCallItem[];
+  tickerMeta: Record<string, TickerMeta>;
   onSubmit: (row: ManualCallBuybackInput) => void;
   onCancel: () => void;
 }) {
-  const today = new Date().toISOString().split('T')[0];
-  const [underlying, setUnderlying] = useState(tickerOptions[0] ?? '');
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const currentYear = now.getFullYear();
+
+  const [ticker, setTicker] = useState(items[0]?.ticker ?? '');
   const [strike, setStrike] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [quantity, setQuantity] = useState('1');
+  const [expMonth, setExpMonth] = useState(String(now.getMonth() + 1)); // 1-12
+  const [expYear, setExpYear] = useState(String(currentYear));
+  const [quantity, setQuantity] = useState(String(items[0]?.availableContracts ?? 1));
   const [buybackPrice, setBuybackPrice] = useState('');
-  const [currency, setCurrency] = useState('USD');
-  const [exchangeRate, setExchangeRate] = useState(String(currencyRates['USD'] ?? 1));
   const [buybackDate, setBuybackDate] = useState(today);
 
-  const onCurrencyChange = (c: string) => {
-    setCurrency(c);
-    if (currencyRates[c]) setExchangeRate(String(currencyRates[c]));
+  // Quando cambia il ticker, riallinea la quantità di default ai contratti disponibili.
+  const onTickerChange = (t: string) => {
+    setTicker(t);
+    const it = items.find(i => i.ticker === t);
+    if (it) setQuantity(String(it.availableContracts));
+  };
+
+  const meta = tickerMeta[ticker] ?? { currency: 'USD', exchangeRate: 1 };
+
+  const MONTHS = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+  const YEARS = [currentYear, currentYear + 1, currentYear + 2];
+
+  // Parse tollerante del prezzo in formato IT o US:
+  // "4,55" -> 4.55 (virgola = decimale, punto = migliaia) ; "4.55" -> 4.55.
+  const parsePrice = (s: string): number => {
+    const t = s.trim();
+    if (!t) return NaN;
+    if (t.includes(',')) return parseFloat(t.replace(/\./g, '').replace(',', '.'));
+    return parseFloat(t);
   };
 
   const submit = () => {
-    const stk = parseFloat(strike.replace(',', '.'));
+    if (!ticker) return toast.error('Seleziona un sottostante');
+    const stk = parsePrice(strike);
     const qty = parseInt(quantity, 10);
-    const bp = parseFloat(buybackPrice.replace(',', '.'));
-    const fx = parseFloat(exchangeRate.replace(',', '.'));
-    if (!underlying.trim()) return toast.error('Sottostante mancante');
+    const bp = parsePrice(buybackPrice);
     if (!Number.isFinite(stk) || stk <= 0) return toast.error('Strike non valido');
-    if (!expiry) return toast.error('Scadenza mancante');
     if (!Number.isFinite(qty) || qty <= 0) return toast.error('Quantità non valida');
     if (!Number.isFinite(bp) || bp < 0) return toast.error('Prezzo di riacquisto non valido');
+    const expiry_date = getOptionExpirationDateISO(parseInt(expYear, 10), parseInt(expMonth, 10));
     onSubmit({
-      underlying: underlying.trim().toUpperCase(),
+      underlying: ticker,
       strike: stk,
-      expiry_date: expiry,
+      expiry_date,
       quantity: qty,
       buyback_price: bp,
-      currency: currency.trim().toUpperCase() || 'USD',
-      exchange_rate: Number.isFinite(fx) && fx > 0 ? fx : 1,
+      currency: meta.currency,
+      exchange_rate: meta.exchangeRate,
       buyback_date: buybackDate,
     });
   };
 
   return (
-    <div className="rounded border border-green-500/30 bg-green-500/5 p-2 space-y-2">
-      <div className="text-xs font-semibold text-foreground">Nuova call da rivendere</div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+    <div className="rounded border border-green-500/30 bg-green-500/5 p-3 space-y-3">
+      <div className="text-xs font-semibold text-foreground">Registra una call da rivendere</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Sottostante
-          <Input
-            list="buyback-ticker-list"
-            value={underlying}
-            onChange={e => setUnderlying(e.target.value)}
-            className="h-7 text-xs px-1.5"
-            placeholder="Es. BABA"
-          />
-          <datalist id="buyback-ticker-list">
-            {tickerOptions.map(t => <option key={t} value={t} />)}
-          </datalist>
+          <Select value={ticker} onValueChange={onTickerChange}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Scegli…" /></SelectTrigger>
+            <SelectContent>
+              {items.map(i => (
+                <SelectItem key={i.ticker} value={i.ticker} className="text-xs">
+                  {i.ticker} (disp. {i.availableContracts})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Strike
-          <Input value={strike} onChange={e => setStrike(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" placeholder="140" />
+          <Input value={strike} onChange={e => setStrike(e.target.value)} className="h-8 text-xs" inputMode="decimal" />
         </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-          Scadenza
-          <Input type="date" value={expiry} onChange={e => setExpiry(e.target.value)} className="h-7 text-xs px-1.5" />
-        </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Quantità (contratti)
-          <Input value={quantity} onChange={e => setQuantity(e.target.value)} className="h-7 text-xs px-1.5" inputMode="numeric" />
+          <Input value={quantity} onChange={e => setQuantity(e.target.value)} className="h-8 text-xs" inputMode="numeric" />
         </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-          Prezzo riacquisto
-          <Input value={buybackPrice} onChange={e => setBuybackPrice(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" placeholder="4,55" />
+
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          Scadenza — mese
+          <Select value={expMonth} onValueChange={setExpMonth}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {MONTHS.map((m, idx) => (
+                <SelectItem key={idx} value={String(idx + 1)} className="text-xs">{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-          Valuta
-          <Input value={currency} onChange={e => onCurrencyChange(e.target.value.toUpperCase())} className="h-7 text-xs px-1.5" placeholder="USD" />
+
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          Scadenza — anno
+          <Select value={expYear} onValueChange={setExpYear}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {YEARS.map(y => (
+                <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-          Cambio (→EUR)
-          <Input value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" />
-        </label>
-        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-          Data riacquisto
-          <Input type="date" value={buybackDate} onChange={e => setBuybackDate(e.target.value)} className="h-7 text-xs px-1.5" />
+
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          Prezzo di riacquisto ({meta.currency})
+          <Input value={buybackPrice} onChange={e => setBuybackPrice(e.target.value)} className="h-8 text-xs" inputMode="decimal" />
         </label>
       </div>
-      <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>Annulla</Button>
-        <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={submit}>
-          <Check className="w-3.5 h-3.5 mr-1" /> Salva
-        </Button>
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">
+          Scadenza: 3° venerdì di {MONTHS[parseInt(expMonth, 10) - 1]} {expYear}. Cambio→EUR {meta.exchangeRate}. Il prezzo di mercato lo aggiorna il cron.
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>Annulla</Button>
+          <Button size="sm" className="h-8 text-xs bg-green-600 hover:bg-green-700" onClick={submit}>
+            <Check className="w-3.5 h-3.5 mr-1" /> Salva
+          </Button>
+        </div>
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        Il prezzo di mercato viene aggiornato automaticamente dal cron opzioni (chiave sottostante + strike + scadenza).
-      </p>
     </div>
   );
 }
@@ -416,17 +486,27 @@ function AvailableCallsSection({
   const { buybacks } = useCallBuybacks([portfolioId]);
   const { setIncluded, editFields, insertManual } = useCallBuybackMutations([portfolioId]);
 
-  // Cambio (→EUR) per valuta, ricavato dalle posizioni correnti: serve a
-  // prefillare il form di inserimento manuale in modo coerente col netting.
-  const currencyRates = useMemo(() => {
-    const map: Record<string, number> = {};
+  // Meta per sottostante (valuta + cambio→EUR) ricavata dalle posizioni:
+  // serve a derivare automaticamente valuta e cambio nel form, senza digitarli.
+  const tickerMeta = useMemo(() => {
+    const map: Record<string, { currency: string; exchangeRate: number }> = {};
+    const register = (rawKey: string | null | undefined, currency: string | null, rate: number | null) => {
+      if (!rawKey || !currency || !rate || rate <= 0) return;
+      const key = (getCanonicalKey(rawKey) || normalizeForMatching(rawKey)).toUpperCase();
+      if (key && !map[key]) map[key] = { currency: currency.toUpperCase(), exchangeRate: rate };
+    };
     for (const p of allPositions) {
-      if (p.currency && p.exchange_rate && p.exchange_rate > 0) {
-        map[p.currency.toUpperCase()] = p.exchange_rate;
-      }
+      register(p.underlying || p.description, p.currency, p.exchange_rate);
     }
-    return map;
-  }, [allPositions]);
+    // Risolve per ogni item il proprio meta (fallback USD/cambio più comune).
+    const fallbackRate = allPositions.find(p => (p.currency || '').toUpperCase() === 'USD' && p.exchange_rate && p.exchange_rate > 0)?.exchange_rate ?? 1;
+    const out: Record<string, { currency: string; exchangeRate: number }> = {};
+    for (const it of items) {
+      const k = (getCanonicalKey(it.ticker) || normalizeForMatching(it.ticker)).toUpperCase();
+      out[it.ticker] = map[k] ?? { currency: 'USD', exchangeRate: fallbackRate };
+    }
+    return out;
+  }, [allPositions, items]);
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
   const visibleBuybacks = useMemo(() => {
@@ -526,8 +606,8 @@ function AvailableCallsSection({
 
           {showAddForm && (
             <AddBuybackForm
-              tickerOptions={items.map(i => i.ticker)}
-              currencyRates={currencyRates}
+              items={items}
+              tickerMeta={tickerMeta}
               onSubmit={handleInsert}
               onCancel={() => setShowAddForm(false)}
             />
