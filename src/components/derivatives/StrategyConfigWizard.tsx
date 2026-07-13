@@ -417,6 +417,29 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
     }
   }
 
+  // Post-process: when multiple strategies reference the same stock object
+  // (e.g. two DRCC on GOOGL/Alphabet with 200 shares), assign distinct virtual
+  // slot IDs so each strategy owns a separate 100-share portion.
+  const stockStrategyMap = new Map<string, WizardStrategy[]>();
+  for (const strat of strategies) {
+    for (const p of strat.positions) {
+      if ((p.asset_type === 'stock' || p.asset_type === 'etf') && !/__slot_\d+$/.test(p.id)) {
+        if (!stockStrategyMap.has(p.id)) stockStrategyMap.set(p.id, []);
+        stockStrategyMap.get(p.id)!.push(strat);
+      }
+    }
+  }
+  for (const [stockId, usedBy] of stockStrategyMap) {
+    if (usedBy.length <= 1) continue; // single strategy — no splitting needed
+    usedBy.forEach((strat, slotIdx) => {
+      strat.positions = strat.positions.map(p =>
+        (p.asset_type === 'stock' || p.asset_type === 'etf') && p.id === stockId
+          ? { ...p, id: `${stockId}__slot_${slotIdx}`, quantity: 100 }
+          : p,
+      );
+    });
+  }
+
   return strategies;
 }
 
@@ -933,26 +956,23 @@ export function StrategyConfigWizard({
   const handleAutoClassify = () => {
     startTransition(() => {
       const auto = autoClassify(derivatives, allPositions, archivedKeys);
-      
-      // Remap original stock IDs to virtual slot IDs
-      const usedSlotIds = new Set<string>();
-      const remappedStrategies = auto.map(strat => ({
-        ...strat,
-        positions: strat.positions.map(p => {
-          if (p.asset_type !== 'stock') return p;
-          // Find matching virtual slot in allAvailable
-          const slot = effectivePositions.find(a =>
-            (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
-          );
-          if (slot && slot.id !== p.id) {
-            usedSlotIds.add(slot.id);
-            return { ...p, id: slot.id, quantity: slot.quantity };
+
+      // If autoClassify assigned virtual stock slots (two or more strategies sharing
+      // the same stock), register those base stock IDs as split so effectivePositions
+      // expands them for the wizard display.
+      const newSplitIds = new Set<string>();
+      for (const strat of auto) {
+        for (const p of strat.positions) {
+          if ((p.asset_type === 'stock' || p.asset_type === 'etf') && /__slot_\d+$/.test(p.id)) {
+            newSplitIds.add(p.id.replace(/__slot_\d+$/, ''));
           }
-          return p;
-        }),
-      }));
-      
-      setStrategies(remappedStrategies);
+        }
+      }
+      if (newSplitIds.size > 0) {
+        setSplitPositionIds(prev => new Set([...prev, ...newSplitIds]));
+      }
+
+      setStrategies(auto);
       setSelectedIdsByGroup(new Map());
     });
   };
@@ -967,27 +987,23 @@ export function StrategyConfigWizard({
       const groupDerivatives = group.positions.filter(p => p.asset_type === 'derivative');
       const autoGroupStrategies = autoClassify(groupDerivatives, allPositions, archivedKeys);
 
-      // Remap stock IDs to virtual slots for this group
-      const usedSlotIds = new Set<string>();
-      const remapped = autoGroupStrategies.map(strat => ({
-        ...strat,
-        positions: strat.positions.map(p => {
-          if (p.asset_type !== 'stock') return p;
-          const slot = effectivePositions.find(a =>
-            (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
-          );
-          if (slot && slot.id !== p.id) {
-            usedSlotIds.add(slot.id);
-            return { ...p, id: slot.id, quantity: slot.quantity };
+      // If autoClassify assigned virtual stock slots, register the base IDs as split
+      const newSplitIds = new Set<string>();
+      for (const strat of autoGroupStrategies) {
+        for (const p of strat.positions) {
+          if ((p.asset_type === 'stock' || p.asset_type === 'etf') && /__slot_\d+$/.test(p.id)) {
+            newSplitIds.add(p.id.replace(/__slot_\d+$/, ''));
           }
-          return p;
-        }),
-      }));
+        }
+      }
+      if (newSplitIds.size > 0) {
+        setSplitPositionIds(prev => new Set([...prev, ...newSplitIds]));
+      }
 
       // Replace current wizard strategies for this group with auto-classified ones
       setStrategies(prev => [
         ...prev.filter(s => !s.positions.some(p => groupPosIds.has(p.id))),
-        ...remapped,
+        ...autoGroupStrategies,
       ]);
       setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(group.key); return next; });
     });

@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { AlertTriangle, Check, X, Plus, Zap, Trash2, ChevronDown, Loader2, Scissors, Merge } from 'lucide-react';
+import { AlertTriangle, Check, X, Plus, Zap, Trash2, ChevronDown, Loader2, Scissors, Merge, Wand2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { ReconciliationItem, LegStatus } from '@/lib/strategyReconciliation';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
@@ -21,6 +21,7 @@ import {
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
+import { autoClassify } from '@/components/derivatives/StrategyConfigWizard';
 
 const STRATEGY_OPTIONS = [
   { value: 'covered_call', label: 'Covered Call' },
@@ -222,6 +223,7 @@ interface StrategyReconciliationDialogProps {
   currentPositions: Position[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
+  archivedKeys?: string[];
 }
 
 export function StrategyReconciliationDialog({
@@ -232,6 +234,7 @@ export function StrategyReconciliationDialog({
   currentPositions,
   onSave,
   isSaving,
+  archivedKeys = [],
 }: StrategyReconciliationDialogProps) {
   const [underlyingStates, setUnderlyingStates] = useState<Map<string, UnderlyingReconciliation>>(new Map());
   const [selectedByGroup, setSelectedByGroup] = useState<Map<string, Set<string>>>(new Map());
@@ -275,6 +278,37 @@ export function StrategyReconciliationDialog({
       const missingLegs: LegStatus[] = [];
       const assignedPositionIds = new Set<string>();
 
+      // Pre-compute: which stock base IDs are referenced via virtual __slot_N IDs?
+      // When saved slot IDs contain __slot_N but the actual portfolio stock is unsplit,
+      // we must expand it into virtual slots before restoring.
+      const virtualSlotBaseIds = new Set<string>();
+      for (const item of reconItems) {
+        const slotIds = (item.config.linked_stock_slot_ids as string[]) || [];
+        for (const sid of slotIds) {
+          if (/__slot_\d+$/.test(sid)) virtualSlotBaseIds.add(sid.replace(/__slot_\d+$/, ''));
+        }
+      }
+
+      // Build an expanded stock pool: stocks referenced by virtual slot IDs are
+      // pre-expanded into 100-share virtual slots so each saved slot can be restored
+      // to a distinct strategy.
+      const rawStockPool = stocksByKey.get(key) || [];
+      const expandedStockPool: Position[] = [];
+      for (const p of rawStockPool) {
+        if (virtualSlotBaseIds.has(p.id) && p.quantity >= 100) {
+          const slots = Math.floor(p.quantity / 100);
+          for (let i = 0; i < slots; i++) {
+            expandedStockPool.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+          }
+          const remainder = p.quantity % 100;
+          if (remainder > 0) {
+            expandedStockPool.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+          }
+        } else {
+          expandedStockPool.push(p);
+        }
+      }
+
       // Build strategies from existing configs (using present legs)
       const strategies: WizardStrategy[] = [];
       for (const item of reconItems) {
@@ -292,19 +326,18 @@ export function StrategyReconciliationDialog({
           // Restore stock slots from linked_stock_slot_ids (preferred) or linked_stock_id (legacy)
           const slotIds = (item.config.linked_stock_slot_ids as string[]) || [];
           const linkedStockId = item.config.linked_stock_id;
-          const stockPool = stocksByKey.get(key) || [];
-          
+
           if (slotIds.length > 0) {
-            // Restore all saved slots
+            // Restore all saved slots using the expanded pool
             for (const slotId of slotIds) {
-              const matchingSlot = stockPool.find(s => s.id === slotId && !assignedPositionIds.has(s.id));
+              const matchingSlot = expandedStockPool.find(s => s.id === slotId && !assignedPositionIds.has(s.id));
               if (matchingSlot) {
                 presentPositions.push(matchingSlot);
                 assignedPositionIds.add(matchingSlot.id);
               } else {
-                // Fallback: try matching by base ID prefix
+                // Fallback: try matching by base ID prefix (legacy non-split stocks)
                 const baseId = slotId.replace(/__slot_\d+$/, '');
-                const fallbackSlot = stockPool.find(s => s.id.startsWith(baseId) && !assignedPositionIds.has(s.id));
+                const fallbackSlot = expandedStockPool.find(s => s.id.startsWith(baseId) && !assignedPositionIds.has(s.id));
                 if (fallbackSlot) {
                   presentPositions.push(fallbackSlot);
                   assignedPositionIds.add(fallbackSlot.id);
@@ -313,7 +346,7 @@ export function StrategyReconciliationDialog({
             }
           } else if (linkedStockId) {
             // Legacy: single linked_stock_id
-            const matchingSlot = stockPool.find(s => s.id.startsWith(linkedStockId) && !assignedPositionIds.has(s.id));
+            const matchingSlot = expandedStockPool.find(s => s.id.startsWith(linkedStockId) && !assignedPositionIds.has(s.id));
             if (matchingSlot) {
               presentPositions.push(matchingSlot);
               assignedPositionIds.add(matchingSlot.id);
@@ -332,10 +365,9 @@ export function StrategyReconciliationDialog({
         }
       }
 
-      // Available positions: all derivatives + stocks for this underlying NOT assigned
+      // Available positions: all derivatives + expanded stock pool NOT yet assigned
       const allDerivs = derivsByKey.get(key) || [];
-      const allStocks = stocksByKey.get(key) || [];
-      const allPoolPositions = [...allDerivs, ...allStocks];
+      const allPoolPositions = [...allDerivs, ...expandedStockPool];
       const availablePositions = allPoolPositions.filter(p => !assignedPositionIds.has(p.id));
 
       states.set(key, {
@@ -347,8 +379,27 @@ export function StrategyReconciliationDialog({
       });
     }
 
+    // Collect base stock IDs that were expanded into virtual slots; register them as
+    // split so the dialog's split/rejoin controls work correctly.
+    const allVirtualBaseIds = new Set<string>();
+    for (const state of states.values()) {
+      for (const strat of state.strategies) {
+        for (const p of strat.positions) {
+          if ((p.asset_type === 'stock' || p.asset_type === 'etf') && /__slot_\d+$/.test(p.id)) {
+            allVirtualBaseIds.add(p.id.replace(/__slot_\d+$/, ''));
+          }
+        }
+      }
+      for (const p of state.availablePositions) {
+        if ((p.asset_type === 'stock' || p.asset_type === 'etf') && /__slot_\d+$/.test(p.id)) {
+          allVirtualBaseIds.add(p.id.replace(/__slot_\d+$/, ''));
+        }
+      }
+    }
+
     setUnderlyingStates(states);
     setSelectedByGroup(new Map());
+    if (allVirtualBaseIds.size > 0) setSplitPositionIds(prev => new Set([...prev, ...allVirtualBaseIds]));
     setInitialized(true);
   }, [items, currentPositions]);
 
@@ -556,6 +607,102 @@ export function StrategyReconciliationDialog({
     });
   };
 
+  /** Applies the shared auto-classify pipeline to a specific underlying in the dialog.
+   *  The user can review the result before saving. */
+  const handleAutoClassifyForUnderlying = useCallback((groupKey: string) => {
+    const state = underlyingStates.get(groupKey);
+    if (!state) return;
+
+    // Gather all derivative positions for this underlying (using original/base IDs)
+    const derivativesForKey: Position[] = [];
+    const seenBaseIds = new Set<string>();
+    const collectDeriv = (p: Position) => {
+      if (p.asset_type !== 'derivative') return;
+      const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+      if (seenBaseIds.has(baseId)) return;
+      seenBaseIds.add(baseId);
+      const orig = currentPositions.find(cp => cp.id === baseId) ?? currentPositions.find(cp => cp.id === p.id);
+      if (orig) derivativesForKey.push(orig);
+      else derivativesForKey.push({ ...p, id: baseId });
+    };
+    for (const strat of state.strategies) strat.positions.forEach(collectDeriv);
+    state.availablePositions.forEach(collectDeriv);
+
+    const autoStrategies = autoClassify(derivativesForKey, currentPositions, archivedKeys);
+
+    // Collect base stock IDs that were virtually split by autoClassify
+    const newSplitIds = new Set<string>();
+    for (const strat of autoStrategies) {
+      for (const p of strat.positions) {
+        if ((p.asset_type === 'stock' || p.asset_type === 'etf') && /__slot_\d+$/.test(p.id)) {
+          newSplitIds.add(p.id.replace(/__slot_\d+$/, ''));
+        }
+      }
+    }
+
+    const assignedIds = new Set(autoStrategies.flatMap(s => s.positions.map(p => p.id)));
+
+    // Rebuild available derivatives (those not classified)
+    const newAvailDerivatives = derivativesForKey.filter(p => !assignedIds.has(p.id));
+
+    // Rebuild available stocks
+    const stocksSeen = new Set<string>();
+    const allStocksRaw: Position[] = [];
+    for (const p of [...state.strategies.flatMap(s => s.positions), ...state.availablePositions]) {
+      if (p.asset_type !== 'stock' && p.asset_type !== 'etf') continue;
+      const baseId = p.id.replace(/__slot_\d+$/, '');
+      if (stocksSeen.has(baseId)) continue;
+      stocksSeen.add(baseId);
+      const orig = currentPositions.find(cp => cp.id === baseId) ?? { ...p, id: baseId };
+      allStocksRaw.push(orig);
+    }
+    const newAvailStocks: Position[] = [];
+    for (const stock of allStocksRaw) {
+      if (newSplitIds.has(stock.id) && stock.quantity >= 100) {
+        const slots = Math.floor(stock.quantity / 100);
+        for (let i = 0; i < slots; i++) {
+          const slotId = `${stock.id}__slot_${i}`;
+          if (!assignedIds.has(slotId)) newAvailStocks.push({ ...stock, id: slotId, quantity: 100 });
+        }
+        const remainder = stock.quantity % 100;
+        if (remainder > 0) {
+          const slotId = `${stock.id}__slot_${slots}`;
+          if (!assignedIds.has(slotId)) newAvailStocks.push({ ...stock, id: slotId, quantity: remainder });
+        }
+      } else if (!assignedIds.has(stock.id)) {
+        newAvailStocks.push(stock);
+      }
+    }
+
+    // Map autoClassify result (no linkedStockId) to the local WizardStrategy type
+    const mappedStrategies: WizardStrategy[] = autoStrategies.map(s => ({
+      ...s,
+      id: genId(),
+      linkedStockId: s.positions
+        .find(p => p.asset_type === 'stock' || p.asset_type === 'etf')
+        ?.id.replace(/__slot_\d+$/, '') ?? null,
+    }));
+
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      next.set(groupKey, {
+        ...state,
+        strategies: mappedStrategies,
+        availablePositions: [...newAvailDerivatives, ...newAvailStocks],
+      });
+      return next;
+    });
+    if (newSplitIds.size > 0) setSplitPositionIds(prev => new Set([...prev, ...newSplitIds]));
+    setSelectedByGroup(prev => { const next = new Map(prev); next.delete(groupKey); return next; });
+  }, [underlyingStates, currentPositions, archivedKeys]);
+
+  /** Auto-classifies all underlyings currently shown in the dialog. */
+  const handleAutoClassifyAll = useCallback(() => {
+    for (const key of underlyingStates.keys()) {
+      handleAutoClassifyForUnderlying(key);
+    }
+  }, [underlyingStates, handleAutoClassifyForUnderlying]);
+
   const handleSave = async () => {
     const configs: UpsertConfigParams[] = [];
     const affectedUnderlyings = new Set<string>();
@@ -623,6 +770,12 @@ export function StrategyReconciliationDialog({
             Sono state rilevate differenze tra le configurazioni salvate e le posizioni attuali.
             Riconfigura le strategie per {entries.length} sottostant{entries.length === 1 ? 'e' : 'i'}.
           </DialogDescription>
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={handleAutoClassifyAll}>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Auto-classifica
+            </Button>
+          </div>
         </DialogHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto pr-2">
@@ -732,6 +885,19 @@ export function StrategyReconciliationDialog({
                             </div>
                           </div>
                         )}
+
+                        {/* Per-underlying Auto-classify button */}
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[11px] px-2"
+                            onClick={() => handleAutoClassifyForUnderlying(key)}
+                          >
+                            <Wand2 className="w-3 h-3 mr-1" />
+                            Auto-classifica
+                          </Button>
+                        </div>
 
                         {/* Available positions pool */}
                         {available.length > 0 && (
