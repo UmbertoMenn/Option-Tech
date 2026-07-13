@@ -164,6 +164,22 @@ export function Dashboard() {
   const nettingIntrinsicA = netting.nettingIntrinsicA + (includeCallBuybacks ? callBuybacksValueEUR : 0);
   const nettingIntrinsicB = netting.nettingIntrinsicB + (includeCallBuybacks ? callBuybacksValueEUR : 0);
 
+  // Componenti del patrimonio (vista Netting Totale): liquidità, azioni, obbligazioni,
+  // GP (conto 08...) e derivati (contributo MTM, tipicamente negativo).
+  const patrimonyComponents = useMemo(() => {
+    if (!summary) return undefined;
+    const assetValue = (type: AssetType) =>
+      summary.byAssetType.find(e => e.type === type)?.value ?? 0;
+    return {
+      liquidity: summary.cashValue - gpSummary.cashValue,
+      stocks: assetValue('stock') + assetValue('etf') + assetValue('commodity') - gpSummary.stockValue,
+      bonds: assetValue('bond') - gpSummary.bondValue,
+      gp: gpSummary.totalValue,
+      derivatives: netting.nettingTotal - summary.totalValue,
+      total: netting.nettingTotal,
+    };
+  }, [summary, gpSummary, netting.nettingTotal]);
+
   // DEBUG diagnostico: confronto market value vs Netting Intrinseco (A) vs Netting Intrinseco (B).
   // Attivazione: in console -> localStorage.setItem('nettingDebug','1'); poi seleziona il portfolio e ricarica.
   // Disattivazione: localStorage.removeItem('nettingDebug').
@@ -474,6 +490,7 @@ export function Dashboard() {
             }
             currentDate={portfolio?.snapshot_date ?? null}
             deposits={allDepositsForCharts}
+            patrimonyComponents={patrimonyComponents}
           />
         </div>
 
