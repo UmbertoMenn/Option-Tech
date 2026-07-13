@@ -3,6 +3,7 @@ import {
   getEffectiveUploadUserId,
   getPortfolioParseOptions,
   shouldRefreshGpSnapshot,
+  shouldRefreshPositionsSnapshot,
 } from '@/lib/portfolioUpload';
 
 describe('portfolio upload GP refresh', () => {
@@ -27,6 +28,14 @@ describe('portfolio upload user options', () => {
   it('usa l’utente autenticato in modalità diretta e quello visualizzato in modalità admin', () => {
     expect(getEffectiveUploadUserId(false, undefined, 'silvia-id')).toBe('silvia-id');
     expect(getEffectiveUploadUserId(true, 'silvia-id', 'admin-id')).toBe('silvia-id');
+  });
+
+  describe('portfolio positions refresh', () => {
+    it('sostituisce le posizioni quando la sorgente ordinaria resta vuota dopo i filtri', () => {
+      expect(shouldRefreshPositionsSnapshot([{
+        positionsSnapshotPresent: true,
+      }])).toBe(true);
+    });
   });
 
   it('applica le esclusioni BION soltanto allo username silvias', () => {

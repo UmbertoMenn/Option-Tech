@@ -201,14 +201,18 @@ export function usePortfolio() {
         .from('positions').delete().eq('portfolio_id', portfolioId);
       if (deleteError) throw deleteError;
       
-      const { data: insertedPositions, error } = await supabase
-        .from('positions')
-        .insert(positions.map(p => ({
-          ...p, portfolio_id: portfolioId,
-          snapshot_price: p.current_price, snapshot_market_value: p.market_value,
-        })))
-        .select();
-      if (error) throw error;
+      let insertedPositions: Position[] = [];
+      if (positions.length > 0) {
+        const { data, error } = await supabase
+          .from('positions')
+          .insert(positions.map(p => ({
+            ...p, portfolio_id: portfolioId,
+            snapshot_price: p.current_price, snapshot_market_value: p.market_value,
+          })))
+          .select();
+        if (error) throw error;
+        insertedPositions = (data || []) as unknown as Position[];
+      }
       
       // ========= STEP 2: Remap overrides =========
       if (existingOverrides && existingOverrides.length > 0 && insertedPositions) {

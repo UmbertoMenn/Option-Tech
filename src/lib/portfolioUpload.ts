@@ -5,6 +5,8 @@ type GpSnapshotSource = Pick<
   'gpSnapshotPresent' | 'gpHoldings' | 'gpCashAccounts'
 >;
 
+type PositionsSnapshotSource = Pick<ParsedPortfolioFile, 'positionsSnapshotPresent'>;
+
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
 };
@@ -55,4 +57,8 @@ export function shouldRefreshGpSnapshot(parsedFiles: GpSnapshotSource[]): boolea
     || parsed.gpHoldings.length > 0
     || parsed.gpCashAccounts.length > 0
   );
+}
+
+export function shouldRefreshPositionsSnapshot(parsedFiles: PositionsSnapshotSource[]): boolean {
+  return parsedFiles.some(parsed => parsed.positionsSnapshotPresent);
 }

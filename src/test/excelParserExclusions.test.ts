@@ -30,5 +30,6 @@ describe('parsePortfolioData exclusions', () => {
     });
 
     expect(result.positions.map(position => position.description)).toEqual(['APPLE INC']);
+    expect(result.positionsSnapshotPresent).toBe(true);
   });
 });

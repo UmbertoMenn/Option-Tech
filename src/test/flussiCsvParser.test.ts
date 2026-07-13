@@ -168,6 +168,21 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(res.positions).toHaveLength(0);
   });
 
+  it('segnala la sorgente posizioni ordinarie anche quando BION è l’unica riga ed è esclusa', () => {
+    const csv = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
+      "01/07/2026;'03211;'02225971281;'010605;BION ON SPA;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+    ].join('\r\n');
+
+    const res = parseFlussiCsvText(csv, {
+      excludedPositionIsins: ['US09075V1026'],
+    });
+
+    expect(res.positionsSnapshotPresent).toBe(true);
+    expect(res.gpSnapshotPresent).toBe(false);
+    expect(res.positions).toHaveLength(0);
+  });
+
   it('converte i controvalori in EUR con il cambio', () => {
     const res = parseFlussiCsvText(TITOLI_CSV);
     const aapl = res.positions.find(p => p.description === 'APPLE INC')!;

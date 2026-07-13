@@ -135,6 +135,8 @@ export interface FlussiParseResult {
   gpCashAccounts: FlussiCashAccount[];
   /** Il file titoli contiene almeno una riga valida di un deposito GP "08...". */
   gpSnapshotPresent: boolean;
+  /** Il file titoli contiene almeno una riga valida di una posizione ordinaria. */
+  positionsSnapshotPresent: boolean;
   snapshotDate: string | null;
   /** Movimenti di capitale (bonifici/giroconti) individuati nel file Movimenti Cash */
   cashMovements: FlussiCashMovement[];
@@ -244,6 +246,7 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     gpHoldings: [],
     gpCashAccounts: [],
     gpSnapshotPresent: false,
+    positionsSnapshotPresent: false,
     snapshotDate: null,
     cashMovements: [],
     titoliOptionTrades: [],
@@ -326,8 +329,12 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult, options?: Fl
   const rateo = parseExcelNumber(cells[12]);
 
   const isGP = accountId.toUpperCase().startsWith('08');
-  if (isGP && (codiceTitolo || description || isinField)) {
-    result.gpSnapshotPresent = true;
+  if (codiceTitolo || description || isinField) {
+    if (isGP) {
+      result.gpSnapshotPresent = true;
+    } else {
+      result.positionsSnapshotPresent = true;
+    }
   }
 
   if (isExcludedPosition(description, isinField, options)) return;

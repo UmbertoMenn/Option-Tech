@@ -20,6 +20,7 @@ import {
   getEffectiveUploadUserId,
   getPortfolioParseOptions,
   shouldRefreshGpSnapshot,
+  shouldRefreshPositionsSnapshot,
 } from '@/lib/portfolioUpload';
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
@@ -283,8 +284,10 @@ export function FileUploader() {
       }
       const gpCashFromCsv = Array.from(seenGpCash.values()).reduce((s, v) => s + v, 0);
       const hasGpFromCsv = shouldRefreshGpSnapshot(parsed);
+      const hasGpTitoliSource = parsed.some(p => p.gpSnapshotPresent);
+      const hasPositionsSource = shouldRefreshPositionsSnapshot(parsed);
 
-      if (positions.length === 0 && !hasGpFromCsv) {
+      if (positions.length === 0 && !hasGpTitoliSource && !hasPositionsSource) {
         toast.error('Nessuna posizione trovata');
         return;
       }
@@ -372,7 +375,9 @@ export function FileUploader() {
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       }
 
-      await updatePositionsAsync({ positions, targetPortfolioId });
+      if (positions.length > 0 || hasPositionsSource) {
+        await updatePositionsAsync({ positions, targetPortfolioId });
+      }
       setUploadSuccess(true);
 
       if (snapshotDate) {
