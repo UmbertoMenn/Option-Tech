@@ -136,15 +136,16 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(byType('derivative')).toHaveLength(3);
   });
 
-  it('esclude BION ON dalle posizioni e dalle holdings GP quando configurato', () => {
+  it('esclude BION ON e BION ON SPA dalle posizioni e dalle holdings GP quando configurato', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
       "01/07/2026;'03211;'02225971281;'010605;BION ON;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
       "01/07/2026;'03211;'08H00012345;'010605; BION   ON ;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'02225971281;'010605;BION ON SPA;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
       "01/07/2026;'03211;'02225971281;'010696;APPLE INC;US0378331005;USD;0,0;10,0;2000,0;1,0;200,0;0,0;",
     ].join('\r\n');
     const res = parseFlussiCsvText(csv, {
-      excludedPositionDescriptions: ['BION ON'],
+      excludedPositionDescriptions: ['BION ON', 'BION ON SPA'],
     });
 
     expect(res.positions.map(position => position.description)).toEqual(['APPLE INC']);

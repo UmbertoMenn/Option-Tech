@@ -33,7 +33,7 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> =
 const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
   silvias: {
     excludedCashPatterns: [{ last: '452' }],
-    excludedPositionDescriptions: ['BION ON'],
+    excludedPositionDescriptions: ['BION ON', 'BION ON SPA'],
     includeGpCashInCash: true,
   },
   maurog: {
