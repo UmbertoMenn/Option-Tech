@@ -87,7 +87,7 @@ import {
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
-import { StrategyConfigWizard } from '@/components/derivatives/StrategyConfigWizard';
+import { StrategyConfigWizard, autoClassify, buildConfigsFromStrategies } from '@/components/derivatives/StrategyConfigWizard';
 import { useArchivedUnderlyings, useArchiveUnderlying, useUnarchiveUnderlying } from '@/hooks/useArchivedUnderlyings';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
@@ -677,6 +677,26 @@ export function Derivatives() {
       });
   }, [reconciliationItems, isLoading, isConfigsLoading, isHistoricalView, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, handleSaveConfigs]);
 
+  // Auto-classificazione iniziale (Bug 1): quando non esistono configurazioni salvate,
+  // classifica automaticamente i derivati senza richiedere il wizard manuale.
+  const initialAutoClassifyDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialAutoClassifyDoneRef.current) return;
+    if (hasConfigurations) return; // già configurato
+    if (isLoading || isConfigsLoading) return; // ancora in caricamento
+    if (isHistoricalView) return; // sola lettura
+    if (derivatives.length === 0 || positions.length === 0) return;
+
+    initialAutoClassifyDoneRef.current = true;
+
+    const archivedKeysList = archivedItems.map(a => a.key);
+    const strategies = autoClassify(derivatives, positions, archivedKeysList);
+    if (strategies.length === 0) return;
+
+    const configs = buildConfigsFromStrategies(strategies).map(c => ({ ...c, config_locked: false }));
+    handleSaveConfigs(configs);
+  }, [hasConfigurations, isLoading, isConfigsLoading, isHistoricalView, derivatives, positions, archivedItems, handleSaveConfigs]);
+
   if (isLoading) {
     return <DerivativesSkeleton />;
   }
@@ -759,6 +779,7 @@ export function Derivatives() {
                   unarchiveMutation.mutate({ portfolioId: portfolio.id, underlyingKey: key });
                 }
               }}
+              onCancelOverride={cancelOverride}
             />
           </ErrorBoundary>
         )}
@@ -804,16 +825,6 @@ export function Derivatives() {
             </Button>
           )}
         </div>
-        {strategyConfigs.some(config => config.config_locked) && (
-          <div className="flex flex-wrap gap-2">
-            {strategyConfigs.filter(config => config.config_locked).map(config => (
-              <Button key={config.id} variant="outline" size="sm" onClick={() => cancelOverride(config.id)}>
-                Annulla override {config.underlying}
-              </Button>
-            ))}
-          </div>
-        )}
-
         {/* Empty state: no configurations saved yet */}
         {!hasConfigurations && derivatives.length > 0 && (
           <Card className="p-8 text-center border-dashed">
