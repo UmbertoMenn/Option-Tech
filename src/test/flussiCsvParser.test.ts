@@ -79,6 +79,24 @@ describe('parseFlussiCsvText — file cash', () => {
     expect(res.gpCashAccounts[0].value).toBeCloseTo(12345.67, 2);
   });
 
+  it('applica le eccezioni per solo suffisso (last, senza mid): esclude SOLO il conto che finisce per 452', () => {
+    const csvWithSilvia = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
+      "01/07/2026;'03211;'A9H00015278;EUR;+;0,01;IT17G03211010010A9H00015278",
+      "01/07/2026;'03211;'52225971282;EUR;+;81729,04;IT61N0321101600052225971282",
+      "01/07/2026;'03211;'52805213452;EUR;+;50000,00;IT00X0321101600052805213452",
+      "01/07/2026;'03211;'B0H00099999;EUR;+;12345,67;IT00X0321101600B0H00099999",
+    ].join('\r\n');
+    const res = parseFlussiCsvText(csvWithSilvia, {
+      excludedCashPatterns: [{ last: '452' }],
+    });
+    // Il conto che finisce per 452 è escluso dalla liquidità del portafoglio
+    expect(res.cashAccounts.some(a => a.accountId === '52805213452')).toBe(false);
+    // Tutti gli altri conti restano inclusi
+    expect(res.cashValue).toBeCloseTo(81729.04 + 0.01, 2);
+    expect(res.gpCashAccounts).toHaveLength(1);
+  });
+
   it('applica il segno negativo', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;DIVISA;SEGNO;SALDO EURO;IBAN;',
@@ -336,6 +354,15 @@ describe('parseFlussiCsvText — file Movimenti Cash', () => {
       excludedCashPatterns: [{ mid: '521', last: '452' }],
     });
     expect(res.cashMovements.every(m => m.accountId !== '52805213452')).toBe(true);
+  });
+
+  it('applica le eccezioni per solo suffisso (last) anche ai movimenti', () => {
+    const res = parseFlussiCsvText(MOV_CASH_CSV, {
+      excludedCashPatterns: [{ last: '452' }],
+    });
+    expect(res.cashMovements.every(m => m.accountId !== '52805213452')).toBe(true);
+    // Il conto non escluso resta
+    expect(res.cashMovements.some(m => m.accountId === '52225971282')).toBe(true);
   });
 
   it('nessun falso positivo su un estratto conto reale privo di bonifici/giroconti', () => {

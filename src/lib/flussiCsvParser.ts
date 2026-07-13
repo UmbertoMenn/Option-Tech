@@ -149,7 +149,12 @@ export interface FlussiParseOptions {
    * le eccezioni cliente restano valide su entrambi i flussi.
    */
   excludedCashAccounts?: string[];
-  excludedCashPatterns?: { mid: string; last: string }[];
+  /**
+   * Pattern sul NUMERO CONTO: `last` è il suffisso richiesto (es. '452' →
+   * "il conto che finisce per 452"); `mid` è OPZIONALE e, se presente, deve
+   * comparire anche al centro del numero conto.
+   */
+  excludedCashPatterns?: { mid?: string; last: string }[];
 }
 
 /** Rimuove l'apostrofo iniziale usato come marcatore testuale. */
@@ -191,9 +196,11 @@ const OPTION_DESCRIPTOR_RE = /^\[([A-Z0-9.\-]+)\]\[(\d{2})\/(\d{2})\]\[([CP])\]\
 function isExcludedAccount(accountId: string, options?: FlussiParseOptions): boolean {
   const byList = options?.excludedCashAccounts?.some(acc => accountId.includes(acc));
   const byPattern = options?.excludedCashPatterns?.some(p => {
+    if (!accountId.endsWith(p.last)) return false;
+    if (!p.mid) return true; // solo suffisso (es. "il conto che finisce per 452")
     const midStart = Math.floor((accountId.length - p.mid.length) / 2);
     const mid = accountId.slice(midStart, midStart + p.mid.length);
-    return mid === p.mid && accountId.endsWith(p.last);
+    return mid === p.mid;
   });
   return !!byList || !!byPattern;
 }

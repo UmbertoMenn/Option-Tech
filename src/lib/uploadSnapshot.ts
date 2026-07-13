@@ -49,9 +49,9 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .reduce((sum, p) => sum + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
     
     // Fetch GP total value — but include it in the snapshot ONLY if the GP
-    // has not been updated AFTER the portfolio snapshot date. Otherwise the
-    // GP belongs to a different (later) point in time and would corrupt the
-    // historical value of the portfolio for snapshotDate.
+    // is aligned with the portfolio snapshot date. Otherwise the GP belongs
+    // to a different (later) point in time and would corrupt the historical
+    // value of the portfolio for snapshotDate.
     const { data: portfolioData } = await supabase
       .from('portfolios')
       .select('gp_total_value')
@@ -60,8 +60,21 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
 
     const { data: gpRows } = await supabase
       .from('gp_holdings')
-      .select('updated_at, created_at')
+      .select('price_date, updated_at, created_at')
       .eq('portfolio_id', portfolioId);
+
+    // Allineamento GP ↔ snapshot: la fonte di verità è price_date (la DATA
+    // dei dati GP, scritta dal flusso CSV), NON i timestamp di scrittura.
+    // I timestamp updated_at/created_at vengono riscritti ad ogni upload
+    // (delete+insert) e ad ogni ricalcolo risultano "odierni", quindi sempre
+    // successivi a una snapshot date tipicamente datata al giorno precedente:
+    // usarli faceva sparire la GP dallo snapshot al primo ricalcolo
+    // (es. dopo una modifica alle configurazioni strategie).
+    const gpPriceDates = (gpRows || [])
+      .map((r: any) => r.price_date as string | null)
+      .filter((d): d is string => !!d)
+      .sort();
+    const maxGpPriceDate = gpPriceDates[gpPriceDates.length - 1];
 
     const latestGpTs = (gpRows || []).reduce<number>((max, r: any) => {
       const ts = new Date(r.updated_at || r.created_at || 0).getTime();
@@ -70,7 +83,10 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
     // End-of-day in UTC for the snapshot date
     const snapshotDayEnd = new Date(`${snapshotDate}T23:59:59Z`).getTime();
     const gpAlignedWithSnapshot = gpRefreshedInThisUpload === true
-      || (latestGpTs > 0 && latestGpTs <= snapshotDayEnd);
+      // GP datata alla snapshot date (o precedente): dati non "dal futuro"
+      || (!!maxGpPriceDate && maxGpPriceDate <= snapshotDate)
+      // Fallback per righe GP senza price_date (dati storici pre-CSV)
+      || (gpPriceDates.length === 0 && latestGpTs > 0 && latestGpTs <= snapshotDayEnd);
 
     const gpTotalValue = gpAlignedWithSnapshot ? (portfolioData?.gp_total_value || 0) : 0;
 
@@ -113,10 +129,12 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       ),
     );
 
-    // Prezzi già congelati per questa data (se lo snapshot esiste già)
+    // Prezzi già congelati per questa data (se lo snapshot esiste già) +
+    // deposits/average_balance esistenti da preservare (prima venivano
+    // azzerati ad ogni ricalcolo dello snapshot).
     const { data: existingSnap } = await supabase
       .from('historical_data')
-      .select('snapshot_underlying_prices')
+      .select('snapshot_underlying_prices, deposits, average_balance')
       .eq('portfolio_id', portfolioId)
       .eq('snapshot_date', snapshotDate)
       .maybeSingle();
@@ -201,8 +219,8 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         equity_exposure_pct: equityExposurePct,
         usd_exposure_pct: usdExposurePct,
         snapshot_underlying_prices: frozen as unknown as Record<string, number>,
-        deposits: 0,
-        average_balance: 0,
+        deposits: Number(existingSnap?.deposits ?? 0),
+        average_balance: Number(existingSnap?.average_balance ?? 0),
       }, { onConflict: 'portfolio_id,snapshot_date' });
 
     // Congela anche lo snapshot COMPLETO (posizioni + configs + overrides + GP)

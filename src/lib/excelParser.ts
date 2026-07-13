@@ -93,7 +93,7 @@ export interface ParsedPortfolioFile {
   gpCashAccounts: { accountId: string; value: number }[];
 }
 
-export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): Promise<ParsedPortfolioFile> {
+export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid?: string; last: string }[] }): Promise<ParsedPortfolioFile> {
   // Nuovi flussi CSV (FlussoSaldiContiCash / FlussoSaldiContiTitoli)
   if (/\.csv$/i.test(file.name)) {
     const { parseFlussiCsvText } = await import('./flussiCsvParser');
@@ -223,7 +223,7 @@ export function extractSnapshotDate(rows: any[][]): string | null {
   return null;
 }
 
-export function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
+export function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid?: string; last: string }[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
   cashAccounts: { accountId: string; value: number }[];
@@ -288,9 +288,11 @@ export function parsePortfolioData(rows: any[][], options?: { excludedCashAccoun
       const accountId = String(row[0] || '').trim();
       const isExcludedByList = options?.excludedCashAccounts?.some(acc => accountId.includes(acc));
       const isExcludedByPattern = options?.excludedCashPatterns?.some(p => {
+        if (!accountId.endsWith(p.last)) return false;
+        if (!p.mid) return true; // solo suffisso (es. "il conto che finisce per 452")
         const midStart = Math.floor((accountId.length - p.mid.length) / 2);
         const mid = accountId.slice(midStart, midStart + p.mid.length);
-        return mid === p.mid && accountId.endsWith(p.last);
+        return mid === p.mid;
       });
       if (isExcludedByList || isExcludedByPattern) {
         console.log(`[ExcelParser] Excluding cash account`);

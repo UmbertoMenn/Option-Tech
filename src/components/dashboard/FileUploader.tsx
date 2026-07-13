@@ -17,9 +17,42 @@ import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 
-const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
+/**
+ * Eccezioni conti liquidità per cliente.
+ * - Per UUID utente: regole legacy già in produzione.
+ * - Per username (profiles.username): regole nuove — per `silvias` va escluso
+ *   SOLO il conto che finisce per '452' (conto personale, fuori dal
+ *   patrimonio del portafoglio). `mid` assente = match sul solo suffisso.
+ */
+const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
 };
+
+const EXCLUDED_CASH_PATTERNS_BY_USERNAME: Record<string, { mid?: string; last: string }[]> = {
+  silvias: [{ last: '452' }],
+};
+
+/** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
+async function resolveExcludedPatterns(userId: string | undefined): Promise<{ mid?: string; last: string }[]> {
+  const patterns = [...(EXCLUDED_CASH_PATTERNS[userId || ''] || [])];
+  if (!userId) return patterns;
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('username, email')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const username = (profile?.username || profile?.email?.replace('@internal.local', '') || '')
+      .trim()
+      .toLowerCase();
+    if (username && EXCLUDED_CASH_PATTERNS_BY_USERNAME[username]) {
+      patterns.push(...EXCLUDED_CASH_PATTERNS_BY_USERNAME[username]);
+    }
+  } catch (err) {
+    console.error('[FileUploader] Impossibile risolvere lo username per le esclusioni conti:', err);
+  }
+  return patterns;
+}
 
 function DropzoneContent({
   isProcessing,
@@ -100,7 +133,7 @@ export function FileUploader() {
     setUploadSuccess(false);
 
     try {
-      const excludedPatterns = EXCLUDED_CASH_PATTERNS[effectiveUserId || ''] || [];
+      const excludedPatterns = await resolveExcludedPatterns(effectiveUserId);
 
       // ---- Smistamento: file MOVIMENTI (mov cash / mov titoli) vs SNAPSHOT (saldi/Excel) ----
       const snapshotFiles: File[] = [];
