@@ -150,6 +150,22 @@ describe('parseFlussiCsvText — file titoli', () => {
 
     expect(res.positions.map(position => position.description)).toEqual(['APPLE INC']);
     expect(res.gpHoldings).toHaveLength(0);
+    expect(res.gpSnapshotPresent).toBe(true);
+  });
+
+  it('segnala la sorgente GP ed esclude per ISIN anche con descrizione variata', () => {
+    const csv = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
+      "01/07/2026;'03211;'08H00012345;'010605;BION BIOTECH CLASS A;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+    ].join('\r\n');
+
+    const res = parseFlussiCsvText(csv, {
+      excludedPositionIsins: ['US09075V1026'],
+    });
+
+    expect(res.gpSnapshotPresent).toBe(true);
+    expect(res.gpHoldings).toHaveLength(0);
+    expect(res.positions).toHaveLength(0);
   });
 
   it('converte i controvalori in EUR con il cambio', () => {

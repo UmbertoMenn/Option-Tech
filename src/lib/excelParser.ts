@@ -91,20 +91,32 @@ export interface ParsedPortfolioFile {
   gpHoldings: GPHolding[];
   /** Conti liquidità GP "B0...". Solo flussi CSV. */
   gpCashAccounts: { accountId: string; value: number }[];
+  /** Indica che un flusso titoli CSV contiene una sorgente GP "08...". */
+  gpSnapshotPresent: boolean;
 }
 
 export interface PortfolioParseOptions {
   excludedCashAccounts?: string[];
   excludedCashPatterns?: { mid?: string; last: string }[];
   excludedPositionDescriptions?: string[];
+  excludedPositionIsins?: string[];
   includeGpCashInCash?: boolean;
 }
 
-function isExcludedPosition(description: string, options?: PortfolioParseOptions): boolean {
+function isExcludedPosition(
+  description: string,
+  isin: string | undefined,
+  options?: PortfolioParseOptions,
+): boolean {
   const normalized = description.trim().replace(/\s+/g, ' ').toUpperCase();
-  return options?.excludedPositionDescriptions?.some(
+  const excludedByDescription = options?.excludedPositionDescriptions?.some(
     excluded => excluded.trim().replace(/\s+/g, ' ').toUpperCase() === normalized,
   ) ?? false;
+  const normalizedIsin = (isin || '').trim().replace(/^'/, '').toUpperCase();
+  const excludedByIsin = options?.excludedPositionIsins?.some(
+    excluded => excluded.trim().replace(/^'/, '').toUpperCase() === normalizedIsin,
+  ) ?? false;
+  return excludedByDescription || excludedByIsin;
 }
 
 export async function parsePortfolioExcel(file: File, options?: PortfolioParseOptions): Promise<ParsedPortfolioFile> {
@@ -121,6 +133,7 @@ export async function parsePortfolioExcel(file: File, options?: PortfolioParseOp
       restrictedCashValue: res.restrictedCashValue,
       gpHoldings: res.gpHoldings,
       gpCashAccounts: res.gpCashAccounts,
+      gpSnapshotPresent: res.gpSnapshotPresent,
     };
   }
 
@@ -147,6 +160,7 @@ export async function parsePortfolioExcel(file: File, options?: PortfolioParseOp
           restrictedCashValue: 0,
           gpHoldings: [],
           gpCashAccounts: [],
+          gpSnapshotPresent: false,
         });
       } catch (error) {
         reject(error);
@@ -326,7 +340,7 @@ export function parsePortfolioData(rows: any[][], options?: PortfolioParseOption
       if (rowStr.includes('OPTION CALL') || rowStr.includes('OPTION PUT') ||
           rowStr.includes('EUREX,') || rowStr.includes('IDEM,')) {
         const position = parseDerivativeRow(row, headerRow);
-        if (position && position.description && !isExcludedPosition(position.description, options)) {
+        if (position && position.description && !isExcludedPosition(position.description, position.isin, options)) {
           positions.push(position);
         }
         continue;
@@ -335,7 +349,7 @@ export function parsePortfolioData(rows: any[][], options?: PortfolioParseOption
     
     // Parse regular position data
     const position = parsePositionRow(row, headerRow, currentSection);
-    if (position && position.description && !isExcludedPosition(position.description, options)) {
+    if (position && position.description && !isExcludedPosition(position.description, position.isin, options)) {
       positions.push(position);
     }
   }
