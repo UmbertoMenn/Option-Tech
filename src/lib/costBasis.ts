@@ -142,6 +142,81 @@ export function unitCostWithCommission(t: FlussiTitoliStockTrade): number {
   return t.price + (t.quantity > 0 ? commissionCcy / t.quantity : 0);
 }
 
+/** Chiave dello store PMC per un contratto d'opzione. */
+export function optionBasisKey(
+  underlyingKey: string,
+  optionType: 'call' | 'put',
+  strike: number,
+  expiryDateISO: string,
+): string {
+  return `OPT:${underlyingKey}:${optionType === 'call' ? 'C' : 'P'}:${strike}:${expiryDateISO}`;
+}
+
+/** Premio unitario per azione comprensivo di commissioni (divisa del titolo). */
+export function optionUnitPremiumWithCommission(t: FlussiTitoliOptionTrade): number {
+  const commissionCcy = (t.commission || 0) * (t.exchangeRate > 0 ? t.exchangeRate : 1);
+  const shares = t.contracts * 100;
+  return t.pricePerShare + (shares > 0 ? commissionCcy / shares : 0);
+}
+
+export interface AppliedOptionTradeResult {
+  entries: Map<string, CostBasisEntry>;
+  applied: number;
+}
+
+/**
+ * PMC delle opzioni a posizione FIRMATA (quantity in contratti: >0 long,
+ * <0 short). Regole simmetriche alla media ponderata continua:
+ * - aprire/aumentare la posizione nella sua direzione (ACQ per le long,
+ *   VEN per le short) ricalcola la media del premio per azione;
+ * - ridurre la posizione verso zero NON cambia il PMC;
+ * - l'attraversamento dello zero apre una nuova posizione al premio del trade.
+ */
+export function applyOptionTradesToBasis(
+  existing: CostBasisEntry[],
+  trades: FlussiTitoliOptionTrade[],
+  resolveUnderlyingKey: (underlyingTicker: string) => string,
+): AppliedOptionTradeResult {
+  const entries = new Map<string, CostBasisEntry>(existing.map(e => [e.basisKey, { ...e }]));
+  let applied = 0;
+
+  const sorted = [...trades].sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+
+  for (const t of sorted) {
+    if (!t.contracts || !Number.isFinite(t.pricePerShare)) continue;
+    const key = optionBasisKey(resolveUnderlyingKey(t.underlyingTicker), t.optionType, t.strike, t.expiryDate);
+    const unit = optionUnitPremiumWithCommission(t);
+    const delta = t.side === 'ACQ' ? t.contracts : -t.contracts;
+    const entry = entries.get(key);
+    const qty0 = entry?.quantity ?? 0;
+    const newQty = qty0 + delta;
+
+    if (!entry || qty0 === 0 || Math.sign(qty0) === Math.sign(delta)) {
+      // Apertura o aumento nella stessa direzione: media ponderata dei premi
+      const pmc0 = entry && qty0 !== 0 ? entry.pmc : 0;
+      const pmc = (Math.abs(qty0) * pmc0 + Math.abs(delta) * unit) / (Math.abs(qty0) + Math.abs(delta));
+      entries.set(key, {
+        basisKey: key,
+        isin: null,
+        description: entry?.description || t.descriptor,
+        pmc,
+        quantity: newQty,
+        currency: t.currency || entry?.currency || null,
+      });
+    } else if (Math.sign(newQty) !== Math.sign(qty0) && newQty !== 0) {
+      // Attraversamento dello zero: nuova posizione al premio del trade
+      entry.pmc = unit;
+      entry.quantity = newQty;
+    } else {
+      // Riduzione (anche a zero): PMC invariato
+      entry.quantity = newQty;
+    }
+    applied += 1;
+  }
+
+  return { entries, applied };
+}
+
 /**
  * Applica i movimenti titoli allo store PMC (media ponderata continua).
  *

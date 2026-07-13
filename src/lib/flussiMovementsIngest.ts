@@ -16,7 +16,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { FlussiCashMovement, FlussiTitoliOptionTrade, FlussiTitoliStockTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
 import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
-import { applyStockTradesToBasis, detectEarlyAssignments, CostBasisEntry, EarlyAssignment, PutPositionLite } from '@/lib/costBasis';
+import { applyStockTradesToBasis, applyOptionTradesToBasis, detectEarlyAssignments, optionBasisKey, CostBasisEntry, EarlyAssignment, PutPositionLite } from '@/lib/costBasis';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
@@ -225,7 +225,9 @@ export async function ingestStockTradesCostBasis(
   optionTrades: FlussiTitoliOptionTrade[],
   newSnapshotPositions?: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker'>[],
 ): Promise<CostBasisIngestResult> {
-  if (stockTrades.length === 0) return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
+  if (stockTrades.length === 0 && optionTrades.length === 0) {
+    return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
+  }
 
   // Chiavi di risoluzione: ISIN quando disponibile (deterministico), altrimenti
   // chiave canonica del ticker via resolver (mai alias hardcoded).
@@ -233,17 +235,30 @@ export async function ingestStockTradesCostBasis(
     t.isin ? t.isin.toUpperCase() : getCanonicalTickerKey({ description: t.description });
   const optionKey = (underlyingTicker: string): string =>
     getCanonicalTickerKey({ rawTicker: underlyingTicker });
+  const optionTradeKey = (t: FlussiTitoliOptionTrade): string =>
+    optionBasisKey(optionKey(t.underlyingTicker), t.optionType, t.strike, t.expiryDate);
 
   // ---- Ledger di idempotenza: inserisce le chiavi naturali; i conflitti
-  // (già applicati in un upload precedente) vengono esclusi. ----
-  const ledgerRows = stockTrades.map(t => ({
-    portfolio_id: portfolioId,
-    basis_key: stockKey(t),
-    trade_date: t.tradeDate,
-    side: t.side,
-    quantity: t.quantity,
-    price: t.price,
-  }));
+  // (già applicati in un upload precedente) vengono esclusi. Titoli e
+  // opzioni condividono il ledger: la chiave OPT:... non collide con gli ISIN. ----
+  const ledgerRows = [
+    ...stockTrades.map(t => ({
+      portfolio_id: portfolioId,
+      basis_key: stockKey(t),
+      trade_date: t.tradeDate,
+      side: t.side,
+      quantity: t.quantity,
+      price: t.price,
+    })),
+    ...optionTrades.map(t => ({
+      portfolio_id: portfolioId,
+      basis_key: optionTradeKey(t),
+      trade_date: t.tradeDate,
+      side: t.side,
+      quantity: t.contracts,
+      price: t.pricePerShare,
+    })),
+  ];
   const { data: inserted, error: ledgerErr } = await supabase
     .from('cost_basis_trades' as never)
     .upsert(ledgerRows as never[], {
@@ -260,7 +275,10 @@ export async function ingestStockTradesCostBasis(
   const freshTrades = stockTrades.filter(t =>
     newLedgerKeys.has(`${stockKey(t)}|${t.tradeDate}|${t.side}|${t.quantity}|${t.price}`),
   );
-  if (freshTrades.length === 0) {
+  const freshOptionTrades = optionTrades.filter(t =>
+    newLedgerKeys.has(`${optionTradeKey(t)}|${t.tradeDate}|${t.side}|${t.contracts}|${t.pricePerShare}`),
+  );
+  if (freshTrades.length === 0 && freshOptionTrades.length === 0) {
     return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
   }
 
@@ -319,6 +337,13 @@ export async function ingestStockTradesCostBasis(
   const result = applyStockTradesToBasis(existing, freshTrades, assignments, stockKey);
   for (const w of result.warnings) console.warn('[CostBasis]', w);
 
+  // ---- PMC opzioni: posizione firmata, media del premio per direzione ----
+  const optionResult = applyOptionTradesToBasis(
+    Array.from(result.entries.values()),
+    freshOptionTrades,
+    optionKey,
+  );
+
   // Marca nel ledger le vendite nettate come chiusure di assegnazione
   for (const t of result.assignmentCloses) {
     await supabase
@@ -336,8 +361,9 @@ export async function ingestStockTradesCostBasis(
   const touchedKeys = new Set([
     ...result.normalTrades.map(stockKey),
     ...result.assignmentCloses.map(stockKey),
+    ...freshOptionTrades.map(optionTradeKey),
   ]);
-  const upserts = Array.from(result.entries.values())
+  const upserts = Array.from(optionResult.entries.values())
     .filter(e => touchedKeys.has(e.basisKey))
     .map(e => ({
       portfolio_id: portfolioId,
@@ -358,7 +384,7 @@ export async function ingestStockTradesCostBasis(
   }
 
   return {
-    tradesApplied: result.normalTrades.length + result.assignmentCloses.length,
+    tradesApplied: result.normalTrades.length + result.assignmentCloses.length + optionResult.applied,
     assignmentsDetected: assignments.length,
     warnings: result.warnings,
   };
