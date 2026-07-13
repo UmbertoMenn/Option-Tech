@@ -88,7 +88,7 @@ function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean
   }
 }
 
-interface WizardStrategy {
+export interface WizardStrategy {
   id: string;
   positions: Position[];
   strategyType: string;
@@ -115,9 +115,10 @@ interface StrategyConfigWizardProps {
   archivedItems?: ArchivedItem[];
   onArchive?: (key: string, displayName: string) => void;
   onUnarchive?: (key: string) => void;
+  onCancelOverride?: (configId: string) => void;
 }
 
-function buildSignatures(positions: Position[]): PositionSignature[] {
+export function buildSignatures(positions: Position[]): PositionSignature[] {
   // Group derivative positions by signature key, summing quantities
   const sigMap = new Map<string, PositionSignature & { totalQty: number }>();
   for (const o of positions) {
@@ -289,7 +290,7 @@ function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
   return stockNorm;
 }
 
-function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
+export function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
   // Filter out archived underlyings before auto-classifying
   const archivedSet = new Set(archivedKeysToExclude.map(k => k.toUpperCase().trim()));
   const filteredDerivs = archivedSet.size > 0
@@ -430,6 +431,48 @@ function autoClassify(derivatives: Position[], allPositions: Position[], archive
 let nextId = 0;
 function genId() { return `ws-${Date.now()}-${nextId++}`; }
 
+/** Converts WizardStrategy[] to UpsertConfigParams[] (pure, no React state). */
+export function buildConfigsFromStrategies(strategies: WizardStrategy[]): UpsertConfigParams[] {
+  return strategies.map((strategy, i) => {
+    const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+    const underlying = derivPos
+      ? (derivPos.underlying || derivPos.description || 'Unknown')
+      : (getCanonicalKey(strategy.positions[0]?.description || '') || strategy.positions[0]?.description || 'Unknown');
+    const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+    const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
+    return {
+      underlying,
+      strategy_type: strategy.strategyType,
+      position_signatures: buildSignatures(strategy.positions),
+      is_synthetic: strategy.isSynthetic,
+      linked_stock_id: realStockId,
+      linked_stock_slot_ids: stockPositions.map(p => p.id),
+      sort_order: i,
+    };
+  });
+}
+
+/** Compare two PositionSignature arrays regardless of order. */
+function sigsEqual(a: PositionSignature[], b: PositionSignature[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (s: PositionSignature) =>
+    `${s.option_type}|${s.strike}|${s.expiry}|${s.quantity_sign}|${s.quantity_abs ?? 1}`;
+  const aSet = new Set(a.map(key));
+  const bSet = new Set(b.map(key));
+  if (aSet.size !== bSet.size) return false;
+  for (const k of aSet) if (!bSet.has(k)) return false;
+  return true;
+}
+
+/** Return true when `raw` config matches any of the auto-classified configs. */
+function matchesAutoClassify(raw: UpsertConfigParams, autoConfigs: UpsertConfigParams[]): boolean {
+  return autoConfigs.some(ac =>
+    normalizeForMatching(ac.underlying) === normalizeForMatching(raw.underlying) &&
+    ac.strategy_type === raw.strategy_type &&
+    sigsEqual(ac.position_signatures, raw.position_signatures),
+  );
+}
+
 /** A group of positions sharing the same underlying */
 interface UnderlyingGroup {
   key: string;        // normalized key
@@ -460,6 +503,7 @@ export function StrategyConfigWizard({
   archivedItems = [],
   onArchive,
   onUnarchive,
+  onCancelOverride,
 }: StrategyConfigWizardProps) {
   const draftStorageKey = `strategyConfigWizardDraft:${draftKey || 'default'}`;
   // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
@@ -548,6 +592,13 @@ export function StrategyConfigWizard({
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
   const [touchedGroupKeys, setTouchedGroupKeys] = useState<Set<string>>(new Set());
+
+  /** Auto-classify reference configs — used to determine config_locked on save and
+   *  to detect whether an existing locked config is a genuine user override. */
+  const autoClassifiedConfigs = useMemo((): UpsertConfigParams[] => {
+    if (!open) return [];
+    return buildConfigsFromStrategies(autoClassify(derivatives, allPositions, archivedKeys));
+  }, [open, derivatives, allPositions, archivedKeys]);
 
   const markGroupTouched = useCallback((groupKey: string) => {
     setTouchedGroupKeys(prev => {
@@ -914,6 +965,44 @@ export function StrategyConfigWizard({
     });
   };
 
+  /** Resets the wizard state for a specific underlying group back to auto-classification
+   *  and immediately cancels the override in the DB (if onCancelOverride is provided). */
+  const handleCancelOverrideForGroup = (group: UnderlyingGroup, configId: string) => {
+    startTransition(() => {
+      const groupPosIds = new Set(group.positions.map(p => p.id));
+
+      // Auto-classify only the derivatives belonging to this group
+      const groupDerivatives = group.positions.filter(p => p.asset_type === 'derivative');
+      const autoGroupStrategies = autoClassify(groupDerivatives, allPositions, archivedKeys);
+
+      // Remap stock IDs to virtual slots for this group
+      const usedSlotIds = new Set<string>();
+      const remapped = autoGroupStrategies.map(strat => ({
+        ...strat,
+        positions: strat.positions.map(p => {
+          if (p.asset_type !== 'stock') return p;
+          const slot = effectivePositions.find(a =>
+            (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
+          );
+          if (slot && slot.id !== p.id) {
+            usedSlotIds.add(slot.id);
+            return { ...p, id: slot.id, quantity: slot.quantity };
+          }
+          return p;
+        }),
+      }));
+
+      // Replace current wizard strategies for this group with auto-classified ones
+      setStrategies(prev => [
+        ...prev.filter(s => !s.positions.some(p => groupPosIds.has(p.id))),
+        ...remapped,
+      ]);
+      setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(group.key); return next; });
+    });
+    // Persist the unlock to the DB immediately
+    if (onCancelOverride) onCancelOverride(configId);
+  };
+
   const handleSave = async () => {
     // Guard: le strategie devono contenere almeno una gamba derivata,
     // altrimenti non sono rappresentabili nel motore di monitoraggio e
@@ -957,16 +1046,25 @@ export function StrategyConfigWizard({
       });
     }
 
+    // Bug fix: set config_locked only for strategies that genuinely differ from
+    // auto-classification. Strategies that match auto-classify are NOT overrides.
+    const configsWithLocked = rawConfigs.map(raw => ({
+      ...raw,
+      config_locked: !matchesAutoClassify(raw, autoClassifiedConfigs),
+    }));
+
     if (filterUnderlyings) {
       for (const existing of existingConfigs) {
-        if (!rawConfigs.some(c => c.underlying === existing.underlying)) {
-          rawConfigs.push({
+        if (!configsWithLocked.some(c => c.underlying === existing.underlying)) {
+          configsWithLocked.push({
             underlying: existing.underlying,
             strategy_type: existing.strategy_type,
             position_signatures: existing.position_signatures,
             is_synthetic: existing.is_synthetic,
             linked_stock_id: existing.linked_stock_id,
             linked_stock_slot_ids: existing.linked_stock_slot_ids || [],
+            // Preserve existing config_locked for untouched configs from other underlyings
+            config_locked: existing.config_locked,
           });
         }
       }
@@ -974,10 +1072,10 @@ export function StrategyConfigWizard({
 
     try {
       console.log('[StrategyConfigWizard] Saving strategies', {
-        count: rawConfigs.length,
-        payload: rawConfigs,
+        count: configsWithLocked.length,
+        payload: configsWithLocked,
       });
-      await onSave(rawConfigs);
+      await onSave(configsWithLocked);
       sessionStorage.removeItem(draftStorageKey);
       onOpenChange(false);
     } catch (e) {
@@ -1161,33 +1259,72 @@ export function StrategyConfigWizard({
                               </Badge>
                             )}
                           </div>
-                          {archivedKeys.includes(group.key) && onUnarchive ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onUnarchive(group.key);
-                              }}
-                            >
-                              <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                              Ripristina
-                            </Button>
-                          ) : groupStrategies.length === 0 && onArchive && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onArchive(group.key, group.displayName);
-                              }}
-                            >
-                              <Archive className="w-3.5 h-3.5 mr-1" />
-                              Archivia
-                            </Button>
-                          )}
+                          {(() => {
+                            // Find a locked config for this group that is a genuine override
+                            // (i.e. differs from auto-classification)
+                            const lockedOverride = existingConfigs.find(c => {
+                              if (!c.config_locked) return false;
+                              const configKey = getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying);
+                              if (configKey !== group.key) return false;
+                              return !matchesAutoClassify(
+                                {
+                                  underlying: c.underlying,
+                                  strategy_type: c.strategy_type,
+                                  position_signatures: c.position_signatures as PositionSignature[],
+                                },
+                                autoClassifiedConfigs,
+                              );
+                            });
+                            if (lockedOverride) {
+                              return (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[11px] px-2 border-orange-400/60 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCancelOverrideForGroup(group, lockedOverride.id);
+                                  }}
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                  Annulla override
+                                </Button>
+                              );
+                            }
+                            if (archivedKeys.includes(group.key) && onUnarchive) {
+                              return (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUnarchive(group.key);
+                                  }}
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                  Ripristina
+                                </Button>
+                              );
+                            }
+                            if (groupStrategies.length === 0 && onArchive) {
+                              return (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onArchive(group.key, group.displayName);
+                                  }}
+                                >
+                                  <Archive className="w-3.5 h-3.5 mr-1" />
+                                  Archivia
+                                </Button>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </CardHeader>
                     </CollapsibleTrigger>
