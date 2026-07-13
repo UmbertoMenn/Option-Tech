@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
-import { parsePortfolioExcel } from '@/lib/excelParser';
+import { parsePortfolioExcel, type PortfolioParseOptions } from '@/lib/excelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
 import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
 import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions } from '@/lib/costBasisStore';
@@ -30,15 +30,23 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> =
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
 };
 
-const EXCLUDED_CASH_PATTERNS_BY_USERNAME: Record<string, { mid?: string; last: string }[]> = {
-  silvias: [{ last: '452' }],
-  maurog: [{ mid: '2789', last: '0' }],
+const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
+  silvias: {
+    excludedCashPatterns: [{ last: '452' }],
+    excludedPositionDescriptions: ['BION ON'],
+    includeGpCashInCash: true,
+  },
+  maurog: {
+    excludedCashPatterns: [{ mid: '2789', last: '0' }],
+  },
 };
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
-async function resolveExcludedPatterns(userId: string | undefined): Promise<{ mid?: string; last: string }[]> {
-  const patterns = [...(EXCLUDED_CASH_PATTERNS[userId || ''] || [])];
-  if (!userId) return patterns;
+async function resolveParseOptions(userId: string | undefined): Promise<PortfolioParseOptions> {
+  const options: PortfolioParseOptions = {
+    excludedCashPatterns: [...(EXCLUDED_CASH_PATTERNS[userId || ''] || [])],
+  };
+  if (!userId) return options;
   try {
     const { data: profile } = await supabase
       .from('profiles')
@@ -48,13 +56,16 @@ async function resolveExcludedPatterns(userId: string | undefined): Promise<{ mi
     const username = (profile?.username || profile?.email?.replace('@internal.local', '') || '')
       .trim()
       .toLowerCase();
-    if (username && EXCLUDED_CASH_PATTERNS_BY_USERNAME[username]) {
-      patterns.push(...EXCLUDED_CASH_PATTERNS_BY_USERNAME[username]);
+    const usernameOptions = PARSE_OPTIONS_BY_USERNAME[username];
+    if (usernameOptions) {
+      options.excludedCashPatterns?.push(...(usernameOptions.excludedCashPatterns || []));
+      options.excludedPositionDescriptions = usernameOptions.excludedPositionDescriptions;
+      options.includeGpCashInCash = usernameOptions.includeGpCashInCash;
     }
   } catch (err) {
     console.error('[FileUploader] Impossibile risolvere lo username per le esclusioni conti:', err);
   }
-  return patterns;
+  return options;
 }
 
 function DropzoneContent({
@@ -136,7 +147,7 @@ export function FileUploader() {
     setUploadSuccess(false);
 
     try {
-      const excludedPatterns = await resolveExcludedPatterns(effectiveUserId);
+      const parseOptions = await resolveParseOptions(effectiveUserId);
 
       // ---- Smistamento: file MOVIMENTI (mov cash / mov titoli) vs SNAPSHOT (saldi/Excel) ----
       const snapshotFiles: File[] = [];
@@ -157,7 +168,7 @@ export function FileUploader() {
       // assegnazioni anticipate confronta le put del saldo aggiornato con
       // quelle pre-upload nel DB (che i movimenti non hanno ancora toccato). ----
       const parsed = snapshotFiles.length > 0
-        ? await Promise.all(snapshotFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns })))
+        ? await Promise.all(snapshotFiles.map(f => parsePortfolioExcel(f, parseOptions)))
         : [];
       const parsedSnapshotPositions = parsed.flatMap(p => p.positions);
 
@@ -166,7 +177,7 @@ export function FileUploader() {
       // Idempotenti: ricaricare lo stesso file non raddoppia nulla. ----
       const movementSummary: string[] = [];
       for (const m of movementTexts) {
-        const parsedMov = parseFlussiCsvText(m.text, { excludedCashPatterns: excludedPatterns });
+        const parsedMov = parseFlussiCsvText(m.text, parseOptions);
         if (m.type === 'mov_cash') {
           const res = await ingestCashMovements(targetPortfolioId, parsedMov.cashMovements);
           if (res.depositsUpserted > 0) {
