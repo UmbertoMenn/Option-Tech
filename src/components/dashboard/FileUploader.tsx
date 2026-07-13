@@ -22,7 +22,9 @@ import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
  * - Per UUID utente: regole legacy già in produzione.
  * - Per username (profiles.username): regole nuove — per `silvias` va escluso
  *   SOLO il conto che finisce per '452' (conto personale, fuori dal
- *   patrimonio del portafoglio). `mid` assente = match sul solo suffisso.
+ *   patrimonio del portafoglio). Per `maurog` va escluso il conto con
+ *   '2789' al centro e che finisce per '0'. `mid` assente = match sul
+ *   solo suffisso.
  */
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
@@ -30,6 +32,7 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> =
 
 const EXCLUDED_CASH_PATTERNS_BY_USERNAME: Record<string, { mid?: string; last: string }[]> = {
   silvias: [{ last: '452' }],
+  maurog: [{ mid: '2789', last: '0' }],
 };
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
