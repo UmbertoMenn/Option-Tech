@@ -166,6 +166,88 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(res.gpHoldings).toHaveLength(1);
     expect(res.gpHoldings[0].description).toBe('MICROSOFT INC.');
   });
+
+  // ---- Caso reale segnalato: CONTROVALORE in valuta, da dividere per CAMBIO ----
+
+  it('USD ordinario: CONTROVALORE / CAMBIO produce il valore in EUR (es. 63244 / 1,143 ≈ 55.331,58)', () => {
+    const TITOLI_HEADER =
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;' +
+      'VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;';
+    const csv = [
+      TITOLI_HEADER,
+      "01/07/2026;'03211;'02225971281;'010605;NVIDIA CORP;US67066G1040;USD;0,0;100,0;63244,0;1,143;632,44;0,0;",
+    ].join('\n');
+    const res = parseFlussiCsvText(csv);
+    const pos = res.positions[0];
+    // 63244 / 1,143 ≈ 55.331,58 EUR — NON 63.244 EUR
+    expect(pos.market_value).toBeCloseTo(63244 / 1.143, 2);
+    expect(pos.currency).toBe('USD');
+    expect(pos.exchange_rate).toBeCloseTo(1.143, 4);
+  });
+
+  it('USD posizione GP (conto 08…): CONTROVALORE / CAMBIO', () => {
+    const TITOLI_HEADER =
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;' +
+      'VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;';
+    const csv = [
+      TITOLI_HEADER,
+      "01/07/2026;'03211;'08H00099999;'010696;ALPHABET INC;US02079K3059;USD;0,0;50,0;63244,0;1,143;1264,88;0,0;",
+    ].join('\n');
+    const res = parseFlussiCsvText(csv);
+    expect(res.gpHoldings).toHaveLength(1);
+    const gp = res.gpHoldings[0];
+    expect(gp.market_value).toBeCloseTo(63244 / 1.143, 2);
+    expect(gp.currency).toBe('USD');
+    expect(gp.exchange_rate).toBeCloseTo(1.143, 4);
+    // La posizione GP non finisce nel portafoglio ordinario
+    expect(res.positions).toHaveLength(0);
+  });
+
+  it('EUR con cambio=1: nessuna variazione, market_value = controvalore', () => {
+    const TITOLI_HEADER =
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;' +
+      'VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;';
+    const csv = [
+      TITOLI_HEADER,
+      "01/07/2026;'03211;'02225971281;'506881;ETF-VANGUARD FTSE ALL-WORLD;IE00B3RBWM25;EUR;0,0;200,0;50000,0;1,0;250,00;0,0;",
+    ].join('\n');
+    const res = parseFlussiCsvText(csv);
+    const pos = res.positions[0];
+    // cambio=1 → nessuna conversione, il market_value eguaglia il controvalore
+    expect(pos.market_value).toBeCloseTo(50000.0, 2);
+  });
+
+  it('cambio invalido (0 o non positivo): fallback a 1, market_value = controvalore', () => {
+    const TITOLI_HEADER =
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;' +
+      'VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;';
+    const csv = [
+      TITOLI_HEADER,
+      // cambio=0: deve usare fallback 1, non generare divisione per zero
+      "01/07/2026;'03211;'02225971281;'010605;TESLA INC;US88160R1014;USD;0,0;50,0;12500,0;0,0;250,00;0,0;",
+    ].join('\n');
+    const res = parseFlussiCsvText(csv);
+    const pos = res.positions[0];
+    // cambio=0 → fallback 1: market_value = controvalore / 1
+    expect(pos.market_value).toBeCloseTo(12500.0, 2);
+  });
+
+  it('bond in valuta estera: (controvalore + rateo) / cambio', () => {
+    const TITOLI_HEADER =
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;' +
+      'VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;';
+    const csv = [
+      TITOLI_HEADER,
+      // Bond USA: nominale=50000, qty=0 (→ isBond), controvalore=49000 USD, rateo=300 USD, cambio=1,143
+      "01/07/2026;'03211;'02225971281;'001234;US TREASURY 3%;US1234567890;USD;50000,0;0,0;49000,0;1,143;98,00;300,0;",
+    ].join('\n');
+    const res = parseFlussiCsvText(csv);
+    const bond = res.positions[0];
+    expect(bond.asset_type).toBe('bond');
+    expect(bond.quantity).toBe(50000); // nominale come quantità
+    // (controvalore + rateo) / cambio = (49000 + 300) / 1,143
+    expect(bond.market_value).toBeCloseTo((49000 + 300) / 1.143, 2);
+  });
 });
 
 // ============================================================================
