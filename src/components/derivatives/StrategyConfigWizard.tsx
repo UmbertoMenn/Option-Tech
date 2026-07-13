@@ -303,14 +303,18 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
   const consumedIds = new Set<string>();
+  const isReusableUnderlyingLeg = (position: Position) =>
+    position.asset_type === 'stock' || position.asset_type === 'etf';
 
   const addUnique = (positions: Position[]): Position[] => {
     const unique = Array.from(new Map(positions.map(p => [p.id, p])).values());
-    return unique.filter(p => !consumedIds.has(p.id));
+    return unique.filter(p => isReusableUnderlyingLeg(p) || !consumedIds.has(p.id));
   };
 
   const consume = (positions: Position[]) => {
-    positions.forEach(p => consumedIds.add(p.id));
+    positions
+      .filter(p => !isReusableUnderlyingLeg(p))
+      .forEach(p => consumedIds.add(p.id));
   };
 
   const make = (positions: Position[], type: string, synthetic = false): WizardStrategy => ({
@@ -322,38 +326,26 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
   });
 
   // Covered Calls
-  const ccByUnderlying = new Map<string, { positions: Position[], isSynthetic: boolean }>();
   for (const cc of result.coveredCalls) {
-    const key = normalizeForMatching(cc.option.underlying || cc.option.description || '');
-    if (!ccByUnderlying.has(key)) ccByUnderlying.set(key, { positions: [], isSynthetic: false });
-    const entry = ccByUnderlying.get(key)!;
-    entry.positions.push(cc.option);
-    if (cc.underlying) entry.positions.push(cc.underlying);
-    if (cc.syntheticPut) entry.positions.push(cc.syntheticPut);
-    if (cc.syntheticCall) entry.positions.push(cc.syntheticCall);
-    if (cc.isSynthetic) entry.isSynthetic = true;
-  }
-  for (const [, { positions, isSynthetic }] of ccByUnderlying) {
-    const unique = addUnique(positions);
-    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'covered_call', isSynthetic)); }
+    const unique = addUnique([
+      cc.option,
+      ...(cc.underlying ? [cc.underlying] : []),
+      ...(cc.syntheticPut ? [cc.syntheticPut] : []),
+      ...(cc.syntheticCall ? [cc.syntheticCall] : []),
+    ]);
+    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'covered_call', !!cc.isSynthetic)); }
   }
 
   // De-Risking Covered Calls
-  const drccByUnderlying = new Map<string, { positions: Position[], isSynthetic: boolean }>();
   for (const drcc of result.deRiskingCoveredCalls) {
-    const key = normalizeForMatching(drcc.coveredCall.option.underlying || drcc.coveredCall.option.description || '');
-    if (!drccByUnderlying.has(key)) drccByUnderlying.set(key, { positions: [], isSynthetic: false });
-    const entry = drccByUnderlying.get(key)!;
-    entry.positions.push(drcc.coveredCall.option);
-    if (drcc.protectionPut) entry.positions.push(drcc.protectionPut);
-    if (drcc.coveredCall.underlying) entry.positions.push(drcc.coveredCall.underlying);
-    if (drcc.syntheticPut) entry.positions.push(drcc.syntheticPut);
-    if (drcc.syntheticCall) entry.positions.push(drcc.syntheticCall);
-    if (drcc.isSynthetic) entry.isSynthetic = true;
-  }
-  for (const [, { positions, isSynthetic }] of drccByUnderlying) {
-    const unique = addUnique(positions);
-    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'derisking_covered_call', isSynthetic)); }
+    const unique = addUnique([
+      drcc.coveredCall.option,
+      ...(drcc.protectionPut ? [drcc.protectionPut] : []),
+      ...(drcc.coveredCall.underlying ? [drcc.coveredCall.underlying] : []),
+      ...(drcc.syntheticPut ? [drcc.syntheticPut] : []),
+      ...(drcc.syntheticCall ? [drcc.syntheticCall] : []),
+    ]);
+    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'derisking_covered_call', drcc.isSynthetic)); }
   }
 
   // Iron Condors

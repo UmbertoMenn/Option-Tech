@@ -146,6 +146,57 @@ describe('autoClassify', () => {
     expect(strategies).toHaveLength(1);
     expect(strategies[0].strategyType).toBe('iron_condor');
   });
+
+  it('keeps two de-risking covered calls on the same underlying separate when their structures differ', () => {
+    const stock = makeStock({ description: 'GOOGL', quantity: 200 });
+    const soldCall1 = makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });
+    const longPut1 = makeOption({ underlying: 'GOOGL', option_type: 'put', strike_price: 150, expiry_date: '2026-06-20', quantity: 1 });
+    const soldCall2 = makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 220, expiry_date: '2026-09-18', quantity: -1 });
+    const longPut2 = makeOption({ underlying: 'GOOGL', option_type: 'put', strike_price: 160, expiry_date: '2026-09-18', quantity: 1 });
+
+    const strategies = autoClassify(
+      [soldCall1, longPut1, soldCall2, longPut2],
+      [stock, soldCall1, longPut1, soldCall2, longPut2],
+    );
+
+    expect(strategies).toHaveLength(2);
+    expect(strategies.every(s => s.strategyType === 'derisking_covered_call')).toBe(true);
+
+    const shortCallStrikes = strategies
+      .map(s => s.positions.find(p => p.option_type === 'call' && p.quantity < 0)?.strike_price)
+      .sort((a, b) => (a || 0) - (b || 0));
+    expect(shortCallStrikes).toEqual([200, 220]);
+    expect(strategies.every(s => s.positions.filter(p => p.asset_type === 'stock').length === 1)).toBe(true);
+    expect(strategies.every(s => s.positions.filter(p => p.option_type === 'put' && p.quantity > 0).length === 1)).toBe(true);
+  });
+
+  it('keeps all legs of a single multi-leg de-risking covered call together', () => {
+    const stock = makeStock({ description: 'GOOGL', quantity: 100 });
+    const soldCall = makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });
+    const longPut = makeOption({ underlying: 'GOOGL', option_type: 'put', strike_price: 150, expiry_date: '2026-06-20', quantity: 1 });
+
+    const strategies = autoClassify([soldCall, longPut], [stock, soldCall, longPut]);
+
+    expect(strategies).toHaveLength(1);
+    expect(strategies[0].strategyType).toBe('derisking_covered_call');
+    expect(strategies[0].positions.map(p => p.id).sort()).toEqual([stock.id, soldCall.id, longPut.id].sort());
+  });
+
+  it('keeps structurally separate covered calls on the same underlying as distinct rows', () => {
+    const stock = makeStock({ description: 'AAPL', quantity: 200 });
+    const soldCall1 = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });
+    const soldCall2 = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 210, expiry_date: '2026-09-18', quantity: -1 });
+
+    const strategies = autoClassify([soldCall1, soldCall2], [stock, soldCall1, soldCall2]);
+
+    expect(strategies).toHaveLength(2);
+    expect(strategies.every(s => s.strategyType === 'covered_call')).toBe(true);
+    expect(strategies.every(s => s.positions.filter(p => p.asset_type === 'stock').length === 1)).toBe(true);
+    const shortCallStrikes = strategies
+      .map(s => s.positions.find(p => p.option_type === 'call' && p.quantity < 0)?.strike_price)
+      .sort((a, b) => (a || 0) - (b || 0));
+    expect(shortCallStrikes).toEqual([200, 210]);
+  });
 });
 
 // ---------------------------------------------------------------------------
