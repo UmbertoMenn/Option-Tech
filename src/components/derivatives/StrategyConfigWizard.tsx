@@ -648,8 +648,11 @@ export function StrategyConfigWizard({
    *  to detect whether an existing locked config is a genuine user override. */
   const autoClassifiedConfigs = useMemo((): UpsertConfigParams[] => {
     if (!open) return [];
-    return buildConfigsFromStrategies(autoClassify(derivatives, allPositions, archivedKeys));
-  }, [open, derivatives, allPositions, archivedKeys]);
+    return buildConfigsFromStrategies(
+      autoClassify(derivatives, allPositions, archivedKeys, dynamicAliases),
+      dynamicAliases,
+    );
+  }, [open, derivatives, allPositions, archivedKeys, dynamicAliases]);
 
   const markGroupTouched = useCallback((groupKey: string) => {
     setTouchedGroupKeys(prev => {
