@@ -393,6 +393,26 @@ export function resolveUnderlyingIdentity(
     };
   }
 
+  // 0b. ISIN autoritativo. L'ISIN è un identificatore unico e globale: quando
+  // presente e conosciuto, vince su ticker/nome. Usa sia l'ISIN esplicito
+  // dell'input sia quello del linkedStock.
+  const isinCandidates = [input.isin, input.linkedStock?.isin]
+    .filter((s): s is string => !!s)
+    .map(s => s.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+  for (const isin of isinCandidates) {
+    if (ISIN_TO_CANONICAL[isin]) {
+      const canonical = ISIN_TO_CANONICAL[isin];
+      return {
+        tickerKey: canonical,
+        displayTicker: canonical,
+        canonicalName: pickCanonicalName(input, canonical),
+        source: 'alias_map',
+        confidence: 'high',
+      };
+    }
+  }
+
+
   // 1. linkedStock wins
   if (input.linkedStock) {
     const stk = input.linkedStock;
