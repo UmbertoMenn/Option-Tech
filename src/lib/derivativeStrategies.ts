@@ -1260,8 +1260,23 @@ function categorizeDerivativesImpl(
   // Se le scadenze differiscono di più di 12 mesi, le opzioni passano allo Step 6 (singole gambe)
   // ECCEZIONE: Se il gruppo contiene solo CALL comprate e/o PUT vendute (non correlate), 
   // le classifichiamo singolarmente come Leap Call e Naked Put
+  // Un diagonal spread è PER DEFINIZIONE venduta a scadenza corta + comprata a
+  // scadenza lunga: il limite dei 12 mesi non deve mai smembrarlo. Se il gruppo
+  // contiene sia gambe vendute sia gambe comprate dello stesso tipo (put o
+  // call), è una strategia a prescindere dalla distanza tra le scadenze
+  // (es. AVGO: P/400 LUG-26 venduta + P/300 DIC-27 comprata = diagonal put
+  // spread, non naked put + protezione).
+  const hasSoldBoughtPair = (options: Position[]): boolean => {
+    for (const optType of ['put', 'call'] as const) {
+      const sold = options.some(o => o.option_type === optType && o.quantity < 0);
+      const bought = options.some(o => o.option_type === optType && o.quantity > 0);
+      if (sold && bought) return true;
+    }
+    return false;
+  };
+
   for (const [, group] of regrouped.entries()) {
-    if (group.length > 1 && hasCloseExpiries(group)) {
+    if (group.length > 1 && (hasCloseExpiries(group) || hasSoldBoughtPair(group))) {
       // Check if group contains ONLY bought CALLs and/or sold PUTs (no real strategy)
       const onlyLeapsAndNakeds = group.every(option => 
         (option.option_type === 'call' && option.quantity > 0) || // Leap Call

@@ -121,6 +121,27 @@ describe('autoClassify', () => {
     expect(strategies[0].positions).toContainEqual(expect.objectContaining({ id: put.id }));
   });
 
+  it('REGRESSIONE (AVGO maxb): put venduta corta + put comprata lunga → UNA diagonal_put_spread', () => {
+    // P/400 LUG-26 venduta + P/300 DIC-27 comprata: 17 mesi di distanza tra le
+    // scadenze. Il limite dei 12 mesi smembrava la coppia in naked_put +
+    // protezione, ma il diagonal è per definizione corta venduta + lunga
+    // comprata.
+    const sold = makeOption({ underlying: 'AVGO', option_type: 'put', strike_price: 400, expiry_date: '2026-07-17', quantity: -1 });
+    const bought = makeOption({ underlying: 'AVGO', option_type: 'put', strike_price: 300, expiry_date: '2027-12-17', quantity: 1 });
+    const strategies = autoClassify([sold, bought], [sold, bought]);
+    expect(strategies).toHaveLength(1);
+    expect(strategies[0].strategyType).toBe('diagonal_put_spread');
+    expect(strategies[0].positions).toHaveLength(2);
+  });
+
+  it('put venduta + put comprata con scadenze vicine → put spread (verticale o diagonale)', () => {
+    const sold = makeOption({ underlying: 'AVGO', option_type: 'put', strike_price: 400, expiry_date: '2026-07-17', quantity: -1 });
+    const bought = makeOption({ underlying: 'AVGO', option_type: 'put', strike_price: 300, expiry_date: '2026-07-17', quantity: 1 });
+    const strategies = autoClassify([sold, bought], [sold, bought]);
+    expect(strategies).toHaveLength(1);
+    expect(strategies[0].strategyType).toBe('put_spread');
+  });
+
   it('REGRESSIONE: due naked put stesso sottostante ma strike/scadenza diversi → DUE strategie', () => {
     // Stessa strategia se e solo se stessa identica opzione: P/180 GEN/28 e
     // P/220 SET/26 su CRDO sono due naked put distinte, mai un'unica config.

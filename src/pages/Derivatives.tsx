@@ -44,7 +44,6 @@ import { autoReconcileStrategies } from '@/lib/strategyAutoReconcile';
 import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
 import { toast } from 'sonner';
-import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
   categorizeDerivatives,
   normalizeForMatching, 
@@ -361,7 +360,6 @@ export function Derivatives() {
   useEffect(() => () => {
     if (activeKeyRef.current) sessionStorage.removeItem(activeKeyRef.current);
   }, []);
-  const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
@@ -679,9 +677,15 @@ export function Derivatives() {
     const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions, underlyingPrices, dynamicAliases);
 
     if (!result.hasAutoChanges) {
-      // Nulla di automatizzabile: comportamento precedente (dialog),
-      // ma solo se c'erano item genuini da riconciliare
-      if (reconciliationItems.length > 0) setReconciliationOpen(true);
+      // Nulla di automatizzabile: la riconciliazione è interamente automatica,
+      // il vecchio dialog manuale non esiste più. Se restano item è solo
+      // diagnostica: le regole 3a-3f sono esaustive, quindi qui gli item
+      // residui indicano config bloccate (config_locked) o nessuna differenza
+      // sostanziale — in entrambi i casi non c'è nulla da chiedere all'utente.
+      if (reconciliationItems.length > 0) {
+        console.log('[AutoReconcile] Item non azionabili (config bloccate o nessuna modifica):',
+          reconciliationItems.map(i => `${i.underlying} (${i.strategyType})`));
+      }
       return;
     }
 
@@ -695,17 +699,14 @@ export function Derivatives() {
             (result.changes.length > 5 ? `\n… e altre ${result.changes.length - 5} modifiche` : ''),
           duration: 10000,
         });
-        // Item irrisolti (es. nuove strategie da classificare) → dialog
-        if (result.unresolvedItems.length > 0) {
-          setReconciliationOpen(true);
-        }
+        // Le regole 3a-3f classificano ogni gamba: non restano mai item
+        // irrisolti da sottoporre all'utente.
       })
       .catch(err => {
         console.error('[AutoReconcile] Errore nel salvataggio automatico:', err);
         toast.error('Riconciliazione automatica fallita', {
-          description: 'Apri il dialog per riconciliare manualmente.',
+          description: 'Riprova ricaricando la pagina; se persiste, usa "Riconfigura".',
         });
-        setReconciliationOpen(true);
       })
       .finally(() => {
         autoReconcileRunningRef.current = false;
@@ -819,22 +820,6 @@ export function Derivatives() {
               }}
               onCancelOverride={cancelOverride}
               dynamicAliases={dynamicAliases}
-            />
-          </ErrorBoundary>
-        )}
-
-        {/* Reconciliation Dialog — mounted only when open */}
-        {reconciliationOpen && (
-          <ErrorBoundary title="Errore nella Riconciliazione">
-            <StrategyReconciliationDialog
-              open={reconciliationOpen}
-              onOpenChange={setReconciliationOpen}
-              items={reconciliationItems}
-              allConfigs={strategyConfigs}
-              currentPositions={positions}
-              onSave={handleSaveConfigs}
-              isSaving={isConfigSaving}
-              archivedKeys={archivedItems.map(a => a.key)}
             />
           </ErrorBoundary>
         )}
