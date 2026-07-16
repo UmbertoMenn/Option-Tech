@@ -361,6 +361,47 @@ export type Database = {
           },
         ]
       }
+      call_resell_ledger: {
+        Row: {
+          applied_quantity: number
+          created_at: string
+          descriptor: string
+          id: string
+          portfolio_id: string
+          quantity: number
+          resell_date: string
+          resell_price: number
+        }
+        Insert: {
+          applied_quantity?: number
+          created_at?: string
+          descriptor: string
+          id?: string
+          portfolio_id: string
+          quantity: number
+          resell_date: string
+          resell_price: number
+        }
+        Update: {
+          applied_quantity?: number
+          created_at?: string
+          descriptor?: string
+          id?: string
+          portfolio_id?: string
+          quantity?: number
+          resell_date?: string
+          resell_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_resell_ledger_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cost_basis_trades: {
         Row: {
           basis_key: string
@@ -398,56 +439,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "cost_basis_trades_portfolio_id_fkey"
-            columns: ["portfolio_id"]
-            isOneToOne: false
-            referencedRelation: "portfolios"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      stock_cost_basis: {
-        Row: {
-          basis_key: string
-          created_at: string
-          currency: string | null
-          description: string | null
-          id: string
-          isin: string | null
-          pmc: number
-          portfolio_id: string
-          quantity: number
-          source: string
-          updated_at: string
-        }
-        Insert: {
-          basis_key: string
-          created_at?: string
-          currency?: string | null
-          description?: string | null
-          id?: string
-          isin?: string | null
-          pmc: number
-          portfolio_id: string
-          quantity?: number
-          source?: string
-          updated_at?: string
-        }
-        Update: {
-          basis_key?: string
-          created_at?: string
-          currency?: string | null
-          description?: string | null
-          id?: string
-          isin?: string | null
-          pmc?: number
-          portfolio_id?: string
-          quantity?: number
-          source?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "stock_cost_basis_portfolio_id_fkey"
             columns: ["portfolio_id"]
             isOneToOne: false
             referencedRelation: "portfolios"
@@ -1386,6 +1377,56 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "put_roll_targets_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_cost_basis: {
+        Row: {
+          basis_key: string
+          created_at: string
+          currency: string | null
+          description: string | null
+          id: string
+          isin: string | null
+          pmc: number
+          portfolio_id: string
+          quantity: number
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          basis_key: string
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          isin?: string | null
+          pmc: number
+          portfolio_id: string
+          quantity?: number
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          basis_key?: string
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          isin?: string | null
+          pmc?: number
+          portfolio_id?: string
+          quantity?: number
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_cost_basis_portfolio_id_fkey"
             columns: ["portfolio_id"]
             isOneToOne: false
             referencedRelation: "portfolios"
