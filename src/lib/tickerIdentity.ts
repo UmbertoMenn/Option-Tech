@@ -514,8 +514,18 @@ export function buildDynamicAliasMap(
     if (!r.underlying || !r.ticker) continue;
     const norm = normalizeText(r.underlying);
     if (!norm) continue;
+    const ticker = r.ticker.toUpperCase();
+    // Difesa in profondità: gli alias dinamici vincono sulla mappa statica, ma
+    // NON possono riscrivere un ticker canonico noto su un altro titolo.
+    // Una riga sbagliata a DB (es. "NOW" -> SNOW) rinominerebbe altrimenti
+    // ServiceNow in Snowflake, prezzo incluso.
+    const asTicker = norm.replace(/\s+/g, '');
+    if (CANONICAL_UNDERLYINGS[asTicker] && asTicker !== ticker) {
+      console.warn(`[tickerIdentity] Alias dinamico incoerente ignorato: "${r.underlying}" -> ${ticker}`);
+      continue;
+    }
     // First write wins to keep things deterministic
-    if (!m.has(norm)) m.set(norm, r.ticker.toUpperCase());
+    if (!m.has(norm)) m.set(norm, ticker);
   }
   return m;
 }

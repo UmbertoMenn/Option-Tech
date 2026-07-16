@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  normalizeName,
+  resolveTickerFromName as resolveTickerFromNameShared,
+  isMappingSafeToPersist,
+} from "./tickerNameResolution.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -91,6 +96,9 @@ const SPECIAL_MAPPINGS: Record<string, string> = {
   'SNOWFLAKE': 'SNOW',
   'SNOWFLAKE INC': 'SNOW',
   'SERVICENOW': 'NOW',
+  'SERVICENOW INC': 'NOW',
+  'FIRST SOLAR': 'FSLR',
+  'FIRST SOLAR INC': 'FSLR',
   'LOCKHEED': 'LMT',
   'LOCKHEED MARTIN': 'LMT',
   'BOEING': 'BA',
@@ -194,46 +202,9 @@ function cleanEurexUnderlying(name: string): string {
   return name;
 }
 
-// Normalize name for matching
-function normalizeName(name: string): string {
-  return name
-    .toUpperCase()
-    .replace(/[.,]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\bINC\b/g, '')
-    .replace(/\bCORP\b/g, '')
-    .replace(/\bLTD\b/g, '')
-    .replace(/\bLLC\b/g, '')
-    .replace(/\bPLC\b/g, '')
-    .replace(/\bCO\b/g, '')
-    .replace(/\bTHE\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// Try to extract ticker from a known format like "NVIDIA CORP" or find in mappings
+// Risoluzione nome → ticker: match a confine di parola (vedi tickerNameResolution.ts).
 function resolveTickerFromName(name: string): string | null {
-  const normalized = normalizeName(name);
-  
-  // Direct match
-  if (SPECIAL_MAPPINGS[normalized]) {
-    return SPECIAL_MAPPINGS[normalized];
-  }
-  
-  // Try partial matches
-  for (const [key, ticker] of Object.entries(SPECIAL_MAPPINGS)) {
-    if (normalized.includes(key) || key.includes(normalized)) {
-      return ticker;
-    }
-  }
-  
-  // Try to extract ticker pattern from the name (e.g., symbols like "AAPL", "MSFT")
-  const tickerMatch = name.match(/\b([A-Z]{1,5})\b/);
-  if (tickerMatch && SPECIAL_MAPPINGS[tickerMatch[1]]) {
-    return SPECIAL_MAPPINGS[tickerMatch[1]];
-  }
-  
-  return null;
+  return resolveTickerFromNameShared(name, SPECIAL_MAPPINGS);
 }
 
 // Use AI to infer ticker from company name
@@ -398,6 +369,13 @@ async function saveToUnderlyingMappingsCache(
   underlying: string,
   ticker: string
 ): Promise<void> {
+  // Non persistere mai un mapping che contraddice il mapping statico: una singola
+  // risoluzione errata (AI o euristica) resterebbe altrimenti in cache per sempre,
+  // avvelenando frontend e cron. È così che "NOW" era finito mappato su SNOW.
+  if (!isMappingSafeToPersist(underlying, ticker, SPECIAL_MAPPINGS)) {
+    console.warn(`Rifiutato mapping incoerente: "${underlying}" -> ${ticker}`);
+    return;
+  }
   try {
     await supabase
       .from('underlying_mappings')
