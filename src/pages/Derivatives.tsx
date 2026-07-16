@@ -94,7 +94,12 @@ import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from 
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
 
-const STRATEGY_WIZARD_ACTIVE_KEY = 'strategyConfigWizardActive';
+import {
+  decideWizardResume,
+  wizardActiveKey,
+  wizardDraftKey,
+  LEGACY_WIZARD_ACTIVE_KEY,
+} from '@/lib/strategyWizardResume';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -275,6 +280,7 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
 
 export function Derivatives() {
   const { portfolio, positions, isLoading, isHistoricalView } = usePortfolio();
+  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, cancelOverride, isSaving: isConfigSaving, isLoading: isConfigsLoading } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
@@ -309,27 +315,51 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+
+  // Chiave del wizard: scoped per portafoglio, come il draft.
+  const wizardPortfolioKey = portfolio?.id ?? selectedPortfolioId ?? null;
+  const activeKeyRef = useRef<string | null>(null);
+  activeKeyRef.current = wizardPortfolioKey ? wizardActiveKey(wizardPortfolioKey) : null;
+
   const setWizardOpenPersisted = useCallback((open: boolean) => {
     setWizardOpen(open);
+    const key = activeKeyRef.current;
+    if (!key) return;
     if (open) {
-      sessionStorage.setItem(STRATEGY_WIZARD_ACTIVE_KEY, JSON.stringify({ ts: Date.now() }));
+      sessionStorage.setItem(key, JSON.stringify({ ts: Date.now() }));
     } else {
-      sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+      sessionStorage.removeItem(key);
     }
   }, []);
+
+  // Ripresa del wizard SOLO dopo un reload della pagina con draft in corso.
+  const resumeCheckedKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    const raw = sessionStorage.getItem(STRATEGY_WIZARD_ACTIVE_KEY);
-    if (!raw) return;
-    try {
-      const active = JSON.parse(raw) as { ts?: number };
-      if (active.ts && Date.now() - active.ts < 4 * 60 * 60 * 1000) {
-        setWizardOpen(true);
-        return;
-      }
-    } catch {
-      // ignore malformed marker and clear below
+    sessionStorage.removeItem(LEGACY_WIZARD_ACTIVE_KEY); // marker globale legacy: bug dei riaperture continue
+    if (!wizardPortfolioKey) return;
+    if (resumeCheckedKeyRef.current === wizardPortfolioKey) return;
+    resumeCheckedKeyRef.current = wizardPortfolioKey;
+
+    const key = wizardActiveKey(wizardPortfolioKey);
+    const decision = decideWizardResume(
+      sessionStorage.getItem(key),
+      sessionStorage.getItem(wizardDraftKey(wizardPortfolioKey)) != null,
+    );
+    if (decision.resume) {
+      setWizardOpen(true);
+      return;
     }
-    sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    // Nessuna ripresa: il draft residuo è stantio e non deve sovrascrivere
+    // le configurazioni già salvate alla prossima apertura manuale.
+    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(wizardDraftKey(wizardPortfolioKey));
+  }, [wizardPortfolioKey]);
+
+  // Navigazione SPA via dalla pagina: il wizard non deve riaprirsi al ritorno.
+  // Su un reload vero React non esegue i cleanup, quindi il marker sopravvive
+  // e la ripresa continua a funzionare.
+  useEffect(() => () => {
+    if (activeKeyRef.current) sessionStorage.removeItem(activeKeyRef.current);
   }, []);
   const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const reconciliationCheckedRef = useRef(false);
@@ -344,8 +374,6 @@ export function Derivatives() {
     positions.filter(p => p.asset_type === 'stock'),
     [positions]
   );
-
-  const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
 
   // Early return for global aggregate - page is hidden
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
