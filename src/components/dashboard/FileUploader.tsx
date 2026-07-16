@@ -7,7 +7,7 @@ import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel, type PortfolioParseOptions } from '@/lib/excelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
 import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
-import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions } from '@/lib/costBasisStore';
+import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions, fetchDynamicAliases } from '@/lib/costBasisStore';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -232,10 +232,11 @@ export function FileUploader() {
       // 2. Applica lo store alle posizioni senza PMC (flussi CSV): i saldi
       //    banca non includono più il prezzo di carico.
       try {
-        const { synced } = await syncCostBasisStoreFromPositions(targetPortfolioId, positions);
+        const dynamicAliases = await fetchDynamicAliases();
+        const { synced } = await syncCostBasisStoreFromPositions(targetPortfolioId, positions, dynamicAliases);
         if (synced > 0) console.log(`[CostBasis] store sincronizzato da Excel: ${synced} titoli`);
         const store = await fetchCostBasisStore(targetPortfolioId);
-        const { applied } = applyCostBasisToPositions(positions, store);
+        const { applied } = applyCostBasisToPositions(positions, store, dynamicAliases);
         if (applied > 0) console.log(`[CostBasis] PMC applicato a ${applied} posizioni dallo store`);
 
         // Flussi CSV senza store: le posizioni restano senza PMC e nessuno lo

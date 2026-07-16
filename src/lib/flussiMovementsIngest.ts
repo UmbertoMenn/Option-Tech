@@ -18,6 +18,7 @@ import { FlussiCashMovement, FlussiTitoliOptionTrade, FlussiTitoliStockTrade, bu
 import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
 import { applyStockTradesToBasis, applyOptionTradesToBasis, detectEarlyAssignments, optionBasisKey, CostBasisEntry, EarlyAssignment, PutPositionLite } from '@/lib/costBasis';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
+import { fetchDynamicAliases } from '@/lib/costBasisStore';
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
@@ -296,11 +297,15 @@ export async function ingestStockTradesCostBasis(
   }
 
   // Chiavi di risoluzione: ISIN quando disponibile (deterministico), altrimenti
-  // chiave canonica del ticker via resolver (mai alias hardcoded).
+  // chiave canonica del ticker via resolver, SEMPRE con gli alias dinamici da
+  // underlying_mappings (la mappa statica non copre tutti i sottostanti: senza
+  // alias si ripiega su NAME:<descrizione> e la chiave non combacia più con
+  // quella prodotta dal caricamento Excel).
+  const dynamicAliases = await fetchDynamicAliases();
   const stockKey = (t: FlussiTitoliStockTrade): string =>
-    t.isin ? t.isin.toUpperCase() : getCanonicalTickerKey({ description: t.description });
+    t.isin ? t.isin.toUpperCase() : getCanonicalTickerKey({ description: t.description }, { dynamicAliases });
   const optionKey = (underlyingTicker: string): string =>
-    getCanonicalTickerKey({ rawTicker: underlyingTicker });
+    getCanonicalTickerKey({ rawTicker: underlyingTicker }, { dynamicAliases });
   const optionTradeKey = (t: FlussiTitoliOptionTrade): string =>
     optionBasisKey(optionKey(t.underlyingTicker), t.optionType, t.strike, t.expiryDate);
 
@@ -355,7 +360,7 @@ export async function ingestStockTradesCostBasis(
     rows
       .filter(p => p.asset_type === 'derivative' && p.option_type === 'put' && p.quantity < 0 && p.strike_price && p.expiry_date)
       .map(p => ({
-        underlyingKey: getCanonicalTickerKey({ rawTicker: p.ticker, underlyingName: p.underlying, description: p.description }),
+        underlyingKey: getCanonicalTickerKey({ rawTicker: p.ticker, underlyingName: p.underlying, description: p.description }, { dynamicAliases }),
         strike: Number(p.strike_price),
         expiryDate: String(p.expiry_date),
         shortContracts: Math.abs(Number(p.quantity)),
@@ -410,7 +415,7 @@ export async function ingestStockTradesCostBasis(
     .in('asset_type', ['stock', 'etf']);
   const preExistingQuantities = new Map<string, number>();
   for (const p of (preStockPositions || []) as unknown as { isin: string | null; ticker: string | null; description: string | null; quantity: number }[]) {
-    const k = p.isin ? p.isin.toUpperCase() : getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description });
+    const k = p.isin ? p.isin.toUpperCase() : getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description }, { dynamicAliases });
     preExistingQuantities.set(k, (preExistingQuantities.get(k) || 0) + Number(p.quantity || 0));
   }
 

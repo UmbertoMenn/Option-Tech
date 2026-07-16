@@ -18,7 +18,7 @@ import { Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { parsePortfolioExcel } from '@/lib/excelParser';
-import { syncCostBasisStoreFromPositions, fetchCostBasisStore, positionBasisKey, derivativeBasisKey } from '@/lib/costBasisStore';
+import { syncCostBasisStoreFromPositions, fetchCostBasisStore, positionBasisKey, derivativeBasisKey, fetchDynamicAliases } from '@/lib/costBasisStore';
 import { supabase } from '@/integrations/supabase/client';
 import { Position } from '@/types/portfolio';
 
@@ -52,7 +52,8 @@ export function PmcUploadDialog({
       }
 
       // 1. Sincronizza lo store (fonte 'excel')
-      const { synced } = await syncCostBasisStoreFromPositions(portfolioId, parsed.positions);
+      const dynamicAliases = await fetchDynamicAliases();
+      const { synced } = await syncCostBasisStoreFromPositions(portfolioId, parsed.positions, dynamicAliases);
 
       // 2. Applica subito alle posizioni correnti in DB (stessa chiave: ISIN
       //    /ticker canonico per azioni-ETF, sottostante+tipo+strike+scadenza
@@ -66,7 +67,7 @@ export function PmcUploadDialog({
 
       let updated = 0;
       for (const pos of (current || []) as unknown as Pick<Position, 'id' | 'isin' | 'ticker' | 'description' | 'asset_type' | 'quantity' | 'current_price' | 'underlying' | 'option_type' | 'strike_price' | 'expiry_date'>[]) {
-        const key = pos.asset_type === 'derivative' ? derivativeBasisKey(pos) : positionBasisKey(pos);
+        const key = pos.asset_type === 'derivative' ? derivativeBasisKey(pos, dynamicAliases) : positionBasisKey(pos, dynamicAliases);
         if (!key) continue;
         const row = store.get(key);
         if (!row || !(row.pmc > 0)) continue;

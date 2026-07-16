@@ -9,22 +9,48 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
-import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
+import { getCanonicalTickerKey, buildDynamicAliasMap } from '@/lib/tickerIdentity';
 import { optionBasisKey } from '@/lib/costBasis';
 import { ParsedPosition } from '@/lib/flussiCsvParser';
 
 const PMC_ASSET_TYPES = new Set(['stock', 'etf']);
 
-export function positionBasisKey(p: Pick<ParsedPosition, 'isin' | 'ticker' | 'description'>): string {
-  return p.isin ? p.isin.toUpperCase() : getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description });
+/**
+ * Alias dinamici da `underlying_mappings`. SEMPRE da passare al resolver: la
+ * mappa statica di tickerIdentity copre solo una parte dei sottostanti (UBER,
+ * MRVL, RKLB… non ci sono). Senza alias il resolver ripiega sulla chiave
+ * `NAME:<descrizione>`, che cambia con la descrizione della banca e non
+ * combacia con la chiave prodotta dai movimenti: il PMC finisce su due righe
+ * distinte e non viene mai aggiornato.
+ */
+export async function fetchDynamicAliases(): Promise<Map<string, string>> {
+  const { data, error } = await supabase.from('underlying_mappings').select('underlying, ticker');
+  if (error) {
+    console.error('[CostBasis] lettura underlying_mappings fallita:', error.message);
+    return new Map();
+  }
+  return buildDynamicAliasMap((data || []) as { underlying: string; ticker: string }[]);
+}
+
+export function positionBasisKey(
+  p: Pick<ParsedPosition, 'isin' | 'ticker' | 'description'>,
+  dynamicAliases?: Map<string, string>,
+): string {
+  return p.isin
+    ? p.isin.toUpperCase()
+    : getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description }, { dynamicAliases });
 }
 
 /** Chiave OPT per una posizione derivata (null se mancano i campi opzione). */
 export function derivativeBasisKey(
   p: Pick<ParsedPosition, 'underlying' | 'ticker' | 'description' | 'option_type' | 'strike_price' | 'expiry_date'>,
+  dynamicAliases?: Map<string, string>,
 ): string | null {
   if (!p.option_type || p.strike_price == null || !p.expiry_date) return null;
-  const uKey = getCanonicalTickerKey({ rawTicker: p.underlying || p.ticker, description: p.description });
+  const uKey = getCanonicalTickerKey(
+    { rawTicker: p.underlying || p.ticker, underlyingName: p.underlying, description: p.description },
+    { dynamicAliases },
+  );
   return optionBasisKey(uKey, p.option_type, Number(p.strike_price), String(p.expiry_date));
 }
 
@@ -61,13 +87,14 @@ export async function fetchCostBasisStore(portfolioId: string): Promise<Map<stri
 export function applyCostBasisToPositions(
   positions: ParsedPosition[],
   store: Map<string, CostBasisStoreRow>,
+  dynamicAliases?: Map<string, string>,
 ): { applied: number } {
   let applied = 0;
   for (const p of positions) {
     if (p.avg_cost != null) continue; // il file (Excel) ha già il PMC: vince
 
     if (PMC_ASSET_TYPES.has(p.asset_type)) {
-      const row = store.get(positionBasisKey(p));
+      const row = store.get(positionBasisKey(p, dynamicAliases));
       if (!row || !(row.pmc > 0)) continue;
       p.avg_cost = row.pmc;
       if (p.current_price != null && p.quantity) {
@@ -79,7 +106,7 @@ export function applyCostBasisToPositions(
     }
 
     if (p.asset_type === 'derivative') {
-      const key = derivativeBasisKey(p);
+      const key = derivativeBasisKey(p, dynamicAliases);
       if (!key) continue;
       const row = store.get(key);
       if (!row || !(row.pmc > 0)) continue;
@@ -106,6 +133,7 @@ export function applyCostBasisToPositions(
 export async function syncCostBasisStoreFromPositions(
   portfolioId: string,
   positions: Pick<ParsedPosition, 'isin' | 'ticker' | 'description' | 'asset_type' | 'avg_cost' | 'quantity' | 'currency' | 'underlying' | 'option_type' | 'strike_price' | 'expiry_date'>[],
+  dynamicAliases?: Map<string, string>,
 ): Promise<{ synced: number }> {
   const rows: {
     portfolio_id: string; basis_key: string; isin: string | null; description: string | null;
@@ -115,9 +143,9 @@ export async function syncCostBasisStoreFromPositions(
     if (p.avg_cost == null || !(p.avg_cost > 0)) continue;
     let key: string | null = null;
     if (PMC_ASSET_TYPES.has(p.asset_type)) {
-      key = positionBasisKey(p);
+      key = positionBasisKey(p, dynamicAliases);
     } else if (p.asset_type === 'derivative') {
-      key = derivativeBasisKey(p);
+      key = derivativeBasisKey(p, dynamicAliases);
     }
     if (!key) continue;
     rows.push({
