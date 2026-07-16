@@ -410,6 +410,32 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     expect(amd.position_signatures[0].quantity_abs).toBe(2);
   });
 
+  it('REGRESSIONE: sottostante nuovo con DUE put vendute (strike/scadenza diversi) → DUE naked_put', () => {
+    // Stessa strategia se e solo se stessa identica opzione: mai un'unica
+    // config con due firme per opzioni diverse.
+    const positions = [
+      makeOption({ underlying: 'CRDO', option_type: 'put', strike_price: 180, expiry_date: '2028-01-21', quantity: -1 }),
+      makeOption({ underlying: 'CRDO', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: -2 }),
+    ];
+    const res = run([], positions);
+    const nps = res.resolvedConfigs!.filter(c => c.strategy_type === 'naked_put');
+    expect(nps).toHaveLength(2);
+    expect(nps.every(c => c.position_signatures.length === 1)).toBe(true);
+    const strikes = nps.map(c => c.position_signatures[0].strike).sort((a, b) => a - b);
+    expect(strikes).toEqual([180, 220]);
+  });
+
+  it('sottostante nuovo con due call comprate diverse → due leap_call', () => {
+    const positions = [
+      makeOption({ underlying: 'ADBE', option_type: 'call', strike_price: 600, expiry_date: '2027-12-17', quantity: 1 }),
+      makeOption({ underlying: 'ADBE', option_type: 'call', strike_price: 500, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+    const res = run([], positions);
+    const lcs = res.resolvedConfigs!.filter(c => c.strategy_type === 'leap_call');
+    expect(lcs).toHaveLength(2);
+    expect(lcs.every(c => c.position_signatures.length === 1)).toBe(true);
+  });
+
   it('sottostante nuovo con long call (es. IREN/APLD del file reale) → leap_call automatica', () => {
     const configs: StrategyConfiguration[] = [
       makeConfig({

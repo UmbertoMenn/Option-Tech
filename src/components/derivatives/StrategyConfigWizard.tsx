@@ -294,6 +294,16 @@ function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): stri
   );
 }
 
+/**
+ * Identità di una SINGOLA opzione: sottostante canonico + tipo + strike +
+ * scadenza. Due posizioni appartengono alla stessa strategia mono-gamba
+ * (naked_put, leap_call) se e solo se sono la stessa identica opzione.
+ */
+function optionIdentityKey(p: Position, dynamicAliases: DynamicAliases): string {
+  const u = canonicalKeyForPosition(p, dynamicAliases);
+  return `${u}|${(p.option_type || '?').toUpperCase()}|${p.strike_price ?? '?'}|${p.expiry_date ?? '?'}`;
+}
+
 function getUnderlyingKey(p: Position, _allDerivatives: Position[], dynamicAliases?: DynamicAliases): string {
   return canonicalKeyForPosition(p, dynamicAliases);
 }
@@ -375,26 +385,30 @@ export function autoClassify(
     if (legs.length > 0) { consume(legs); strategies.push(make(legs, 'double_diagonal')); }
   }
 
-  // Naked Puts
-  const npByUnderlying = new Map<string, Position[]>();
+  // Naked Puts — una strategia per OPZIONE IDENTICA (sottostante+tipo+strike+
+  // scadenza). Raggruppare per solo sottostante metteva P/180 GEN e P/220 SET
+  // sotto la stessa naked_put: strategie diverse, e diverso da come le crea il
+  // riconciliatore (una config per firma).
+  const npByOption = new Map<string, Position[]>();
   for (const np of result.nakedPuts) {
-    const key = canonicalKeyForPosition(np.option, dynamicAliases);
-    if (!npByUnderlying.has(key)) npByUnderlying.set(key, []);
-    npByUnderlying.get(key)!.push(np.option);
+    const key = optionIdentityKey(np.option, dynamicAliases);
+    if (!npByOption.has(key)) npByOption.set(key, []);
+    npByOption.get(key)!.push(np.option);
   }
-  for (const [, positions] of npByUnderlying) {
+  for (const [, positions] of npByOption) {
     const unique = addUnique(positions);
     if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'naked_put')); }
   }
 
   // Leap Calls
-  const lcByUnderlying = new Map<string, Position[]>();
+  // Leap Calls — stessa regola delle naked put: una strategia per opzione identica.
+  const lcByOption = new Map<string, Position[]>();
   for (const lc of result.leapCalls) {
-    const key = canonicalKeyForPosition(lc.option, dynamicAliases);
-    if (!lcByUnderlying.has(key)) lcByUnderlying.set(key, []);
-    lcByUnderlying.get(key)!.push(lc.option);
+    const key = optionIdentityKey(lc.option, dynamicAliases);
+    if (!lcByOption.has(key)) lcByOption.set(key, []);
+    lcByOption.get(key)!.push(lc.option);
   }
-  for (const [, positions] of lcByUnderlying) {
+  for (const [, positions] of lcByOption) {
     const unique = addUnique(positions);
     if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'leap_call')); }
   }

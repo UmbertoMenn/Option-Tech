@@ -121,6 +121,34 @@ describe('autoClassify', () => {
     expect(strategies[0].positions).toContainEqual(expect.objectContaining({ id: put.id }));
   });
 
+  it('REGRESSIONE: due naked put stesso sottostante ma strike/scadenza diversi → DUE strategie', () => {
+    // Stessa strategia se e solo se stessa identica opzione: P/180 GEN/28 e
+    // P/220 SET/26 su CRDO sono due naked put distinte, mai un'unica config.
+    const p1 = makeOption({ underlying: 'CRDO', option_type: 'put', strike_price: 180, expiry_date: '2028-01-21', quantity: -1 });
+    const p2 = makeOption({ underlying: 'CRDO', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: -2 });
+    const strategies = autoClassify([p1, p2], [p1, p2]);
+    const np = strategies.filter(s => s.strategyType === 'naked_put');
+    expect(np).toHaveLength(2);
+    expect(np.every(s => s.positions.length === 1)).toBe(true);
+  });
+
+  it('due righe della STESSA identica opzione → una sola strategia', () => {
+    const a = makeOption({ underlying: 'MU', option_type: 'put', strike_price: 80, expiry_date: '2026-06-20', quantity: -1 });
+    const b = makeOption({ underlying: 'MU', option_type: 'put', strike_price: 80, expiry_date: '2026-06-20', quantity: -2 });
+    const strategies = autoClassify([a, b], [a, b]);
+    const np = strategies.filter(s => s.strategyType === 'naked_put');
+    expect(np).toHaveLength(1);
+    expect(np[0].positions).toHaveLength(2);
+  });
+
+  it('due leap call con scadenze diverse → due strategie', () => {
+    const c1 = makeOption({ underlying: 'ADBE', option_type: 'call', strike_price: 600, expiry_date: '2027-12-17', quantity: 1 });
+    const c2 = makeOption({ underlying: 'ADBE', option_type: 'call', strike_price: 500, expiry_date: '2026-12-18', quantity: 1 });
+    const strategies = autoClassify([c1, c2], [c1, c2]);
+    const lc = strategies.filter(s => s.strategyType === 'leap_call');
+    expect(lc).toHaveLength(2);
+  });
+
   it('classifies a covered call (short call + stock)', () => {
     const stock = makeStock({ description: 'AAPL', quantity: 100 });
     const call = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });

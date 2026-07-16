@@ -33,7 +33,8 @@
  *        spread 1:1 per quantità (put_spread/call_spread, varianti
  *        diagonal se scadenze diverse). Residui alle regole per-gamba
  *        (es. 2V+1C → spread 1+1, la V residua diventa naked put).
- *     c. Put VENDUTA residua → SEMPRE nuova config naked_put separata
+ *     c. Put VENDUTA residua → SEMPRE nuova config naked_put separata,
+ *        UNA PER OPZIONE (stessa strategia ⇔ stessa identica opzione)
  *        (mai accodata a naked put/spread esistenti; le put vendute
  *        residue dello stesso run confluiscono in una sola nuova config).
  *     d. Put COMPRATA residua → covered_call esistente → append + la
@@ -560,11 +561,12 @@ export function autoReconcileStrategies(
         // put comprata (→ de-risking) nello stesso run.
         const remaining = leftovers.filter(l => l.qty > 0);
 
-        // 3c: put vendute residue → UNA nuova naked_put per run
+        // 3c: put vendute residue → una naked_put PER OPZIONE (strike/scadenza
+        // diversi = strategie diverse; mai accorpate in un'unica config)
         const soldPuts = remaining.filter(l => l.optionType === 'put' && l.quantitySign === -1);
-        if (soldPuts.length > 0) {
-          createConfig('naked_put', soldPuts.map(l => legToSig(l)));
-          soldPuts.forEach(l => { l.qty = 0; });
+        for (const l of soldPuts) {
+          createConfig('naked_put', [legToSig(l)]);
+          l.qty = 0;
         }
 
         // 3e: call vendute residue
@@ -621,11 +623,11 @@ export function autoReconcileStrategies(
           l.qty = 0;
         }
 
-        // 3f: call comprate residue → UNA nuova leap_call per run
+        // 3f: call comprate residue → una leap_call PER OPZIONE (come le naked put)
         const boughtCalls = remaining.filter(l => l.optionType === 'call' && l.quantitySign === 1 && l.qty > 0);
-        if (boughtCalls.length > 0) {
-          createConfig('leap_call', boughtCalls.map(l => legToSig(l)));
-          boughtCalls.forEach(l => { l.qty = 0; });
+        for (const l of boughtCalls) {
+          createConfig('leap_call', [legToSig(l)]);
+          l.qty = 0;
         }
       }
     }
