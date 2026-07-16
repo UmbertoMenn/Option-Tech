@@ -459,14 +459,27 @@ export function autoClassify(
 let nextId = 0;
 function genId() { return `ws-${Date.now()}-${nextId++}`; }
 
-/** Converts WizardStrategy[] to UpsertConfigParams[] (pure, no React state). */
-export function buildConfigsFromStrategies(strategies: WizardStrategy[]): UpsertConfigParams[] {
+/** Converts WizardStrategy[] to UpsertConfigParams[] (pure, no React state).
+ *  `underlying` è sempre il ticker canonico (via `tickerIdentity`), non il
+ *  raw dell'opzione: così ADBE, "ADOBE INC" e US00724F1012 finiscono uguali.
+ */
+export function buildConfigsFromStrategies(
+  strategies: WizardStrategy[],
+  dynamicAliases?: DynamicAliases,
+): UpsertConfigParams[] {
   return strategies.map((strategy, i) => {
-    const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
-    const underlying = derivPos
-      ? (derivPos.underlying || derivPos.description || 'Unknown')
-      : (getCanonicalKey(strategy.positions[0]?.description || '') || strategy.positions[0]?.description || 'Unknown');
+    // Preferisci l'azione collegata (linked_stock) come fonte di identità: è
+    // il segnale più forte (ha ticker + ISIN). In assenza, deriva dal derivato.
     const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+    const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+    let underlying: string;
+    if (stockPositions[0]) {
+      underlying = canonicalKeyForPosition(stockPositions[0], dynamicAliases);
+    } else if (derivPos) {
+      underlying = canonicalKeyForPosition(derivPos, dynamicAliases);
+    } else {
+      underlying = strategy.positions[0]?.description || 'Unknown';
+    }
     const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
     return {
       underlying,
@@ -492,10 +505,16 @@ function sigsEqual(a: PositionSignature[], b: PositionSignature[]): boolean {
   return true;
 }
 
-/** Return true when `raw` config matches any of the auto-classified configs. */
-function matchesAutoClassify(raw: UpsertConfigParams, autoConfigs: UpsertConfigParams[]): boolean {
+/** Return true when `raw` config matches any of the auto-classified configs.
+ *  Confronto in chiave canonica: "ADBE" vs "Adobe Inc" devono corrispondere. */
+function matchesAutoClassify(
+  raw: UpsertConfigParams,
+  autoConfigs: UpsertConfigParams[],
+  dynamicAliases?: DynamicAliases,
+): boolean {
+  const rawKey = canonicalKeyForText(raw.underlying, dynamicAliases);
   return autoConfigs.some(ac =>
-    normalizeForMatching(ac.underlying) === normalizeForMatching(raw.underlying) &&
+    canonicalKeyForText(ac.underlying, dynamicAliases) === rawKey &&
     ac.strategy_type === raw.strategy_type &&
     sigsEqual(ac.position_signatures, raw.position_signatures),
   );
