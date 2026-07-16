@@ -107,4 +107,31 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(r.tickerKey).toBe('SBNC');
     expect(r.source).toBe('alias_map');
   });
+
+  it('ADBE: ticker, nome esteso e ISIN convergono su ADBE', () => {
+    expect(resolveUnderlyingIdentity({ rawTicker: 'ADBE' }).tickerKey).toBe('ADBE');
+    expect(resolveUnderlyingIdentity({ rawName: 'ADOBE INC' }).tickerKey).toBe('ADBE');
+    expect(resolveUnderlyingIdentity({ rawName: 'Adobe Systems Inc' }).tickerKey).toBe('ADBE');
+    expect(resolveUnderlyingIdentity({ isin: 'US00724F1012' }).tickerKey).toBe('ADBE');
+    // ISIN vince anche su rawTicker sconosciuto
+    expect(resolveUnderlyingIdentity({ rawTicker: 'XXX', isin: 'US00724F1012' }).tickerKey).toBe('ADBE');
+  });
+
+  it('CRDO: ticker, nome breve, nome esteso e ISIN convergono su CRDO', () => {
+    expect(resolveUnderlyingIdentity({ rawTicker: 'CRDO' }).tickerKey).toBe('CRDO');
+    expect(resolveUnderlyingIdentity({ rawName: 'CREDO TECHNOLOGY GRP' }).tickerKey).toBe('CRDO');
+    expect(resolveUnderlyingIdentity({ rawName: 'Credo Technology Group Holding Ltd' }).tickerKey).toBe('CRDO');
+    expect(resolveUnderlyingIdentity({ underlyingName: 'CREDO' }).tickerKey).toBe('CRDO');
+    expect(resolveUnderlyingIdentity({ isin: 'KYG254571055' }).tickerKey).toBe('CRDO');
+  });
+
+  it('MBG: DAI, Daimler, Mercedes-Benz Group e ISIN convergono su MBG', () => {
+    expect(resolveUnderlyingIdentity({ rawTicker: 'MBG' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'DAI' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'DAI.DE' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ rawName: 'DAIMLER AG' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ rawName: 'MERCEDES-BENZ GROUP AG' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ underlyingName: 'DAI' }).tickerKey).toBe('MBG');
+    expect(resolveUnderlyingIdentity({ isin: 'DE0007100000' }).tickerKey).toBe('MBG');
+  });
 });
