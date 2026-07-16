@@ -86,10 +86,48 @@ export async function ingestCashMovements(
 export interface TitoliIngestResult {
   buybacksUpserted: number;
   resellsApplied: number;
+  warnings: string[];
 }
 
-/** Applica una rivendita ai riacquisti aperti dello stesso descrittore (FIFO per data). */
-async function applyResell(portfolioId: string, resell: CallResell): Promise<number> {
+/**
+ * Applica una rivendita ai riacquisti aperti dello stesso descrittore (FIFO per data).
+ *
+ * Idempotente: la rivendita viene prima registrata nel ledger
+ * `call_resell_ledger` con chiave naturale univoca. Se era già stata applicata
+ * da un upload precedente (file sovrapposti o ricaricati) non viene riapplicata.
+ * Senza questo controllo una rivendita PARZIALE veniva scalata due volte,
+ * riducendo la quantità aperta oltre il dovuto.
+ */
+async function applyResell(
+  portfolioId: string,
+  resell: CallResell,
+): Promise<{ applied: number; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  // Ledger: se la riga esiste già, questa rivendita è stata applicata prima.
+  const { data: ledgerInserted, error: ledgerErr } = await supabase
+    .from('call_resell_ledger' as never)
+    .upsert(
+      [{
+        portfolio_id: portfolioId,
+        descriptor: resell.descriptor,
+        resell_date: resell.resell_date,
+        quantity: resell.quantity,
+        resell_price: resell.resell_price,
+      }] as never[],
+      { onConflict: 'portfolio_id,descriptor,resell_date,quantity,resell_price', ignoreDuplicates: true },
+    )
+    .select('id');
+  if (ledgerErr) {
+    console.error('[flussiIngest] ledger rivendite fallito:', ledgerErr.message);
+    return { applied: 0, warnings };
+  }
+  if (!ledgerInserted || ledgerInserted.length === 0) {
+    // Già applicata in un upload precedente.
+    return { applied: 0, warnings };
+  }
+  const ledgerId = (ledgerInserted as unknown as { id: string }[])[0].id;
+
   const { data: open, error } = await supabase
     .from('call_buybacks' as never)
     .select('id, quantity, resold_quantity, manually_edited')
@@ -99,16 +137,22 @@ async function applyResell(portfolioId: string, resell: CallResell): Promise<num
     .order('buyback_date', { ascending: true });
   if (error) {
     console.error('[flussiIngest] lettura buyback aperti fallita:', error.message);
-    return 0;
+    return { applied: 0, warnings };
   }
 
   let remaining = resell.quantity;
   let applied = 0;
   for (const row of (open || []) as unknown as { id: string; quantity: number; resold_quantity: number; manually_edited?: boolean }[]) {
     if (remaining <= 0) break;
-    // Le righe corrette a mano non vengono toccate dal CSV: il titolare le
-    // gestisce manualmente (incluso ridurre la quantità dopo una rivendita).
-    if (row.manually_edited) continue;
+    // Riga corretta a mano: è il lotto FIFO di competenza, ma il titolare la
+    // gestisce da sé. Ci si ferma qui invece di far scivolare la rivendita sul
+    // lotto successivo, che verrebbe scalato al posto di quello giusto.
+    if (row.manually_edited) {
+      warnings.push(
+        `Rivendita di ${remaining} ${resell.descriptor} non applicata: il riacquisto più vecchio è stato modificato a mano. Aggiorna la quantità manualmente.`,
+      );
+      break;
+    }
     const take = Math.min(row.quantity, remaining);
     const { error: updErr } = await supabase
       .from('call_buybacks' as never)
@@ -126,14 +170,23 @@ async function applyResell(portfolioId: string, resell: CallResell): Promise<num
     remaining -= take;
     applied += take;
   }
-  return applied;
+
+  // Traccia quanto è stato effettivamente scalato: se resta scoperto (nessun
+  // riacquisto aperto o riga manuale), il ledger lo registra e la rivendita
+  // non viene comunque ritentata al prossimo upload dello stesso file.
+  await supabase
+    .from('call_resell_ledger' as never)
+    .update({ applied_quantity: applied } as never)
+    .eq('id', ledgerId);
+
+  return { applied, warnings };
 }
 
 export async function ingestTitoliTrades(
   portfolioId: string,
   trades: FlussiTitoliOptionTrade[],
 ): Promise<TitoliIngestResult> {
-  if (trades.length === 0) return { buybacksUpserted: 0, resellsApplied: 0 };
+  if (trades.length === 0) return { buybacksUpserted: 0, resellsApplied: 0, warnings: [] };
 
   // Stato corrente (PRE-aggiornamento posizioni): serve a distinguere i
   // riacquisti dalle aperture long. Le call vendute vengono cercate sia
@@ -155,33 +208,43 @@ export async function ingestTitoliTrades(
     // canoniche: strike/scadenza/quantità/prezzo di riacquisto non vengono più
     // toccati dal CSV. Vengono sovrascritte solo le righe ancora "automatiche".
     // Chiave di conflitto: (portfolio_id, descriptor, buyback_date).
-    const { data: existingManual, error: manualErr } = await supabase
+    const { data: existingRows, error: manualErr } = await supabase
       .from('call_buybacks' as never)
-      .select('descriptor, buyback_date, manually_edited')
-      .eq('portfolio_id', portfolioId)
-      .eq('manually_edited', true);
+      .select('descriptor, buyback_date, resold_quantity, manually_edited')
+      .eq('portfolio_id', portfolioId);
     if (manualErr) {
-      console.error('[flussiIngest] lettura buyback manuali fallita:', manualErr.message);
+      console.error('[flussiIngest] lettura buyback esistenti fallita:', manualErr.message);
     }
-    const manualKeys = new Set(
-      ((existingManual || []) as unknown as { descriptor: string; buyback_date: string }[])
-        .map(r => `${r.descriptor}|${r.buyback_date}`),
-    );
+    const existingByKey = new Map<string, { resold_quantity: number; manually_edited: boolean }>();
+    for (const r of (existingRows || []) as unknown as { descriptor: string; buyback_date: string; resold_quantity: number | null; manually_edited: boolean }[]) {
+      existingByKey.set(`${r.descriptor}|${r.buyback_date}`, {
+        resold_quantity: Number(r.resold_quantity || 0),
+        manually_edited: !!r.manually_edited,
+      });
+    }
 
     const rows = buybacks
-      .filter(b => !manualKeys.has(`${b.descriptor}|${b.buyback_date}`))
-      .map(b => ({
-        portfolio_id: portfolioId,
-        underlying: b.underlying,
-        descriptor: b.descriptor,
-        strike: b.strike,
-        expiry_date: b.expiry_date,
-        quantity: b.quantity,
-        buyback_price: b.buyback_price,
-        currency: b.currency,
-        exchange_rate: b.exchange_rate,
-        buyback_date: b.buyback_date,
-      }));
+      .filter(b => !existingByKey.get(`${b.descriptor}|${b.buyback_date}`)?.manually_edited)
+      .map(b => {
+        // Il CSV riporta la quantità ORIGINARIA del riacquisto. Se una parte è
+        // già stata rivenduta, riscriverla tale e quale resusciterebbe i
+        // contratti chiusi ad ogni ricaricamento del file: si scala il
+        // rivenduto già registrato.
+        const prev = existingByKey.get(`${b.descriptor}|${b.buyback_date}`);
+        const resold = prev?.resold_quantity ?? 0;
+        return {
+          portfolio_id: portfolioId,
+          underlying: b.underlying,
+          descriptor: b.descriptor,
+          strike: b.strike,
+          expiry_date: b.expiry_date,
+          quantity: Math.max(0, b.quantity - resold),
+          buyback_price: b.buyback_price,
+          currency: b.currency,
+          exchange_rate: b.exchange_rate,
+          buyback_date: b.buyback_date,
+        };
+      });
     if (rows.length > 0) {
       const { error } = await supabase
         .from('call_buybacks' as never)
@@ -192,11 +255,14 @@ export async function ingestTitoliTrades(
   }
 
   let resellsApplied = 0;
+  const warnings: string[] = [];
   for (const r of resells) {
-    resellsApplied += await applyResell(portfolioId, r);
+    const res = await applyResell(portfolioId, r);
+    resellsApplied += res.applied;
+    warnings.push(...res.warnings);
   }
 
-  return { buybacksUpserted, resellsApplied };
+  return { buybacksUpserted, resellsApplied, warnings };
 }
 
 export interface CostBasisIngestResult {
@@ -334,8 +400,37 @@ export async function ingestStockTradesCostBasis(
     currency: r.currency,
   }));
 
-  const result = applyStockTradesToBasis(existing, freshTrades, assignments, stockKey);
+  // Quantità già in portafoglio PRIMA dell'upload: distingue un titolo nuovo
+  // (ACQ può creare il PMC) da uno già posseduto senza PMC di partenza (ACQ
+  // NON deve inventare una baseline sul solo lotto nuovo).
+  const { data: preStockPositions } = await supabase
+    .from('positions')
+    .select('isin, ticker, description, quantity, asset_type')
+    .eq('portfolio_id', portfolioId)
+    .in('asset_type', ['stock', 'etf']);
+  const preExistingQuantities = new Map<string, number>();
+  for (const p of (preStockPositions || []) as unknown as { isin: string | null; ticker: string | null; description: string | null; quantity: number }[]) {
+    const k = p.isin ? p.isin.toUpperCase() : getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description });
+    preExistingQuantities.set(k, (preExistingQuantities.get(k) || 0) + Number(p.quantity || 0));
+  }
+
+  const result = applyStockTradesToBasis(existing, freshTrades, assignments, stockKey, preExistingQuantities);
   for (const w of result.warnings) console.warn('[CostBasis]', w);
+
+  // I trade saltati per mancanza di PMC di partenza NON sono stati applicati:
+  // vanno tolti dal ledger, altrimenti dopo il caricamento del PMC da Excel
+  // verrebbero considerati già assorbiti e persi per sempre.
+  for (const t of result.skippedNoBaseline) {
+    await supabase
+      .from('cost_basis_trades' as never)
+      .delete()
+      .eq('portfolio_id', portfolioId)
+      .eq('basis_key', stockKey(t))
+      .eq('trade_date', t.tradeDate)
+      .eq('side', t.side)
+      .eq('quantity', t.quantity)
+      .eq('price', t.price);
+  }
 
   // ---- PMC opzioni: posizione firmata, media del premio per direzione ----
   const optionResult = applyOptionTradesToBasis(

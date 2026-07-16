@@ -14,6 +14,59 @@ import { FlussiTitoliStockTrade, FlussiTitoliOptionTrade } from '@/lib/flussiCsv
 const stockKey = (t: FlussiTitoliStockTrade) => t.isin.toUpperCase();
 const optionKey = (u: string) => u.toUpperCase();
 
+describe('applyStockTradesToBasis — guardia PMC di partenza mancante', () => {
+  const BABA = 'US01609W1027';
+
+  it('ACQ su titolo GIÀ posseduto senza PMC nello store: non inventa la baseline', () => {
+    const trades = [stock({ side: 'ACQ', quantity: 100, price: 150, tradeDate: '2026-07-02' })];
+    const pre = new Map([[BABA, 200]]); // 200 azioni già in portafoglio
+    const r = applyStockTradesToBasis([], trades, [], stockKey, pre);
+
+    expect(r.entries.get(BABA)).toBeUndefined();
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain('senza PMC di partenza');
+    expect(r.skippedNoBaseline).toHaveLength(1);
+    expect(r.normalTrades).toHaveLength(0);
+  });
+
+  it('ACQ su titolo davvero nuovo: crea la baseline come prima', () => {
+    const trades = [stock({ side: 'ACQ', quantity: 100, price: 150, tradeDate: '2026-07-02' })];
+    const r = applyStockTradesToBasis([], trades, [], stockKey, new Map());
+
+    expect(r.entries.get(BABA)?.pmc).toBe(150);
+    expect(r.entries.get(BABA)?.quantity).toBe(100);
+    expect(r.warnings).toHaveLength(0);
+    expect(r.skippedNoBaseline).toHaveLength(0);
+  });
+
+  it('ACQ su titolo già nello store: media ponderata, nessun warning', () => {
+    const existing: CostBasisEntry[] = [
+      { basisKey: BABA, isin: BABA, description: 'ALIBABA', pmc: 100, quantity: 200, currency: 'USD' },
+    ];
+    const trades = [stock({ side: 'ACQ', quantity: 100, price: 160, tradeDate: '2026-07-02' })];
+    const r = applyStockTradesToBasis(existing, trades, [], stockKey, new Map([[BABA, 200]]));
+
+    // (200×100 + 100×160)/300 = 120
+    expect(r.entries.get(BABA)?.pmc).toBeCloseTo(120, 6);
+    expect(r.entries.get(BABA)?.quantity).toBe(300);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('senza la mappa delle quantità pre-upload il comportamento resta invariato', () => {
+    const trades = [stock({ side: 'ACQ', quantity: 100, price: 150 })];
+    const r = applyStockTradesToBasis([], trades, [], stockKey);
+    expect(r.entries.get(BABA)?.pmc).toBe(150);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('VEN senza PMC tracciato: warning e trade non consumato dal ledger', () => {
+    const trades = [stock({ side: 'VEN', quantity: 50, price: 150 })];
+    const r = applyStockTradesToBasis([], trades, [], stockKey, new Map([[BABA, 200]]));
+    expect(r.warnings[0]).toContain('senza PMC tracciato');
+    expect(r.skippedNoBaseline).toHaveLength(1);
+  });
+});
+
 function stock(partial: Partial<FlussiTitoliStockTrade>): FlussiTitoliStockTrade {
   return {
     accountId: 'ACC1',

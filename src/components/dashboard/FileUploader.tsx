@@ -171,6 +171,9 @@ export function FileUploader() {
           const parts: string[] = [];
           if (res.buybacksUpserted > 0) parts.push(`${res.buybacksUpserted} riacquisti call tracciati`);
           if (res.resellsApplied > 0) parts.push(`${res.resellsApplied} contratti rivenduti applicati`);
+          for (const w of res.warnings) {
+            toast.warning('Call da rivendere', { description: w });
+          }
 
           // PMC: acquisti/vendite titoli aggiornano la media ponderata; le
           // vendite che chiudono lotti assegnati (assegnazione anticipata di
@@ -234,6 +237,19 @@ export function FileUploader() {
         const store = await fetchCostBasisStore(targetPortfolioId);
         const { applied } = applyCostBasisToPositions(positions, store);
         if (applied > 0) console.log(`[CostBasis] PMC applicato a ${applied} posizioni dallo store`);
+
+        // Flussi CSV senza store: le posizioni restano senza PMC e nessuno lo
+        // segnala. Il PMC iniziale va caricato una volta per portafoglio dal
+        // vecchio Excel, altrimenti P&L e prezzo di carico restano vuoti.
+        const needingPmc = positions.filter(
+          p => ['stock', 'etf', 'derivative'].includes(p.asset_type) && p.avg_cost == null,
+        ).length;
+        if (needingPmc > 0 && synced === 0) {
+          toast.warning('PMC iniziale mancante', {
+            description: `${needingPmc} posizioni senza prezzo medio di carico. Carica una volta il vecchio file Excel con "Carica PMC" per questo portafoglio: dai movimenti successivi il PMC si aggiorna da solo.`,
+            duration: 12000,
+          });
+        }
       } catch (pmcErr) {
         console.error('[FileUploader] gestione PMC fallita:', pmcErr);
         toast.warning('PMC non applicati', {

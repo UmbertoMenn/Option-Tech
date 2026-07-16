@@ -35,6 +35,12 @@ export interface AppliedTradeResult {
   assignmentCloses: FlussiTitoliStockTrade[];
   /** Trade normali applicati (acquisti/vendite che toccano il PMC/quantità) */
   normalTrades: FlussiTitoliStockTrade[];
+  /**
+   * Trade NON applicati perché manca il PMC di partenza del titolo. Non vanno
+   * marcati come applicati nel ledger: dopo il caricamento del PMC da Excel
+   * devono poter essere riapplicati.
+   */
+  skippedNoBaseline: FlussiTitoliStockTrade[];
   warnings: string[];
 }
 
@@ -227,12 +233,21 @@ export function applyOptionTradesToBasis(
  * - VEN che chiude un lotto assegnato (assignment_close): nessun effetto su
  *   PMC/quantità del titolo (il lotto invisibile a carico=strike si netta con
  *   la vendita). Le azioni assegnate consumano le vendite in ordine di data.
+ *
+ * `preExistingQuantities` (chiave → quantità già in portafoglio PRIMA
+ * dell'upload) serve a distinguere un titolo davvero nuovo da un titolo già
+ * posseduto ma senza PMC di partenza. Nel secondo caso un ACQ NON può creare
+ * il PMC: la media risulterebbe calcolata sul solo lotto nuovo, ignorando
+ * quello preesistente, con un PMC plausibile ma sbagliato. Meglio nessun PMC
+ * che un PMC errato: si emette un warning e si rimanda al caricamento Excel.
+ * Se la mappa non viene passata, il comportamento resta quello precedente.
  */
 export function applyStockTradesToBasis(
   existing: CostBasisEntry[],
   stockTrades: FlussiTitoliStockTrade[],
   assignments: EarlyAssignment[],
   resolveStockKey: (t: FlussiTitoliStockTrade) => string,
+  preExistingQuantities?: Map<string, number>,
 ): AppliedTradeResult {
   const entries = new Map<string, CostBasisEntry>(
     existing.map(e => [e.basisKey, { ...e }]),
@@ -240,6 +255,7 @@ export function applyStockTradesToBasis(
   const warnings: string[] = [];
   const assignmentCloses: FlussiTitoliStockTrade[] = [];
   const normalTrades: FlussiTitoliStockTrade[] = [];
+  const skippedNoBaseline: FlussiTitoliStockTrade[] = [];
 
   // Azioni "assegnate" ancora da consumare per sottostante
   const assignedSharesLeft = new Map<string, number>();
@@ -256,6 +272,17 @@ export function applyStockTradesToBasis(
     if (t.side === 'ACQ') {
       const unitCost = unitCostWithCommission(t);
       if (!entry || entry.quantity <= 0) {
+        // Titolo già in portafoglio ma assente dallo store: manca il PMC di
+        // partenza. Creare qui la baseline dal solo lotto nuovo darebbe un PMC
+        // sbagliato senza che si veda. Si salta e si avvisa.
+        const held = preExistingQuantities?.get(key) ?? 0;
+        if (held > 0) {
+          warnings.push(
+            `Acquisto di ${t.quantity} ${t.description || t.isin} su una posizione già esistente (${held}) senza PMC di partenza: PMC non calcolato (caricare prima il PMC dal file Excel)`,
+          );
+          skippedNoBaseline.push(t);
+          continue;
+        }
         entries.set(key, {
           basisKey: key,
           isin: t.isin || entry?.isin || null,
@@ -284,6 +311,7 @@ export function applyStockTradesToBasis(
 
     if (!entry || entry.quantity <= 0) {
       warnings.push(`Vendita di ${t.quantity} ${t.description || t.isin} senza PMC tracciato: ignorata (caricare prima il PMC dal file Excel)`);
+      skippedNoBaseline.push(t);
       continue;
     }
     if (t.quantity > entry.quantity) {
@@ -295,5 +323,5 @@ export function applyStockTradesToBasis(
     normalTrades.push(t);
   }
 
-  return { entries, assignmentCloses, normalTrades, warnings };
+  return { entries, assignmentCloses, normalTrades, skippedNoBaseline, warnings };
 }
