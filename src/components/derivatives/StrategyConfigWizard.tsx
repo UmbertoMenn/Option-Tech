@@ -1074,11 +1074,20 @@ export function StrategyConfigWizard({
 
     for (let i = 0; i < strategies.length; i++) {
       const strategy = strategies[i];
-      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
-      const underlying = derivPos
-        ? (derivPos.underlying || derivPos.description || 'Unknown')
-        : (getCanonicalKey(strategy.positions[0]?.description || '') || getCanonicalKey(`${strategy.positions[0]?.description || ''} ${strategy.positions[0]?.ticker || ''}`) || strategy.positions[0]?.description || 'Unknown');
       const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+      // Identità canonica: azione collegata > derivato > fallback. Il campo
+      // `underlying` in DB è la chiave di raggruppamento della strategia,
+      // quindi DEVE essere il ticker canonico (via tickerIdentity), non il
+      // raw dell'opzione o il nome esteso dell'azione.
+      let underlying: string;
+      if (stockPositions[0]) {
+        underlying = canonicalKeyForPosition(stockPositions[0], dynamicAliases);
+      } else if (derivPos) {
+        underlying = canonicalKeyForPosition(derivPos, dynamicAliases);
+      } else {
+        underlying = strategy.positions[0]?.description || 'Unknown';
+      }
       const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
       const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
 
@@ -1097,7 +1106,7 @@ export function StrategyConfigWizard({
     // auto-classification. Strategies that match auto-classify are NOT overrides.
     const configsWithLocked = rawConfigs.map(raw => ({
       ...raw,
-      config_locked: !matchesAutoClassify(raw, autoClassifiedConfigs),
+      config_locked: !matchesAutoClassify(raw, autoClassifiedConfigs, dynamicAliases),
     }));
 
     if (filterUnderlyings) {
