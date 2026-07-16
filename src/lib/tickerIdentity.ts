@@ -217,6 +217,18 @@ const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
   'ENI.MI': 'ENI',
 };
 
+/**
+ * Mapping da ISIN a canonical ticker.
+ * L'ISIN è un identificatore unico e non ambiguo: quando presente, vince su
+ * qualsiasi risoluzione basata su ticker/nome (che possono essere aliases,
+ * abbreviazioni storiche, o nomi tradotti).
+ */
+const ISIN_TO_CANONICAL: Record<string, string> = {
+  US00724F1012: 'ADBE',
+  KYG254571055: 'CRDO',
+  DE0007100000: 'MBG',
+};
+
 // ============================================================================
 // 2. Reverse index for fast alias lookup
 // ============================================================================
