@@ -617,11 +617,11 @@ export function StrategyConfigWizard({
     // Pre-compute underlying key map for O(n) total instead of O(n²)
     const keyMapForGroups = new Map<string, string>();
     for (const p of effectivePositions) {
-      keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups));
+      keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups, dynamicAliases));
     }
 
     for (const p of effectivePositions) {
-      const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups);
+      const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups, dynamicAliases);
       if (!groupMap.has(key)) {
         let display = key;
         if (p.asset_type === 'derivative' && p.underlying) {
