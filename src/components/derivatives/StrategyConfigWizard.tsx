@@ -676,7 +676,7 @@ export function StrategyConfigWizard({
     const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore = new Map<string, string>();
     for (const p of allAvailable) {
-      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore));
+      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore, dynamicAliases));
     }
     const resolveConfigKey = (config: StrategyConfiguration, keyMap: Map<string, string>, positions: Position[]) => {
       const slotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
@@ -686,9 +686,9 @@ export function StrategyConfigWizard({
         (p.id === config.linked_stock_id || (!!baseFromSlot && p.id === baseFromSlot))
       );
       if (linkedStock) {
-        return keyMap.get(linkedStock.id) || getUnderlyingKey(linkedStock, derivsOnlyRestore);
+        return keyMap.get(linkedStock.id) || getUnderlyingKey(linkedStock, derivsOnlyRestore, dynamicAliases);
       }
-      return getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+      return canonicalKeyForText(config.underlying, dynamicAliases);
     };
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
