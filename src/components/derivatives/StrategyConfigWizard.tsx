@@ -770,7 +770,7 @@ export function StrategyConfigWizard({
     const derivsOnlyRestore2 = restorePositions.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore2 = new Map<string, string>();
     for (const p of restorePositions) {
-      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2));
+      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2, dynamicAliases));
     }
 
     for (const config of existingConfigs) {
