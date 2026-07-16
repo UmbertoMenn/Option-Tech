@@ -815,6 +815,7 @@ export function Derivatives() {
                 }
               }}
               onCancelOverride={cancelOverride}
+              dynamicAliases={dynamicAliases}
             />
           </ErrorBoundary>
         )}
