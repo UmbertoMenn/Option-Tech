@@ -529,6 +529,47 @@ export function getCanonicalTickerKey(input: IdentityInput, options?: ResolveOpt
   return resolveUnderlyingIdentity(input, options).tickerKey;
 }
 
+export type DynamicAliases = Map<string, string> | Record<string, string> | undefined;
+
+/**
+ * Canonicalizza qualunque posizione (stock/etf o derivato) in una chiave
+ * sottostante unica. Single source of truth: usata dal wizard di
+ * archiviazione/classificazione E dal motore di monitoraggio, così una
+ * sottostante archiviata risulta tale ovunque con lo stesso identico
+ * criterio (niente più mismatch tipo ADBE/Adobe Inc, CRDO/Credo Technology
+ * GRP, DAI/Mercedes-Benz Group tra un modulo e l'altro).
+ */
+export function canonicalKeyForPosition(p: Position, dynamicAliases: DynamicAliases): string {
+  if (p.asset_type === 'derivative') {
+    return getCanonicalTickerKey(
+      {
+        rawTicker: p.underlying || p.ticker,
+        underlyingName: p.underlying,
+        description: p.description,
+      },
+      { dynamicAliases },
+    );
+  }
+  // stock / etf
+  return getCanonicalTickerKey(
+    {
+      rawTicker: p.ticker,
+      rawName: p.description,
+      description: p.description,
+      isin: p.isin,
+    },
+    { dynamicAliases },
+  );
+}
+
+/** Stessa canonicalizzazione di `canonicalKeyForPosition`, per input testuali liberi (es. una chiave archiviata). */
+export function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, underlyingName: text, description: text },
+    { dynamicAliases },
+  );
+}
+
 /** Display ticker (null when fallback). */
 export function getDisplayTickerForKey(tickerKey: string): string | null {
   if (!tickerKey || tickerKey === 'UNKNOWN') return null;

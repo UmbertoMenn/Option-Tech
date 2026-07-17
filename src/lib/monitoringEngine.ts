@@ -17,6 +17,7 @@ import {
   getCanonicalKey 
 } from './derivativeStrategies';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
+import { canonicalKeyForPosition, canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
 
 // ============ Types ============
 
@@ -189,6 +190,7 @@ export function computeMonitoring(
   underlyingPrices: Record<string, UnderlyingPrice>,
   configs: StrategyConfiguration[],
   archivedKeys?: string[],
+  dynamicAliases?: DynamicAliases,
 ): MonitoringResult {
   return {
     uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, underlyingPrices, categories),
@@ -199,7 +201,7 @@ export function computeMonitoring(
     leapCallsInGain: computeLeapGain(categories, underlyingPrices),
     otherStrategiesOOROOB: computeOtherOOROOB(categories, underlyingPrices),
     incompleteMultiLegStrategies: computeIncompleteMultiLeg(categories, underlyingPrices),
-    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs, archivedKeys, categories),
+    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs, archivedKeys, categories, dynamicAliases),
   };
 }
 
@@ -505,17 +507,23 @@ function computeAvailableCalls(
   configs: StrategyConfiguration[],
   archivedKeys?: string[],
   categories?: DerivativeCategories,
+  dynamicAliases?: DynamicAliases,
 ): MonitoringAvailableCalls[] {
   // Build archived set using resolveKey for proper ticker matching
   const archivedResolved = new Set<string>();
   // Raw archived keys (as stored by the wizard: canonical or normalized)
   const archivedRaw = new Set<string>();
+  // Chiave canonica (stessa risoluzione tickerIdentity usata dal wizard per
+  // archiviare): unica fonte davvero affidabile per il match, perché è
+  // ESATTAMENTE quella con cui la chiave è stata salvata in archived_underlyings.
+  const archivedCanonical = new Set<string>();
   for (const k of (archivedKeys || [])) {
     const trimmed = (k || '').trim();
     if (!trimmed) continue;
     archivedResolved.add(resolveKey(trimmed, underlyingPrices));
     archivedResolved.add(normalizeForMatching(trimmed));
     archivedRaw.add(trimmed.toUpperCase());
+    archivedCanonical.add(canonicalKeyForText(trimmed, dynamicAliases));
   }
 
   // Replica della logica wizard getUnderlyingKey per stock/etf
@@ -533,21 +541,29 @@ function computeAvailableCalls(
     return out;
   };
 
-  const balance = new Map<string, { owned: number; soldCalls: number; syntheticCovered: number; displayTicker: string; stockKeys: string[] }>();
+  const balance = new Map<string, { owned: number; soldCalls: number; syntheticCovered: number; displayTicker: string; stockKeys: string[]; canonicalKeys: Set<string> }>();
 
-  const ensure = (key: string, displayTicker?: string, stockKeys?: string[]) => {
+  const ensure = (key: string, displayTicker?: string, stockKeys?: string[], canonicalKey?: string) => {
     if (!balance.has(key)) {
-      balance.set(key, { owned: 0, soldCalls: 0, syntheticCovered: 0, displayTicker: displayTicker || key, stockKeys: stockKeys || [] });
-    } else if (stockKeys && stockKeys.length) {
+      balance.set(key, {
+        owned: 0,
+        soldCalls: 0,
+        syntheticCovered: 0,
+        displayTicker: displayTicker || key,
+        stockKeys: stockKeys || [],
+        canonicalKeys: new Set(canonicalKey ? [canonicalKey] : []),
+      });
+    } else {
       const cur = balance.get(key)!;
-      cur.stockKeys = Array.from(new Set([...cur.stockKeys, ...stockKeys]));
+      if (stockKeys && stockKeys.length) cur.stockKeys = Array.from(new Set([...cur.stockKeys, ...stockKeys]));
+      if (canonicalKey) cur.canonicalKeys.add(canonicalKey);
     }
   };
 
   // Count shares
   for (const stock of stockPositions) {
     const { key, display } = resolveStockKey(stock, underlyingPrices);
-    ensure(key, display, computeWizardStockKey(stock));
+    ensure(key, display, computeWizardStockKey(stock), canonicalKeyForPosition(stock, dynamicAliases));
     balance.get(key)!.owned += stock.quantity;
   }
 
@@ -558,7 +574,7 @@ function computeAvailableCalls(
   for (const d of soldCalls) {
     const underlyingText = d.underlying || d.description || '';
     const key = resolveKey(underlyingText, underlyingPrices);
-    ensure(key);
+    ensure(key, undefined, undefined, canonicalKeyForPosition(d, dynamicAliases));
     balance.get(key)!.soldCalls += Math.abs(d.quantity);
   }
 
@@ -566,22 +582,25 @@ function computeAvailableCalls(
   // - Long Call ITM (syntheticCall) ⇒ +|quantity| contratti coperti
   // - Short Put ITM (syntheticPut)  ⇒ +|quantity| contratti coperti
   if (categories) {
-    const addSynth = (underlyingText: string, qty: number) => {
+    const addSynth = (underlyingText: string, qty: number, posForCanonical?: Position) => {
       const key = resolveKey(underlyingText, underlyingPrices);
-      ensure(key);
+      const canonicalKey = posForCanonical
+        ? canonicalKeyForPosition(posForCanonical, dynamicAliases)
+        : canonicalKeyForText(underlyingText, dynamicAliases);
+      ensure(key, undefined, undefined, canonicalKey);
       balance.get(key)!.syntheticCovered += qty;
     };
     for (const cc of categories.coveredCalls) {
       if (!cc.isSynthetic) continue;
       const underlyingText = cc.option.underlying || cc.option.description || '';
-      if (cc.syntheticCall) addSynth(underlyingText, Math.abs(cc.syntheticCall.quantity));
-      if (cc.syntheticPut) addSynth(underlyingText, Math.abs(cc.syntheticPut.quantity));
+      if (cc.syntheticCall) addSynth(underlyingText, Math.abs(cc.syntheticCall.quantity), cc.option);
+      if (cc.syntheticPut) addSynth(underlyingText, Math.abs(cc.syntheticPut.quantity), cc.option);
     }
     for (const dr of categories.deRiskingCoveredCalls) {
       if (!dr.isSynthetic) continue;
       const underlyingText = dr.coveredCall.option.underlying || dr.coveredCall.option.description || '';
-      if (dr.syntheticCall) addSynth(underlyingText, Math.abs(dr.syntheticCall.quantity));
-      if (dr.syntheticPut) addSynth(underlyingText, Math.abs(dr.syntheticPut.quantity));
+      if (dr.syntheticCall) addSynth(underlyingText, Math.abs(dr.syntheticCall.quantity), dr.coveredCall.option);
+      if (dr.syntheticPut) addSynth(underlyingText, Math.abs(dr.syntheticPut.quantity), dr.coveredCall.option);
     }
     // Incomplete synthetic CC/DR-CC (Short Call mancante): la long call / short put
     // sintetica c'è già ed è una "share equivalent" — va contata.
@@ -590,16 +609,19 @@ function computeAvailableCalls(
       if (inc.strategyType !== 'covered_call' && inc.strategyType !== 'derisking_covered_call') continue;
       const longCall = inc.presentLegs.find(p => p.option_type === 'call' && p.quantity > 0);
       const shortPut = inc.presentLegs.find(p => p.option_type === 'put' && p.quantity < 0);
-      if (longCall) addSynth(inc.underlying, Math.abs(longCall.quantity));
-      else if (shortPut) addSynth(inc.underlying, Math.abs(shortPut.quantity));
+      if (longCall) addSynth(inc.underlying, Math.abs(longCall.quantity), longCall);
+      else if (shortPut) addSynth(inc.underlying, Math.abs(shortPut.quantity), shortPut);
     }
   }
 
   const result: MonitoringAvailableCalls[] = [];
   for (const [key, data] of balance) {
-    // Skip archived underlyings
-    if (archivedResolved.size > 0 || archivedRaw.size > 0) {
+    // Skip archived underlyings — il match canonico (stessa risoluzione del
+    // wizard di archiviazione) è autoritativo; i match legacy restano come
+    // fallback per compatibilità con eventuali chiavi storiche.
+    if (archivedResolved.size > 0 || archivedRaw.size > 0 || archivedCanonical.size > 0) {
       if (
+        Array.from(data.canonicalKeys).some(ck => archivedCanonical.has(ck)) ||
         archivedResolved.has(key) ||
         archivedResolved.has(normalizeForMatching(key)) ||
         archivedResolved.has(normalizeForMatching(data.displayTicker)) ||

@@ -22,6 +22,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { computeMonitoring, buildSnapshotSections, MonitoringResult } from '@/lib/monitoringEngine';
+import { canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
 
 interface DerivativesSummaryCardProps {
   categories: DerivativeCategories;
@@ -30,6 +31,7 @@ interface DerivativesSummaryCardProps {
   underlyingPrices: Record<string, UnderlyingPrice>;
   strategyConfigs: StrategyConfiguration[];
   archivedKeys?: string[];
+  dynamicAliases?: DynamicAliases;
   missingCount?: number;
   isFetchingMissing?: boolean;
 }
@@ -486,10 +488,14 @@ function AvailableCallsSection({
   items,
   portfolioId,
   allPositions,
+  archivedKeys = [],
+  dynamicAliases,
 }: {
   items: { ticker: string; availableContracts: number }[];
   portfolioId: string | null | undefined;
   allPositions: Position[];
+  archivedKeys?: string[];
+  dynamicAliases?: DynamicAliases;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -519,14 +525,30 @@ function AvailableCallsSection({
   }, [allPositions, items]);
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
+  const archivedCanonicalSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const k of archivedKeys) {
+      const trimmed = (k || '').trim();
+      if (!trimmed) continue;
+      set.add(canonicalKeyForText(trimmed, dynamicAliases));
+    }
+    return set;
+  }, [archivedKeys, dynamicAliases]);
+
   const visibleBuybacks = useMemo(() => {
-    if (items.length === 0 || buybacks.length === 0) return [] as CallBuybackRow[];
+    if (buybacks.length === 0) return [] as CallBuybackRow[];
     const tickerKeys = items.map(i => getCanonicalKey(i.ticker) || normalizeForMatching(i.ticker));
     return buybacks.filter(b => {
+      // Un riacquisto la cui sottostante è stata archiviata in configurazione
+      // strategie non va mai mostrato, indipendentemente dal matching con gli
+      // "available calls to sell" qui sotto.
+      if (archivedCanonicalSet.size > 0 && archivedCanonicalSet.has(canonicalKeyForText(b.underlying, dynamicAliases))) {
+        return false;
+      }
       const bKey = getCanonicalKey(b.underlying) || normalizeForMatching(b.underlying);
       return tickerKeys.some(tk => tk === bKey || tk.includes(bKey) || bKey.includes(tk));
     });
-  }, [items, buybacks]);
+  }, [items, buybacks, archivedCanonicalSet, dynamicAliases]);
 
   if (items.length === 0) return null;
 
@@ -696,6 +718,7 @@ export function DerivativesSummaryCard({
   underlyingPrices,
   strategyConfigs,
   archivedKeys = [],
+  dynamicAliases,
   missingCount = 0,
   isFetchingMissing = false,
 }: DerivativesSummaryCardProps) {
@@ -704,8 +727,8 @@ export function DerivativesSummaryCard({
   
   // ============ Single canonical monitoring computation ============
   const monitoring: MonitoringResult = useMemo(() => {
-    return computeMonitoring(categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys);
-  }, [categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys]);
+    return computeMonitoring(categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys, dynamicAliases);
+  }, [categories, allPositions, stockPositions, underlyingPrices, strategyConfigs, archivedKeys, dynamicAliases]);
 
   // ============ Save monitoring snapshot ============
   useEffect(() => {
@@ -934,6 +957,8 @@ export function DerivativesSummaryCard({
             items={monitoring.availableCallsToSell}
             portfolioId={selectedPortfolioId}
             allPositions={allPositions}
+            archivedKeys={archivedKeys}
+            dynamicAliases={dynamicAliases}
           />
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, startTransition } from 'react';
 import { Position } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
-import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
+import { canonicalKeyForPosition, canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -254,44 +254,6 @@ function hasTokenOverlap(a: string, b: string): boolean {
   const matchCount = shorter.filter(t => longer.includes(t)).length;
   if (shorter.length >= 2) return matchCount >= 2;
   return matchCount === 1 && shorter[0].length >= 4;
-}
-
-type DynamicAliases = Map<string, string> | Record<string, string> | undefined;
-
-/**
- * Canonicalizza qualunque input testuale/posizione in una chiave sottostante
- * unica (via `tickerIdentity`). Sostituisce il vecchio pattern
- * `getCanonicalKey || normalizeForMatching` che generava chiavi diverse per
- * ADBE/Adobe Inc, CRDO/Credo Technology GRP, DAI/Mercedes-Benz Group.
- */
-function canonicalKeyForPosition(p: Position, dynamicAliases: DynamicAliases): string {
-  if (p.asset_type === 'derivative') {
-    return getCanonicalTickerKey(
-      {
-        rawTicker: p.underlying || p.ticker,
-        underlyingName: p.underlying,
-        description: p.description,
-      },
-      { dynamicAliases },
-    );
-  }
-  // stock / etf
-  return getCanonicalTickerKey(
-    {
-      rawTicker: p.ticker,
-      rawName: p.description,
-      description: p.description,
-      isin: p.isin,
-    },
-    { dynamicAliases },
-  );
-}
-
-function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): string {
-  return getCanonicalTickerKey(
-    { rawTicker: text, rawName: text, underlyingName: text, description: text },
-    { dynamicAliases },
-  );
 }
 
 /**

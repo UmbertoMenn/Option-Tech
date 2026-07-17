@@ -880,6 +880,7 @@ export function Derivatives() {
           underlyingPrices={underlyingPrices}
           strategyConfigs={strategyConfigs}
           archivedKeys={archivedItems.map(a => a.key)}
+          dynamicAliases={dynamicAliases}
           missingCount={missingCount}
           isFetchingMissing={isFetchingMissing}
         />
