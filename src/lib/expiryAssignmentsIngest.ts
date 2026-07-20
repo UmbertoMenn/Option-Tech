@@ -156,15 +156,14 @@ export async function ingestExpiryAssignments(
     const existingStore = storeByKey.get(stockBasisKey);
     const preExistingShares = oldStockQtyByU.get(a.underlyingKey) || 0;
 
-    let newPmc: number;
-    let newQty: number;
-    if (existingStore && existingStore.quantity > 0 && existingStore.pmc > 0) {
-      newQty = existingStore.quantity + a.shares;
-      newPmc = (existingStore.quantity * existingStore.pmc + a.shares * a.strike) / newQty;
-    } else if (preExistingShares > 0) {
-      outWarnings.push(
-        `Assegnazione ${a.underlyingKey}: erano già presenti ${preExistingShares} azioni senza PMC — PMC non calcolato (caricare prima il PMC dal file Excel)`,
-      );
+    const applyRes = applyExpiryAssignmentToStore(a.underlyingKey, {
+      existing: existingStore ? { pmc: existingStore.pmc, quantity: existingStore.quantity } : null,
+      preExistingShares,
+      strike: a.strike,
+      shares: a.shares,
+    });
+
+    const rollbackLedger = async () => {
       await supabase
         .from('cost_basis_trades' as never)
         .delete()
@@ -174,10 +173,12 @@ export async function ingestExpiryAssignments(
         .eq('side', 'ASG')
         .eq('quantity', a.shares)
         .eq('price', a.strike);
+    };
+
+    if (!applyRes.next) {
+      if (applyRes.warning) outWarnings.push(applyRes.warning);
+      await rollbackLedger();
       continue;
-    } else {
-      newQty = a.shares;
-      newPmc = a.strike;
     }
 
     const { error: upsertErr } = await supabase
@@ -188,8 +189,8 @@ export async function ingestExpiryAssignments(
           basis_key: stockBasisKey,
           isin: sample.isin ? sample.isin.toUpperCase() : (existingStore?.isin ?? null),
           description: sample.description || existingStore?.description || null,
-          pmc: newPmc,
-          quantity: newQty,
+          pmc: applyRes.next.pmc,
+          quantity: applyRes.next.quantity,
           currency: sample.currency || existingStore?.currency || null,
           source: 'expiry_assignment',
           updated_at: new Date().toISOString(),
@@ -198,10 +199,11 @@ export async function ingestExpiryAssignments(
       );
     if (upsertErr) {
       outWarnings.push(`Salvataggio PMC assegnazione ${a.underlyingKey} fallito: ${upsertErr.message}`);
+      await rollbackLedger();
       continue;
     }
     applied += 1;
-    console.log(`[ExpiryAssignments] ${a.underlyingKey}: ${a.shares} azioni @ strike ${a.strike} → PMC ${newPmc.toFixed(2)}`);
+    console.log(`[ExpiryAssignments] ${a.underlyingKey}: ${a.shares} azioni @ strike ${a.strike} → PMC ${applyRes.next.pmc.toFixed(2)}`);
   }
 
   return { assignmentsApplied: applied, warnings: outWarnings };
