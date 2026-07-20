@@ -15,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
+import { ingestExpiryAssignments } from '@/lib/expiryAssignmentsIngest';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 import {
   getEffectiveUploadUserId,
@@ -233,6 +234,23 @@ export function FileUploader() {
       //    banca non includono più il prezzo di carico.
       try {
         const dynamicAliases = await fetchDynamicAliases();
+
+        // Assegnazione PUT a SCADENZA (senza file movimenti): confronta il DB
+        // pre-upload con lo snapshot e aggiorna il PMC del titolo assegnato
+        // ("carico = strike"). Idempotente via ledger cost_basis_trades.
+        try {
+          const snapshotDateForAssign = Array.from(new Set(parsed.map(p => p.snapshotDate).filter((d): d is string => !!d)))[0] || null;
+          const asg = await ingestExpiryAssignments(targetPortfolioId, snapshotDateForAssign, positions);
+          if (asg.assignmentsApplied > 0) {
+            toast.success('Assegnazioni a scadenza', {
+              description: `${asg.assignmentsApplied} put short assegnate: PMC del titolo aggiornato al valore dello strike.`,
+            });
+          }
+          for (const w of asg.warnings) toast.warning('Assegnazione put a scadenza', { description: w });
+        } catch (asgErr) {
+          console.error('[FileUploader] rilevamento assegnazioni a scadenza fallito:', asgErr);
+        }
+
         const { synced } = await syncCostBasisStoreFromPositions(targetPortfolioId, positions, dynamicAliases);
         if (synced > 0) console.log(`[CostBasis] store sincronizzato da Excel: ${synced} titoli`);
         const store = await fetchCostBasisStore(targetPortfolioId);
