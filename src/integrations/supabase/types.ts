@@ -404,37 +404,76 @@ export type Database = {
       }
       cost_basis_trades: {
         Row: {
+          asset_type: string | null
+          attribution_price_source: string | null
           basis_key: string
+          commission_eur: number | null
           created_at: string
+          currency: string | null
+          exchange_rate: number | null
+          expiry_date: string | null
+          gross_eur: number | null
           id: string
+          intrinsic_per_share: number | null
           kind: string
+          option_type: string | null
           portfolio_id: string
           price: number
           quantity: number
           side: string
+          strike: number | null
+          time_value_per_share: number | null
           trade_date: string
+          underlying_key: string | null
+          underlying_price: number | null
         }
         Insert: {
+          asset_type?: string | null
+          attribution_price_source?: string | null
           basis_key: string
+          commission_eur?: number | null
           created_at?: string
+          currency?: string | null
+          exchange_rate?: number | null
+          expiry_date?: string | null
+          gross_eur?: number | null
           id?: string
+          intrinsic_per_share?: number | null
           kind?: string
+          option_type?: string | null
           portfolio_id: string
           price: number
           quantity: number
           side: string
+          strike?: number | null
+          time_value_per_share?: number | null
           trade_date: string
+          underlying_key?: string | null
+          underlying_price?: number | null
         }
         Update: {
+          asset_type?: string | null
+          attribution_price_source?: string | null
           basis_key?: string
+          commission_eur?: number | null
           created_at?: string
+          currency?: string | null
+          exchange_rate?: number | null
+          expiry_date?: string | null
+          gross_eur?: number | null
           id?: string
+          intrinsic_per_share?: number | null
           kind?: string
+          option_type?: string | null
           portfolio_id?: string
           price?: number
           quantity?: number
           side?: string
+          strike?: number | null
+          time_value_per_share?: number | null
           trade_date?: string
+          underlying_key?: string | null
+          underlying_price?: number | null
         }
         Relationships: [
           {
@@ -853,6 +892,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "historical_data_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      internal_transfer_ledger: {
+        Row: {
+          amount_eur: number
+          created_at: string
+          credit_date: string
+          debit_date: string
+          from_gp: boolean
+          id: string
+          portfolio_id: string
+          to_gp: boolean
+          transfer_key: string
+        }
+        Insert: {
+          amount_eur: number
+          created_at?: string
+          credit_date: string
+          debit_date: string
+          from_gp?: boolean
+          id?: string
+          portfolio_id: string
+          to_gp?: boolean
+          transfer_key: string
+        }
+        Update: {
+          amount_eur?: number
+          created_at?: string
+          credit_date?: string
+          debit_date?: string
+          from_gp?: boolean
+          id?: string
+          portfolio_id?: string
+          to_gp?: boolean
+          transfer_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "internal_transfer_ledger_portfolio_id_fkey"
             columns: ["portfolio_id"]
             isOneToOne: false
             referencedRelation: "portfolios"
@@ -1675,6 +1758,36 @@ export type Database = {
           ticker?: string
           underlying?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      underlying_price_history: {
+        Row: {
+          close_price: number
+          created_at: string
+          price_date: string
+          requested_date: string
+          source: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          close_price: number
+          created_at?: string
+          price_date: string
+          requested_date: string
+          source?: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          close_price?: number
+          created_at?: string
+          price_date?: string
+          requested_date?: string
+          source?: string
+          ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }
