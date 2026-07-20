@@ -15,7 +15,13 @@ export type AttributionCategory =
   | 'gp'
   | 'commodity'
   | 'cash'
-  | 'unclassified';
+  | 'unclassified'
+  /**
+   * Differenza esplicita tra il P/L del Netting e la somma delle componenti.
+   * Non rappresenta un rendimento: serve a non nascondere dati mancanti o
+   * movimenti che il ledger non riesce ancora a ricostruire.
+   */
+  | 'reconciliation_gap';
 
 export const ATTRIBUTION_CATEGORIES: AttributionCategory[] = [
   'option_time',
@@ -27,10 +33,11 @@ export const ATTRIBUTION_CATEGORIES: AttributionCategory[] = [
   'commodity',
   'cash',
   'unclassified',
+  'reconciliation_gap',
 ];
 
 export const ATTRIBUTION_LABELS: Record<AttributionCategory, string> = {
-  option_time: 'Premi temporali netti',
+  option_time: 'Valore temporale opzioni',
   option_intrinsic: 'Intrinseco opzioni',
   stock: 'Azioni',
   etf: 'ETF',
@@ -39,6 +46,7 @@ export const ATTRIBUTION_LABELS: Record<AttributionCategory, string> = {
   commodity: 'Materie prime',
   cash: 'Liquidità / costi',
   unclassified: 'Non attribuito',
+  reconciliation_gap: 'Residuo da verificare',
 };
 
 export interface AttributionTradeRow {
@@ -193,11 +201,6 @@ export function buildSnapshotAttributionValues(
   values.gp += alignedGp.reduce((sum, holding) => sum + Number(holding.market_value || 0), 0);
   values.cash += Number(snapshot.cash_value || 0);
 
-  // Assorbe differenze dovute a dati legacy/incompleti. Così ogni snapshot
-  // riconcilia esattamente con il Netting Totale storico.
-  const knownTotal = ATTRIBUTION_CATEGORIES.reduce((sum, category) => sum + values[category], 0);
-  values.unclassified += historicalValue(historical) - knownTotal;
-
   return { values, optionMarks, optionMarksWithoutSpot };
 }
 
@@ -227,10 +230,17 @@ function proxySpot(
   tradeDate: string,
   historicalData: HistoricalDataEntry[],
 ): number | null {
-  const ordered = historicalData
-    .filter(entry => entry.snapshot_date >= tradeDate)
+  // Non usare un prezzo futuro per stimare l'intrinseco alla data trade:
+  // sarebbe look-ahead bias. Si prende prima l'ultimo snapshot disponibile
+  // alla data dell'operazione; solo se non esiste alcun dato precedente si
+  // ricorre al primo successivo e la copertura resta segnalata come proxy.
+  const prior = historicalData
+    .filter(entry => entry.snapshot_date <= tradeDate)
+    .sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date));
+  const subsequent = historicalData
+    .filter(entry => entry.snapshot_date > tradeDate)
     .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
-  for (const entry of ordered) {
+  for (const entry of [...prior, ...subsequent]) {
     const frozen = (entry.snapshot_underlying_prices ?? {}) as Record<string, number>;
     const direct = Number(frozen[underlyingKey]);
     if (direct > 0) return direct;
@@ -414,8 +424,10 @@ export function calculatePerformanceAttribution(input: {
   for (const category of ATTRIBUTION_CATEGORIES) {
     amounts[category] = end.values[category] - start.values[category] - flows[category];
   }
-  const attributedTotal = ATTRIBUTION_CATEGORIES.reduce((sum, category) => sum + amounts[category], 0);
-  amounts.unclassified += totalPL - attributedTotal;
+  const attributedTotal = ATTRIBUTION_CATEGORIES
+    .filter(category => category !== 'reconciliation_gap')
+    .reduce((sum, category) => sum + amounts[category], 0);
+  amounts.reconciliation_gap = totalPL - attributedTotal;
 
   const items = ATTRIBUTION_CATEGORIES
     .map(category => ({
@@ -431,13 +443,16 @@ export function calculatePerformanceAttribution(input: {
     warnings.push(`${coverage.optionMarksWithoutSpot} valorizzazioni opzione senza prezzo sottostante`);
   }
   if (coverage.proxyOptionTrades > 0) {
-    warnings.push(`${coverage.proxyOptionTrades} movimenti opzione stimati dal primo snapshot utile`);
+    warnings.push(`${coverage.proxyOptionTrades} movimenti opzione stimati da uno snapshot, non dal prezzo storico della data trade`);
   }
   if (coverage.missingOptionTrades > 0) {
     warnings.push(`${coverage.missingOptionTrades} movimenti opzione non scomponibili`);
   }
   if (Math.abs(amounts.unclassified) >= 1) {
-    warnings.push(`${amounts.unclassified.toFixed(0)} € di rendimento non attribuito per dati legacy o incompleti`);
+    warnings.push(`${amounts.unclassified.toFixed(0)} € attribuiti a strumenti non classificati`);
+  }
+  if (Math.abs(amounts.reconciliation_gap) >= 1) {
+    warnings.push(`${amounts.reconciliation_gap.toFixed(0)} € di residuo: Netting, snapshot e movimenti non riconciliano ancora`);
   }
 
   return {

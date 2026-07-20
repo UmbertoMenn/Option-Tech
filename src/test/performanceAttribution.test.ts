@@ -259,4 +259,26 @@ describe('calculatePerformanceAttribution', () => {
     expect(itemAmount(result, 'stock')).toBeCloseTo(0, 6);
     expect(itemAmount(result, 'cash')).toBeCloseTo(0, 6);
   });
+
+  it('espone il residuo quando Netting e dettaglio posizioni non riconciliano', () => {
+    const startHistorical = historical('2026-07-01', 100);
+    const endHistorical = historical('2026-07-02', 120);
+    const result = calculatePerformanceAttribution({
+      startSnapshot: snapshot('2026-07-01', 100),
+      // Il dettaglio disponibile spiega soltanto 10 €, mentre il Netting ne
+      // riporta 20: la differenza non va più nascosta in “Non attribuito”.
+      endSnapshot: snapshot('2026-07-02', 110),
+      startHistorical,
+      endHistorical,
+      allHistoricalData: [startHistorical, endHistorical],
+      deposits: [],
+      trades: [],
+      internalTransfers: [],
+    });
+
+    expect(itemAmount(result, 'cash')).toBeCloseTo(10, 6);
+    expect(itemAmount(result, 'reconciliation_gap')).toBeCloseTo(10, 6);
+    expect(itemAmount(result, 'unclassified')).toBeCloseTo(0, 6);
+    expect(result.warnings.some(warning => warning.includes('residuo'))).toBe(true);
+  });
 });

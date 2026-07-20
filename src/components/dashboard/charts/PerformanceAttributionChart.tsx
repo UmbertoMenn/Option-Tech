@@ -37,6 +37,18 @@ function cutoffForRange(range: TimeRange, endDate: string): string | null {
   return dateMonthsBefore(endDate, months[range]);
 }
 
+function startSnapshotForRange(
+  snapshots: Array<{ snapshot_date: string }>,
+  cutoff: string | null,
+) {
+  if (!cutoff) return snapshots[0] ?? null;
+  // Il periodo parte dal miglior T0 disponibile alla o prima della data
+  // richiesta. Usare il primo snapshot successivo troncherebbe il rendimento.
+  return snapshots.filter(snapshot => snapshot.snapshot_date <= cutoff).at(-1)
+    ?? snapshots[0]
+    ?? null;
+}
+
 function AttributionTooltip({ active, payload }: {
   active?: boolean;
   payload?: Array<{ payload: AttributionItem }>;
@@ -50,7 +62,9 @@ function AttributionTooltip({ active, payload }: {
         {formatEUR(item.amount)} · {formatPercentage(item.percent)}
       </p>
       <p className="mt-1 max-w-56 text-muted-foreground">
-        Variazione di valore al netto di acquisti, vendite e trasferimenti interni.
+        {item.category === 'reconciliation_gap'
+          ? 'Differenza da analizzare: non viene attribuita artificialmente a una classe di attivo.'
+          : 'Variazione di valore al netto di acquisti, vendite e trasferimenti interni.'}
       </p>
     </div>
   );
@@ -76,11 +90,8 @@ export function PerformanceAttributionChart({
     const snapshots = [...data.snapshots].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
     const endSnapshot = snapshots[snapshots.length - 1];
     const cutoff = cutoffForRange(timeRange, endSnapshot.snapshot_date);
-    const eligible = cutoff
-      ? snapshots.filter(snapshot => snapshot.snapshot_date >= cutoff)
-      : snapshots;
-    if (eligible.length < 2) return null;
-    const startSnapshot = eligible[0];
+    const startSnapshot = startSnapshotForRange(snapshots, cutoff);
+    if (!startSnapshot || startSnapshot.snapshot_date === endSnapshot.snapshot_date) return null;
     const historicalByDate = new Map(historicalData.map(entry => [entry.snapshot_date, entry]));
     const startHistorical = historicalByDate.get(startSnapshot.snapshot_date);
     const endHistorical = historicalByDate.get(endSnapshot.snapshot_date);
