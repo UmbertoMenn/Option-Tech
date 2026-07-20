@@ -1,141 +1,250 @@
-// Bond math best-effort: cedola e scadenza non sono colonne strutturate nello schema,
-// quindi vengono dedotte dalla `description` (formati broker IT/EU). Dove non deducibili,
-// il bond viene tenuto piatto (nessun pull-to-par, nessuna cedola) e segnalato.
+// Bond math + resolver dei metadati (cedola / scadenza / frequenza).
+//
+// Cedola e scadenza NON sono colonne strutturate nello schema `positions`: vengono
+// dedotte dalla `description` del broker (formati IT/EU molto eterogenei) e, dove non
+// deducibili, da un override manuale per ISIN (tabella `bond_overrides`).
 //
 // Convenzione robusta rispetto a quantità/face: la proiezione lavora sul RAPPORTO del
 // prezzo clean (price(t)/price(t0)) applicato al market value corrente, e calcola le
-// cedole in cassa come frazione del valore nominale derivato dal prezzo corrente. Così
-// non serve conoscere units/face: vedi portfolioProjection.ts.
+// cedole in cassa come frazione del nominale derivato dal prezzo corrente. Vedi
+// portfolioProjection.ts — qui produciamo solo i metadati e il pricing teorico.
 
 export interface BondInfo {
   couponRatePct: number;   // cedola annua in % del nominale (es. 3.5)
   maturity: Date;
-  frequency: number;       // pagamenti/anno (default 1)
+  frequency: number;       // pagamenti/anno (>=1 per il calcolo; 0 = zero coupon a livello UI)
   parsedFrom: string;      // debug: cosa è stato riconosciuto
 }
 
-const IT_MONTH: Record<string, number> = {
+// ── Mesi ────────────────────────────────────────────────────────────────────
+// Copre: italiano 3 lettere (GEN..DIC), inglese 3 lettere (JAN..DEC) e i codici
+// Directa a 2 lettere (GE FE MZ AP MG GN LU AG ST OT NO DC). Le forme più lunghe
+// vengono provate PRIMA nella regex per non far vincere un match parziale (es. "SET"
+// non deve degradare a "ST").
+const MONTH_MAP: Record<string, number> = {
+  // IT 3 lettere
+  GEN: 1, FEB: 2, MAR: 3, APR: 4, MAG: 5, GIU: 6, LUG: 7, AGO: 8, SET: 9, OTT: 10, NOV: 11, DIC: 12,
+  // EN 3 lettere (FEB/MAR/APR/NOV coincidono)
+  JAN: 1, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, DEC: 12,
+  // IT 2 lettere (Directa)
   GE: 1, FE: 2, MZ: 3, AP: 4, MG: 5, GN: 6, LU: 7, AG: 8, ST: 9, OT: 10, NO: 11, DC: 12,
 };
-const EN_MONTH: Record<string, number> = {
-  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
-};
+// Alternation ordinata per lunghezza decrescente (3 lettere prima delle 2).
+const MONTH_ALT = Object.keys(MONTH_MAP)
+  .sort((a, b) => b.length - a.length || a.localeCompare(b))
+  .join('|');
 
 function mkDate(y: number, m: number, d: number): Date {
-  // m: 1-12
-  return new Date(Date.UTC(y, m - 1, d));
+  return new Date(Date.UTC(y, m - 1, d)); // m: 1-12
 }
-
-function parseMaturity(descUpper: string): { date: Date; how: string } | null {
-  // 1) DD/MM/YYYY | DD-MM-YYYY | DD.MM.YYYY
-  let m = descUpper.match(/\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})\b/);
-  if (m) return { date: mkDate(+m[3], +m[2], +m[1]), how: 'DD/MM/YYYY' };
-  // 2) YYYY-MM-DD
-  m = descUpper.match(/\b(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})\b/);
-  if (m) return { date: mkDate(+m[1], +m[2], +m[3]), how: 'YYYY-MM-DD' };
-  // 3) DDMMYYYY concatenato (es. BTP ITA 28062030)
-  m = descUpper.match(/\b(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(20\d{2})\b/);
-  if (m) return { date: mkDate(+m[3], +m[2], +m[1]), how: 'DDMMYYYY' };
-  // 4) DD<MeseIT 2 lettere>YY  (Directa, es. 01MZ30, 15DC28)
-  m = descUpper.match(/\b(\d{1,2})(GE|FE|MZ|AP|MG|GN|LU|AG|ST|OT|NO|DC)(\d{2})\b/);
-  if (m) return { date: mkDate(2000 + +m[3], IT_MONTH[m[2]], +m[1]), how: 'DDMMMit/YY' };
-  // 5) <MeseIT 2 lettere>YY senza giorno (es. ST33 = settembre 2033) -> giorno 1
-  m = descUpper.match(/\b(GE|FE|MZ|AP|MG|GN|LU|AG|ST|OT|NO|DC)(\d{2})\b/);
-  if (m) return { date: mkDate(2000 + +m[2], IT_MONTH[m[1]], 1), how: 'MMMit/YY' };
-  // 6) DD MMM(EN) YYYY  (es. 15 NOV 2034 / 15NOV34)
-  m = descUpper.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2,4})\b/);
-  if (m) {
-    const yr = m[3].length === 2 ? 2000 + +m[3] : +m[3];
-    return { date: mkDate(yr, EN_MONTH[m[2]], +m[1]), how: 'DDMMMen/YYYY' };
-  }
-  // 6b) MMM(EN)YY senza giorno (es. BOT ZC JUN27) -> giorno 1
-  m = descUpper.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})\b/);
-  if (m) return { date: mkDate(2000 + +m[2], EN_MONTH[m[1]], 1), how: 'MMMen/YY' };
-  // 7) MM/YYYY -> fine mese
-  m = descUpper.match(/\b(\d{1,2})[/\-.](\d{4})\b/);
-  if (m) return { date: mkDate(+m[2], +m[1] % 12 + 1, 1), how: 'MM/YYYY' };
-  // 8) anno nudo plausibile (2024..2070) -> 31/12
-  m = descUpper.match(/\b(20[2-6]\d|2070)\b/);
-  if (m) return { date: mkDate(+m[1], 12, 31), how: 'YYYY' };
-  return null;
+function validDate(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  if (y < 2020 || y > 2085) return false;
+  return true;
 }
-
-/** Frequenza cedolare di default per i govvie italiani (semestrale) vs resto (annuale). */
-function defaultFrequency(descUpper: string): number {
-  if (/\bBTP\b|\bCCT\b|\bCTZ\b|\bBOT\b/.test(descUpper)) return 2;
-  return 1;
-}
-
-export interface BondPartial {
-  couponRatePct: number | null; // null = cedola non deducibile (es. step-up); 0 = zero coupon noto
-  maturity: Date | null;
-  frequency: number;
-  inflationLinked: boolean;     // BTP Italia / €i / indicizzati: NON convergono a 100, accreditano sull'inflazione
-}
-
-/** Bond indicizzato all'inflazione? (BTP Italia, BTP€i, TIPS, ecc.) */
-function isInflationLinked(descUpper: string): boolean {
-  return /\bINFL\b|INFLAZ|INDICIZZAT|INFLATION|\bTII\b|€I\b|BTP\s*ITAL/.test(descUpper);
+function yy2yyyy(s: string): number {
+  return s.length <= 2 ? 2000 + parseInt(s, 10) : parseInt(s, 10);
 }
 
 /**
- * Parsing parziale: prova a estrarre cedola e scadenza separatamente.
- * - inflation-linked          → accredito su target inflazione (no pull-to-par)
- * - maturity nota + coupon noto (anche 0 = zero coupon) → proiezione completa (pull-to-par)
- * - maturity nota + coupon null → pull-to-par senza cedole modellate
- * - maturity null               → bond tenuto piatto
+ * Estrae la scadenza dalla description provando, in ordine, tutti i formati che
+ * compaiono nei descrittori bancari italiani. Primo match valido vince.
+ */
+function parseMaturity(descUpper: string): { date: Date; how: string } | null {
+  const up = descUpper;
+  let m: RegExpMatchArray | null;
+
+  // 1) ISO YYYY-MM-DD
+  m = up.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (m && validDate(+m[1], +m[2], +m[3])) return { date: mkDate(+m[1], +m[2], +m[3]), how: 'YYYY-MM-DD' };
+
+  // 2) DD/MM/YYYY  (anche - o .)
+  m = up.match(/\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b/);
+  if (m && validDate(+m[3], +m[2], +m[1])) return { date: mkDate(+m[3], +m[2], +m[1]), how: 'DD/MM/YYYY' };
+
+  // 3) DD/MM/YY  (anno a 2 cifre → 20YY)  es. 12/02/27, 01/03/32
+  m = up.match(/\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2})\b/);
+  if (m) { const y = yy2yyyy(m[3]); if (validDate(y, +m[2], +m[1])) return { date: mkDate(y, +m[2], +m[1]), how: 'DD/MM/YY' }; }
+
+  // 4) DD<MESE>YY|YYYY  (mese a lettere, giorno attaccato, code trailing ammesso)
+  //    es. 14GIU28, 16OTT42, 15FEB28, 16FEB31MWC, 15DC30
+  m = up.match(new RegExp(String.raw`\b(\d{1,2})\s*(${MONTH_ALT})\s*(\d{2,4})`));
+  if (m) { const mo = MONTH_MAP[m[2]]; const y = yy2yyyy(m[3]); if (mo && validDate(y, mo, +m[1])) return { date: mkDate(y, mo, +m[1]), how: 'DD<MESE>YY' }; }
+
+  // 5) <MESE>YY|YYYY  (senza giorno → giorno 1)  es. APR27, FEB29, ST33, AP27, OCT31
+  m = up.match(new RegExp(String.raw`\b(${MONTH_ALT})\s*(\d{2,4})`));
+  if (m) { const mo = MONTH_MAP[m[1]]; const y = yy2yyyy(m[2]); if (mo && validDate(y, mo, 1)) return { date: mkDate(y, mo, 1), how: '<MESE>YY' }; }
+
+  // 6) DDMMYYYY concatenato  es. 28062030
+  m = up.match(/\b(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(20\d{2})\b/);
+  if (m && validDate(+m[3], +m[2], +m[1])) return { date: mkDate(+m[3], +m[2], +m[1]), how: 'DDMMYYYY' };
+
+  // 7) DDMMYY concatenato  es. 140328, 280630, 050330, 281032, 221128, 130627
+  m = up.match(/\b(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(\d{2})\b/);
+  if (m) { const y = yy2yyyy(m[3]); if (validDate(y, +m[2], +m[1])) return { date: mkDate(y, +m[2], +m[1]), how: 'DDMMYY' }; }
+
+  // 8) MM/YYYY → giorno 1 del mese
+  m = up.match(/\b(0?[1-9]|1[0-2])[/.\-](\d{4})\b/);
+  if (m && validDate(+m[2], +m[1], 1)) return { date: mkDate(+m[2], +m[1], 1), how: 'MM/YYYY' };
+
+  // 9) anno a 4 cifre nudo (2020..2079) → 31/12
+  m = up.match(/\b(20[2-7]\d)\b/);
+  if (m) { const y = +m[1]; if (validDate(y, 12, 31)) return { date: mkDate(y, 12, 31), how: 'YYYY' }; }
+
+  // 10) anno a 2 cifre nudo (26..75) → 31/12. Last resort: si scansiona la stringa
+  //     PRIVATA della cedola (la cedola può contenere cifre a 2 posizioni) e si prende
+  //     l'ULTIMO token a 2 cifre in range anno. es. "BON Y OBL 0.10% 31" → 2031.
+  const stripped = up.replace(/\d+(?:[.,]\d+)?\s*%/g, ' ');
+  const twoDigit = [...stripped.matchAll(/\b(\d{2})\b/g)].map(x => +x[1]).filter(n => n >= 26 && n <= 75);
+  if (twoDigit.length > 0) {
+    const y = 2000 + twoDigit[twoDigit.length - 1];
+    if (validDate(y, 12, 31)) return { date: mkDate(y, 12, 31), how: 'YY-bare' };
+  }
+
+  return null;
+}
+
+/** Zero coupon? (BOT, ZC, "zero coupon"). */
+function isZeroCoupon(up: string): boolean {
+  return /\bBOT\b|\bZ\.?C\.?\b|ZERO\s*COUPON|\bZERO\b/.test(up);
+}
+
+/** Indicizzato all'inflazione? (BTP Italia, BTP€i, TIPS, "INFL...", "INF C"). */
+function isInflationLinked(up: string): boolean {
+  // "INFL" copre INFL/INFLC/INFLAZ/INFLATION; "\bINF\b" copre "INF C"; "BTP ITA" = BTP Italia.
+  return /INFL|INDICIZZAT|\bINF\b|INFLATION|\bTII\b|\bTIPS\b|€\s*I\b|\bBTP\s*ITA/.test(up);
+}
+
+/** Cedola step-up / non fissa? (BTP Valore, BTP Più, "ST UP"/"STEP UP"). */
+function isStepUp(up: string): boolean {
+  return /STEP\s*UP|\bST\.?\s*UP\b|\bBTP\s*VAL|\bBTP\s*PI(U|Ù)\b/.test(up);
+}
+
+/** Frequenza cedolare di default: govvie/BTP-Italia/Valore semestrale, resto annuale, ZC = 0. */
+function defaultFrequency(up: string): number {
+  if (isZeroCoupon(up)) return 0;
+  if (/\bBTP\b|\bCCT\b|\bCTZ\b|\bBTP\s*ITA|\bBTP\s*VAL|\bBTP\s*PI(U|Ù)\b/.test(up)) return 2;
+  return 1;
+}
+
+/** Cedola annua in % dalla description. null se non presente e non ZC. */
+function parseCouponPct(up: string): number | null {
+  const cm = up.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (cm) return parseFloat(cm[1].replace(',', '.'));
+  if (isZeroCoupon(up)) return 0;
+  return null;
+}
+
+export interface BondPartial {
+  couponRatePct: number | null; // null = cedola non deducibile; 0 = zero coupon noto
+  maturity: Date | null;
+  frequency: number;
+  inflationLinked: boolean;
+  stepUp: boolean;              // cedola variabile nota (BTP Valore/Più): pull-to-par senza cedole modellate
+  zeroCoupon: boolean;
+}
+
+/**
+ * Parsing parziale: estrae separatamente cedola, scadenza, tipo. Nessun lancio, sempre
+ * un oggetto (i campi null indicano "non deducibile").
  */
 export function parseBondPartial(description: string | null | undefined): BondPartial {
-  if (!description) return { couponRatePct: null, maturity: null, frequency: 1, inflationLinked: false };
+  if (!description) {
+    return { couponRatePct: null, maturity: null, frequency: 1, inflationLinked: false, stepUp: false, zeroCoupon: false };
+  }
   const up = description.toUpperCase();
-  let couponRatePct: number | null = null;
-  const cm = up.match(/(\d+(?:[.,]\d+)?)\s*%/);
-  if (cm) couponRatePct = parseFloat(cm[1].replace(',', '.'));
-  // BOT e zero-coupon: cedola NOTA = 0 (convergono a 100, nessuna cedola)
-  else if (/\bBOT\b|\bZ\.?C\.?\b|\bZERO\b|ZERO\s*COUPON/.test(up)) couponRatePct = 0;
   const mat = parseMaturity(up);
   return {
-    couponRatePct,
+    couponRatePct: parseCouponPct(up),
     maturity: mat && isFinite(mat.date.getTime()) ? mat.date : null,
     frequency: defaultFrequency(up),
     inflationLinked: isInflationLinked(up),
+    stepUp: isStepUp(up),
+    zeroCoupon: isZeroCoupon(up),
   };
 }
 
-/** Deduce cedola/scadenza dalla description del bond. Null se non sufficiente. */
+/** Deduce cedola/scadenza dalla description. Null se cedola o scadenza mancano (retro-compat). */
 export function parseBondInfo(description: string | null | undefined): BondInfo | null {
-  if (!description) return null;
-  const up = description.toUpperCase();
+  const p = parseBondPartial(description);
+  if (p.couponRatePct === null || !p.maturity) return null;
+  return {
+    couponRatePct: p.couponRatePct,
+    maturity: p.maturity,
+    frequency: Math.max(1, p.frequency || 1),
+    parsedFrom: `coupon=${p.couponRatePct}% maturity ok`,
+  };
+}
 
-  // cedola: primo "x.yy%" (anche con virgola). Zero coupon -> 0 se "ZC"/"ZERO".
-  let couponRatePct: number | null = null;
-  const cm = up.match(/(\d+(?:[.,]\d+)?)\s*%/);
-  if (cm) couponRatePct = parseFloat(cm[1].replace(',', '.'));
-  else if (/\bZ\.?C\.?\b|\bZERO\b/.test(up)) couponRatePct = 0;
+// ── Risoluzione unificata description + override ────────────────────────────
+export interface BondOverrideLike {
+  couponRatePct: number | null;
+  maturity: Date | null;
+  frequency: number | null;
+}
+export type BondFixStatus = 'resolved' | 'partial' | 'unresolved';
 
-  const mat = parseMaturity(up);
-  if (couponRatePct === null || !mat) return null;
-  if (!isFinite(mat.date.getTime())) return null;
+export interface ResolvedBond {
+  couponRatePct: number | null;
+  maturity: Date | null;
+  frequency: number;
+  inflationLinked: boolean;
+  stepUp: boolean;
+  zeroCoupon: boolean;
+  overridden: boolean;
+  status: BondFixStatus;   // resolved = ok; partial = pull-to-par senza cedole; unresolved = manca la scadenza
+  needsFix: boolean;       // va mostrato nell'editor "Risolvi bond"
+}
+
+/**
+ * Fonde description + override manuale e classifica lo stato del bond.
+ * - unresolved: manca la scadenza → NON proiettabile (va risolto a mano)
+ * - partial:    scadenza nota ma cedola ignota su bond ordinario → pull-to-par senza cedole
+ * - resolved:   scadenza nota + (cedola nota | ZC | inflation | step-up)
+ *
+ * `needsFix` è true per unresolved e per i "partial ordinari" (cedola davvero mancante,
+ * es. corporate senza % nella description). NON è true per ZC/inflation/step-up, che sono
+ * modellati correttamente anche senza una singola cedola fissa.
+ */
+export function resolveBond(description: string | null | undefined, override?: BondOverrideLike | null): ResolvedBond {
+  const p = parseBondPartial(description);
+  const ov = override ?? null;
+
+  const maturity = ov?.maturity ?? p.maturity;
+  const couponRatePct = ov ? ov.couponRatePct : p.couponRatePct; // override vince (anche null esplicito)
+  const frequency = ov?.frequency ?? p.frequency;
+  const overridden = !!ov && (ov.maturity != null || ov.couponRatePct != null);
+
+  let status: BondFixStatus;
+  let needsFix: boolean;
+  if (!maturity) {
+    status = 'unresolved';
+    needsFix = true;
+  } else if (couponRatePct == null && !p.inflationLinked && !p.stepUp && !p.zeroCoupon) {
+    status = 'partial';
+    needsFix = true; // cedola davvero mancante su bond ordinario
+  } else {
+    status = couponRatePct == null && !p.zeroCoupon ? 'partial' : 'resolved';
+    needsFix = false; // inflation/step-up/ZC/cedola nota → ok
+  }
 
   return {
-    couponRatePct,
-    maturity: mat.date,
-    frequency: 1, // default annuale (govvie EUR); modificabile a monte se necessario
-    parsedFrom: `coupon=${couponRatePct}% maturity=${mat.how}`,
+    couponRatePct, maturity, frequency,
+    inflationLinked: p.inflationLinked, stepUp: p.stepUp, zeroCoupon: p.zeroCoupon,
+    overridden, status, needsFix,
   };
 }
 
-/** Date dei flussi cedolari da `from` (escluso) alla maturity (incluso), a ritroso. */
-export function couponDates(info: BondInfo, fromInclusiveOk = false): Date[] {
+// ── Pricing teorico ─────────────────────────────────────────────────────────
+/** Date dei flussi cedolari dalla maturity a ritroso. Frequenza clampata a >=1. */
+export function couponDates(info: BondInfo): Date[] {
   const out: Date[] = [];
-  const stepMonths = Math.round(12 / info.frequency);
-  const m = info.maturity;
-  let d = new Date(m.getTime());
-  // genera all'indietro finché > epoch ragionevole
+  const f = Math.max(1, info.frequency || 1);
+  const stepMonths = Math.round(12 / f);
+  let d = new Date(info.maturity.getTime());
   for (let i = 0; i < 200; i++) {
     out.push(new Date(d.getTime()));
-    const nd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - stepMonths, d.getUTCDate()));
-    d = nd;
+    d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - stepMonths, d.getUTCDate()));
     if (d.getUTCFullYear() < 1990) break;
   }
   return out.sort((a, b) => a.getTime() - b.getTime());
@@ -145,22 +254,21 @@ function yearFrac(a: Date, b: Date): number {
   return (b.getTime() - a.getTime()) / (365.25 * 24 * 3600 * 1000);
 }
 
-/** Prezzo clean teorico (face=100) dato un rendimento annuo `y`, valutato a `asOf`. */
+/** Prezzo clean teorico (face=100) dato un rendimento annuo `ytm`, valutato a `asOf`. */
 export function bondCleanPrice(info: BondInfo, ytm: number, asOf: Date, face = 100): number {
-  const f = info.frequency;
+  const f = Math.max(1, info.frequency || 1);
   const couponPmt = (info.couponRatePct / 100) * face / f;
   const periodRate = ytm / f;
   let pv = 0;
-  const dates = couponDates(info);
-  for (const cd of dates) {
+  for (const cd of couponDates(info)) {
     if (cd.getTime() <= asOf.getTime()) continue; // cedola già staccata
     const t = yearFrac(asOf, cd);
     if (t <= 0) continue;
-    const n = t * f; // numero di periodi (frazionario)
+    const n = t * f;
     const df = Math.pow(1 + periodRate, -n);
     pv += couponPmt * df;
     if (Math.abs(cd.getTime() - info.maturity.getTime()) < 24 * 3600 * 1000) {
-      pv += face * df; // rimborso a scadenza insieme all'ultima cedola
+      pv += face * df; // rimborso a scadenza con l'ultima cedola
     }
   }
   return pv;
@@ -170,18 +278,17 @@ export function bondCleanPrice(info: BondInfo, ytm: number, asOf: Date, face = 1
 export function bondYTM(info: BondInfo, cleanPrice: number, asOf: Date, face = 100): number {
   let lo = -0.5, hi = 1.5;
   let pLo = bondCleanPrice(info, lo, asOf, face) - cleanPrice;
-  let pHi = bondCleanPrice(info, hi, asOf, face) - cleanPrice;
+  const pHi = bondCleanPrice(info, hi, asOf, face) - cleanPrice;
   if (pLo === 0) return lo;
   if (pHi === 0) return hi;
   if (pLo * pHi > 0) {
-    // prezzo fuori range plausibile: fallback grezzo coupon/price
-    return (info.couponRatePct / 100) * face / cleanPrice;
+    return (info.couponRatePct / 100) * face / cleanPrice; // fuori range: fallback grezzo
   }
   for (let i = 0; i < 100; i++) {
     const mid = (lo + hi) / 2;
     const pm = bondCleanPrice(info, mid, asOf, face) - cleanPrice;
     if (Math.abs(pm) < 1e-7) return mid;
-    if (pLo * pm < 0) { hi = mid; pHi = pm; } else { lo = mid; pLo = pm; }
+    if (pLo * pm < 0) { hi = mid; } else { lo = mid; pLo = pm; }
   }
   return (lo + hi) / 2;
 }

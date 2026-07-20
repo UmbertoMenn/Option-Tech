@@ -17,8 +17,18 @@ import {
   buildProjectionInputs, buildTimeGrid, projectDeterministic, decomposeAtHorizon,
   ResolvedBondOverride, ProjectionScope, INFLATION_TARGET,
 } from '@/lib/portfolioProjection';
-import { parseBondPartial } from '@/lib/bondMath';
+import { resolveBond, BondOverrideLike } from '@/lib/bondMath';
 import { useBondOverrides, BondOverride } from '@/hooks/useBondOverrides';
+
+/** Adatta una riga bond_overrides al formato atteso da resolveBond (Date, non ISO string). */
+function overrideToLike(ov?: BondOverride): BondOverrideLike | null {
+  if (!ov) return null;
+  return {
+    couponRatePct: ov.coupon_rate_pct,
+    maturity: ov.maturity_date ? new Date(ov.maturity_date + 'T00:00:00Z') : null,
+    frequency: ov.frequency,
+  };
+}
 
 interface Props {
   positions: Position[];
@@ -65,27 +75,44 @@ function BondFixRow({ position, override, onSave, saving }: {
   onSave: (inp: { portfolioId: string; isin: string; couponRatePct: number | null; maturityDate: string | null; frequency: number }) => void;
   saving: boolean;
 }) {
-  const partial = parseBondPartial(position.description);
-  const [coupon, setCoupon] = useState(
-    override?.coupon_rate_pct != null ? String(override.coupon_rate_pct)
-      : partial.couponRatePct != null ? String(partial.couponRatePct) : '',
-  );
-  const [maturity, setMaturity] = useState(
-    override?.maturity_date ?? (partial.maturity ? toISO(partial.maturity) : ''),
-  );
-  const [freq, setFreq] = useState(String(override?.frequency ?? partial.frequency));
+  // Prefill dalla risoluzione unificata (description + eventuale override già salvato):
+  // così i campi partono già compilati con quanto dedotto dalla description.
+  const resolved = resolveBond(position.description, overrideToLike(override));
+  const [coupon, setCoupon] = useState(resolved.couponRatePct != null ? String(resolved.couponRatePct) : '');
+  const [maturity, setMaturity] = useState(resolved.maturity ? toISO(resolved.maturity) : '');
+  // frequenza: 0 = zero coupon; default a quella dedotta.
+  const [freq, setFreq] = useState(String(resolved.zeroCoupon ? 0 : (override?.frequency ?? resolved.frequency)));
 
+  const isZC = freq === '0';
   const canSave = !!position.isin && maturity !== '';
+
+  // Se l'utente sceglie "0 (ZC)" la cedola è per definizione 0; se la sposta via da 0
+  // e la cedola era 0, la lasciamo modificabile.
+  const onFreqChange = (v: string) => {
+    setFreq(v);
+    if (v === '0') setCoupon('0');
+  };
 
   return (
     <div className="flex flex-wrap items-end gap-2 py-2 border-b border-border/40 last:border-0">
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium text-foreground truncate" title={position.description}>{position.description}</div>
-        <div className="text-[10px] text-muted-foreground font-mono">{position.isin ?? 'ISIN assente — non salvabile'}</div>
+        <div className="text-[10px] text-muted-foreground font-mono">
+          {position.isin ?? 'ISIN assente — non salvabile'}
+          {resolved.stepUp && <span className="ml-1 text-amber-500">· step-up</span>}
+          {resolved.inflationLinked && <span className="ml-1 text-sky-500">· indicizzato</span>}
+        </div>
       </div>
       <div className="flex flex-col">
         <label className="text-[10px] text-muted-foreground">Cedola %</label>
-        <Input value={coupon} onChange={e => setCoupon(e.target.value)} placeholder="es. 2,45" className="h-7 w-20 text-xs" inputMode="decimal" />
+        <Input
+          value={coupon}
+          onChange={e => setCoupon(e.target.value)}
+          placeholder={resolved.stepUp ? 'step-up' : 'es. 2,45'}
+          disabled={isZC}
+          className="h-7 w-20 text-xs"
+          inputMode="decimal"
+        />
       </div>
       <div className="flex flex-col">
         <label className="text-[10px] text-muted-foreground">Scadenza</label>
@@ -93,9 +120,10 @@ function BondFixRow({ position, override, onSave, saving }: {
       </div>
       <div className="flex flex-col">
         <label className="text-[10px] text-muted-foreground">Cedole/anno</label>
-        <Select value={freq} onValueChange={setFreq}>
-          <SelectTrigger className="h-7 w-16 text-xs"><SelectValue /></SelectTrigger>
+        <Select value={freq} onValueChange={onFreqChange}>
+          <SelectTrigger className="h-7 w-24 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
+            <SelectItem value="0">0 (ZC)</SelectItem>
             <SelectItem value="1">1</SelectItem>
             <SelectItem value="2">2</SelectItem>
             <SelectItem value="4">4</SelectItem>
@@ -109,9 +137,9 @@ function BondFixRow({ position, override, onSave, saving }: {
         onClick={() => onSave({
           portfolioId: position.portfolio_id,
           isin: position.isin as string,
-          couponRatePct: coupon.trim() === '' ? null : parseFloat(coupon.replace(',', '.')),
+          couponRatePct: isZC ? 0 : (coupon.trim() === '' ? null : parseFloat(coupon.replace(',', '.'))),
           maturityDate: maturity || null,
-          frequency: parseInt(freq, 10) || 1,
+          frequency: parseInt(freq, 10),
         })}
       >
         Salva
@@ -208,16 +236,12 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   const last = deterministic[deterministic.length - 1];
   const horizonLabel = grid[grid.length - 1]?.label ?? '';
 
-  // bond da risolvere: manca la scadenza, oppure manca la cedola e NON è indicizzato/ZC
+  // bond da risolvere: scadenza assente, oppure cedola davvero mancante su bond ordinario.
+  // ZC, indicizzati e step-up (BTP Italia/Valore/Più) sono modellati correttamente e NON
+  // vengono più segnalati (unica fonte di verità: resolveBond).
   const bondsToFix = useMemo(() => positions.filter(p => {
     if (p.asset_type !== 'bond') return false;
-    const ov = getOverride(p.portfolio_id, p.isin);
-    const partial = parseBondPartial(p.description);
-    const maturity = ov?.maturity_date ?? (partial.maturity ? toISO(partial.maturity) : null);
-    const coupon = ov ? ov.coupon_rate_pct : partial.couponRatePct;
-    if (!maturity) return true;                       // scadenza assente
-    if (coupon == null && !partial.inflationLinked) return true; // cedola sconosciuta (non indicizzato/ZC)
-    return false;
+    return resolveBond(p.description, overrideToLike(getOverride(p.portfolio_id, p.isin))).needsFix;
   }), [positions, getOverride]);
 
   const presets: { label: string; years: number | null }[] = [

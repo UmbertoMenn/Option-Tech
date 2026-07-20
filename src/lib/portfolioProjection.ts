@@ -264,15 +264,18 @@ export function buildProjectionInputs(
       if (maturity && isFinite(maturity.getTime()) && currentClean > 0 && mvEUR !== 0) {
         parsedBondMV += mvEUR;
         if (maturity.getTime() > maxExpiry) maxExpiry = maturity.getTime();
-        const info: BondInfo = { couponRatePct: couponRatePct ?? 0, maturity, frequency, parsedFrom: ov ? 'override' : 'auto' };
+        // Frequenza per la MATEMATICA: >=1 (0 = zero coupon a livello UI, ma serve un
+        // passo cedolare valido per generare le date; le cedole restano 0 per gli ZC).
+        const freqMath = Math.max(1, frequency || 1);
+        const info: BondInfo = { couponRatePct: couponRatePct ?? 0, maturity, frequency: freqMath, parsedFrom: ov ? 'override' : 'auto' };
         const ytm = inflationLinked ? 0 : bondYTM(info, currentClean, t0);
         const couponsModeled = couponRatePct != null && couponRatePct > 0;
-        const couponCashPerPeriod = couponsModeled ? (mvEUR * (couponRatePct as number)) / (currentClean * frequency) : 0;
+        const couponCashPerPeriod = couponsModeled ? (mvEUR * (couponRatePct as number)) / (currentClean * freqMath) : 0;
 
         // Flussi futuri precomputati una volta sola (niente Date math in patrimonyAt).
         const maturityT = Math.max(0, yearFrac(t0, maturity));
         const futureDates = couponDates(info).filter(d => d.getTime() > t0.getTime());
-        const cpnPct = (info.couponRatePct / info.frequency); // % del face per periodo
+        const cpnPct = (info.couponRatePct / freqMath); // % del face per periodo (0 per ZC)
         const flowT: number[] = [];
         const flowAmt: number[] = [];
         for (const d of futureDates) {
