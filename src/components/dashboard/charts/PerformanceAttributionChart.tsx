@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, Info } from 'lucide-react';
 import { DepositEntry } from '@/types/deposits';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { usePerformanceAttribution } from '@/hooks/usePerformanceAttribution';
-import { AttributionItem, calculatePerformanceAttribution } from '@/lib/performanceAttribution';
+import {
+  AttributionItem,
+  PerformanceAttributionResult,
+  calculatePerformanceAttribution,
+} from '@/lib/performanceAttribution';
 import { formatDate, formatEUR, formatPercentage } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,6 +19,25 @@ interface PerformanceAttributionChartProps {
   historicalData: HistoricalDataEntry[];
   deposits: DepositEntry[];
 }
+
+interface AttributionCalculation {
+  result: PerformanceAttributionResult | null;
+  reason: string | null;
+}
+
+const STATUS_LABELS: Record<AttributionItem['status'], string> = {
+  calculated: 'Calcolato',
+  partial: 'Parziale',
+  unavailable: 'Non attribuibile',
+  no_activity: 'Nessuna attività',
+};
+
+const STATUS_CLASSES: Record<AttributionItem['status'], string> = {
+  calculated: 'border-profit/30 bg-profit/10 text-profit',
+  partial: 'border-warning/30 bg-warning/10 text-warning',
+  unavailable: 'border-loss/30 bg-loss/10 text-loss',
+  no_activity: 'border-border bg-muted text-muted-foreground',
+};
 
 function dateMonthsBefore(date: string, months: number): string {
   const value = new Date(`${date}T12:00:00`);
@@ -49,25 +71,16 @@ function startSnapshotForRange(
     ?? null;
 }
 
-function AttributionTooltip({ active, payload }: {
-  active?: boolean;
-  payload?: Array<{ payload: AttributionItem }>;
-}) {
-  if (!active || !payload?.length) return null;
-  const item = payload[0].payload;
-  return (
-    <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-lg">
-      <p className="mb-1 font-semibold text-foreground">{item.label}</p>
-      <p className={item.amount >= 0 ? 'text-profit' : 'text-loss'}>
-        {formatEUR(item.amount)} · {formatPercentage(item.percent)}
-      </p>
-      <p className="mt-1 max-w-56 text-muted-foreground">
-        {item.category === 'reconciliation_gap'
-          ? 'Differenza da analizzare: non viene attribuita artificialmente a una classe di attivo.'
-          : 'Variazione di valore al netto di acquisti, vendite e trasferimenti interni.'}
-      </p>
-    </div>
-  );
+function signedFormulaValue(value: number): string {
+  return value < 0 ? `(${formatEUR(value)})` : formatEUR(value);
+}
+
+function rowFormula(item: AttributionItem, result: PerformanceAttributionResult): string {
+  if (item.category === 'reconciliation_gap') {
+    const classified = result.totalPL - item.amount;
+    return `${formatEUR(result.totalPL)} − ${signedFormulaValue(classified)}`;
+  }
+  return `${formatEUR(item.endValue)} − ${formatEUR(item.startValue)} − ${signedFormulaValue(item.netFlows)}`;
 }
 
 export function PerformanceAttributionChart({
@@ -85,29 +98,62 @@ export function PerformanceAttributionChart({
     [historicalData],
   );
 
-  const result = useMemo(() => {
-    if (!data || data.snapshots.length < 2) return null;
+  const calculation = useMemo<AttributionCalculation>(() => {
+    if (!data) return { result: null, reason: 'I dati necessari non sono ancora disponibili.' };
+    if (data.snapshots.length === 0) {
+      return {
+        result: null,
+        reason: 'Calcolo non possibile: non è disponibile alcuno snapshot completo delle posizioni.',
+      };
+    }
+    if (data.snapshots.length === 1) {
+      return {
+        result: null,
+        reason: `Calcolo non possibile: è disponibile un solo snapshot completo (${formatDate(data.snapshots[0].snapshot_date)}). Servono sia T0 sia T1.`,
+      };
+    }
+
     const snapshots = [...data.snapshots].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
     const endSnapshot = snapshots[snapshots.length - 1];
     const cutoff = cutoffForRange(timeRange, endSnapshot.snapshot_date);
     const startSnapshot = startSnapshotForRange(snapshots, cutoff);
-    if (!startSnapshot || startSnapshot.snapshot_date === endSnapshot.snapshot_date) return null;
+    if (!startSnapshot || startSnapshot.snapshot_date === endSnapshot.snapshot_date) {
+      return {
+        result: null,
+        reason: 'Calcolo non possibile nel periodo selezionato: manca uno snapshot T0 distinto dallo snapshot T1.',
+      };
+    }
+
     const historicalByDate = new Map(historicalData.map(entry => [entry.snapshot_date, entry]));
     const startHistorical = historicalByDate.get(startSnapshot.snapshot_date);
     const endHistorical = historicalByDate.get(endSnapshot.snapshot_date);
-    if (!startHistorical || !endHistorical) return null;
+    const missingDates = [
+      !startHistorical ? `T0 ${formatDate(startSnapshot.snapshot_date)}` : null,
+      !endHistorical ? `T1 ${formatDate(endSnapshot.snapshot_date)}` : null,
+    ].filter((value): value is string => !!value);
+    if (!startHistorical || !endHistorical) {
+      return {
+        result: null,
+        reason: `Calcolo non possibile: manca il Netting storico per ${missingDates.join(' e ')}.`,
+      };
+    }
 
-    return calculatePerformanceAttribution({
-      startSnapshot,
-      endSnapshot,
-      startHistorical,
-      endHistorical,
-      allHistoricalData: historicalData,
-      deposits,
-      trades: data.trades,
-      internalTransfers: data.internalTransfers,
-    });
+    return {
+      result: calculatePerformanceAttribution({
+        startSnapshot,
+        endSnapshot,
+        startHistorical,
+        endHistorical,
+        allHistoricalData: historicalData,
+        deposits,
+        trades: data.trades,
+        internalTransfers: data.internalTransfers,
+      }),
+      reason: null,
+    };
   }, [data, deposits, historicalData, timeRange]);
+
+  const result = calculation.result;
 
   if (!portfolioId) {
     return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Disponibile sul singolo portafoglio</div>;
@@ -116,11 +162,15 @@ export function PerformanceAttributionChart({
     return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Calcolo attribuzione…</div>;
   }
   if (error) {
-    return <div className="flex h-full items-center justify-center text-sm text-loss">Impossibile caricare la scomposizione</div>;
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-loss">
+        Impossibile caricare la scomposizione: il recupero di snapshot o movimenti non è riuscito.
+      </div>
+    );
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1">
           {(['1M', '3M', '6M', '1Y', '2Y', '3Y', 'MAX', 'YTD'] as const).map(range => (
@@ -140,8 +190,8 @@ export function PerformanceAttributionChart({
         {result && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Totale</span>
-            <span className={cn('font-semibold', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
-              {formatEUR(result.totalPL)} · {formatPercentage(result.totalPercent)}
+            <span className={cn('font-semibold tabular-nums', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
+              {formatEUR(result.totalPL)} · {result.totalPercent == null ? 'percentuale n.d.' : formatPercentage(result.totalPercent)}
             </span>
             <TooltipProvider delayDuration={150}>
               <UiTooltip>
@@ -152,12 +202,12 @@ export function PerformanceAttributionChart({
                       : <Info className="h-3.5 w-3.5 text-muted-foreground" />}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-80 text-xs">
+                <TooltipContent className="max-w-96 text-xs">
                   <p>
-                    Periodo {formatDate(result.startDate)} – {formatDate(result.endDate)}. La somma dei contributi riconcilia il P/L del Netting Totale.
+                    Periodo {formatDate(result.startDate)} – {formatDate(result.endDate)}. Ogni contributo è T1 − T0 − movimenti netti; l’eventuale differenza resta visibile nel residuo.
                   </p>
                   <p className="mt-1">
-                    Prezzi opzioni verificati: {result.coverage.optionMarks - result.coverage.optionMarksWithoutSpot}/{result.coverage.optionMarks}.
+                    Base delle percentuali: patrimonio medio {formatEUR(result.averageBalance)}. Prezzi opzioni verificati: {result.coverage.optionMarks - result.coverage.optionMarksWithoutSpot}/{result.coverage.optionMarks}.
                   </p>
                   {earliestHistoricalDate && earliestHistoricalDate < result.startDate && (
                     <p className="mt-1 text-warning">
@@ -173,38 +223,75 @@ export function PerformanceAttributionChart({
       </div>
 
       {!result ? (
-        <div className="flex flex-1 items-center justify-center text-center text-sm text-muted-foreground">
-          Servono almeno due snapshot completi nel periodo selezionato
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+          {calculation.reason}
         </div>
       ) : (
-        <div className="min-h-0 flex-1">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={result.items} layout="vertical" margin={{ top: 0, right: 24, left: 18, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.45} horizontal={false} />
-              <XAxis
-                type="number"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={value => `${Number(value).toFixed(1)}%`}
-                axisLine={{ stroke: 'hsl(var(--border))' }}
-                tickLine={false}
-              />
-              <YAxis
-                type="category"
-                dataKey="label"
-                width={118}
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.35)' }} content={<AttributionTooltip />} />
-              <Bar dataKey="percent" radius={[3, 3, 3, 3]} maxBarSize={18}>
-                {result.items.map(item => (
-                  <Cell key={item.category} fill={item.amount >= 0 ? 'hsl(var(--profit))' : 'hsl(var(--loss))'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border/70">
+          <table className="w-full min-w-[1180px] border-collapse text-[11px]">
+            <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_hsl(var(--border))]">
+              <tr className="text-left text-muted-foreground">
+                <th className="w-44 px-3 py-2 font-medium">Classe</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">T0 · {formatDate(result.startDate)}</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">T1 · {formatDate(result.endDate)}</th>
+                <th className="w-32 px-3 py-2 text-right font-medium">Movimenti netti</th>
+                <th className="w-64 px-3 py-2 font-medium">Calcolo</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Contributo</th>
+                <th className="w-20 px-3 py-2 text-right font-medium">% rend.</th>
+                <th className="min-w-80 px-3 py-2 font-medium">Stato / motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.items.map(item => {
+                const isGap = item.category === 'reconciliation_gap';
+                return (
+                  <tr key={item.category} className={cn('border-b border-border/60 align-top hover:bg-muted/30', isGap && 'bg-warning/5')}>
+                    <td className="px-3 py-2 font-medium text-foreground">{item.label}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{isGap ? '—' : formatEUR(item.startValue)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{isGap ? '—' : formatEUR(item.endValue)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{isGap ? '—' : formatEUR(item.netFlows)}</td>
+                    <td className="px-3 py-2 font-mono tabular-nums text-muted-foreground">{rowFormula(item, result)}</td>
+                    <td className={cn('px-3 py-2 text-right font-semibold tabular-nums', item.amount >= 0 ? 'text-profit' : 'text-loss')}>
+                      {formatEUR(item.amount)}
+                    </td>
+                    <td className={cn('px-3 py-2 text-right tabular-nums', item.amount >= 0 ? 'text-profit' : 'text-loss')}>
+                      {item.percent == null ? '—' : formatPercentage(item.percent)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-start gap-2">
+                        <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide', STATUS_CLASSES[item.status])}>
+                          {STATUS_LABELS[item.status]}
+                        </span>
+                        <span className="leading-4 text-muted-foreground">{item.reason}</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="sticky bottom-0 z-10 bg-muted shadow-[0_-1px_0_hsl(var(--border))]">
+              <tr className="font-semibold text-foreground">
+                <td className="px-3 py-2">Netting totale</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.startTotal)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.endTotal)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.externalFlows)}</td>
+                <td className="px-3 py-2 font-mono font-normal tabular-nums text-muted-foreground">
+                  {formatEUR(result.endTotal)} − {formatEUR(result.startTotal)} − {signedFormulaValue(result.externalFlows)}
+                </td>
+                <td className={cn('px-3 py-2 text-right tabular-nums', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
+                  {formatEUR(result.totalPL)}
+                </td>
+                <td className={cn('px-3 py-2 text-right tabular-nums', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
+                  {result.totalPercent == null ? '—' : formatPercentage(result.totalPercent)}
+                </td>
+                <td className="px-3 py-2 font-normal text-muted-foreground">
+                  {result.totalPercent == null
+                    ? 'Percentuale non disponibile: il patrimonio medio del periodo non è positivo.'
+                    : `Percentuale calcolata sul patrimonio medio di ${formatEUR(result.averageBalance)}.`}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
     </div>

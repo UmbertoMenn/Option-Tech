@@ -82,8 +82,13 @@ export interface InternalTransferRow {
 export interface AttributionItem {
   category: AttributionCategory;
   label: string;
+  startValue: number;
+  endValue: number;
+  netFlows: number;
   amount: number;
-  percent: number;
+  percent: number | null;
+  status: 'calculated' | 'partial' | 'unavailable' | 'no_activity';
+  reason: string;
 }
 
 export interface AttributionCoverage {
@@ -92,14 +97,22 @@ export interface AttributionCoverage {
   exactOptionTrades: number;
   proxyOptionTrades: number;
   missingOptionTrades: number;
+  tradesInPeriod: number;
+  internalTransfersInPeriod: number;
+  startDetailGap: number;
+  endDetailGap: number;
+  uncoveredPositionChanges: AttributionCategory[];
 }
 
 export interface PerformanceAttributionResult {
   startDate: string;
   endDate: string;
   totalPL: number;
-  totalPercent: number;
+  totalPercent: number | null;
   averageBalance: number;
+  startTotal: number;
+  endTotal: number;
+  externalFlows: number;
   items: AttributionItem[];
   coverage: AttributionCoverage;
   warnings: string[];
@@ -126,6 +139,36 @@ function canonicalPositionKey(position: Position): string {
     description: position.description,
     isin: position.isin,
   });
+}
+
+function snapshotCategoryQuantities(snapshot: FullSnapshot): Map<AttributionCategory, Map<string, number>> {
+  const result = new Map<AttributionCategory, Map<string, number>>();
+  const add = (category: AttributionCategory, key: string, quantity: number) => {
+    const values = result.get(category) ?? new Map<string, number>();
+    values.set(key, (values.get(key) ?? 0) + quantity);
+    result.set(category, values);
+  };
+
+  for (const position of snapshot.positions) {
+    const canonical = canonicalPositionKey(position) || position.isin || position.description;
+    const optionSuffix = position.asset_type === 'derivative'
+      ? `:${position.option_type ?? '?'}:${position.strike_price ?? '?'}:${position.expiry_date ?? '?'}`
+      : '';
+    const key = `${canonical}${optionSuffix}`;
+    if (position.asset_type === 'derivative') {
+      add('option_time', key, Number(position.quantity || 0));
+      add('option_intrinsic', key, Number(position.quantity || 0));
+      continue;
+    }
+    const category = position.asset_type as AttributionCategory;
+    add(category in emptyValues() ? category : 'unclassified', key, Number(position.quantity || 0));
+  }
+  return result;
+}
+
+function mapsDiffer(left: Map<string, number>, right: Map<string, number>): boolean {
+  const keys = new Set([...left.keys(), ...right.keys()]);
+  return [...keys].some(key => Math.abs((left.get(key) ?? 0) - (right.get(key) ?? 0)) > 1e-8);
 }
 
 function resolveSnapshotSpot(
@@ -294,7 +337,13 @@ export function calculatePerformanceAttribution(input: {
     exactOptionTrades: 0,
     proxyOptionTrades: 0,
     missingOptionTrades: 0,
+    tradesInPeriod: 0,
+    internalTransfersInPeriod: 0,
+    startDetailGap: 0,
+    endDetailGap: 0,
+    uncoveredPositionChanges: [],
   };
+  const tradeCategories = new Set<AttributionCategory>();
 
   const positionsForBasis = [...startSnapshot.positions, ...endSnapshot.positions];
   const basisCategory = new Map<string, AttributionCategory>();
@@ -316,11 +365,14 @@ export function calculatePerformanceAttribution(input: {
 
   for (const trade of trades) {
     if (!(trade.trade_date > startDate && trade.trade_date <= endDate)) continue;
+    coverage.tradesInPeriod += 1;
     if (trade.side === 'ASG') {
       // L'assegnazione di una PUT è un trasferimento, non rendimento:
       // la quota fair passa alle azioni e l'intrinseco estingue la passività.
       const assignedPosition = positionByBasis.get(trade.basis_key);
       const category = categoryForTrade(trade, basisCategory);
+      tradeCategories.add(category);
+      tradeCategories.add('option_intrinsic');
       const quantity = Math.abs(Number(trade.quantity || 0)); // azioni, non contratti
       const strike = Math.abs(Number(trade.strike ?? trade.price ?? 0));
       const exchangeRate = Number(trade.exchange_rate || assignedPosition?.exchange_rate || 1) > 0
@@ -353,6 +405,8 @@ export function calculatePerformanceAttribution(input: {
     const parsedOption = parseOptionBasisKey(trade.basis_key);
 
     if (parsedOption) {
+      tradeCategories.add('option_time');
+      tradeCategories.add('option_intrinsic');
       const optionType = trade.option_type ?? parsedOption.optionType;
       const strike = Number(trade.strike ?? parsedOption.strike);
       const underlyingKey = trade.underlying_key ?? parsedOption.underlyingKey;
@@ -386,6 +440,7 @@ export function calculatePerformanceAttribution(input: {
     }
 
     const category = categoryForTrade(trade, basisCategory);
+    tradeCategories.add(category);
     const gross = Number(trade.gross_eur || 0) > 0
       ? Math.abs(Number(trade.gross_eur))
       : price * quantity / exchangeRate;
@@ -397,6 +452,7 @@ export function calculatePerformanceAttribution(input: {
     // l'addebito (GP→cash); le due date possono differire per valuta.
     const effectiveDate = transfer.to_gp ? transfer.credit_date : transfer.debit_date;
     if (!(effectiveDate > startDate && effectiveDate <= endDate)) continue;
+    coverage.internalTransfersInPeriod += 1;
     const amount = Math.abs(Number(transfer.amount_eur || 0));
     if (transfer.to_gp) flows.gp += amount;
     if (transfer.from_gp) flows.gp -= amount;
@@ -429,14 +485,112 @@ export function calculatePerformanceAttribution(input: {
     .reduce((sum, category) => sum + amounts[category], 0);
   amounts.reconciliation_gap = totalPL - attributedTotal;
 
-  const items = ATTRIBUTION_CATEGORIES
-    .map(category => ({
+  const detailCategories = ATTRIBUTION_CATEGORIES.filter(category => category !== 'reconciliation_gap');
+  const startDetailTotal = detailCategories.reduce((sum, category) => sum + start.values[category], 0);
+  const endDetailTotal = detailCategories.reduce((sum, category) => sum + end.values[category], 0);
+  coverage.startDetailGap = startValue - startDetailTotal;
+  coverage.endDetailGap = endValue - endDetailTotal;
+
+  const startQuantities = snapshotCategoryQuantities(startSnapshot);
+  const endQuantities = snapshotCategoryQuantities(endSnapshot);
+  const positionCategories: AttributionCategory[] = [
+    'option_time', 'option_intrinsic', 'stock', 'etf', 'bond', 'commodity', 'unclassified',
+  ];
+  coverage.uncoveredPositionChanges = positionCategories.filter(category =>
+    mapsDiffer(startQuantities.get(category) ?? new Map(), endQuantities.get(category) ?? new Map())
+      && !tradeCategories.has(category),
+  );
+
+  const gapReasons = (): string[] => {
+    const reasons: string[] = [];
+    if (Math.abs(coverage.startDetailGap) >= 1) {
+      reasons.push(`a T0 il dettaglio differisce dal Netting di ${coverage.startDetailGap.toFixed(0)} €`);
+    }
+    if (Math.abs(coverage.endDetailGap) >= 1) {
+      reasons.push(`a T1 il dettaglio differisce dal Netting di ${coverage.endDetailGap.toFixed(0)} €`);
+    }
+    if (coverage.uncoveredPositionChanges.length > 0) {
+      reasons.push(`variazioni di quantità senza movimenti registrati: ${coverage.uncoveredPositionChanges.map(category => ATTRIBUTION_LABELS[category]).join(', ')}`);
+    }
+    if (coverage.optionMarksWithoutSpot > 0) {
+      reasons.push(`${coverage.optionMarksWithoutSpot} valorizzazioni opzione senza sottostante`);
+    }
+    if (coverage.missingOptionTrades > 0) {
+      reasons.push(`${coverage.missingOptionTrades} movimenti opzione non scomponibili`);
+    }
+    return reasons;
+  };
+
+  const itemStatus = (category: AttributionCategory): Pick<AttributionItem, 'status' | 'reason'> => {
+    const activity = Math.abs(start.values[category]) >= 0.01
+      || Math.abs(end.values[category]) >= 0.01
+      || Math.abs(flows[category]) >= 0.01
+      || Math.abs(amounts[category]) >= 0.01;
+    if (category === 'reconciliation_gap') {
+      const reasons = gapReasons();
+      if (Math.abs(amounts[category]) < 0.01) {
+        if (reasons.length > 0) {
+          return {
+            status: 'partial',
+            reason: `Quadratura aritmetica completa, ma la copertura dei dati è parziale: ${reasons.join('; ')}.`,
+          };
+        }
+        return { status: 'calculated', reason: 'Quadratura completa: la somma delle classi coincide con il P/L del Netting.' };
+      }
+      return {
+        status: 'unavailable',
+        reason: reasons.length > 0
+          ? `Non attribuibile: ${reasons.join('; ')}.`
+          : 'Non attribuibile: mancano dettagli o movimenti sufficienti per assegnare la differenza a una classe.',
+      };
+    }
+    if (category === 'option_time' || category === 'option_intrinsic') {
+      const issues: string[] = [];
+      if (coverage.optionMarksWithoutSpot > 0) issues.push(`${coverage.optionMarksWithoutSpot} mark senza prezzo del sottostante`);
+      if (coverage.proxyOptionTrades > 0) issues.push(`${coverage.proxyOptionTrades} movimenti valorizzati con prezzo proxy`);
+      if (coverage.missingOptionTrades > 0) issues.push(`${coverage.missingOptionTrades} movimenti senza split intrinseco/tempo`);
+      if (coverage.uncoveredPositionChanges.includes(category)) issues.push('quantità variate senza movimento registrato');
+      if (issues.length > 0) {
+        const nothingCouldBeSplit = !activity
+          && coverage.optionMarks > 0
+          && coverage.optionMarksWithoutSpot === coverage.optionMarks;
+        return {
+          status: nothingCouldBeSplit ? 'unavailable' : 'partial',
+          reason: `${nothingCouldBeSplit ? 'Calcolo non possibile' : 'Calcolo parziale'}: ${issues.join('; ')}.`,
+        };
+      }
+    }
+    if (!activity) {
+      return { status: 'no_activity', reason: 'Nessuna posizione o movimento per questa classe nel periodo.' };
+    }
+    if (category === 'unclassified') {
+      return { status: 'partial', reason: 'Valori presenti, ma lo strumento o il movimento non è classificabile con i dati disponibili.' };
+    }
+    if (coverage.uncoveredPositionChanges.includes(category)) {
+      return { status: 'partial', reason: 'Calcolo parziale: le quantità sono cambiate tra T0 e T1, ma non risultano movimenti della classe nel ledger.' };
+    }
+    if (category === 'gp' && coverage.internalTransfersInPeriod === 0 && Math.abs(end.values.gp - start.values.gp) >= 0.01) {
+      return { status: 'partial', reason: 'Calcolato assumendo assenza di giroconti GP: nel periodo non risultano trasferimenti interni registrati.' };
+    }
+    if (averageBalance <= 0) {
+      return { status: 'partial', reason: 'Contributo in euro calcolato; percentuale non disponibile perché il patrimonio medio non è positivo.' };
+    }
+    return { status: 'calculated', reason: 'Calcolato come T1 − T0 − movimenti netti della classe.' };
+  };
+
+  const items = ATTRIBUTION_CATEGORIES.map(category => {
+    const status = itemStatus(category);
+    return {
       category,
       label: ATTRIBUTION_LABELS[category],
+      startValue: start.values[category],
+      endValue: end.values[category],
+      netFlows: flows[category],
       amount: amounts[category],
-      percent: averageBalance > 0 ? amounts[category] / averageBalance * 100 : 0,
-    }))
-    .filter(item => Math.abs(item.amount) >= 0.01);
+      percent: averageBalance > 0 ? amounts[category] / averageBalance * 100 : null,
+      ...status,
+    };
+  });
 
   const warnings: string[] = [];
   if (coverage.optionMarksWithoutSpot > 0) {
@@ -454,13 +608,25 @@ export function calculatePerformanceAttribution(input: {
   if (Math.abs(amounts.reconciliation_gap) >= 1) {
     warnings.push(`${amounts.reconciliation_gap.toFixed(0)} € di residuo: Netting, snapshot e movimenti non riconciliano ancora`);
   }
+  if (Math.abs(coverage.startDetailGap) >= 1 || Math.abs(coverage.endDetailGap) >= 1) {
+    warnings.push('Il dettaglio per classe non coincide con il Netting in almeno uno dei due estremi del periodo');
+  }
+  if (coverage.uncoveredPositionChanges.length > 0) {
+    warnings.push(`Quantità variate senza movimenti registrati: ${coverage.uncoveredPositionChanges.map(category => ATTRIBUTION_LABELS[category]).join(', ')}`);
+  }
+  if (averageBalance <= 0) {
+    warnings.push('Percentuali non calcolabili: il patrimonio medio del periodo non è positivo');
+  }
 
   return {
     startDate,
     endDate,
     totalPL,
-    totalPercent: averageBalance > 0 ? totalPL / averageBalance * 100 : 0,
+    totalPercent: averageBalance > 0 ? totalPL / averageBalance * 100 : null,
     averageBalance,
+    startTotal: startValue,
+    endTotal: endValue,
+    externalFlows: depositsInPeriod,
     items,
     coverage,
     warnings,

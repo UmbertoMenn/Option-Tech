@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { FullSnapshot } from '@/lib/fullSnapshot';
-import { calculatePerformanceAttribution } from '@/lib/performanceAttribution';
+import {
+  ATTRIBUTION_CATEGORIES,
+  AttributionCategory,
+  calculatePerformanceAttribution,
+} from '@/lib/performanceAttribution';
 import { splitOptionPremium } from '@/lib/optionTradeAttribution';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { Position } from '@/types/portfolio';
@@ -69,6 +73,15 @@ function historical(date: string, netting: number, spots: Record<string, number>
 
 function itemAmount(result: ReturnType<typeof calculatePerformanceAttribution>, category: string): number {
   return result.items.find(item => item.category === category)?.amount ?? 0;
+}
+
+function attributionItem(
+  result: ReturnType<typeof calculatePerformanceAttribution>,
+  category: AttributionCategory,
+) {
+  const item = result.items.find(value => value.category === category);
+  if (!item) throw new Error(`Missing attribution item: ${category}`);
+  return item;
 }
 
 describe('splitOptionPremium', () => {
@@ -193,6 +206,12 @@ describe('calculatePerformanceAttribution', () => {
     expect(result.totalPL).toBe(0);
     expect(itemAmount(result, 'stock')).toBeCloseTo(0, 6);
     expect(itemAmount(result, 'cash')).toBeCloseTo(0, 6);
+    expect(attributionItem(result, 'stock')).toMatchObject({
+      startValue: 0,
+      endValue: 5_000,
+      netFlows: 5_000,
+      status: 'calculated',
+    });
   });
 
   it('neutralizza il giroconto cash→GP e riconcilia esattamente il totale', () => {
@@ -280,5 +299,37 @@ describe('calculatePerformanceAttribution', () => {
     expect(itemAmount(result, 'reconciliation_gap')).toBeCloseTo(10, 6);
     expect(itemAmount(result, 'unclassified')).toBeCloseTo(0, 6);
     expect(result.warnings.some(warning => warning.includes('residuo'))).toBe(true);
+    expect(attributionItem(result, 'reconciliation_gap').status).toBe('unavailable');
+    expect(attributionItem(result, 'reconciliation_gap').reason).toContain('T1');
+  });
+
+  it('mostra ogni classe e spiega quando lo split opzioni non è calcolabile', () => {
+    const startHistorical = historical('2026-07-01', 10_000);
+    const endHistorical = historical('2026-07-02', 10_000);
+    const optionWithoutSpot = position({
+      asset_type: 'derivative',
+      ticker: 'MSFT',
+      underlying: 'MSFT',
+      option_type: 'put',
+      strike_price: 420,
+      expiry_date: '2026-09-18',
+      quantity: -1,
+      snapshot_price: 33,
+    });
+    const result = calculatePerformanceAttribution({
+      startSnapshot: snapshot('2026-07-01', 10_000),
+      endSnapshot: snapshot('2026-07-02', 13_300, [optionWithoutSpot]),
+      startHistorical,
+      endHistorical,
+      allHistoricalData: [startHistorical, endHistorical],
+      deposits: [],
+      trades: [],
+      internalTransfers: [],
+    });
+
+    expect(result.items.map(item => item.category)).toEqual(ATTRIBUTION_CATEGORIES);
+    expect(attributionItem(result, 'option_time').status).toBe('unavailable');
+    expect(attributionItem(result, 'option_time').reason).toContain('senza prezzo del sottostante');
+    expect(attributionItem(result, 'bond').status).toBe('no_activity');
   });
 });
