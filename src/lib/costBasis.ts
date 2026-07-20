@@ -202,7 +202,16 @@ export function detectExpiryAssignments(
   for (const [uKey, puts] of byU) {
     const expectedShares = puts.reduce((s, p) => s + p.shortContracts * 100, 0);
     const deltaShares = stockQuantityDeltaByUnderlyingKey.get(uKey) || 0;
-    if (deltaShares < expectedShares) continue;         // put scaduta OTM o parziale
+
+    if (deltaShares <= 0) continue;                     // put scaduta OTM: nessuna azione
+    if (deltaShares !== expectedShares) {
+      // Δ positivo ma non coerente: possibile acquisto indipendente nello
+      // stesso upload o assegnazione parziale. Non decidiamo arbitrariamente.
+      warnings.push(
+        `Assegnazione a scadenza non coerente per ${uKey}: attese ${expectedShares} azioni, trovate ${deltaShares} — PMC non aggiornato automaticamente`,
+      );
+      continue;
+    }
 
     const uniqueStrikes = new Set(puts.map(p => p.strike));
     if (uniqueStrikes.size > 1) {
@@ -224,6 +233,47 @@ export function detectExpiryAssignments(
   }
 
   return { assignments, warnings };
+}
+
+/**
+ * Applicazione pura della regola PMC per una assegnazione a scadenza.
+ * Estratta dall'ingest per essere testabile senza Supabase.
+ *
+ * Ritorna il nuovo stato PMC del titolo, oppure `null` con warning se
+ * non è possibile calcolarlo (azioni preesistenti senza PMC noto).
+ */
+export interface ApplyExpiryAssignmentInput {
+  /** Stato PMC store attuale per la basis_key del titolo, o null se assente. */
+  existing: { pmc: number; quantity: number } | null;
+  /** Azioni del titolo presenti PRIMA dell'upload (dal DB positions pre-upload). */
+  preExistingShares: number;
+  /** Assegnazione rilevata. */
+  strike: number;
+  shares: number;
+}
+
+export interface ApplyExpiryAssignmentResult {
+  next: { pmc: number; quantity: number } | null;
+  warning?: string;
+}
+
+export function applyExpiryAssignmentToStore(
+  underlyingKey: string,
+  input: ApplyExpiryAssignmentInput,
+): ApplyExpiryAssignmentResult {
+  const { existing, preExistingShares, strike, shares } = input;
+  if (existing && existing.quantity > 0 && existing.pmc > 0) {
+    const newQty = existing.quantity + shares;
+    const newPmc = (existing.quantity * existing.pmc + shares * strike) / newQty;
+    return { next: { pmc: newPmc, quantity: newQty } };
+  }
+  if (preExistingShares > 0) {
+    return {
+      next: null,
+      warning: `Assegnazione ${underlyingKey}: erano già presenti ${preExistingShares} azioni senza PMC — PMC non calcolato (caricare prima il PMC dal file Excel)`,
+    };
+  }
+  return { next: { pmc: strike, quantity: shares } };
 }
 
 /** Costo unitario d'acquisto comprensivo di commissioni, nella divisa del titolo. */
