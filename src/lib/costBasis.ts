@@ -141,6 +141,91 @@ export function detectEarlyAssignments(
   return assignments;
 }
 
+/**
+ * Rileva le assegnazioni A SCADENZA di put short confrontando il DB pre-upload
+ * con il nuovo snapshot, SENZA dipendere dai file movimenti.
+ *
+ * Una put short si considera assegnata se:
+ *   1. non è più presente nello snapshot aggiornato;
+ *   2. la sua expiry_date è <= snapshotDate (quindi realmente scaduta);
+ *   3. nel nuovo snapshot le azioni del sottostante sono aumentate di
+ *      almeno contracts×100 rispetto al pre-upload.
+ *
+ * Ambiguità: se più put sullo stesso sottostante sono sparite con strike
+ * diversi, il PMC "a strike" non è univoco per lotto — si produce un warning
+ * e si salta il sottostante. Se hanno lo stesso strike, l'assegnazione è
+ * considerata unica al medesimo strike.
+ *
+ * Funzione pura: il chiamante (ingest) risolve chiavi, quantità pre-upload
+ * e successivamente applica il PMC allo store.
+ */
+export interface ExpiryAssignmentInput {
+  oldShortPuts: PutPositionLite[];
+  /** Chiavi complete `${underlyingKey}|${strike}|${expiryDate}` presenti nel nuovo snapshot. */
+  newShortPutFullKeys: Set<string>;
+  /** Data snapshot (ISO YYYY-MM-DD). */
+  snapshotDate: string;
+  /** Δ azioni (nuovo − vecchio) per underlyingKey. Solo positivi contano. */
+  stockQuantityDeltaByUnderlyingKey: Map<string, number>;
+}
+
+export interface ExpiryAssignmentDetected {
+  underlyingKey: string;
+  strike: number;
+  expiryDate: string;
+  contracts: number;
+  shares: number;
+}
+
+export interface ExpiryAssignmentDetectionResult {
+  assignments: ExpiryAssignmentDetected[];
+  warnings: string[];
+}
+
+export function detectExpiryAssignments(
+  input: ExpiryAssignmentInput,
+): ExpiryAssignmentDetectionResult {
+  const { oldShortPuts, newShortPutFullKeys, snapshotDate, stockQuantityDeltaByUnderlyingKey } = input;
+  const assignments: ExpiryAssignmentDetected[] = [];
+  const warnings: string[] = [];
+
+  const byU = new Map<string, PutPositionLite[]>();
+  for (const p of oldShortPuts) {
+    const fullKey = `${p.underlyingKey}|${p.strike}|${p.expiryDate}`;
+    if (newShortPutFullKeys.has(fullKey)) continue;   // ancora presente
+    if (p.expiryDate > snapshotDate) continue;         // non ancora scaduta
+    const arr = byU.get(p.underlyingKey) || [];
+    arr.push(p);
+    byU.set(p.underlyingKey, arr);
+  }
+
+  for (const [uKey, puts] of byU) {
+    const expectedShares = puts.reduce((s, p) => s + p.shortContracts * 100, 0);
+    const deltaShares = stockQuantityDeltaByUnderlyingKey.get(uKey) || 0;
+    if (deltaShares < expectedShares) continue;         // put scaduta OTM o parziale
+
+    const uniqueStrikes = new Set(puts.map(p => p.strike));
+    if (uniqueStrikes.size > 1) {
+      warnings.push(
+        `Assegnazione a scadenza ambigua per ${uKey}: put a strike diversi (${[...uniqueStrikes].sort((a, b) => a - b).join(', ')}) — PMC non aggiornato automaticamente`,
+      );
+      continue;
+    }
+    const strike = puts[0].strike;
+    const expiryDate = puts.reduce((max, p) => (p.expiryDate > max ? p.expiryDate : max), puts[0].expiryDate);
+    const contracts = puts.reduce((s, p) => s + p.shortContracts, 0);
+    assignments.push({
+      underlyingKey: uKey,
+      strike,
+      expiryDate,
+      contracts,
+      shares: contracts * 100,
+    });
+  }
+
+  return { assignments, warnings };
+}
+
 /** Costo unitario d'acquisto comprensivo di commissioni, nella divisa del titolo. */
 export function unitCostWithCommission(t: FlussiTitoliStockTrade): number {
   // La commissione è in EUR; exchangeRate = divisa per 1 EUR (es. 1.14 USD/EUR).
