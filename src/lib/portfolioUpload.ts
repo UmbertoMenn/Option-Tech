@@ -68,8 +68,13 @@ export function shouldRefreshPositionsSnapshot(parsedFiles: PositionsSnapshotSou
   return parsedFiles.some(parsed => parsed.positionsSnapshotPresent);
 }
 
-/** Estensioni accettate dal caricatore portfolio (stesse del dropzone: .csv/.xlsx/.xls). */
-const SUPPORTED_UPLOAD_EXTENSIONS = /\.(csv|xlsx|xls)$/i;
+export type PortfolioUploadMode = 'csv' | 'legacy';
+
+const SUPPORTED_UPLOAD_EXTENSIONS: Record<PortfolioUploadMode | 'all', RegExp> = {
+  csv: /\.csv$/i,
+  legacy: /\.(xlsx|xls)$/i,
+  all: /\.(csv|xlsx|xls)$/i,
+};
 
 /**
  * Filtra un elenco di File (es. da `clipboardData.files` su un evento paste)
@@ -82,7 +87,9 @@ const SUPPORTED_UPLOAD_EXTENSIONS = /\.(csv|xlsx|xls)$/i;
  * limite. Il filtro evita di intercettare un normale paste di testo (che non
  * ha mai file allegati) e scarta allegati di tipo non gestito.
  */
-export function filterSupportedUploadFiles(files: File[]): File[] {
-  return files.filter(file => SUPPORTED_UPLOAD_EXTENSIONS.test(file.name));
+export function filterSupportedUploadFiles(
+  files: File[],
+  mode: PortfolioUploadMode | 'all' = 'all',
+): File[] {
+  return files.filter(file => SUPPORTED_UPLOAD_EXTENSIONS[mode].test(file.name));
 }
-

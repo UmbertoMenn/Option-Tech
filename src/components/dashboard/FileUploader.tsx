@@ -3,8 +3,9 @@ import { useDropzone } from 'react-dropzone';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, ArrowLeftRight } from 'lucide-react';
 import { parsePortfolioExcel, type PortfolioParseOptions } from '@/lib/excelParser';
+import { parseGPExcel } from '@/lib/gpExcelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
 import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
 import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions, fetchDynamicAliases } from '@/lib/costBasisStore';
@@ -23,6 +24,7 @@ import {
   shouldRefreshGpSnapshot,
   shouldRefreshPositionsSnapshot,
   filterSupportedUploadFiles,
+  type PortfolioUploadMode,
 } from '@/lib/portfolioUpload';
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
@@ -101,14 +103,25 @@ function DropzoneContent({
 }
 
 export function FileUploader() {
+  const [uploadMode, setUploadMode] = useState<PortfolioUploadMode>('csv');
+  const [legacyTarget, setLegacyTarget] = useState<'portfolio' | 'gp'>('portfolio');
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [isProcessingGP, setIsProcessingGP] = useState(false);
+  const [uploadGPSuccess, setUploadGPSuccess] = useState(false);
   const { portfolio, updatePositionsAsync } = usePortfolio();
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const effectiveUserId = getEffectiveUploadUserId(isAdminMode, adminViewUserId, user?.id);
+
+  const switchUploadMode = useCallback(() => {
+    if (isProcessing || isProcessingGP) return;
+    setUploadMode(mode => mode === 'csv' ? 'legacy' : 'csv');
+    setUploadSuccess(false);
+    setUploadGPSuccess(false);
+  }, [isProcessing, isProcessingGP]);
 
   // ============ PORTFOLIO UPLOAD (1 o 2 file) ============
   const onDropPortfolio = useCallback(async (acceptedFiles: File[]) => {
@@ -458,15 +471,101 @@ export function FileUploader() {
     }
   }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient, effectiveUserId, navigate]);
 
+  // ============ VECCHIO EXCEL GP ============
+  const onDropGP = useCallback(async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+
+    const targetPortfolioId = portfolio?.id;
+    if (!targetPortfolioId) {
+      toast.error('Nessun portfolio selezionato');
+      return;
+    }
+
+    setIsProcessingGP(true);
+    setUploadGPSuccess(false);
+
+    try {
+      // Il file resta nel browser: vengono persistite solo le holdings necessarie
+      // alla piattaforma, mai il file originale o identificativi di conto.
+      const { holdings, cashValue, totalValue } = await parseGPExcel(file);
+      if (holdings.length === 0) {
+        toast.error('Nessuna posizione GP trovata');
+        return;
+      }
+
+      const { error: deleteError } = await supabase
+        .from('gp_holdings')
+        .delete()
+        .eq('portfolio_id', targetPortfolioId);
+      if (deleteError) throw deleteError;
+
+      const { error: insertError } = await supabase.from('gp_holdings').insert(
+        holdings.map(holding => ({
+          portfolio_id: targetPortfolioId,
+          asset_type: holding.asset_type,
+          description: holding.description,
+          quantity: holding.quantity,
+          market_value: holding.market_value,
+          price: holding.price,
+          currency: holding.currency,
+          exchange_rate: holding.exchange_rate,
+          weight_pct: holding.weight_pct,
+          ticker_code: holding.ticker_code,
+          price_date: holding.price_date,
+        })),
+      );
+      if (insertError) throw insertError;
+
+      const { error: portfolioError } = await supabase
+        .from('portfolios')
+        .update({ gp_total_value: totalValue, gp_cash_value: cashValue })
+        .eq('id', targetPortfolioId);
+      if (portfolioError) throw portfolioError;
+
+      // Se il vecchio Excel ordinario ha già fissato la data, riscrive la stessa
+      // snapshot includendo la GP appena caricata. Nessuna data viene inventata.
+      if (portfolio.snapshot_date) {
+        await upsertUploadSnapshot({
+          portfolioId: targetPortfolioId,
+          snapshotDate: portfolio.snapshot_date,
+          cashValue: portfolio.cash_value || 0,
+          gpRefreshedInThisUpload: true,
+        });
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] }),
+        queryClient.invalidateQueries({ queryKey: ['gp-holdings'] }),
+        queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
+        queryClient.invalidateQueries({ queryKey: ['performance-attribution'] }),
+      ]);
+
+      setUploadGPSuccess(true);
+      toast.success('Gestione Patrimoniale caricata!', {
+        description: `${holdings.length} posizioni importate dal vecchio Excel GP.`,
+      });
+    } catch (error) {
+      console.error('[FileUploader] Errore parser GP legacy:', error instanceof Error ? error.message : 'errore sconosciuto');
+      toast.error('Errore elaborazione file GP', {
+        description: 'Assicurati di aver selezionato il vecchio file Excel della Gestione Patrimoniale.',
+      });
+    } finally {
+      setIsProcessingGP(false);
+    }
+  }, [portfolio?.id, portfolio?.snapshot_date, portfolio?.cash_value, queryClient]);
+
   const portfolioDropzone = useDropzone({
-    onDrop: onDropPortfolio,
-    accept: {
-      'application/vnd.ms-excel': ['.xls'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'text/csv': ['.csv'],
-    },
-    maxFiles: 4,
-    disabled: isProcessing,
+    onDrop: uploadMode === 'legacy' && legacyTarget === 'gp' ? onDropGP : onDropPortfolio,
+    accept: uploadMode === 'csv'
+      ? { 'text/csv': ['.csv'] }
+      : {
+          'application/vnd.ms-excel': ['.xls'],
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+        },
+    maxFiles: uploadMode === 'csv' ? 4 : 1,
+    disabled: isProcessing || isProcessingGP,
   });
 
   // ---- Incolla da appunti (Ctrl+V / Cmd+V) ----
@@ -478,30 +577,89 @@ export function FileUploader() {
   // byte reali sugli appunti del sistema operativo.
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
-      if (isProcessing) return;
+      if (isProcessing || isProcessingGP) return;
       const files = event.clipboardData?.files;
       if (!files || files.length === 0) return; // paste di solo testo: non intercettare
-      const supported = filterSupportedUploadFiles(Array.from(files));
+      const supported = filterSupportedUploadFiles(Array.from(files), uploadMode);
       if (supported.length === 0) {
-        toast.error('Nessun file CSV/XLSX riconosciuto negli appunti');
+        toast.error(uploadMode === 'csv'
+          ? 'Nessun file CSV riconosciuto negli appunti'
+          : 'Nessun file Excel riconosciuto negli appunti');
         return;
       }
       event.preventDefault();
-      onDropPortfolio(supported);
+      if (uploadMode === 'legacy' && legacyTarget === 'gp') {
+        onDropGP(supported.slice(0, 1));
+      } else {
+        onDropPortfolio(uploadMode === 'csv' ? supported : supported.slice(0, 1));
+      }
     };
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, [isProcessing, onDropPortfolio]);
+  }, [isProcessing, isProcessingGP, legacyTarget, onDropGP, onDropPortfolio, uploadMode]);
 
   return (
     <Card className="border-dashed border-2 border-border hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground text-center mb-3 px-2">
-          Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
-        </p>
-        <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
-          Trascinare l'allegato direttamente dal client email spesso non funziona (il sistema lo tratta come file "virtuale" che il browser non può leggere). Salva prima gli allegati in una cartella, poi trascinali da lì o clicca qui per selezionarli.
-        </p>
+        <div className="flex justify-end mb-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={switchUploadMode}
+            disabled={isProcessing || isProcessingGP}
+          >
+            <ArrowLeftRight className="h-3.5 w-3.5" />
+            {uploadMode === 'csv' ? 'Usa Excel + GP' : 'Torna ai CSV'}
+          </Button>
+        </div>
+
+        {uploadMode === 'csv' ? (
+          <>
+            <p className="text-xs text-muted-foreground text-center mb-3 px-2">
+              Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
+              Trascinare l'allegato direttamente dal client email spesso non funziona. Salva prima gli allegati in una cartella, poi trascinali da lì o clicca qui per selezionarli.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <Button
+                type="button"
+                size="sm"
+                variant={legacyTarget === 'portfolio' ? 'default' : 'outline'}
+                onClick={() => {
+                  setLegacyTarget('portfolio');
+                  setUploadSuccess(false);
+                }}
+                disabled={isProcessing || isProcessingGP}
+              >
+                Portfolio Excel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={legacyTarget === 'gp' ? 'default' : 'outline'}
+                onClick={() => {
+                  setLegacyTarget('gp');
+                  setUploadGPSuccess(false);
+                }}
+                disabled={isProcessing || isProcessingGP}
+              >
+                GP Excel
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground text-center mb-3 px-2">
+              Parser storici separati. Il Portfolio Excel importa anche il PMC presente nel file; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
+              Il file viene elaborato localmente nel browser e non viene conservato. Sul Portfolio Excel restano attive le esclusioni dei conti liquidità configurate per l'utente.
+            </p>
+          </>
+        )}
         <div
           {...portfolioDropzone.getRootProps()}
           className={`flex flex-col items-center justify-center gap-3 py-6 cursor-pointer rounded-lg transition-colors ${
@@ -510,10 +668,14 @@ export function FileUploader() {
         >
           <input {...portfolioDropzone.getInputProps()} />
           <DropzoneContent
-            isProcessing={isProcessing}
-            uploadSuccess={uploadSuccess}
+            isProcessing={legacyTarget === 'gp' && uploadMode === 'legacy' ? isProcessingGP : isProcessing}
+            uploadSuccess={legacyTarget === 'gp' && uploadMode === 'legacy' ? uploadGPSuccess : uploadSuccess}
             isDragActive={portfolioDropzone.isDragActive}
-            label="Carica Portfolio (fino a 4 CSV)"
+            label={uploadMode === 'csv'
+              ? 'Carica Portfolio (fino a 4 CSV)'
+              : legacyTarget === 'portfolio'
+                ? 'Carica vecchio Portfolio Excel'
+                : 'Carica vecchio Excel GP'}
           />
         </div>
       </CardContent>

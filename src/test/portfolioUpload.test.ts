@@ -60,6 +60,17 @@ describe('filterSupportedUploadFiles (paste da appunti)', () => {
     expect(filterSupportedUploadFiles(files)).toEqual(files);
   });
 
+  it('in modalità CSV accetta solo i flussi CSV', () => {
+    const csv = file('FlussoSaldiContiTitoli.csv');
+    expect(filterSupportedUploadFiles([csv, file('portafoglio.xlsx'), file('gp.xls')], 'csv')).toEqual([csv]);
+  });
+
+  it('in modalità legacy accetta solo Excel, incluso il file GP', () => {
+    const portfolio = file('portafoglio.xlsx');
+    const gp = file('gestione-patrimoniale.xls');
+    expect(filterSupportedUploadFiles([file('saldi.csv'), portfolio, gp], 'legacy')).toEqual([portfolio, gp]);
+  });
+
   it('scarta le estensioni non supportate (es. allegato PDF/immagine copiato per errore)', () => {
     const csv = file('FlussoMovContiCash.csv');
     const result = filterSupportedUploadFiles([csv, file('nota.pdf'), file('logo.png')]);
