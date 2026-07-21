@@ -16,7 +16,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { FlussiCashMovement, FlussiTitoliOptionTrade, FlussiTitoliStockTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
 import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
-import { applyStockTradesToBasis, applyOptionTradesToBasis, detectEarlyAssignments, optionBasisKey, CostBasisEntry, EarlyAssignment, PutPositionLite } from '@/lib/costBasis';
+import { applyStockTradesToBasis, applyOptionTradesToBasis, detectEarlyAssignments, detectEarlyCallAssignments, optionBasisKey, CostBasisEntry, EarlyAssignment, PutPositionLite, CallPositionLite, CallAssignmentDetected } from '@/lib/costBasis';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { fetchDynamicAliases } from '@/lib/costBasisStore';
 import { Position } from '@/types/portfolio';
@@ -495,7 +495,26 @@ export async function ingestStockTradesCostBasis(
         shortContracts: Math.abs(Number(p.quantity)),
       }));
 
+  const toCallLite = (
+    rows: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker'>[],
+  ): CallPositionLite[] =>
+    rows
+      .filter(p => p.asset_type === 'derivative' && p.option_type === 'call' && p.quantity < 0 && p.strike_price && p.expiry_date)
+      .map(p => ({
+        underlyingKey: getCanonicalTickerKey({ rawTicker: p.ticker, underlyingName: p.underlying, description: p.description }, { dynamicAliases }),
+        strike: Number(p.strike_price),
+        expiryDate: String(p.expiry_date),
+        shortContracts: Math.abs(Number(p.quantity)),
+      }));
+
+  // Metadati del titolo pre-upload per sottostante: servono a valorizzare la
+  // riga ASG delle call assegnate (il titolo può essere già sparito dal nuovo
+  // snapshot perché richiamato).
+  interface OldStockMeta { isin: string | null; currency: string | null; exchangeRate: number; spot: number }
+  const oldStockMetaByU = new Map<string, OldStockMeta>();
+
   let assignments: EarlyAssignment[] = [];
+  let callAssignments: CallAssignmentDetected[] = [];
   if (newSnapshotPositions && newSnapshotPositions.length > 0) {
     const { data: oldPositions } = await supabase
       .from('positions')
@@ -512,6 +531,64 @@ export async function ingestStockTradesCostBasis(
     );
     if (assignments.length > 0) {
       console.log('[CostBasis] assegnazioni anticipate rilevate:', assignments.map(a => `${a.underlyingKey} ${a.contracts}×100 @ strike ${a.strike}`));
+    }
+
+    // ---- Assegnazioni CALL (covered call richiamata) ----
+    // Segnale: call short sparita dal saldo + azioni diminuite di contracts×100
+    // SENZA una VEN che lo spieghi (le azioni escono "assegnate", non vendute).
+    const { data: oldStockRows } = await supabase
+      .from('positions')
+      .select('ticker, description, isin, quantity, currency, exchange_rate, current_price, asset_type')
+      .eq('portfolio_id', portfolioId)
+      .in('asset_type', ['stock', 'etf']);
+    const oldStockByU = new Map<string, number>();
+    for (const p of (oldStockRows || []) as unknown as { ticker: string | null; description: string | null; isin: string | null; quantity: number; currency: string | null; exchange_rate: number | null; current_price: number | null }[]) {
+      const u = getCanonicalTickerKey({ rawTicker: p.ticker, description: p.description }, { dynamicAliases });
+      oldStockByU.set(u, (oldStockByU.get(u) || 0) + Number(p.quantity || 0));
+      if (!oldStockMetaByU.has(u)) {
+        oldStockMetaByU.set(u, {
+          isin: p.isin,
+          currency: p.currency,
+          exchangeRate: Number(p.exchange_rate || 1) > 0 ? Number(p.exchange_rate) : 1,
+          spot: Number(p.current_price || 0),
+        });
+      }
+    }
+    const newStockByU = new Map<string, number>();
+    for (const p of newSnapshotPositions) {
+      if (p.asset_type !== 'stock' && p.asset_type !== 'etf') continue;
+      const u = getCanonicalTickerKey({ rawTicker: p.ticker, underlyingName: p.underlying, description: p.description }, { dynamicAliases });
+      newStockByU.set(u, (newStockByU.get(u) || 0) + Number(p.quantity || 0));
+    }
+    const venSharesByU = new Map<string, number>();
+    for (const t of freshTrades) {
+      if (t.side !== 'VEN') continue;
+      const u = stockUnderlyingKey(t);
+      venSharesByU.set(u, (venSharesByU.get(u) || 0) + t.quantity);
+    }
+    const unexplainedShareDropByUnderlyingKey = new Map<string, number>();
+    for (const u of new Set<string>([...oldStockByU.keys(), ...newStockByU.keys()])) {
+      const drop = (oldStockByU.get(u) || 0) - (newStockByU.get(u) || 0) - (venSharesByU.get(u) || 0);
+      unexplainedShareDropByUnderlyingKey.set(u, drop);
+    }
+    const newShortCallFullKeys = new Set(
+      toCallLite(newSnapshotPositions).map(c => `${c.underlyingKey}|${c.strike}|${c.expiryDate}`),
+    );
+    const callBuybackFullKeys = new Set(
+      optionTrades
+        .filter(t => t.optionType === 'call' && t.side === 'ACQ')
+        .map(t => `${optionKey(t.underlyingTicker)}|${t.strike}|${t.expiryDate}`),
+    );
+    const callResult = detectEarlyCallAssignments({
+      oldShortCalls: toCallLite((oldPositions || []) as unknown as Position[]),
+      newShortCallFullKeys,
+      callBuybackFullKeys,
+      unexplainedShareDropByUnderlyingKey,
+    });
+    callAssignments = callResult.assignments;
+    for (const warning of callResult.warnings) attributionWarnings.push(warning);
+    if (callAssignments.length > 0) {
+      console.log('[CostBasis] assegnazioni call rilevate:', callAssignments.map(a => `${a.underlyingKey} ${a.contracts}×100 @ strike ${a.strike}`));
     }
   }
 
@@ -648,11 +725,72 @@ export async function ingestStockTradesCostBasis(
       .eq('price', t.price);
   }
 
+  // ---- Assegnazioni CALL: riga ASG per l'attribuzione + scarico quantità dal
+  // PMC (come una VEN, PMC invariato). Idempotente: lo scarico avviene solo se
+  // la riga ASG è NUOVA (un re-upload non la riapplica).
+  const callAssignmentTouchedKeys: string[] = [];
+  if (callAssignments.length > 0) {
+    const batchDate = [...stockTrades, ...optionTrades]
+      .reduce<string>((max, t) => (t.tradeDate > max ? t.tradeDate : max), '0000-00-00');
+    for (const assignment of callAssignments) {
+      const meta = oldStockMetaByU.get(assignment.underlyingKey);
+      const basisKey = meta?.isin ? meta.isin.toUpperCase() : assignment.underlyingKey;
+      const exchangeRate = meta && meta.exchangeRate > 0 ? meta.exchangeRate : 1;
+      const spot = meta && meta.spot > 0 ? meta.spot : 0;
+      const intrinsic = spot > 0 ? Math.max(0, spot - assignment.strike) : null;
+      const { data: insertedAsg, error: asgError } = await supabase
+        .from('cost_basis_trades' as never)
+        .upsert([{
+          portfolio_id: portfolioId,
+          basis_key: basisKey,
+          trade_date: batchDate,
+          side: 'ASG',
+          quantity: assignment.shares,
+          price: assignment.strike,
+          kind: 'call_assignment',
+          asset_type: 'stock',
+          underlying_key: assignment.underlyingKey,
+          option_type: 'call',
+          strike: assignment.strike,
+          currency: meta?.currency ?? null,
+          exchange_rate: exchangeRate,
+          gross_eur: assignment.strike * assignment.shares / exchangeRate,
+          underlying_price: spot > 0 ? spot : null,
+          intrinsic_per_share: intrinsic,
+          time_value_per_share: 0,
+          attribution_price_source: spot > 0 ? 'snapshot_proxy' : 'missing',
+        }] as never[], {
+          onConflict: 'portfolio_id,basis_key,trade_date,side,quantity,price',
+          ignoreDuplicates: true,
+        })
+        .select('basis_key');
+      if (asgError) {
+        attributionWarnings.push(`Ledger assegnazione call ${assignment.underlyingKey} non aggiornato: ${asgError.message}`);
+        continue;
+      }
+      // Solo se la riga è nuova: scarico la quantità una sola volta.
+      if (!Array.isArray(insertedAsg) || insertedAsg.length === 0) continue;
+      const entry = optionResult.entries.get(basisKey);
+      if (!entry || entry.quantity <= 0) {
+        attributionWarnings.push(`Assegnazione call ${assignment.underlyingKey}: nessun PMC tracciato per ${basisKey} — quantità non scaricata (caricare prima il PMC dal file Excel)`);
+        continue;
+      }
+      if (assignment.shares > entry.quantity) {
+        attributionWarnings.push(`Assegnazione call ${assignment.underlyingKey}: azioni richiamate (${assignment.shares}) superiori alla quantità tracciata (${entry.quantity}): quantità azzerata`);
+        entry.quantity = 0;
+      } else {
+        entry.quantity -= assignment.shares; // PMC invariato, come una VEN normale
+      }
+      callAssignmentTouchedKeys.push(basisKey);
+    }
+  }
+
   // Upsert dello store: solo le chiavi toccate dai trade nuovi
   const touchedKeys = new Set([
     ...result.normalTrades.map(stockKey),
     ...result.assignmentCloses.map(stockKey),
     ...freshOptionTrades.map(optionTradeKey),
+    ...callAssignmentTouchedKeys,
   ]);
   const upserts = Array.from(optionResult.entries.values())
     .filter(e => touchedKeys.has(e.basisKey))
@@ -676,7 +814,7 @@ export async function ingestStockTradesCostBasis(
 
   return {
     tradesApplied: result.normalTrades.length + result.assignmentCloses.length + optionResult.applied,
-    assignmentsDetected: assignments.length,
+    assignmentsDetected: assignments.length + callAssignments.length,
     warnings: [...result.warnings, ...attributionWarnings],
   };
 }

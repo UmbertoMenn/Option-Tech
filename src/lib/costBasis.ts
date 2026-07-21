@@ -159,6 +159,104 @@ export function detectEarlyAssignments(
  * Funzione pura: il chiamante (ingest) risolve chiavi, quantità pre-upload
  * e successivamente applica il PMC allo store.
  */
+export interface CallPositionLite {
+  underlyingKey: string;
+  strike: number;
+  expiryDate: string; // ISO
+  /** Contratti short (positivo, es. 2 = -2 in posizione) */
+  shortContracts: number;
+}
+
+export interface CallAssignmentInput {
+  /** Call short presenti PRIMA dell'upload (dal DB positions pre-upload). */
+  oldShortCalls: CallPositionLite[];
+  /** Chiavi "underlyingKey|strike|expiry" delle call short ANCORA nel saldo aggiornato. */
+  newShortCallFullKeys: Set<string>;
+  /** Chiavi "underlyingKey|strike|expiry" delle call RICOMPRATE (ACQ) nei movimenti. */
+  callBuybackFullKeys: Set<string>;
+  /**
+   * Calo di azioni per sottostante NON spiegato da una VEN nei movimenti,
+   * ovvero (azioni pre-upload − azioni nel nuovo snapshot − azioni vendute
+   * con VEN). In una covered call assegnata le azioni "spariscono" dallo
+   * snapshot senza una vendita: è questo il segnale.
+   */
+  unexplainedShareDropByUnderlyingKey: Map<string, number>;
+}
+
+export interface CallAssignmentDetected {
+  underlyingKey: string;
+  strike: number;
+  expiryDate: string;
+  contracts: number;
+  /** Azioni richiamate (contracts × 100) */
+  shares: number;
+}
+
+export interface CallAssignmentDetectionResult {
+  assignments: CallAssignmentDetected[];
+  warnings: string[];
+}
+
+/**
+ * Rileva le assegnazioni di CALL short (covered call richiamata) dai movimenti,
+ * SENZA percorso a scadenza dedicato: copre sia l'anticipata sia quella a
+ * scadenza, perché il segnale è sempre lo stesso.
+ *
+ * Una call short si considera assegnata su un sottostante U se:
+ *   1. non è più presente nel saldo aggiornato;
+ *   2. non è stata ricomprata (nessun ACQ call stessa strike/scadenza);
+ *   3. le azioni di U sono diminuite di ESATTAMENTE contracts×100 senza che una
+ *      VEN nei movimenti lo spieghi (le azioni sono uscite "assegnate", non vendute).
+ *
+ * Ambiguità (come per le put a scadenza): calo non coerente con l'atteso, o più
+ * strike diversi sullo stesso sottostante → warning e nessun aggiornamento.
+ *
+ * Funzione pura: il chiamante risolve chiavi/quantità e applica store + ledger.
+ */
+export function detectEarlyCallAssignments(
+  input: CallAssignmentInput,
+): CallAssignmentDetectionResult {
+  const { oldShortCalls, newShortCallFullKeys, callBuybackFullKeys, unexplainedShareDropByUnderlyingKey } = input;
+  const assignments: CallAssignmentDetected[] = [];
+  const warnings: string[] = [];
+
+  const byU = new Map<string, CallPositionLite[]>();
+  for (const c of oldShortCalls) {
+    const fullKey = `${c.underlyingKey}|${c.strike}|${c.expiryDate}`;
+    if (newShortCallFullKeys.has(fullKey)) continue;   // ancora presente
+    if (callBuybackFullKeys.has(fullKey)) continue;    // ricomprata, non assegnata
+    const arr = byU.get(c.underlyingKey) || [];
+    arr.push(c);
+    byU.set(c.underlyingKey, arr);
+  }
+
+  for (const [uKey, calls] of byU) {
+    const expectedShares = calls.reduce((s, c) => s + c.shortContracts * 100, 0);
+    const drop = unexplainedShareDropByUnderlyingKey.get(uKey) || 0;
+
+    if (drop <= 0) continue; // call OTM: le azioni non sono uscite → nessuna assegnazione
+    if (drop !== expectedShares) {
+      warnings.push(
+        `Assegnazione call non coerente per ${uKey}: attese ${expectedShares} azioni richiamate, calo non spiegato ${drop} — PMC non aggiornato automaticamente`,
+      );
+      continue;
+    }
+    const uniqueStrikes = new Set(calls.map(c => c.strike));
+    if (uniqueStrikes.size > 1) {
+      warnings.push(
+        `Assegnazione call ambigua per ${uKey}: call a strike diversi (${[...uniqueStrikes].sort((a, b) => a - b).join(', ')}) — PMC non aggiornato automaticamente`,
+      );
+      continue;
+    }
+    const strike = calls[0].strike;
+    const expiryDate = calls.reduce((max, c) => (c.expiryDate > max ? c.expiryDate : max), calls[0].expiryDate);
+    const contracts = calls.reduce((s, c) => s + c.shortContracts, 0);
+    assignments.push({ underlyingKey: uKey, strike, expiryDate, contracts, shares: contracts * 100 });
+  }
+
+  return { assignments, warnings };
+}
+
 export interface ExpiryAssignmentInput {
   oldShortPuts: PutPositionLite[];
   /** Chiavi complete `${underlyingKey}|${strike}|${expiryDate}` presenti nel nuovo snapshot. */
