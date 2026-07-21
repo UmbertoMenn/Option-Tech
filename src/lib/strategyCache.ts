@@ -10,6 +10,7 @@ import {
 } from './derivativeStrategies';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { formatExpiryKey, nakedPutKey } from './strategyKeys';
+import { canonicalizeTargetTicker } from './tickerIdentity';
 
 interface StrategyRecord {
   portfolio_id: string;
@@ -32,6 +33,14 @@ interface StrategyRecord {
  * The prices map is keyed by underlying name with UnderlyingPrice as value
  */
 function resolveTicker(underlying: string, underlyingPrices: Record<string, UnderlyingPrice>): string | null {
+  const raw = resolveTickerRaw(underlying, underlyingPrices);
+  if (!raw) return raw;
+  // Il ticker mostrato deve stare nello stesso spazio canonico del matching:
+  // MBGYY → MBG, SAP.DE → SAP, RACE.MI → RACE. Per i ticker US è un no-op.
+  return canonicalizeTargetTicker(raw) || raw;
+}
+
+function resolveTickerRaw(underlying: string, underlyingPrices: Record<string, UnderlyingPrice>): string | null {
   // 1. Direct match (via underlying_mappings populated map)
   const priceData = underlyingPrices[underlying];
   if (priceData?.ticker) return priceData.ticker;

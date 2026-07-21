@@ -178,7 +178,7 @@ const CANONICAL_UNDERLYINGS: Record<string, string[]> = {
   // === European stocks (cross-listed / local exchanges) ===
   RACE: ['RACE', 'FERRARI', 'FERRARI NV', 'FERRARI N V'],
   STLA: ['STLA', 'STELLANTIS', 'STELLANTIS NV', 'STELLANTIS N V'],
-  MBG: ['MBG', 'DAI', 'DAIMLER', 'DAIMLER AG', 'MERCEDES', 'MERCEDES BENZ', 'MERCEDES BENZ GROUP', 'MERCEDES BENZ GROUP AG'],
+  MBG: ['MBG', 'MBGYY', 'DAI', 'DAIMLER', 'DAIMLER AG', 'MERCEDES', 'MERCEDES BENZ', 'MERCEDES BENZ GROUP', 'MERCEDES BENZ GROUP AG'],
   DPW: ['DPW', 'DEUTSCHE POST', 'DEUTSCHE POST AG', 'DHL GROUP'],
   SAP: ['SAP', 'SAP SE', 'SAP AG'],
   TIT: ['TIT', 'TELECOM ITALIA', 'TELECOM ITALIA SPA', 'DIR TELECOM ITALIA', 'DIR TELECOM ITALIA SPA'],
@@ -227,6 +227,8 @@ const ISIN_TO_CANONICAL: Record<string, string> = {
   US00724F1012: 'ADBE',
   KYG254571055: 'CRDO',
   DE0007100000: 'MBG',
+  NL0011585146: 'RACE', // Ferrari NV
+  DE0005552004: 'DPW',  // Deutsche Post / DHL Group
 };
 
 // ============================================================================
@@ -280,6 +282,26 @@ export function isLikelyUnderlyingTicker(candidate: string): boolean {
   if (!/^[A-Z][A-Z0-9]{0,5}$/.test(candidate)) return false;
   // Common option contract symbols are much longer (e.g. "AAPL240119C00150000")
   return candidate.length <= 6;
+}
+
+/**
+ * Porta un ticker "grezzo" (es. il target di una riga `underlying_mappings`,
+ * o il ticker mostrato in cache) nello stesso spazio canonico usato ovunque:
+ * toglie il prefisso broker (AZ.), risolve le forme con suffisso di borsa
+ * (RACE.MI → RACE, MBG.DE → MBG, DHL.DE → DPW) e gli alias/ADR noti
+ * (MBGYY → MBG). Senza questo, una mappa che punta a "RACE.MI" produce una
+ * chiave diversa da quella dell'azione ("RACE") e la covered call risulta
+ * scoperta; il ticker mostrato resta sporco ("SAP.DE", "MBGYY").
+ */
+export function canonicalizeTargetTicker(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const cleaned = raw.trim().toUpperCase().replace(/^AZ\./, '');
+  if (EXCHANGE_TICKER_TO_CANONICAL[cleaned]) return EXCHANGE_TICKER_TO_CANONICAL[cleaned];
+  const noSuffix = cleaned.split(/[.:]/)[0].trim();
+  if (EXCHANGE_TICKER_TO_CANONICAL[noSuffix]) return EXCHANGE_TICKER_TO_CANONICAL[noSuffix];
+  const alias = ALIAS_TO_TICKER.get(noSuffix);
+  if (alias) return alias;
+  return noSuffix;
 }
 
 /** Look up alias map. Returns canonical ticker or null. */
@@ -453,6 +475,20 @@ export function resolveUnderlyingIdentity(
         confidence: 'high',
       };
     }
+    // Un codice di banca corto (es. "RAC" per Ferrari) supera isLikelyUnderlyingTicker
+    // ma NON è il ticker canonico. Prima di accettarlo grezzo, si consulta la
+    // mappa dinamica (underlying_mappings): così una riga "RAC" -> RACE lo
+    // riconcilia con l'azione, invece di lasciarlo divergere.
+    const dynForCandidate = dynLookup(candidate);
+    if (dynForCandidate) {
+      return {
+        tickerKey: dynForCandidate.toUpperCase(),
+        displayTicker: dynForCandidate.toUpperCase(),
+        canonicalName: pickCanonicalName(input, dynForCandidate),
+        source: 'alias_map',
+        confidence: 'high',
+      };
+    }
     // Plain ticker without alias entry
     return {
       tickerKey: candidate,
@@ -601,7 +637,10 @@ export function buildDynamicAliasMap(
     if (!r.underlying || !r.ticker) continue;
     const norm = normalizeText(r.underlying);
     if (!norm) continue;
-    const ticker = r.ticker.toUpperCase();
+    // Il target va portato in forma canonica (RACE.MI → RACE, MBGYY → MBG),
+    // altrimenti la mappa produce chiavi che non combaciano con quelle delle
+    // azioni e le covered call europee risultano scoperte.
+    const ticker = canonicalizeTargetTicker(r.ticker) || r.ticker.toUpperCase();
     // Difesa in profondità: gli alias dinamici vincono sulla mappa statica, ma
     // NON possono riscrivere un ticker canonico noto su un altro titolo.
     // Una riga sbagliata a DB (es. "NOW" -> SNOW) rinominerebbe altrimenti
