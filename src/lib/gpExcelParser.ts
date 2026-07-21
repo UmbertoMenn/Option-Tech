@@ -184,16 +184,8 @@ export function parseGPExcel(file: File): Promise<GPParseResult> {
           });
         }
 
-        console.log('[GPParser] Parsed result:', {
-          holdingsCount: holdings.length,
-          cashValue,
-          totalValue,
-          byType: {
-            stock: holdings.filter(h => h.asset_type === 'stock').length,
-            bond: holdings.filter(h => h.asset_type === 'bond').length,
-            cash: holdings.filter(h => h.asset_type === 'cash').length,
-          }
-        });
+        // Log redatto: non esporre valori patrimoniali o contenuto del file.
+        console.log(`[GPParser] ${holdings.length} righe GP riconosciute`);
 
         resolve({ holdings, cashValue, totalValue });
       } catch (err) {

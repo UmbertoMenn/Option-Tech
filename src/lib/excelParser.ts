@@ -555,8 +555,10 @@ function parsePositionRow(
   headers: string[],
   assetType: AssetType
 ): Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'> | null {
-  const isin = findColumnValue(row, headers, ['ISIN']);
-  const description = findColumnValue(row, headers, ['DESCRIZIONE ESTESA', 'DESCRIZIONE']);
+  const rawIsin = findColumnValue(row, headers, ['ISIN']);
+  const rawDescription = findColumnValue(row, headers, ['DESCRIZIONE ESTESA', 'DESCRIZIONE']);
+  const isin = rawIsin == null ? null : String(rawIsin);
+  const description = rawDescription == null ? null : String(rawDescription);
   const currency = findColumnValue(row, headers, ['DIVISA CODICE', 'DIVISA']) || 'EUR';
   const exchangeRate = parseExcelNumber(findColumnValue(row, headers, ['CAMBIO ULTIMO', 'CAMBIO', 'TASSO CAMBIO']));
   const quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
@@ -659,11 +661,15 @@ function parsePositionRow(
   };
 }
 
-function findColumnValue(row: any[], headers: string[], possibleNames: string[]): string | null {
+function findColumnValue(row: any[], headers: string[], possibleNames: string[]): string | number | null {
   for (const name of possibleNames) {
     const index = headers.findIndex(h => h && h.includes(name));
     if (index !== -1 && row[index] !== undefined && row[index] !== null && row[index] !== '') {
-      return String(row[index]);
+      // Mantiene i numeri Excel come numeri. Convertirli subito in stringa
+      // trasformava ad esempio 185.25 in "185.25", che parseExcelNumber
+      // interpretava come formato italiano con separatore delle migliaia
+      // e quindi come 18525.
+      return typeof row[index] === 'number' ? row[index] : String(row[index]);
     }
   }
   
