@@ -500,7 +500,7 @@ export function FileUploader() {
           Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
         </p>
         <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
-          Se trascinare l'allegato dalla mail non funziona (cursore di divieto), copialo (tasto destro → Copia) e incollalo qui con Ctrl+V.
+          Trascinare l'allegato direttamente dal client email spesso non funziona (il sistema lo tratta come file "virtuale" che il browser non può leggere). Salva prima gli allegati in una cartella, poi trascinali da lì o clicca qui per selezionarli.
         </p>
         <div
           {...portfolioDropzone.getRootProps()}
