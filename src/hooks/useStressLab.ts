@@ -762,6 +762,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     frozenUnderlyingPrices,
     false,
     nettingConfigs,
+    gpDynamicAliases,
   );
 
   // ESPOSIZIONE POTENZIALE IN EQUITY = esposizione equity del Risk Analyzer (grandTotal),

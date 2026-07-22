@@ -41,6 +41,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { DepositEntry } from '@/types/deposits';
 import { PortfolioSummary, AssetType } from '@/types/portfolio';
+import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 
 export function Dashboard() {
@@ -53,6 +55,11 @@ export function Dashboard() {
 
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
+  const { allMappings } = useUnderlyingMappings();
+  const dynamicAliases = useMemo(
+    () => buildDynamicAliasMap(allMappings.data || []),
+    [allMappings.data],
+  );
   const { gpHoldings, gpSummary } = useGPHoldings();
   
   // Merge GP values into summary
@@ -156,7 +163,7 @@ export function Dashboard() {
     return merged;
   }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
 
-  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
+  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs, dynamicAliases);
   // Il premio di mercato dei riacquisti aperti (call da rivendere) è patrimonio
   // netting intrinseco mancante sia in vista A che in vista B: entrambe valutano
   // le call vendute a intrinseco, quindi entrambe "perdono" il valore della call
@@ -187,7 +194,7 @@ export function Dashboard() {
     if (typeof window === 'undefined') return;
     if (localStorage.getItem('nettingDebug') !== '1') return;
     if (!summary || positions.length === 0) return;
-    const cmp = compareNettingMethods(positions, summary.totalValue, overrides, frozenUnderlyingPrices, strategyConfigs);
+    const cmp = compareNettingMethods(positions, summary.totalValue, overrides, frozenUnderlyingPrices, strategyConfigs, dynamicAliases);
     const fmt = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
     /* eslint-disable no-console */
     console.log(`%c[NETTING] ${portfolio?.name ?? 'portfolio'} — confronto metodi`, 'font-weight:bold;font-size:13px');
@@ -213,7 +220,7 @@ export function Dashboard() {
       `NETTING INTRINSECO (B):  €${fmt(cmp.finalIntrinsicB)}`
     );
     /* eslint-enable no-console */
-  }, [positions, summary, overrides, frozenUnderlyingPrices, strategyConfigs, portfolio?.name]);
+  }, [positions, summary, overrides, frozenUnderlyingPrices, strategyConfigs, dynamicAliases, portfolio?.name]);
   
   const {
     deposits,
@@ -419,6 +426,7 @@ export function Dashboard() {
             underlyingPrices={frozenUnderlyingPrices}
             hasConfigurations={hasConfigurations}
             strategyConfigs={strategyConfigs}
+            dynamicAliases={dynamicAliases}
             patrimonyComponents={patrimonyComponents}
           />
 

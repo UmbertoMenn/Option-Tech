@@ -38,6 +38,8 @@ import { SectorAllocationView } from '@/components/risk/SectorAllocationView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { calculateSectorExposure } from '@/lib/sectorExposure';
+import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
@@ -74,6 +76,11 @@ export function RiskAnalyzer() {
   const { isAggregatedView } = usePortfolioContext();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs } = useStrategyConfigurations();
+  const { allMappings } = useUnderlyingMappings();
+  const dynamicAliases = useMemo(
+    () => buildDynamicAliasMap(allMappings.data || []),
+    [allMappings.data],
+  );
   const derivativeUnderlyings = useMemo(
     () => positions.filter(p => p.asset_type === 'derivative')
       .map(p => p.underlying || p.description)
@@ -83,7 +90,7 @@ export function RiskAnalyzer() {
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
   // Netting su PREZZI CONGELATI dello snapshot — identico a Dashboard e Stress Lab.
   const frozenUnderlyingPrices = useFrozenUnderlyingPrices(portfolio, underlyingPrices);
-  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
+  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs, dynamicAliases);
 
   if (typeof window !== 'undefined') {
     console.log('[RiskAnalyzer] render', {

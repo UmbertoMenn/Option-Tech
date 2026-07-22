@@ -6,6 +6,7 @@ import {
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 function pos(p: Partial<Position>): Position {
   return {
@@ -189,5 +190,55 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     const netting = computeSinglePortfolioNetting(all, [], prices, configs);
     const sumContrib = rows.reduce((s, x) => s + x.contribEUR, 0);
     expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicA, 6);
+  });
+});
+
+describe('breakdown istogrammi — identità canonica e isolamento portfolio', () => {
+  it('andreaz: RAC viene riconciliata con la config RACE e non finisce tra le orfane', () => {
+    const EXP = '2026-12-18';
+    const stock = pos({
+      id: 'race-stock', asset_type: 'stock', ticker: 'RACE.MI',
+      description: 'FERRARI NV', quantity: 100, current_price: 410,
+    });
+    const call = pos({
+      id: 'rac-call', underlying: 'RAC', ticker: 'RAC', option_type: 'call',
+      quantity: -1, strike_price: 420, expiry_date: EXP, snapshot_price: 12,
+    });
+    const config = cfg({
+      id: 'race-cc', underlying: 'RACE', linked_stock_id: stock.id,
+      linked_stock_slot_ids: [stock.id],
+      position_signatures: [sig({ option_type: 'call', strike: 420, expiry: EXP, quantity_sign: -1 })],
+    });
+    const aliases = buildDynamicAliasMap([{ underlying: 'RAC', ticker: 'RACE' }]);
+
+    const result = computeSinglePortfolioNetting([stock, call], [], { RAC: up(410) }, [config], aliases);
+
+    expect(result.breakdown.find(x => x.category === 'orphans')).toBeUndefined();
+    expect(result.breakdown.find(x => x.category === 'covered_call')?.value).toBeCloseTo(-1200, 6);
+  });
+
+  it('la vista aggregata non usa la configurazione di un cliente per classificare le gambe di un altro', () => {
+    const EXP = '2026-12-18';
+    const optionOfPf2 = pos({
+      id: 'pf2-call', portfolio_id: 'pf2', underlying: 'CEG', ticker: 'CEG',
+      option_type: 'call', quantity: -1, strike_price: 300,
+      expiry_date: EXP, snapshot_price: 8,
+    });
+    const configOfPf1 = cfg({
+      id: 'pf1-config', portfolio_id: 'pf1', underlying: 'CEG',
+      position_signatures: [sig({ option_type: 'call', strike: 300, expiry: EXP, quantity_sign: -1 })],
+    });
+
+    const rows = computeLegDecomposition(
+      'netting_total',
+      [optionOfPf2],
+      [],
+      { CEG: up(290) },
+      [configOfPf1],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].category).toBe('orphans');
+    expect(rows[0].contribEUR).toBeCloseTo(-800, 6);
   });
 });

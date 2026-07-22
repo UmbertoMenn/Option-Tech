@@ -27,6 +27,7 @@ import { useNavigate } from 'react-router-dom';
 import { PatrimonyProjectionCard } from '@/components/dashboard/PatrimonyProjectionCard';
 import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTooltip';
 import { useAuth } from '@/contexts/AuthContext';
+import type { DynamicAliases } from '@/lib/tickerIdentity';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -39,6 +40,7 @@ interface DynamicPortfolioChartProps {
   underlyingPrices?: Record<string, UnderlyingPrice>;
   hasConfigurations?: boolean;
   strategyConfigs?: StrategyConfiguration[];
+  dynamicAliases?: DynamicAliases;
   /** Ripartizione del patrimonio per componente (slide extra in vista Netting Totale). */
   patrimonyComponents?: PatrimonyComponents;
 }
@@ -254,7 +256,7 @@ const CHART_TITLES: Record<ViewMode, string> = {
 };
 
 
-export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [], patrimonyComponents }: DynamicPortfolioChartProps) {
+export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [], dynamicAliases, patrimonyComponents }: DynamicPortfolioChartProps) {
   const { isAdmin } = useAuth();
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
@@ -298,12 +300,13 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       overrides,
       underlyingPrices,
       strategyConfigs,
+      dynamicAliases,
     );
-  }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices, strategyConfigs]);
+  }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices, strategyConfigs, dynamicAliases]);
 
   const legRows = useMemo(() => {
-    return computeLegDecomposition(viewMode, positions, overrides, underlyingPrices, strategyConfigs);
-  }, [viewMode, positions, overrides, underlyingPrices, strategyConfigs]);
+    return computeLegDecomposition(viewMode, positions, overrides, underlyingPrices, strategyConfigs, dynamicAliases);
+  }, [viewMode, positions, overrides, underlyingPrices, strategyConfigs, dynamicAliases]);
 
   const hasDer = positions.some(p => p.asset_type === 'derivative');
 

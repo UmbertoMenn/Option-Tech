@@ -4,6 +4,7 @@ import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import type { DynamicAliases } from '@/lib/tickerIdentity';
 
 export interface NettingBreakdownDetail {
   positionId: string;
@@ -110,11 +111,12 @@ function buildCanonicalLegs(
   derivatives: Position[],
   positions: Position[],
   overrides: DerivativeOverride[],
-  strategyConfigs: StrategyConfiguration[]
+  strategyConfigs: StrategyConfiguration[],
+  dynamicAliases?: DynamicAliases,
 ): CanonicalLeg[] {
   const categories = categorizeDerivatives(
     derivatives, positions, overrides, strategyConfigs,
-    { configOnly: true }
+    { configOnly: true, dynamicAliases }
   );
 
   const legs: CanonicalLeg[] = [];
@@ -165,6 +167,51 @@ function buildCanonicalLegs(
     }
   }
 
+  return legs;
+}
+
+/**
+ * Costruisce le gambe senza mai far incrociare posizioni/configurazioni di
+ * portafogli diversi. È importante nella vista aggregata: due clienti possono
+ * avere lo stesso sottostante e firme identiche, ma ogni config deve consumare
+ * soltanto le posizioni del proprio portfolio.
+ */
+function buildCanonicalLegsByPortfolio(
+  positions: Position[],
+  overrides: DerivativeOverride[],
+  strategyConfigs: StrategyConfiguration[],
+  dynamicAliases?: DynamicAliases,
+): CanonicalLeg[] {
+  const byPortfolio = new Map<string, Position[]>();
+  for (const p of positions) {
+    if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
+    byPortfolio.get(p.portfolio_id)!.push(p);
+  }
+
+  const overridesByPortfolio = new Map<string, DerivativeOverride[]>();
+  for (const o of overrides) {
+    if (!overridesByPortfolio.has(o.portfolio_id)) overridesByPortfolio.set(o.portfolio_id, []);
+    overridesByPortfolio.get(o.portfolio_id)!.push(o);
+  }
+
+  const configsByPortfolio = new Map<string, StrategyConfiguration[]>();
+  for (const c of strategyConfigs) {
+    if (!configsByPortfolio.has(c.portfolio_id)) configsByPortfolio.set(c.portfolio_id, []);
+    configsByPortfolio.get(c.portfolio_id)!.push(c);
+  }
+
+  const legs: CanonicalLeg[] = [];
+  for (const [portfolioId, portfolioPositions] of byPortfolio) {
+    const derivatives = portfolioPositions.filter(p => p.asset_type === 'derivative');
+    if (derivatives.length === 0) continue;
+    legs.push(...buildCanonicalLegs(
+      derivatives,
+      portfolioPositions,
+      overridesByPortfolio.get(portfolioId) || [],
+      configsByPortfolio.get(portfolioId) || [],
+      dynamicAliases,
+    ));
+  }
   return legs;
 }
 
@@ -224,14 +271,15 @@ export function computeSinglePortfolioNetting(
   positions: Position[],
   overrides: DerivativeOverride[],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  dynamicAliases?: DynamicAliases,
 ): { totalNetting: number; nettingIntrinsicA: number; nettingIntrinsicB: number; breakdown: NettingBreakdownItem[] } {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) {
     return { totalNetting: 0, nettingIntrinsicA: 0, nettingIntrinsicB: 0, breakdown: [] };
   }
 
-  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
+  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs, dynamicAliases);
 
   // Accumulators per categoria
   const acc: Record<StrategySectionCategory, CategoryAccumulator> = {
@@ -363,7 +411,8 @@ export function compareNettingMethods(
   baseValue: number,
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  dynamicAliases?: DynamicAliases,
 ): NettingCompareResult {
   const byPortfolio = new Map<string, Position[]>();
   positions.forEach(p => {
@@ -389,7 +438,8 @@ export function compareNettingMethods(
     const legs = buildCanonicalLegs(
       derivatives, pPositions,
       overridesByPortfolio.get(pid) || [],
-      configsByPortfolio.get(pid) || []
+      configsByPortfolio.get(pid) || [],
+      dynamicAliases,
     );
 
     for (const leg of legs) {
@@ -456,7 +506,8 @@ export function useDerivativeNetting(
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
   isAggregatedView: boolean = false,
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  dynamicAliases?: DynamicAliases,
 ): NettingResult {
   return useMemo(() => {
     const emptyResult: NettingResult = {
@@ -500,7 +551,7 @@ export function useDerivativeNetting(
       for (const [pid, pPositions] of byPortfolio) {
         const pOverrides = overridesByPortfolio.get(pid) || [];
         const pConfigs = configsByPortfolio.get(pid) || [];
-        const result = computeSinglePortfolioNetting(pPositions, pOverrides, underlyingPrices, pConfigs);
+        const result = computeSinglePortfolioNetting(pPositions, pOverrides, underlyingPrices, pConfigs, dynamicAliases);
         mergedTotalNetting += result.totalNetting;
         mergedIntrinsicA += result.nettingIntrinsicA;
         mergedIntrinsicB += result.nettingIntrinsicB;
@@ -526,7 +577,7 @@ export function useDerivativeNetting(
       };
     }
 
-    const result = computeSinglePortfolioNetting(positions, overrides, underlyingPrices, strategyConfigs);
+    const result = computeSinglePortfolioNetting(positions, overrides, underlyingPrices, strategyConfigs, dynamicAliases);
 
     return {
       nettingTotal: summary.totalValue + result.totalNetting,
@@ -534,7 +585,7 @@ export function useDerivativeNetting(
       nettingIntrinsicB: summary.totalValue + result.nettingIntrinsicB,
       breakdown: result.breakdown,
     };
-  }, [positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs]);
+  }, [positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs, dynamicAliases]);
 }
 
 /**
@@ -549,7 +600,8 @@ export function getBreakdownForViewMode(
   summary: PortfolioSummary | null,
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  dynamicAliases?: DynamicAliases,
 ): { items: NettingBreakdownItem[]; finalValue: number } {
   const baseValue = summary?.totalValue ?? 0;
 
@@ -560,8 +612,7 @@ export function getBreakdownForViewMode(
   }
 
   // Viste intrinseche: ricalcola per gamba usando la fonte canonica.
-  const derivatives = positions.filter(p => p.asset_type === 'derivative');
-  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
+  const legs = buildCanonicalLegsByPortfolio(positions, overrides, strategyConfigs, dynamicAliases);
 
   const acc: Record<StrategySectionCategory, CategoryAccumulator> = {
     covered_call: makeAcc(),
@@ -690,12 +741,13 @@ export function computeLegDecomposition(
   positions: Position[],
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  dynamicAliases?: DynamicAliases,
 ): LegDecompositionRow[] {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) return [];
 
-  const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
+  const legs = buildCanonicalLegsByPortfolio(positions, overrides, strategyConfigs, dynamicAliases);
   const rows: LegDecompositionRow[] = [];
 
   for (const leg of legs) {
