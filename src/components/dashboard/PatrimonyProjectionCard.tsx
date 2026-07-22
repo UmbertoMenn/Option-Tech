@@ -19,6 +19,18 @@ import {
 } from '@/lib/portfolioProjection';
 import { resolveBond, BondOverrideLike } from '@/lib/bondMath';
 import { useBondOverrides, BondOverride } from '@/hooks/useBondOverrides';
+import { cn } from '@/lib/utils';
+
+type ProjectionTimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y';
+
+const PROJECTION_TIME_RANGES: { value: ProjectionTimeRange; label: string; months: number }[] = [
+  { value: '1M', label: '1M', months: 1 },
+  { value: '3M', label: '3M', months: 3 },
+  { value: '6M', label: '6M', months: 6 },
+  { value: '1Y', label: '1A', months: 12 },
+  { value: '2Y', label: '2A', months: 24 },
+  { value: '3Y', label: '3A', months: 36 },
+];
 
 /** Adatta una riga bond_overrides al formato atteso da resolveBond (Date, non ISO string). */
 function overrideToLike(ov?: BondOverride): BondOverrideLike | null {
@@ -38,7 +50,6 @@ interface Props {
   derivativesNettingT0?: number;
 }
 
-const MS_YEAR = 365.25 * 24 * 3600 * 1000;
 const fmtEURc = (n: number) => '€' + n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
 const fmtEURcompact = (n: number) => {
   const a = Math.abs(n);
@@ -149,7 +160,7 @@ function BondFixRow({ position, override, onSave, saving }: {
 }
 
 export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices, gpEquityValue = 0, derivativesNettingT0 }: Props) {
-  const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
+  const [timeRange, setTimeRange] = useState<ProjectionTimeRange>('1Y');
   const [scope, setScope] = useState<ProjectionScope>('all');
   const [fixOpen, setFixOpen] = useState(false);
 
@@ -172,12 +183,12 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
     [positions, baseValue, underlyingPrices, bondOverrideMap, gpEquityValue, derivativesNettingT0],
   );
 
-  const maxYears = Math.max(0.25, (inputs.horizon.getTime() - inputs.t0.getTime()) / MS_YEAR);
   const effectiveHorizon = useMemo(() => {
-    if (rangeYears == null) return inputs.horizon;
-    const capped = new Date(inputs.t0.getTime() + rangeYears * MS_YEAR);
+    const selectedMonths = PROJECTION_TIME_RANGES.find(range => range.value === timeRange)?.months ?? 12;
+    const capped = new Date(inputs.t0);
+    capped.setMonth(capped.getMonth() + selectedMonths);
     return capped.getTime() < inputs.horizon.getTime() ? capped : inputs.horizon;
-  }, [rangeYears, inputs]);
+  }, [timeRange, inputs]);
 
   const grid = useMemo(() => buildTimeGrid(inputs.t0, effectiveHorizon, 60), [inputs, effectiveHorizon]);
   const deterministic = useMemo(() => projectDeterministic(inputs, grid, scope), [inputs, grid, scope]);
@@ -192,7 +203,6 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
     if (inputs.derivs.length === 0 && inputs.bonds.length === 0) return;
     const dec = decomposeAtHorizon(inputs);
     const fmt = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
-    /* eslint-disable no-console */
     console.log('%c[PROIEZIONE] Evoluzione patrimonio — diagnostica orizzonte', 'font-weight:bold;font-size:13px');
     console.table(inputs.derivSummary.map(d => ({
       descr: d.description,
@@ -224,7 +234,6 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
       `Confronto: patrimonio Netting Intrinseco A = base + Σ intrinseci (stessi spot). ` +
       `Il gap vs orizzonte è spiegato da: effetto bond (rimborso − MV t0), cedole, gambe senza spot/scadute e offset.`
     );
-    /* eslint-enable no-console */
   }, [inputs]);
 
   const data = useMemo(() => deterministic.map(d => ({
@@ -244,12 +253,6 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
     return resolveBond(p.description, overrideToLike(getOverride(p.portfolio_id, p.isin))).needsFix;
   }), [positions, getOverride]);
 
-  const presets: { label: string; years: number | null }[] = [
-    { label: '1A', years: 1 }, { label: '2A', years: 2 }, { label: '3A', years: 3 },
-    { label: '5A', years: 5 }, { label: '10A', years: 10 },
-  ].filter(p => p.years! <= maxYears + 0.5);
-  presets.push({ label: 'Max', years: null });
-
   const bondModeledMV = inputs.bondSummary.reduce((s, b) => s + b.mvT0, 0);
 
   return (
@@ -268,19 +271,24 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
       {/* Selettore arco temporale asse X + analisi per bucket */}
       <div className="flex items-center gap-1 flex-wrap">
         <span className="text-[11px] text-muted-foreground mr-1">Orizzonte:</span>
-        {presets.map(p => (
-          <button
-            key={p.label}
-            onClick={() => setRangeYears(p.years)}
-            className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
-              rangeYears === p.years
-                ? 'border-primary bg-primary/15 text-primary'
-                : 'border-border text-muted-foreground hover:bg-muted'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+        <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+          {PROJECTION_TIME_RANGES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTimeRange(value)}
+              aria-pressed={timeRange === value}
+              className={cn(
+                'px-2 py-0.5 text-xs transition-colors',
+                timeRange === value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted text-foreground'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="text-[11px] text-muted-foreground ml-3 mr-1">Analizza:</span>
         <TooltipProvider delayDuration={150}>
           {(Object.keys(SCOPE_INFO) as ProjectionScope[]).map(v => (
