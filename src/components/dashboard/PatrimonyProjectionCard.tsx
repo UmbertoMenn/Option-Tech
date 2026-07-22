@@ -160,7 +160,7 @@ function BondFixRow({ position, override, onSave, saving }: {
 }
 
 export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices, gpEquityValue = 0, derivativesNettingT0 }: Props) {
-  const [timeRange, setTimeRange] = useState<ProjectionTimeRange>('1Y');
+  const [timeRange, setTimeRange] = useState<ProjectionTimeRange>('3M');
   const [scope, setScope] = useState<ProjectionScope>('all');
   const [fixOpen, setFixOpen] = useState(false);
 
