@@ -42,6 +42,9 @@ verify_jwt = false
 [functions.massive-proxy]
 verify_jwt = false
 
+[functions.thetadata-proxy]
+verify_jwt = false
+
 [functions.admin-reset-password]
 verify_jwt = false
 

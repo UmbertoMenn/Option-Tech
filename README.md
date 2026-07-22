@@ -1,5 +1,19 @@
 # Welcome to your Lovable project
 
+## Backtesting e ThetaData v3
+
+La pagina `/backtesting` usa un adapter server-side e non espone credenziali o indirizzi del gateway nel browser.
+
+Configurazione prevista dopo l'upgrade ThetaData:
+
+1. eseguire Theta Terminal v3 su un host sempre acceso;
+2. pubblicare il solo endpoint REST tramite un gateway HTTPS privato e autenticato, raggiungibile dalle Edge Functions Supabase;
+3. configurare i secret Supabase `THETADATA_BASE_URL` (deve terminare con `/v3`) e, se usato dal gateway, `THETADATA_GATEWAY_TOKEN`;
+4. distribuire la funzione `thetadata-proxy` e applicare la migration `20260722150000_backtesting_foundation.sql`;
+5. verificare il collegamento dalla card ThetaData nella pagina Backtesting.
+
+Non esporre direttamente la porta locale `25503` su Internet. Le credenziali dell'account ThetaData restano nel Terminal e non vengono salvate nel frontend o nella tabella `backtest_runs`. La tabella conserva soltanto configurazione e risultati aggregati, non le quote grezze.
+
 ## Project info
 
 **URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID

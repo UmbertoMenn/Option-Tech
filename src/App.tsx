@@ -23,6 +23,7 @@ const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ de
 const OptionAnalyzer = lazy(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazy(() => import("@/pages/Simulator"));
+const Backtesting = lazy(() => import("@/pages/Backtesting"));
 const OAuthConsent = lazy(() => import("@/pages/OAuthConsent"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -179,6 +180,11 @@ function AppRoutes() {
           <Route path="/simulator" element={
             <ErrorBoundary title="Errore nel caricamento del simulatore">
               <Simulator />
+            </ErrorBoundary>
+          } />
+          <Route path="/backtesting" element={
+            <ErrorBoundary title="Errore nel caricamento del Backtesting">
+              <Backtesting />
             </ErrorBoundary>
           } />
           <Route path="*" element={<NotFound />} />
