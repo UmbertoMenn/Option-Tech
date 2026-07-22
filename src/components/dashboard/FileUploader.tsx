@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, ArrowLeftRight } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, ArrowLeftRight, AlertTriangle } from 'lucide-react';
 import { parsePortfolioExcel, type PortfolioParseOptions } from '@/lib/excelParser';
 import { parseGPExcel } from '@/lib/gpExcelParser';
 import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
@@ -655,6 +655,13 @@ export function FileUploader() {
             <p className="text-xs text-muted-foreground text-center mb-3 px-2">
               Parser storici separati. Il Portfolio Excel importa anche il PMC presente nel file; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
             </p>
+            <div className="mb-3 flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-xs text-amber-950 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p>
+                <span className="font-semibold">Ordine di caricamento obbligatorio per la stessa data:</span>{' '}
+                prima <strong>Portfolio Excel</strong>, poi <strong>GP Excel</strong>. Caricando il Portfolio dopo la GP, lo snapshot può restare incompleto e generare incongruenze nei dati e nei calcoli.
+              </p>
+            </div>
             <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
               Il file viene elaborato localmente nel browser e non viene conservato. Sul Portfolio Excel restano attive le esclusioni dei conti liquidità configurate per l'utente.
             </p>
