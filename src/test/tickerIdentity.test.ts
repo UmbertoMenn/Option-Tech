@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { resolveUnderlyingIdentity, buildDynamicAliasMap } from '@/lib/tickerIdentity';
+import {
+  resolveUnderlyingIdentity,
+  buildDynamicAliasMap,
+  canonicalKeyForPosition,
+} from '@/lib/tickerIdentity';
 
 describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   it('LULU stock and LULULEMON ATHLETICA derivative converge to LULU', () => {
@@ -37,6 +41,53 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   it('ALIBABA / BABA converge to BABA', () => {
     expect(resolveUnderlyingIdentity({ rawName: 'ALIBABA GROUP HOLDING' }).tickerKey).toBe('BABA');
     expect(resolveUnderlyingIdentity({ rawTicker: 'BABA' }).tickerKey).toBe('BABA');
+  });
+
+  it('BAIDU: azione e varianti SPON ADR delle opzioni convergono su BIDU', () => {
+    const stock = {
+      asset_type: 'stock',
+      ticker: null,
+      description: 'AZ.BAIDU INC - SPON ADR',
+      isin: 'US0567521085',
+    } as any;
+    const call = {
+      asset_type: 'derivative',
+      ticker: null,
+      underlying: 'BAIDU INC SPON ADR REP A',
+      description: 'BAIDU INC SPON ADR REP A V CALL 125 AGO/26',
+    } as any;
+    const put = {
+      asset_type: 'derivative',
+      ticker: null,
+      underlying: 'BAIDU INC SPON ADR REP A',
+      description: 'BAIDU INC SPON ADR REP A A PUT 95 GEN/28',
+    } as any;
+
+    expect(canonicalKeyForPosition(stock, undefined)).toBe('BIDU');
+    expect(canonicalKeyForPosition(call, undefined)).toBe('BIDU');
+    expect(canonicalKeyForPosition(put, undefined)).toBe('BIDU');
+  });
+
+  it('BAIDU: una mappa dinamica incoerente non separa ADR e opzioni', () => {
+    const dynamicAliases = buildDynamicAliasMap([
+      { underlying: 'BAIDU INC - SPON ADR', ticker: 'BIDU' },
+      { underlying: 'BAIDU INC SPON ADR REP A', ticker: '9888.HK' },
+    ]);
+    const stock = {
+      asset_type: 'stock',
+      ticker: null,
+      description: 'AZ.BAIDU INC - SPON ADR',
+      isin: 'US0567521085',
+    } as any;
+    const option = {
+      asset_type: 'derivative',
+      ticker: null,
+      underlying: 'BAIDU INC SPON ADR REP A',
+      description: 'BAIDU INC SPON ADR REP A V CALL 125 AGO/26',
+    } as any;
+
+    expect(canonicalKeyForPosition(stock, dynamicAliases)).toBe('BIDU');
+    expect(canonicalKeyForPosition(option, dynamicAliases)).toBe('BIDU');
   });
 
   it('strips broker prefix and exchange suffixes', () => {

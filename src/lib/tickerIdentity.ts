@@ -135,7 +135,13 @@ const CANONICAL_UNDERLYINGS: Record<string, string[]> = {
   BABA: ['BABA', 'ALIBABA', 'ALIBABA GROUP', 'ALIBABA GROUP HOLDING'],
   PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
   NTES: ['NTES', 'NETEASE', 'NETEASE INC'],
-  BIDU: ['BIDU', 'BAIDU', 'BAIDU INC'],
+  BIDU: [
+    'BIDU',
+    'BAIDU',
+    'BAIDU INC',
+    'BAIDU INC SPON ADR',
+    'BAIDU INC SPON ADR REP A',
+  ],
 
   // === Crypto / mining ===
   MSTR: ['MSTR', 'MICROSTRATEGY', 'STRATEGY', 'STRATEGY INC'],
@@ -225,6 +231,7 @@ const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
  */
 const ISIN_TO_CANONICAL: Record<string, string> = {
   US00724F1012: 'ADBE',
+  US0567521085: 'BIDU',
   KYG254571055: 'CRDO',
   DE0007100000: 'MBG',
   NL0011585146: 'RACE', // Ferrari NV
@@ -646,7 +653,10 @@ export function buildDynamicAliasMap(
     // Una riga sbagliata a DB (es. "NOW" -> SNOW) rinominerebbe altrimenti
     // ServiceNow in Snowflake, prezzo incluso.
     const asTicker = norm.replace(/\s+/g, '');
-    if (CANONICAL_UNDERLYINGS[asTicker] && asTicker !== ticker) {
+    const knownCanonical = CANONICAL_UNDERLYINGS[asTicker]
+      ? asTicker
+      : ALIAS_TO_TICKER.get(norm) || ALIAS_TO_TICKER.get(asTicker);
+    if (knownCanonical && knownCanonical !== ticker) {
       console.warn(`[tickerIdentity] Alias dinamico incoerente ignorato: "${r.underlying}" -> ${ticker}`);
       continue;
     }
