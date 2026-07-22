@@ -41,8 +41,10 @@ import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { reconcileConfigs } from '@/lib/strategyReconciliation';
 import { autoReconcileStrategies } from '@/lib/strategyAutoReconcile';
-import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
+import { buildDynamicAliasMap, canonicalKeyForPosition, getDisplayTickerForKey } from '@/lib/tickerIdentity';
 import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { findUnlinkedShortCalls } from '@/lib/unrecognizedUnderlyings';
+import { UnrecognizedUnderlyingsBanner } from '@/components/derivatives/UnrecognizedUnderlyingsBanner';
 import { toast } from 'sonner';
 import { 
   categorizeDerivatives,
@@ -284,7 +286,8 @@ export function Derivatives() {
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, cancelOverride, isSaving: isConfigSaving, isLoading: isConfigsLoading } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
-  const { allMappings } = useUnderlyingMappings();
+  const { allMappings, upsertMapping } = useUnderlyingMappings();
+  const [linkingCode, setLinkingCode] = useState<string | null>(null);
   const dynamicAliases = useMemo(
     () => buildDynamicAliasMap(allMappings.data || []),
     [allMappings.data],
@@ -372,6 +375,35 @@ export function Derivatives() {
     positions.filter(p => p.asset_type === 'stock'),
     [positions]
   );
+
+  // Short call il cui sottostante non è riconosciuto (codice di banca non mappato):
+  // risultano scoperte finché non le si collega al ticker corretto.
+  const unlinkedUnderlyings = useMemo(
+    () => findUnlinkedShortCalls(derivatives, stockPositions, dynamicAliases),
+    [derivatives, stockPositions, dynamicAliases],
+  );
+
+  // Ticker canonici delle azioni possedute: opzioni suggerite per il collegamento.
+  const heldTickers = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of stockPositions) {
+      if (Number(s.quantity) <= 0) continue;
+      const display = getDisplayTickerForKey(canonicalKeyForPosition(s, dynamicAliases));
+      if (display) set.add(display);
+    }
+    return [...set].sort();
+  }, [stockPositions, dynamicAliases]);
+
+  const handleLinkUnderlying = useCallback((code: string, ticker: string) => {
+    setLinkingCode(code);
+    upsertMapping.mutate(
+      { underlying: code, ticker },
+      {
+        onSuccess: () => toast.success(`Collegato: ${code} → ${ticker.toUpperCase()}`),
+        onSettled: () => setLinkingCode(null),
+      },
+    );
+  }, [upsertMapping]);
 
   // Early return for global aggregate - page is hidden
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
@@ -883,6 +915,14 @@ export function Derivatives() {
           dynamicAliases={dynamicAliases}
           missingCount={missingCount}
           isFetchingMissing={isFetchingMissing}
+        />
+
+        {/* Prompt inline: sottostanti non riconosciuti da collegare a mano */}
+        <UnrecognizedUnderlyingsBanner
+          items={unlinkedUnderlyings}
+          heldTickers={heldTickers}
+          onLink={handleLinkUnderlying}
+          linkingCode={linkingCode}
         />
         
         {/* Section 1: Covered Call (Collapsible) */}
