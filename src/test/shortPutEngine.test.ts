@@ -219,6 +219,29 @@ describe('motore end-to-end su dati sintetici', () => {
     expect(result.bySymbol[0].assignments).toBe(0);
   });
 
+  it('non chiude forzatamente a fine periodo le posizioni con scadenza successiva (regressione)', async () => {
+    // Periodo che termina PRIMA della scadenza della put venduta:
+    // ingresso ~05/01 su mensile di febbraio (gennaio ha <10 DTE? no: 16/01 ha 11 DTE
+    // il 05/01, quindi mensile gennaio; fine periodo 09/01, scadenza 16/01 > endDate).
+    const config = baseConfig({
+      basket: [{ symbol: 'OPEN', contracts: 1 }],
+      startDate: '2026-01-05',
+      endDate: '2026-01-09',
+    });
+    const provider = new SyntheticMarketDataProvider(new Map([['OPEN', params()]]), config.startDate, config.endDate);
+    const result = await runShortPutBacktest(config, provider, 'synthetic');
+
+    expect(result.events.filter((e) => e.type === 'entry')).toHaveLength(1);
+    // Prima del fix, l'ultimo giorno del periodo veniva trattato come settlement
+    // (nessun giorno di negoziazione successivo nei dati) e la posizione chiusa.
+    expect(result.events.some((e) => e.type === 'expired_otm' || e.type === 'assignment' || e.type === 'survival_roll')).toBe(false);
+    expect(result.openPositions).toHaveLength(1);
+    expect(result.openPositions[0].expiration > config.endDate).toBe(true);
+    // La posizione aperta pesa sull'equity finale come passività al mid (> 0).
+    const last = result.equityCurve[result.equityCurve.length - 1];
+    expect(last.equity).toBeLessThan(last.cash);
+  });
+
   it('valida la configurazione e rifiuta paniere vuoto o regole incomplete', () => {
     const bad = baseConfig({ basket: [] });
     expect(validateShortPutConfig(bad)).not.toHaveLength(0);

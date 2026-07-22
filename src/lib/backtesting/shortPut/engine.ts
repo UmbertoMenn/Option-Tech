@@ -45,6 +45,9 @@ interface SymbolState {
   position: ShortPutOpenPosition | null;
   maxRollsLogged: boolean;
   rollFailedLogged: boolean;
+  entrySkippedLogged: boolean;
+  /** Ultimo mid per azione della put in posizione (carry-forward per il MTM). */
+  lastMarkPerShare: number | null;
   summary: ShortPutSymbolSummary;
 }
 
@@ -119,6 +122,8 @@ export async function runShortPutBacktest(
       position: null,
       maxRollsLogged: false,
       rollFailedLogged: false,
+      entrySkippedLogged: false,
+      lastMarkPerShare: null,
       summary: emptySummary(symbol, item.contracts),
     });
   }
@@ -198,8 +203,14 @@ export async function runShortPutBacktest(
       if (state.position) {
         const pos = state.position;
         const dte = daysBetween(date, pos.expiration);
+        // Settlement solo se la scadenza cade entro il periodo del backtest:
+        // altrimenti l'assenza di giorni successivi (fine dati) forzerebbe una
+        // chiusura anticipata di posizioni ancora vive. Quelle restano aperte
+        // e sono riportate in openPositions.
         const isSettlementDay =
-          dte <= 0 || !hasTradingDayBetween(tradingDaysBySymbol.get(state.symbol)!, date, pos.expiration);
+          dte <= 0 ||
+          (pos.expiration <= config.endDate &&
+            !hasTradingDayBetween(tradingDaysBySymbol.get(state.symbol)!, date, pos.expiration));
         if (isSettlementDay) {
           if (spot >= pos.strike) {
             state.summary.expiredOtm += 1;
@@ -214,6 +225,7 @@ export async function runShortPutBacktest(
               from: { strike: pos.strike, expiration: pos.expiration },
             });
             state.position = null;
+            state.lastMarkPerShare = null;
             state.maxRollsLogged = false;
             state.rollFailedLogged = false;
             continue;
@@ -263,6 +275,7 @@ export async function runShortPutBacktest(
               from: { strike: pos.strike, expiration: pos.expiration },
             });
             state.position = null;
+            state.lastMarkPerShare = null;
             state.maxRollsLogged = false;
             state.rollFailedLogged = false;
           }
@@ -279,17 +292,21 @@ export async function runShortPutBacktest(
         const expiration = frontMonthlyExpiry(date, config.entry.minDte);
         const quote = selectEntryStrike(chain, expiration, spot, config.entry, fills);
         if (!quote) {
-          pushEvent({
-            date,
-            symbol: state.symbol,
-            type: 'entry_skipped',
-            description: `Nessuno strike valido su ${expiration} (spot ${spot.toFixed(2)})`,
-            spot,
-            cashFlow: 0,
-            commissions: 0,
-          });
+          if (!state.entrySkippedLogged) {
+            state.entrySkippedLogged = true;
+            pushEvent({
+              date,
+              symbol: state.symbol,
+              type: 'entry_skipped',
+              description: `Nessuno strike valido su ${expiration} (spot ${spot.toFixed(2)}): riprovo ai prossimi close`,
+              spot,
+              cashFlow: 0,
+              commissions: 0,
+            });
+          }
           continue;
         }
+        state.entrySkippedLogged = false;
         const sell = fills.sellFill(quote);
         const credit = sell * multiplier;
         const commissions = tradeCommission(contracts, 1);
@@ -406,17 +423,25 @@ export async function runShortPutBacktest(
       }
     }
 
-    // Mark-to-market di fine giornata: equity = cassa − costo di chiusura (mid) delle posizioni aperte.
+    // Mark-to-market di fine giornata: equity = cassa − costo di chiusura (mid)
+    // delle posizioni aperte. Se la quote manca o il titolo non negozia oggi,
+    // carry-forward dell'ultimo mid noto con floor al valore intrinseco: una
+    // quote assente non può mai azzerare una passività reale.
     let liabilities = 0;
     for (const state of states.values()) {
       if (!state.position) continue;
       const pos = state.position;
-      if (!tradingDaysBySymbol.get(state.symbol)?.has(date)) continue;
-      const chain = await provider.getPutChain(state.symbol, date, [pos.expiration]);
-      const quote = findQuote(chain, pos.expiration, pos.strike);
-      if (quote) {
-        liabilities += ((quote.bid + quote.ask) / 2) * SHARES_PER_CONTRACT * pos.contracts;
+      const isTradingToday = tradingDaysBySymbol.get(state.symbol)?.has(date) ?? false;
+      let markPerShare = state.lastMarkPerShare ?? 0;
+      if (isTradingToday) {
+        const spot = await provider.getSpot(state.symbol, date);
+        const intrinsic = Math.max(pos.strike - spot, 0);
+        const chain = await provider.getPutChain(state.symbol, date, [pos.expiration]);
+        const quote = findQuote(chain, pos.expiration, pos.strike);
+        markPerShare = quote ? Math.max((quote.bid + quote.ask) / 2, intrinsic) : Math.max(markPerShare, intrinsic);
+        state.lastMarkPerShare = markPerShare;
       }
+      liabilities += markPerShare * SHARES_PER_CONTRACT * pos.contracts;
     }
     equityCurve.push({ date, equity: cash - liabilities, cash });
   }
