@@ -36,6 +36,17 @@ interface Profile {
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 
+// HTML-escape user-controlled fields before interpolating into email HTML
+function esc(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Determine alert type label in Italian
 function getAlertTypeLabel(alertType: string): string {
   if (alertType.startsWith('distance_')) return 'Avviso di Distanza';
@@ -134,12 +145,12 @@ async function sendEmail(
       alertData.threshold_value
     );
     const priceLabel = alertData.underlying_price ? 
-      `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
+      `<strong>Prezzo ${esc(alertData.ticker)}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     
     await resend.emails.send({
       from: "Portfolio Alerts <noreply@resend.dev>",
       to: [email],
-      subject: `${severityEmoji} Avviso Portfolio: ${alertData.ticker}`,
+      subject: `${severityEmoji} Avviso Portfolio: ${esc(alertData.ticker)}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: ${severityColor}; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
@@ -151,25 +162,25 @@ async function sendEmail(
               ${isAdmin && userName ? `
               <tr>
                 <td style="padding: 8px 0; color: #6b7280; width: 120px;">Utente:</td>
-                <td style="padding: 8px 0;"><strong>${userName}</strong></td>
+                <td style="padding: 8px 0;"><strong>${esc(userName)}</strong></td>
               </tr>
               ` : ''}
               <tr>
                 <td style="padding: 8px 0; color: #6b7280; width: 120px;">Ticker:</td>
-                <td style="padding: 8px 0;"><strong>${alertData.ticker}</strong></td>
+                <td style="padding: 8px 0;"><strong>${esc(alertData.ticker)}</strong></td>
               </tr>
               <tr>
                 <td style="padding: 8px 0; color: #6b7280;">Strategia:</td>
-                <td style="padding: 8px 0;">${strategyName}</td>
+                <td style="padding: 8px 0;">${esc(strategyName)}</td>
               </tr>
               <tr>
                 <td style="padding: 8px 0; color: #6b7280;">Messaggio:</td>
-                <td style="padding: 8px 0;">${alertData.message}</td>
+                <td style="padding: 8px 0;">${esc(alertData.message)}</td>
               </tr>
               ${optionInfo ? `
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">${optionInfo.label}:</td>
-                <td style="padding: 8px 0;">${optionInfo.value}</td>
+                <td style="padding: 8px 0; color: #6b7280;">${esc(optionInfo.label)}:</td>
+                <td style="padding: 8px 0;">${esc(optionInfo.value)}</td>
               </tr>
               ` : ''}
             </table>
@@ -278,6 +289,14 @@ async function logNotification(
 serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  if (!cronSecret || req.headers.get("x-cron-secret") !== cronSecret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
