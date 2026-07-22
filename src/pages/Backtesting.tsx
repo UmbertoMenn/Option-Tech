@@ -23,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
+import { ShortPutBacktestPanel } from '@/components/backtesting/ShortPutBacktestPanel';
 import { checkThetaDataHealth } from '@/lib/backtesting/thetaDataClient';
 import { DEFAULT_BACKTEST_CONFIG, STRATEGY_CATALOG, getStrategyDefinition } from '@/lib/backtesting/strategyCatalog';
 import { BacktestConfig, BacktestStrategyId, BacktestValidationIssue, ThetaDataHealth } from '@/lib/backtesting/types';
@@ -74,7 +75,10 @@ function IssueList({ issues }: { issues: BacktestValidationIssue[] }) {
 
 export function Backtesting() {
   const { isAdmin } = useAuth();
-  const [config, setConfig] = useState<BacktestConfig>(() => structuredClone(DEFAULT_BACKTEST_CONFIG));
+  const [config, setConfig] = useState<BacktestConfig>(() => ({
+    ...structuredClone(DEFAULT_BACKTEST_CONFIG),
+    strategyId: 'cash_secured_put' as BacktestStrategyId,
+  }));
   const [issues, setIssues] = useState<BacktestValidationIssue[]>([]);
   const [health, setHealth] = useState<ThetaDataHealth | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(false);
@@ -212,6 +216,34 @@ export function Backtesting() {
           <TabsContent value="configuration" className="space-y-4">
             <Card>
               <CardHeader>
+                <CardTitle className="text-base">Strategia</CardTitle>
+                <CardDescription>
+                  {config.strategyId === 'cash_secured_put'
+                    ? 'Motore implementato: vendita PUT OTM mensile su paniere con roll in discesa (1–4) e gestione al rialzo.'
+                    : 'Motore in sviluppo: per questa strategia è disponibile solo la validazione della configurazione.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Select value={config.strategyId} onValueChange={(value) => setConfig((current) => ({ ...current, strategyId: value as BacktestStrategyId }))}>
+                  <SelectTrigger className="max-w-md"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {STRATEGY_CATALOG.map((strategy) => (
+                      <SelectItem key={strategy.id} value={strategy.id}>
+                        Fase {strategy.phase} · {strategy.name}
+                        {strategy.id === 'cash_secured_put' ? ' · motore attivo' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardContent>
+            </Card>
+
+            {config.strategyId === 'cash_secured_put' ? (
+              <ShortPutBacktestPanel />
+            ) : (
+              <>
+            <Card>
+              <CardHeader>
                 <CardTitle className="text-base">1. Universo e periodo</CardTitle>
                 <CardDescription>La prima validazione usa un ticker alla volta e dati EOD.</CardDescription>
               </CardHeader>
@@ -246,19 +278,6 @@ export function Backtesting() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>Strategia</Label>
-                    <Select value={config.strategyId} onValueChange={(value) => setConfig((current) => ({ ...current, strategyId: value as BacktestStrategyId }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {STRATEGY_CATALOG.map((strategy) => (
-                          <SelectItem key={strategy.id} value={strategy.id}>
-                            Fase {strategy.phase} · {strategy.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div className="space-y-1.5">
                     <Label>Frequenza ingresso</Label>
                     <Select value={config.entry.frequency} onValueChange={(value) => updateEntry('frequency', value as BacktestConfig['entry']['frequency'])}>
@@ -395,6 +414,8 @@ export function Backtesting() {
             <p className="text-xs text-center text-muted-foreground">
               Il runner resta bloccato finché ThetaData non è collegato; non vengono prodotti risultati con prezzi sintetici spacciati per storici.
             </p>
+              </>
+            )}
           </TabsContent>
 
           <TabsContent value="rules" className="space-y-4">
