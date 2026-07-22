@@ -901,6 +901,17 @@ export function Derivatives() {
         )}
 
 
+        {/* Prompt inline: sottostanti non riconosciuti da collegare a mano.
+            Fuori dal gate hasConfigurations: i casi residui vanno collegabili
+            anche su un portafoglio non ancora configurato. */}
+        <UnrecognizedUnderlyingsBanner
+          items={unlinkedUnderlyings}
+          heldTickers={heldTickers}
+          onLink={handleLinkUnderlying}
+          linkingCode={linkingCode}
+        />
+
+
         {/* Main content — only show when configurations exist */}
         {hasConfigurations && (<>
 
@@ -917,14 +928,6 @@ export function Derivatives() {
           isFetchingMissing={isFetchingMissing}
         />
 
-        {/* Prompt inline: sottostanti non riconosciuti da collegare a mano */}
-        <UnrecognizedUnderlyingsBanner
-          items={unlinkedUnderlyings}
-          heldTickers={heldTickers}
-          onLink={handleLinkUnderlying}
-          linkingCode={linkingCode}
-        />
-        
         {/* Section 1: Covered Call (Collapsible) */}
         {(categories.coveredCalls.length > 0 || incCovered.length > 0) && (
         <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
