@@ -15,7 +15,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { FlussiCashMovement, FlussiTitoliOptionTrade, FlussiTitoliStockTrade, buildDepositCandidates, pairInternalTransfers } from '@/lib/flussiCsvParser';
-import { extractCallBuybacks, CallResell } from '@/lib/callBuybacks';
+import { extractCallBuybacks, mergeIdenticalTranches, trancheKey, CallResell } from '@/lib/callBuybacks';
 import { applyStockTradesToBasis, applyOptionTradesToBasis, detectEarlyAssignments, detectEarlyCallAssignments, optionBasisKey, CostBasisEntry, EarlyAssignment, PutPositionLite, CallPositionLite, CallAssignmentDetected } from '@/lib/costBasis';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { fetchDynamicAliases } from '@/lib/costBasisStore';
@@ -171,7 +171,10 @@ async function applyResell(
     .eq('portfolio_id', portfolioId)
     .eq('descriptor', resell.descriptor)
     .gt('quantity', 0)
-    .order('buyback_date', { ascending: true });
+    // FIFO per data; a parità di data (più tranche dello stesso giorno a prezzi
+    // diversi) l'ordine di creazione rende l'applicazione deterministica.
+    .order('buyback_date', { ascending: true })
+    .order('created_at', { ascending: true });
   if (error) {
     console.error('[flussiIngest] lettura buyback aperti fallita:', error.message);
     return { applied: 0, warnings };
@@ -233,41 +236,48 @@ export async function ingestTitoliTrades(
     supabase.from('strategy_configurations').select('*').eq('portfolio_id', portfolioId),
   ]);
 
-  const { buybacks, resells } = extractCallBuybacks(
+  const extraction = extractCallBuybacks(
     trades,
     (positions || []) as unknown as Position[],
     (configs || []) as unknown as StrategyConfiguration[],
   );
+  const resells = extraction.resells;
+  // Due movimenti identici (stesso descrittore, data E prezzo) sono lo stesso
+  // lotto spezzato dalla banca: vanno sommati PRIMA dell'upsert, altrimenti
+  // colpirebbero due volte la stessa riga in ON CONFLICT e Postgres rifiuta
+  // l'intero caricamento. Le tranche a prezzo diverso restano separate.
+  const buybacks = mergeIdenticalTranches(extraction.buybacks);
 
   let buybacksUpserted = 0;
   if (buybacks.length > 0) {
     // Le righe già corrette a mano dal titolare (manually_edited = true) sono
     // canoniche: strike/scadenza/quantità/prezzo di riacquisto non vengono più
     // toccati dal CSV. Vengono sovrascritte solo le righe ancora "automatiche".
-    // Chiave di conflitto: (portfolio_id, descriptor, buyback_date).
+    // Chiave di conflitto: (portfolio_id, descriptor, buyback_date, buyback_price),
+    // così ogni tranche a prezzo diverso è una riga a sé.
     const { data: existingRows, error: manualErr } = await supabase
       .from('call_buybacks' as never)
-      .select('descriptor, buyback_date, resold_quantity, manually_edited')
+      .select('descriptor, buyback_date, buyback_price, resold_quantity, manually_edited')
       .eq('portfolio_id', portfolioId);
     if (manualErr) {
       console.error('[flussiIngest] lettura buyback esistenti fallita:', manualErr.message);
     }
     const existingByKey = new Map<string, { resold_quantity: number; manually_edited: boolean }>();
-    for (const r of (existingRows || []) as unknown as { descriptor: string; buyback_date: string; resold_quantity: number | null; manually_edited: boolean }[]) {
-      existingByKey.set(`${r.descriptor}|${r.buyback_date}`, {
+    for (const r of (existingRows || []) as unknown as { descriptor: string; buyback_date: string; buyback_price: number; resold_quantity: number | null; manually_edited: boolean }[]) {
+      existingByKey.set(trancheKey({ descriptor: r.descriptor, buyback_date: r.buyback_date, buyback_price: Number(r.buyback_price) }), {
         resold_quantity: Number(r.resold_quantity || 0),
         manually_edited: !!r.manually_edited,
       });
     }
 
     const rows = buybacks
-      .filter(b => !existingByKey.get(`${b.descriptor}|${b.buyback_date}`)?.manually_edited)
+      .filter(b => !existingByKey.get(trancheKey(b))?.manually_edited)
       .map(b => {
         // Il CSV riporta la quantità ORIGINARIA del riacquisto. Se una parte è
         // già stata rivenduta, riscriverla tale e quale resusciterebbe i
         // contratti chiusi ad ogni ricaricamento del file: si scala il
         // rivenduto già registrato.
-        const prev = existingByKey.get(`${b.descriptor}|${b.buyback_date}`);
+        const prev = existingByKey.get(trancheKey(b));
         const resold = prev?.resold_quantity ?? 0;
         return {
           portfolio_id: portfolioId,
@@ -285,7 +295,7 @@ export async function ingestTitoliTrades(
     if (rows.length > 0) {
       const { error } = await supabase
         .from('call_buybacks' as never)
-        .upsert(rows as never[], { onConflict: 'portfolio_id,descriptor,buyback_date' });
+        .upsert(rows as never[], { onConflict: 'portfolio_id,descriptor,buyback_date,buyback_price' });
       if (error) throw new Error(`Errore salvataggio riacquisti call: ${error.message}`);
       buybacksUpserted = rows.length;
     }

@@ -10,7 +10,8 @@ import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, P
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
-import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields, ManualCallBuybackInput } from '@/hooks/useCallBuybacks';
+import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, hasKnownMarketPrice, unknownMarketPriceCount, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields, ManualCallBuybackInput } from '@/hooks/useCallBuybacks';
+import { computeAvailableCallResiduals } from '@/lib/callBuybacks';
 import { toast } from 'sonner';
 import { getOptionExpirationDateISO } from '@/lib/optionExpiry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -184,6 +185,10 @@ function BuybackRow({
 
   const expired = b.expiry_date < today;
   const mkt = effectiveMarketPrice(b, today);
+  // Prezzo di mercato non noto (call viva, cron non ancora passato): il G/P
+  // potenziale NON è calcolabile. Prima si mostrava (0 − riacquisto), cioè una
+  // perdita finta pari all'intero costo del riacquisto.
+  const priceKnown = hasKnownMarketPrice(b, today);
   const potentialGainLoss = (mkt - b.buyback_price) * 100 * b.quantity;
 
   if (editing) {
@@ -293,11 +298,15 @@ function BuybackRow({
         {expired ? `0,00 ${b.currency}` : (b.market_price != null ? `${fmt2(mkt)} ${b.currency}` : '—')}
       </td>
       <td className="text-right py-1 pl-2">
-        {fmt2(mkt * 100 * b.quantity)} {b.currency}
+        {priceKnown ? `${fmt2(mkt * 100 * b.quantity)} ${b.currency}` : '—'}
       </td>
-      <td className={`text-right py-1 pl-2 ${potentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+      <td className={`text-right py-1 pl-2 ${!priceKnown ? 'text-muted-foreground' : potentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
         <div className="flex items-center justify-end gap-1.5">
-          <span>{potentialGainLoss >= 0 ? '+' : ''}{fmt2(potentialGainLoss)} {b.currency}</span>
+          <span title={priceKnown ? undefined : 'Prezzo di mercato non ancora disponibile: G/P non calcolabile'}>
+            {priceKnown
+              ? `${potentialGainLoss >= 0 ? '+' : ''}${fmt2(potentialGainLoss)} ${b.currency}`
+              : 'n.d.'}
+          </span>
           <button
             type="button"
             onClick={beginEdit}
@@ -323,6 +332,8 @@ function BuybackRow({
 interface AvailableCallItem {
   ticker: string;
   availableContracts: number;
+  /** Contratti ancora da registrare (disponibili − già registrati come tranche). */
+  residualContracts: number;
 }
 
 interface TickerMeta {
@@ -333,19 +344,27 @@ interface TickerMeta {
 /**
  * Form inline per registrare una call da rivendere collegandola a un
  * sottostante GIÀ presente tra le "call da rivendere" (BABA/CEG/…): si sceglie
- * il ticker dall'elenco, la quantità è prefillata dai contratti disponibili,
- * la scadenza si indica come mese/anno (viene calcolato il terzo venerdì reale).
+ * il ticker dall'elenco, la quantità è prefillata sui contratti ANCORA da
+ * registrare (residuo = disponibili − già registrati) e la scadenza si indica
+ * come mese/anno (viene calcolato il terzo venerdì reale).
  * Valuta e cambio sono derivati automaticamente dal sottostante. Il prezzo di
  * mercato lo aggiorna il cron opzioni (chiave sottostante+strike+scadenza).
+ *
+ * Lo stesso strike/scadenza può essere registrato in più TRANCHE a prezzi di
+ * riacquisto diversi: il form resta aperto dopo il salvataggio finché il
+ * residuo non arriva a zero, così si inseriscono i lotti uno dopo l'altro.
  */
 function AddBuybackForm({
   items,
   tickerMeta,
+  savedTick,
   onSubmit,
   onCancel,
 }: {
   items: AvailableCallItem[];
   tickerMeta: Record<string, TickerMeta>;
+  /** Incrementato dal parent ad ogni tranche salvata: azzera il prezzo per il lotto successivo. */
+  savedTick: number;
   onSubmit: (row: ManualCallBuybackInput) => void;
   onCancel: () => void;
 }) {
@@ -357,16 +376,35 @@ function AddBuybackForm({
   const [strike, setStrike] = useState('');
   const [expMonth, setExpMonth] = useState(String(now.getMonth() + 1)); // 1-12
   const [expYear, setExpYear] = useState(String(currentYear));
-  const [quantity, setQuantity] = useState(String(items[0]?.availableContracts ?? 1));
+  const [quantity, setQuantity] = useState(String(items[0]?.residualContracts ?? 1));
   const [buybackPrice, setBuybackPrice] = useState('');
   const [buybackDate, setBuybackDate] = useState(today);
 
-  // Quando cambia il ticker, riallinea la quantità di default ai contratti disponibili.
+  const selected = items.find(i => i.ticker === ticker);
+  const residual = selected?.residualContracts ?? 0;
+
+  // Quando cambia il ticker, riallinea la quantità di default al RESIDUO.
   const onTickerChange = (t: string) => {
     setTicker(t);
     const it = items.find(i => i.ticker === t);
-    if (it) setQuantity(String(it.availableContracts));
+    if (it) setQuantity(String(it.residualContracts));
   };
+
+  // Il residuo scende ad ogni tranche salvata: riallinea la quantità proposta
+  // (senza sovrascrivere un valore che l'utente sta digitando più basso).
+  useEffect(() => {
+    setQuantity(prev => {
+      const n = parseInt(prev, 10);
+      if (!Number.isFinite(n) || n > residual) return String(residual);
+      return prev;
+    });
+  }, [residual]);
+
+  // Dopo il salvataggio di una tranche: strike e scadenza restano (di norma il
+  // lotto successivo è la stessa call a un prezzo diverso), si azzera il prezzo.
+  useEffect(() => {
+    if (savedTick > 0) setBuybackPrice('');
+  }, [savedTick]);
 
   const meta = tickerMeta[ticker] ?? { currency: 'USD', exchangeRate: 1 };
 
@@ -389,6 +427,16 @@ function AddBuybackForm({
     const bp = parsePrice(buybackPrice);
     if (!Number.isFinite(stk) || stk <= 0) return toast.error('Strike non valido');
     if (!Number.isFinite(qty) || qty <= 0) return toast.error('Quantità non valida');
+    if (residual <= 0) {
+      return toast.error('Nessun contratto residuo', {
+        description: `Su ${ticker} sono già registrati tutti i contratti disponibili.`,
+      });
+    }
+    if (qty > residual) {
+      return toast.error('Quantità oltre il residuo', {
+        description: `Su ${ticker} restano ${residual} contratti da registrare.`,
+      });
+    }
     if (!Number.isFinite(bp) || bp < 0) return toast.error('Prezzo di riacquisto non valido');
     const expiry_date = getOptionExpirationDateISO(parseInt(expYear, 10), parseInt(expMonth, 10));
     onSubmit({
@@ -414,7 +462,7 @@ function AddBuybackForm({
             <SelectContent>
               {items.map(i => (
                 <SelectItem key={i.ticker} value={i.ticker} className="text-xs">
-                  {i.ticker} (disp. {i.availableContracts})
+                  {i.ticker} (residui {i.residualContracts}/{i.availableContracts})
                 </SelectItem>
               ))}
             </SelectContent>
@@ -427,7 +475,7 @@ function AddBuybackForm({
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-          Quantità (contratti)
+          Quantità (max {residual})
           <Input value={quantity} onChange={e => setQuantity(e.target.value)} className="h-8 text-xs" inputMode="numeric" />
         </label>
 
@@ -464,11 +512,19 @@ function AddBuybackForm({
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
           Scadenza: 3° venerdì di {MONTHS[parseInt(expMonth, 10) - 1]} {expYear}. Cambio→EUR {meta.exchangeRate}. Il prezzo di mercato lo aggiorna il cron.
+          {residual > 0
+            ? ` Residui ${residual} contratti: salva più tranche a prezzi diversi fino a zero.`
+            : ' Nessun contratto residuo su questo sottostante.'}
         </span>
         <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>Annulla</Button>
-          <Button size="sm" className="h-8 text-xs bg-green-600 hover:bg-green-700" onClick={submit}>
-            <Check className="w-3.5 h-3.5 mr-1" /> Salva
+          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onCancel}>Chiudi</Button>
+          <Button
+            size="sm"
+            className="h-8 text-xs bg-green-600 hover:bg-green-700"
+            onClick={submit}
+            disabled={residual <= 0}
+          >
+            <Check className="w-3.5 h-3.5 mr-1" /> Salva tranche
           </Button>
         </div>
       </div>
@@ -499,6 +555,7 @@ function AvailableCallsSection({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [savedTick, setSavedTick] = useState(0);
   const { buybacks } = useCallBuybacks([portfolioId]);
   const { setIncluded, editFields, insertManual, remove } = useCallBuybackMutations([portfolioId]);
 
@@ -550,6 +607,14 @@ function AvailableCallsSection({
     });
   }, [items, buybacks, archivedCanonicalSet, dynamicAliases]);
 
+  // I contratti "disponibili" per sottostante vanno scalati di quelli già
+  // registrati come tranche di riacquisto: il residuo mostrato scende fino a
+  // zero mano a mano che si inseriscono i lotti.
+  const residuals = useMemo(
+    () => computeAvailableCallResiduals(items, visibleBuybacks),
+    [items, visibleBuybacks],
+  );
+
   if (items.length === 0) return null;
 
   const today = new Date().toISOString().split('T')[0];
@@ -565,14 +630,18 @@ function AvailableCallsSection({
       { portfolioId, row },
       {
         onSuccess: () => {
-          toast.success('Call da rivendere aggiunta', { description: `${row.underlying} C ${row.strike}` });
-          setShowAddForm(false);
+          toast.success('Tranche registrata', {
+            description: `${row.underlying} C ${row.strike} — ${row.quantity} contratti a ${row.buyback_price}`,
+          });
+          // Il form resta aperto: si continua con la tranche successiva a un
+          // prezzo diverso finché il residuo non arriva a zero.
+          setSavedTick(t => t + 1);
         },
         onError: (e: unknown) => {
           const msg = e instanceof Error ? e.message : 'errore sconosciuto';
           toast.error('Inserimento non riuscito', {
             description: /duplicate key|unique/i.test(msg)
-              ? 'Esiste già un riacquisto per questo sottostante/strike/scadenza nella stessa data.'
+              ? 'Esiste già una tranche identica (stesso strike/scadenza, stessa data E stesso prezzo). Cambia il prezzo o modifica la quantità della riga esistente.'
               : msg,
           });
         },
@@ -599,6 +668,7 @@ function AvailableCallsSection({
   const totalMarketPremiumEUR = openCallBuybacksValueEUR(visibleBuybacks, today);
   const totalPotentialGainLossEUR = openCallBuybacksGainLossEUR(visibleBuybacks, today);
   const hasIncluded = visibleBuybacks.some(b => b.included_in_netting !== false);
+  const missingPriceRows = unknownMarketPriceCount(visibleBuybacks, today);
 
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
@@ -627,13 +697,19 @@ function AvailableCallsSection({
       {isExpanded && (
         <div className="mt-2 pl-6 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            {items.map((item, idx) => (
+            {residuals.map((item, idx) => (
               <Badge
                 key={idx}
                 variant="outline"
-                className="text-xs bg-green-500/10 border-green-500/30"
+                className={`text-xs ${item.residualContracts === 0
+                  ? 'bg-muted border-border text-muted-foreground'
+                  : 'bg-green-500/10 border-green-500/30'}`}
+                title={`${item.availableContracts} disponibili − ${item.registeredContracts} registrati`}
               >
-                {item.ticker} ×{item.availableContracts}
+                {item.ticker} ×{item.residualContracts}
+                {item.registeredContracts > 0 && (
+                  <span className="ml-1 text-muted-foreground">/{item.availableContracts}</span>
+                )}
               </Badge>
             ))}
           </div>
@@ -652,8 +728,9 @@ function AvailableCallsSection({
 
           {showAddForm && (
             <AddBuybackForm
-              items={items}
+              items={residuals}
               tickerMeta={tickerMeta}
+              savedTick={savedTick}
               onSubmit={handleInsert}
               onCancel={() => setShowAddForm(false)}
             />
@@ -703,6 +780,14 @@ function AvailableCallsSection({
                   </tr>
                 </tbody>
               </table>
+              {missingPriceRows > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {missingPriceRows} {missingPriceRows === 1 ? 'riga' : 'righe'} senza prezzo di mercato
+                  {missingPriceRows === 1 ? ' è esclusa' : ' sono escluse'} dai totali (in attesa del cron opzioni).
+                  Un G/P potenziale negativo significa che il premio di mercato è oggi INFERIORE al prezzo
+                  di riacquisto: rivendendo adesso la call si incasserebbe meno di quanto speso per chiuderla.
+                </p>
+              )}
             </div>
           )}
         </div>

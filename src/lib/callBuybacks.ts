@@ -145,3 +145,76 @@ export function extractCallBuybacks(
     resells,
   };
 }
+
+/**
+ * Chiave naturale di una TRANCHE di riacquisto: descrittore + data + prezzo.
+ * Corrisponde al vincolo univoco (portfolio_id, descriptor, buyback_date,
+ * buyback_price): due tranche dello stesso giorno a prezzi diversi sono righe
+ * distinte, lo stesso lotto ricaricato dal medesimo file collassa su sé stesso.
+ */
+export function trancheKey(b: { descriptor: string; buyback_date: string; buyback_price: number }): string {
+  return `${b.descriptor}|${b.buyback_date}|${b.buyback_price}`;
+}
+
+/**
+ * Somma le tranche perfettamente identiche (stesso descrittore, data e prezzo)
+ * mantenendo separate quelle a prezzo diverso.
+ *
+ * Serve prima dell'upsert: Postgres rifiuta un ON CONFLICT che colpisce due
+ * volte la stessa riga ("command cannot affect row a second time"), quindi un
+ * file con due movimenti identici farebbe fallire l'intero caricamento.
+ */
+export function mergeIdenticalTranches(buybacks: CallBuybackInsert[]): CallBuybackInsert[] {
+  const byKey = new Map<string, CallBuybackInsert>();
+  for (const b of buybacks) {
+    const key = trancheKey(b);
+    const prev = byKey.get(key);
+    if (prev) prev.quantity += b.quantity;
+    else byKey.set(key, { ...b });
+  }
+  return Array.from(byKey.values());
+}
+
+export interface AvailableCallTicker {
+  ticker: string;
+  availableContracts: number;
+}
+
+export interface AvailableCallResidual extends AvailableCallTicker {
+  /** Contratti già registrati come "call da rivendere" (somma delle tranche aperte). */
+  registeredContracts: number;
+  /** Contratti ancora da registrare: availableContracts − registrati, mai sotto zero. */
+  residualContracts: number;
+}
+
+/**
+ * Scala i contratti disponibili per sottostante di quelli già registrati come
+ * "call da rivendere", così la quantità mostrata a video (e prefillata nel form)
+ * scende fino a zero mano a mano che si registrano le tranche.
+ *
+ * Il matching sottostante↔riacquisto usa lo stesso criterio della tabella dei
+ * riacquisti visibili (chiave canonica con fallback su inclusione), per evitare
+ * che il residuo e la lista mostrata divergano.
+ */
+export function computeAvailableCallResiduals(
+  items: AvailableCallTicker[],
+  buybacks: Array<{ underlying: string; quantity: number }>,
+  keyOf: (text: string) => string = norm,
+): AvailableCallResidual[] {
+  return items.map(item => {
+    const itemKey = keyOf(item.ticker);
+    const registeredContracts = buybacks.reduce((sum, b) => {
+      const bKey = keyOf(b.underlying);
+      // Chiavi vuote non devono matchare tutto (''.includes('') è true).
+      const matches = itemKey && bKey
+        ? (itemKey === bKey || itemKey.includes(bKey) || bKey.includes(itemKey))
+        : false;
+      return matches ? sum + Math.max(0, b.quantity) : sum;
+    }, 0);
+    return {
+      ...item,
+      registeredContracts,
+      residualContracts: Math.max(0, item.availableContracts - registeredContracts),
+    };
+  });
+}

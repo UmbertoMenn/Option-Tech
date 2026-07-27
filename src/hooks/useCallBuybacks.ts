@@ -116,6 +116,36 @@ export function useCallBuybackMutations(portfolioIds: Array<string | null | unde
       // Descrittore sintetico stabile: evita collisioni con i descrittori banca
       // e mantiene idempotenza sull'unica chiave (portfolio, descriptor, data).
       const descriptor = `MAN-${row.underlying}-${row.strike}-${row.expiry_date}`.toUpperCase().replace(/\s+/g, '');
+
+      // Tranche: la chiave univoca include il prezzo di riacquisto, quindi lo
+      // stesso strike/scadenza può essere registrato in più lotti a prezzi
+      // diversi. Una tranche identica (stessa data E stesso prezzo) non è un
+      // lotto nuovo: si somma la quantità alla riga esistente invece di far
+      // fallire l'inserimento con un errore di chiave duplicata.
+      const { data: existing, error: readErr } = await supabase
+        .from('call_buybacks' as never)
+        .select('id, quantity')
+        .eq('portfolio_id', portfolioId)
+        .eq('descriptor', descriptor)
+        .eq('buyback_date', row.buyback_date)
+        .eq('buyback_price', row.buyback_price)
+        .maybeSingle();
+      if (readErr) throw new Error(readErr.message);
+
+      if (existing) {
+        const prev = existing as unknown as { id: string; quantity: number };
+        const { error: updErr } = await supabase
+          .from('call_buybacks' as never)
+          .update({
+            quantity: Number(prev.quantity || 0) + row.quantity,
+            manually_edited: true,
+            updated_at: new Date().toISOString(),
+          } as never)
+          .eq('id', prev.id);
+        if (updErr) throw new Error(updErr.message);
+        return;
+      }
+
       const insert = {
         portfolio_id: portfolioId,
         underlying: row.underlying,
@@ -159,6 +189,22 @@ export function effectiveMarketPrice(row: CallBuybackRow, todayISO?: string): nu
   return row.market_price ?? 0;
 }
 
+/**
+ * True se il prezzo di mercato è NOTO.
+ *
+ * Una call scaduta vale zero per davvero (il premio è perso), quindi il suo G/P
+ * potenziale è un dato reale: −prezzo di riacquisto × 100 × contratti.
+ * Una call NON scaduta senza market_price (cron non ancora passato, oppure
+ * catena opzioni non trovata su Yahoo) è invece un dato MANCANTE: trattarla
+ * come zero produceva un G/P potenziale falsamente negativo pari all'intero
+ * costo di riacquisto, sia sulla riga sia sul totale.
+ */
+export function hasKnownMarketPrice(row: CallBuybackRow, todayISO?: string): boolean {
+  const today = todayISO || new Date().toISOString().split('T')[0];
+  if (row.expiry_date < today) return true;
+  return row.market_price != null;
+}
+
 /** True se la riga va conteggiata nel netting (default: sì). */
 function isIncluded(row: CallBuybackRow): boolean {
   return row.included_in_netting !== false;
@@ -168,17 +214,28 @@ function isIncluded(row: CallBuybackRow): boolean {
 export function openCallBuybacksValueEUR(rows: CallBuybackRow[], todayISO?: string): number {
   return rows.reduce((total, row) => {
     if (!isIncluded(row)) return total;
+    if (!hasKnownMarketPrice(row, todayISO)) return total;
     const exchangeRate = row.exchange_rate > 0 ? row.exchange_rate : 1;
     return total + (effectiveMarketPrice(row, todayISO) * 100 * row.quantity) / exchangeRate;
   }, 0);
 }
 
-/** G/P potenziale complessivo (mercato − riacquisto) dei riacquisti aperti INCLUSI, convertito in EUR. */
+/**
+ * G/P potenziale complessivo (mercato − riacquisto) dei riacquisti aperti
+ * INCLUSI e con prezzo di mercato NOTO, convertito in EUR. Le righe senza
+ * prezzo di mercato sono escluse invece di pesare come perdita totale.
+ */
 export function openCallBuybacksGainLossEUR(rows: CallBuybackRow[], todayISO?: string): number {
   return rows.reduce((total, row) => {
     if (!isIncluded(row)) return total;
+    if (!hasKnownMarketPrice(row, todayISO)) return total;
     const exchangeRate = row.exchange_rate > 0 ? row.exchange_rate : 1;
     const gainLossPerShare = effectiveMarketPrice(row, todayISO) - row.buyback_price;
     return total + (gainLossPerShare * 100 * row.quantity) / exchangeRate;
   }, 0);
+}
+
+/** Quante righe incluse hanno prezzo di mercato mancante (escluse dai totali). */
+export function unknownMarketPriceCount(rows: CallBuybackRow[], todayISO?: string): number {
+  return rows.filter(r => isIncluded(r) && !hasKnownMarketPrice(r, todayISO)).length;
 }

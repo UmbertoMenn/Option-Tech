@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractCallBuybacks } from '@/lib/callBuybacks';
-import { CallBuybackRow, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR } from '@/hooks/useCallBuybacks';
+import { extractCallBuybacks, mergeIdenticalTranches, trancheKey, computeAvailableCallResiduals } from '@/lib/callBuybacks';
+import { CallBuybackRow, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, hasKnownMarketPrice, unknownMarketPriceCount } from '@/hooks/useCallBuybacks';
 import { FlussiTitoliOptionTrade } from '@/lib/flussiCsvParser';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { Position } from '@/types/portfolio';
@@ -309,5 +309,123 @@ describe('extractCallBuybacks', () => {
     expect(resells).toHaveLength(1);
     expect(resells[0].descriptor).toBe('MUQ6C1100');
     expect(resells[0].resell_price).toBe(52);
+  });
+});
+
+describe('tranche di riacquisto (più lotti a prezzi diversi)', () => {
+  it('due ACQ dello stesso giorno a prezzi diversi restano tranche distinte', () => {
+    const trades = [
+      trade({ descriptor: 'MUQ6C1100', underlyingTicker: 'MU', optionType: 'call', strike: 1100, expiryDate: '2026-08-21', side: 'ACQ', contracts: 2, pricePerShare: 41.0, tradeDate: '2026-07-02' }),
+      trade({ descriptor: 'MUQ6C1100', underlyingTicker: 'MU', optionType: 'call', strike: 1100, expiryDate: '2026-08-21', side: 'ACQ', contracts: 3, pricePerShare: 43.5, tradeDate: '2026-07-02' }),
+    ];
+    const positions = [soldCallPosition('MU', 1100, '2026-08-21', -5)];
+
+    const merged = mergeIdenticalTranches(extractCallBuybacks(trades, positions, []).buybacks);
+    expect(merged).toHaveLength(2);
+    expect(merged.map(b => b.buyback_price).sort((a, b) => a - b)).toEqual([41.0, 43.5]);
+    expect(merged.reduce((s, b) => s + b.quantity, 0)).toBe(5);
+  });
+
+  it('due ACQ identici (stessa data E stesso prezzo) si sommano in una riga sola', () => {
+    const trades = [
+      trade({ descriptor: 'MUQ6C1100', underlyingTicker: 'MU', optionType: 'call', strike: 1100, expiryDate: '2026-08-21', side: 'ACQ', contracts: 2, pricePerShare: 41.0, tradeDate: '2026-07-02' }),
+      trade({ descriptor: 'MUQ6C1100', underlyingTicker: 'MU', optionType: 'call', strike: 1100, expiryDate: '2026-08-21', side: 'ACQ', contracts: 1, pricePerShare: 41.0, tradeDate: '2026-07-02' }),
+    ];
+    const positions = [soldCallPosition('MU', 1100, '2026-08-21', -3)];
+
+    const merged = mergeIdenticalTranches(extractCallBuybacks(trades, positions, []).buybacks);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].quantity).toBe(3);
+  });
+
+  it('trancheKey distingue i lotti per prezzo e non per quantità', () => {
+    const a = trancheKey({ descriptor: 'MUQ6C1100', buyback_date: '2026-07-02', buyback_price: 41 });
+    const b = trancheKey({ descriptor: 'MUQ6C1100', buyback_date: '2026-07-02', buyback_price: 43.5 });
+    expect(a).not.toBe(b);
+    expect(a).toBe(trancheKey({ descriptor: 'MUQ6C1100', buyback_date: '2026-07-02', buyback_price: 41 }));
+  });
+});
+
+describe('residuo dei contratti disponibili', () => {
+  it('scala i disponibili delle tranche già registrate fino a zero', () => {
+    const items = [{ ticker: 'MU', availableContracts: 5 }, { ticker: 'BABA', availableContracts: 2 }];
+    const out = computeAvailableCallResiduals(items, [
+      { underlying: 'MU', quantity: 2 },
+      { underlying: 'MU', quantity: 3 },
+    ]);
+    const mu = out.find(o => o.ticker === 'MU')!;
+    expect(mu.registeredContracts).toBe(5);
+    expect(mu.residualContracts).toBe(0);
+    const baba = out.find(o => o.ticker === 'BABA')!;
+    expect(baba.registeredContracts).toBe(0);
+    expect(baba.residualContracts).toBe(2);
+  });
+
+  it('non scende mai sotto zero se i registrati eccedono i disponibili', () => {
+    const out = computeAvailableCallResiduals(
+      [{ ticker: 'MU', availableContracts: 1 }],
+      [{ underlying: 'MU', quantity: 4 }],
+    );
+    expect(out[0].residualContracts).toBe(0);
+    expect(out[0].registeredContracts).toBe(4);
+  });
+
+  it('un sottostante senza chiave valida non matcha tutto', () => {
+    const out = computeAvailableCallResiduals(
+      [{ ticker: 'MU', availableContracts: 3 }],
+      [{ underlying: '', quantity: 2 }],
+    );
+    expect(out[0].residualContracts).toBe(3);
+  });
+});
+
+describe('G/P potenziale con prezzo di mercato mancante', () => {
+  const base: Omit<CallBuybackRow, 'market_price' | 'expiry_date'> = {
+    id: 'r1',
+    portfolio_id: 'p1',
+    underlying: 'MU',
+    descriptor: 'MUQ6C1100',
+    strike: 1100,
+    quantity: 2,
+    buyback_price: 40,
+    currency: 'USD',
+    exchange_rate: 1,
+    buyback_date: '2026-07-02',
+    market_price_updated_at: null,
+    resold_quantity: 0,
+    resell_price: null,
+    resell_date: null,
+    included_in_netting: true,
+    manually_edited: false,
+  };
+  const today = '2026-07-27';
+
+  it('call viva senza market_price è esclusa dai totali (non vale −costo di riacquisto)', () => {
+    const rows = [{ ...base, expiry_date: '2026-08-21', market_price: null }] as CallBuybackRow[];
+    expect(hasKnownMarketPrice(rows[0], today)).toBe(false);
+    expect(openCallBuybacksGainLossEUR(rows, today)).toBe(0);
+    expect(openCallBuybacksValueEUR(rows, today)).toBe(0);
+    expect(unknownMarketPriceCount(rows, today)).toBe(1);
+  });
+
+  it('call scaduta senza market_price vale zero per davvero: perdita piena', () => {
+    const rows = [{ ...base, expiry_date: '2026-07-17', market_price: null }] as CallBuybackRow[];
+    expect(hasKnownMarketPrice(rows[0], today)).toBe(true);
+    expect(openCallBuybacksGainLossEUR(rows, today)).toBe(-8000); // −40 × 100 × 2
+    expect(unknownMarketPriceCount(rows, today)).toBe(0);
+  });
+
+  it('prezzo di mercato noto sotto il riacquisto → G/P negativo reale', () => {
+    const rows = [{ ...base, expiry_date: '2026-08-21', market_price: 35 }] as CallBuybackRow[];
+    expect(openCallBuybacksGainLossEUR(rows, today)).toBe(-1000); // (35−40) × 100 × 2
+  });
+
+  it('tranche a prezzi diversi: ognuna col proprio G/P, sommato sul totale', () => {
+    const rows = [
+      { ...base, id: 'a', expiry_date: '2026-08-21', buyback_price: 41, quantity: 2, market_price: 45 },
+      { ...base, id: 'b', expiry_date: '2026-08-21', buyback_price: 43.5, quantity: 3, market_price: 45 },
+    ] as CallBuybackRow[];
+    // (45−41)×100×2 = 800 ; (45−43.5)×100×3 = 450
+    expect(openCallBuybacksGainLossEUR(rows, today)).toBeCloseTo(1250, 6);
   });
 });
