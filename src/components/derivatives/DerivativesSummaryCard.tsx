@@ -137,6 +137,12 @@ function expiryFromMonthYear(month1to12: number, year: number): string | null {
   return getOptionExpirationDateISO(year, month1to12 - 1);
 }
 
+/**
+ * Mesi come numeri, non come sigle: "Dic" costringe a cercare la voce con gli
+ * occhi, "12" si digita e la tendina ci salta sopra da sola (typeahead).
+ */
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+
 /** Anno digitato a 2 o 4 cifre: "27" e "2027" valgono entrambi 2027. */
 function normalizeYear(raw: string): number {
   const n = parseInt(raw.trim(), 10);
@@ -174,6 +180,13 @@ function BuybackRow({
   const initYear = String(new Date(b.expiry_date + 'T00:00:00').getFullYear());
   const [expMonth, setExpMonth] = useState(initMonth);
   const [expYear, setExpYear] = useState(initYear);
+
+  // L'anno della riga può essere fuori dalla finestra corrente (LEAP lunghe):
+  // va incluso, altrimenti la tendina si aprirebbe su un valore inesistente.
+  const nowYear = new Date().getFullYear();
+  const YEARS = Array.from(
+    new Set([nowYear, nowYear + 1, nowYear + 2, nowYear + 3, parseInt(initYear, 10)]),
+  ).sort((a, b) => a - b);
 
 
   const parsePrice = (s: string): number => {
@@ -234,23 +247,26 @@ function BuybackRow({
               inputMode="decimal"
               aria-label="Strike"
             />
-            <Input
-              value={expMonth}
-              onChange={e => setExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
-              className="h-6 w-11 text-xs px-1 text-center"
-              inputMode="numeric"
-              placeholder="MM"
-              aria-label="Mese di scadenza (1-12)"
-            />
-            <span className="text-muted-foreground">/</span>
-            <Input
-              value={expYear}
-              onChange={e => setExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              className="h-6 w-14 text-xs px-1 text-center"
-              inputMode="numeric"
-              placeholder="AAAA"
-              aria-label="Anno di scadenza"
-            />
+            <Select value={expMonth} onValueChange={setExpMonth}>
+              <SelectTrigger className="h-6 w-14 text-xs px-1" aria-label="Mese di scadenza">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTH_OPTIONS.map(m => (
+                  <SelectItem key={m} value={String(parseInt(m, 10))} className="text-xs">{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={expYear} onValueChange={setExpYear}>
+              <SelectTrigger className="h-6 w-20 text-xs px-1" aria-label="Anno di scadenza">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {YEARS.map(y => (
+                  <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </td>
         <td className="text-right py-1 px-2">
@@ -443,7 +459,9 @@ function AddBuybackForm({
 
   const meta = tickerMeta[ticker] ?? { currency: 'USD', exchangeRate: 1 };
 
-  // Anteprima della scadenza reale: conferma a video che il mese digitato è
+  const YEARS = [currentYear, currentYear + 1, currentYear + 2, currentYear + 3];
+
+  // Anteprima della scadenza reale: conferma a video che il mese scelto è
   // quello che finisce a DB (il bug del +1 mese non sarebbe stato invisibile).
   const previewExpiry = expiryFromMonthYear(parseInt(expMonth, 10), normalizeYear(expYear));
 
@@ -519,25 +537,27 @@ function AddBuybackForm({
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-          Scadenza — mese (1-12)
-          <Input
-            value={expMonth}
-            onChange={e => setExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
-            className="h-8 text-xs"
-            inputMode="numeric"
-            placeholder="MM"
-          />
+          Scadenza — mese
+          <Select value={expMonth} onValueChange={setExpMonth}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map(m => (
+                <SelectItem key={m} value={String(parseInt(m, 10))} className="text-xs">{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Scadenza — anno
-          <Input
-            value={expYear}
-            onChange={e => setExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            className="h-8 text-xs"
-            inputMode="numeric"
-            placeholder="AAAA"
-          />
+          <Select value={expYear} onValueChange={setExpYear}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {YEARS.map(y => (
+                <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
