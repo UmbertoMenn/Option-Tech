@@ -23,6 +23,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Trash2, Plus, Loader2, AlertTriangle, Check, TrendingUp, TrendingDown, DollarSign, RotateCcw, Link2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { NotificationSettings } from '@/components/settings/NotificationSettings';
+import { CallBuybackAlertsPanel } from '@/components/derivatives/CallBuybackAlertsPanel';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useResetAlertSystem } from '@/hooks/useAlerts';
@@ -825,19 +826,32 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <Tabs defaultValue="distance" className="w-full">
-            <TabsList className={`grid w-full ${isAdminMode ? 'grid-cols-6' : 'grid-cols-7'}`}>
-              <TabsTrigger value="distance">Distanza</TabsTrigger>
-              <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
-              <TabsTrigger value="strategy">Strategia</TabsTrigger>
-              <TabsTrigger value="price">Prezzo</TabsTrigger>
-              <TabsTrigger value="action">Stato</TabsTrigger>
-              <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
-              {!isAdminMode && <TabsTrigger value="notifications">Notifiche</TabsTrigger>}
+          <Tabs defaultValue="strategie" className="w-full">
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="strategie">Strategie</TabsTrigger>
+              <TabsTrigger value="eccezioni">Eccezioni</TabsTrigger>
+              <TabsTrigger value="rivendere">Da rivendere</TabsTrigger>
+              <TabsTrigger value="prezzo">Prezzo</TabsTrigger>
+              <TabsTrigger value="recapito">Recapito</TabsTrigger>
             </TabsList>
-            
-            {/* Tab 1: Global Distance Thresholds */}
-            <TabsContent value="distance" className="mt-4">
+
+            <div className="rounded-lg border bg-muted/30 p-3 mb-4">
+              <p className="text-xs font-semibold mb-1.5">Come si combinano gli avvisi</p>
+              <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                <li><span className="text-foreground font-medium">Strategie</span> — le regole di base, valide per tipo di strategia su tutti i ticker.</li>
+                <li><span className="text-foreground font-medium">Eccezioni</span> — sovrascrivono le regole di base su un singolo ticker o su una singola strategia. Vince sempre la regola più specifica.</li>
+                <li><span className="text-foreground font-medium">Call da rivendere</span> e <span className="text-foreground font-medium">Prezzo</span> — avvisi a sé stanti: si impostano uno per uno e non seguono le regole di base.</li>
+                <li><span className="text-foreground font-medium">Recapito</span> — ogni quanto un avviso può ripetersi e dove ti arriva.</li>
+              </ol>
+            </div>
+
+            {/* 1. Regole di base per tipo di strategia */}
+            <TabsContent value="strategie" className="mt-4 space-y-6">
+              <section className="space-y-3">
+                <div className="border-l-2 border-primary/40 pl-3">
+                  <h3 className="text-sm font-semibold">Distanza dallo strike</h3>
+                  <p className="text-xs text-muted-foreground">Quanto vicino deve arrivare il titolo allo strike prima di avvisarti. Soglia più bassa = avviso più anticipato.</p>
+                </div>
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
                     Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
@@ -948,10 +962,60 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     );
                   })}
                 </div>
+              </section>
+
+              <section className="space-y-3">
+                <div className="border-l-2 border-primary/40 pl-3">
+                  <h3 className="text-sm font-semibold">Condizioni di stato</h3>
+                  <p className="text-xs text-muted-foreground">Avvisi legati a un evento, non a una distanza: posizione andata ITM, strategia fuori range o fuori breakeven, guadagno della LEAP.</p>
+                </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Attiva o disattiva gli avvisi per condizioni specifiche.
+              </p>
+              
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-muted-foreground">Condizioni di Stato</h4>
+                
+                {ACTION_ALERT_TYPES.map(type => (
+                  <div key={type} className="flex items-center justify-between p-3 border rounded-lg">
+                    <Label htmlFor={type} className="cursor-pointer">
+                      {ALERT_TYPE_LABELS[type]}
+                    </Label>
+                    <Switch
+                      id={type}
+                      checked={actionToggles[type] ?? true}
+                      onCheckedChange={checked => setActionToggles(prev => ({ ...prev, [type]: checked }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              
+              <div className="space-y-3 pt-4 border-t">
+                <h4 className="font-medium text-sm text-muted-foreground">Leap Gain</h4>
+                
+                {LEAP_GAIN_ALERT_TYPES.map(type => (
+                  <div key={type} className="flex items-center justify-between p-3 border rounded-lg">
+                    <Label htmlFor={type} className="cursor-pointer">
+                      {ALERT_TYPE_LABELS[type]}
+                    </Label>
+                    <Switch
+                      id={type}
+                      checked={actionToggles[type] ?? true}
+                      onCheckedChange={checked => setActionToggles(prev => ({ ...prev, [type]: checked }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              </section>
             </TabsContent>
-            
-            {/* Tab 2: Ticker Overrides */}
-            <TabsContent value="ticker" className="mt-4">
+
+            {/* 2. Eccezioni che sovrascrivono le regole di base */}
+            <TabsContent value="eccezioni" className="mt-4 space-y-6">
+              <section className="space-y-3">
+                <div className="border-l-2 border-primary/40 pl-3">
+                  <h3 className="text-sm font-semibold">Per ticker</h3>
+                  <p className="text-xs text-muted-foreground">Soglia di distanza diversa dal default su un singolo sottostante. Sovrascrive la regola della sezione Strategie.</p>
+                </div>
                 <div className="space-y-4">
               {/* Available tickers from strategies */}
               {availableTickers.length > 0 && (
@@ -1085,10 +1149,90 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 </div>
               </div>
                 </div>
+              </section>
+
+              <section className="space-y-3">
+                <div className="border-l-2 border-primary/40 pl-3">
+                  <h3 className="text-sm font-semibold">Per singola strategia</h3>
+                  <p className="text-xs text-muted-foreground">Silenzia o riattiva una specifica posizione aperta, senza toccare le altre dello stesso tipo.</p>
+                </div>
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Attiva o disattiva gli avvisi per singola strategia. Le strategie non più presenti dopo un ricaricamento Excel spariscono automaticamente.
+                </p>
+                
+                {strategyItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Nessuna strategia presente. Visita la pagina Strategie Derivati per caricare le posizioni.
+                  </p>
+                ) : (
+                  <>
+                    {/* Toggle All */}
+                    <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+                      <div>
+                        <p className="text-sm font-medium">Tutte le strategie</p>
+                        <p className="text-xs text-muted-foreground">{strategyItems.length} strategie</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleAll(true)}
+                          disabled={batchUpsertTogglesMutation.isPending}
+                        >
+                          Attiva tutte
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleAll(false)}
+                          disabled={batchUpsertTogglesMutation.isPending}
+                        >
+                          Disattiva tutte
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Strategy list grouped by type */}
+                    <div className="space-y-1">
+                      {(() => {
+                        let lastType = '';
+                        return strategyItems.map((item) => {
+                          const showHeader = item.strategyType !== lastType;
+                          lastType = item.strategyType;
+                          return (
+                            <div key={item.strategyKey}>
+                              {showHeader && (
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-3 pb-1 px-1">
+                                  {item.strategyType}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50">
+                                <span className="text-sm">{item.label}</span>
+                                <Switch
+                                  checked={isStrategyEnabled(item.strategyKey)}
+                                  onCheckedChange={(checked) => handleToggleStrategy(item.strategyKey, checked)}
+                                  disabled={upsertToggleMutation.isPending}
+                                />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </>
+                )}
+              </div>
+              </section>
             </TabsContent>
-            
-            {/* Tab 3: Price Alerts */}
-            <TabsContent value="price" className="space-y-4 mt-4">
+
+            {/* 3. Call da rivendere: avvisi indipendenti */}
+            <TabsContent value="rivendere" className="mt-4">
+              <CallBuybackAlertsPanel portfolioId={selectedPortfolioId} />
+            </TabsContent>
+
+            {/* 4. Avvisi di prezzo */}
+            <TabsContent value="prezzo" className="space-y-4 mt-4">
               <p className="text-sm text-muted-foreground">
                 Crea avvisi di prezzo su qualsiasi ticker, anche se non presente nel tuo portafoglio.
               </p>
@@ -1516,50 +1660,15 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 )}
               </div>
             </TabsContent>
-            
-            {/* Tab 4: Action Alerts */}
-            <TabsContent value="action" className="space-y-4 mt-4">
-              <p className="text-sm text-muted-foreground mb-4">
-                Attiva o disattiva gli avvisi per condizioni specifiche.
-              </p>
-              
-              <div className="space-y-3">
-                <h4 className="font-medium text-sm text-muted-foreground">Condizioni di Stato</h4>
-                
-                {ACTION_ALERT_TYPES.map(type => (
-                  <div key={type} className="flex items-center justify-between p-3 border rounded-lg">
-                    <Label htmlFor={type} className="cursor-pointer">
-                      {ALERT_TYPE_LABELS[type]}
-                    </Label>
-                    <Switch
-                      id={type}
-                      checked={actionToggles[type] ?? true}
-                      onCheckedChange={checked => setActionToggles(prev => ({ ...prev, [type]: checked }))}
-                    />
-                  </div>
-                ))}
-              </div>
-              
-              <div className="space-y-3 pt-4 border-t">
-                <h4 className="font-medium text-sm text-muted-foreground">Leap Gain</h4>
-                
-                {LEAP_GAIN_ALERT_TYPES.map(type => (
-                  <div key={type} className="flex items-center justify-between p-3 border rounded-lg">
-                    <Label htmlFor={type} className="cursor-pointer">
-                      {ALERT_TYPE_LABELS[type]}
-                    </Label>
-                    <Switch
-                      id={type}
-                      checked={actionToggles[type] ?? true}
-                      onCheckedChange={checked => setActionToggles(prev => ({ ...prev, [type]: checked }))}
-                    />
-                  </div>
-                ))}
-              </div>
-            </TabsContent>
-            
-            {/* Tab 4: Cooldown */}
-            <TabsContent value="cooldown" className="space-y-4 mt-4">
+
+            {/* 5. Recapito: cooldown + canali. In admin mode i canali di
+                notifica sono del cliente, quindi resta il solo cooldown. */}
+            <TabsContent value="recapito" className="mt-4 space-y-6">
+              <section className="space-y-3">
+                <div className="border-l-2 border-primary/40 pl-3">
+                  <h3 className="text-sm font-semibold">Cooldown</h3>
+                  <p className="text-xs text-muted-foreground">Tempo minimo prima che lo stesso avviso possa ripetersi sulla stessa posizione.</p>
+                </div>
               <p className="text-sm text-muted-foreground mb-4">
                 Tempo minimo tra avvisi dello stesso tipo per la stessa posizione dopo un reset.
               </p>
@@ -1592,85 +1701,20 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 finché il prezzo non torna in zona sicura e poi ri-entra in zona di pericolo, 
                 e solo se è passato il tempo di cooldown.
               </p>
+              </section>
+
+              {/* In admin mode i canali sono quelli del cliente, non tuoi:
+                  resta il solo cooldown. */}
+              {!isAdminMode && (
+                <section className="space-y-3">
+                  <div className="border-l-2 border-primary/40 pl-3">
+                    <h3 className="text-sm font-semibold">Canali di notifica</h3>
+                    <p className="text-xs text-muted-foreground">Dove ricevere gli avvisi oltre alla campanella in app.</p>
+                  </div>
+                  <NotificationSettings />
+                </section>
+              )}
             </TabsContent>
-
-            {/* Tab: Per Strategia */}
-            <TabsContent value="strategy" className="mt-4">
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Attiva o disattiva gli avvisi per singola strategia. Le strategie non più presenti dopo un ricaricamento Excel spariscono automaticamente.
-                </p>
-                
-                {strategyItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Nessuna strategia presente. Visita la pagina Strategie Derivati per caricare le posizioni.
-                  </p>
-                ) : (
-                  <>
-                    {/* Toggle All */}
-                    <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
-                      <div>
-                        <p className="text-sm font-medium">Tutte le strategie</p>
-                        <p className="text-xs text-muted-foreground">{strategyItems.length} strategie</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleToggleAll(true)}
-                          disabled={batchUpsertTogglesMutation.isPending}
-                        >
-                          Attiva tutte
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleToggleAll(false)}
-                          disabled={batchUpsertTogglesMutation.isPending}
-                        >
-                          Disattiva tutte
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Strategy list grouped by type */}
-                    <div className="space-y-1">
-                      {(() => {
-                        let lastType = '';
-                        return strategyItems.map((item) => {
-                          const showHeader = item.strategyType !== lastType;
-                          lastType = item.strategyType;
-                          return (
-                            <div key={item.strategyKey}>
-                              {showHeader && (
-                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-3 pb-1 px-1">
-                                  {item.strategyType}
-                                </p>
-                              )}
-                              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50">
-                                <span className="text-sm">{item.label}</span>
-                                <Switch
-                                  checked={isStrategyEnabled(item.strategyKey)}
-                                  onCheckedChange={(checked) => handleToggleStrategy(item.strategyKey, checked)}
-                                  disabled={upsertToggleMutation.isPending}
-                                />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Tab 5: Notification Settings (hidden in admin mode) */}
-            {!isAdminMode && (
-              <TabsContent value="notifications" className="mt-4">
-                <NotificationSettings />
-              </TabsContent>
-            )}
           </Tabs>
         )}
         

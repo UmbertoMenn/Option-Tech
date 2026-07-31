@@ -1341,7 +1341,6 @@ export type Database = {
         Row: {
           context: string
           cooldown_minutes: number
-          context: string
           created_at: string
           delete_after_trigger: boolean
           direction: string
@@ -1356,7 +1355,6 @@ export type Database = {
         Insert: {
           context?: string
           cooldown_minutes?: number
-          context?: string
           created_at?: string
           delete_after_trigger?: boolean
           direction: string
@@ -1371,7 +1369,6 @@ export type Database = {
         Update: {
           context?: string
           cooldown_minutes?: number
-          context?: string
           created_at?: string
           delete_after_trigger?: boolean
           direction?: string

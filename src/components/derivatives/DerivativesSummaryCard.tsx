@@ -14,7 +14,6 @@ import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, hasKnow
 import { computeAvailableCallResiduals } from '@/lib/callBuybacks';
 import { callKey } from '@/lib/callBuybackAlerts';
 import { useCallBuybackAlerts } from '@/hooks/useCallBuybackAlerts';
-import { CallBuybackAlertDialog } from '@/components/derivatives/CallBuybackAlertDialog';
 import { toast } from 'sonner';
 import { getOptionExpirationDateISO } from '@/lib/optionExpiry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -131,7 +130,6 @@ function BuybackRow({
   onToggleIncluded,
   onSaveFields,
   onDelete,
-  onOpenAlerts,
   hasAlert,
   fmt2,
   fmtDate,
@@ -142,7 +140,7 @@ function BuybackRow({
   onToggleIncluded: (included: boolean) => void;
   onSaveFields: (fields: CallBuybackEditableFields) => void;
   onDelete: () => void;
-  onOpenAlerts: () => void;
+  /** Solo indicatore visivo: la configurazione vive nel dialog Avvisi. */
   hasAlert: boolean;
   fmt2: (n: number) => string;
   fmtDate: (iso: string) => string;
@@ -288,6 +286,13 @@ function BuybackRow({
       </td>
       <td className="py-1 pr-2">
         {b.underlying} C {b.strike} {fmtDate(b.expiry_date)}
+        {hasAlert && (
+          <Bell
+            className="inline w-3 h-3 ml-1.5 text-blue-400 align-[-1px]"
+            aria-label="Avviso configurato"
+            /* Solo indicatore: si gestisce da Avvisi e notifiche → Da rivendere */
+          />
+        )}
         {b.manually_edited && (
           <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 h-4 bg-blue-500/10 border-blue-500/30 text-blue-400">
             man.
@@ -314,15 +319,6 @@ function BuybackRow({
               ? `${potentialGainLoss >= 0 ? '+' : ''}${fmt2(potentialGainLoss)} ${b.currency}`
               : 'n.d.'}
           </span>
-          <button
-            type="button"
-            onClick={onOpenAlerts}
-            className={`p-0.5 rounded hover:bg-muted transition-colors ${hasAlert ? 'text-blue-400' : 'text-muted-foreground'}`}
-            aria-label={`Avvisi per ${b.underlying} C ${b.strike}`}
-            title={hasAlert ? 'Avvisi configurati' : 'Imposta avvisi'}
-          >
-            <Bell className="w-3 h-3" />
-          </button>
           <button
             type="button"
             onClick={beginEdit}
@@ -562,19 +558,16 @@ function AvailableCallsSection({
   allPositions,
   archivedKeys = [],
   dynamicAliases,
-  underlyingPrices,
 }: {
   items: { ticker: string; availableContracts: number }[];
   portfolioId: string | null | undefined;
   allPositions: Position[];
   archivedKeys?: string[];
   dynamicAliases?: DynamicAliases;
-  underlyingPrices?: Record<string, UnderlyingPrice>;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [savedTick, setSavedTick] = useState(0);
-  const [alertRow, setAlertRow] = useState<CallBuybackRow | null>(null);
   const { buybacks } = useCallBuybacks([portfolioId]);
   const { alerts: buybackAlerts } = useCallBuybackAlerts(portfolioId);
   const { setIncluded, editFields, insertManual, remove } = useCallBuybackMutations([portfolioId]);
@@ -796,7 +789,6 @@ function AvailableCallsSection({
                       onToggleIncluded={(included) => setIncluded.mutate({ id: b.id, included })}
                       onSaveFields={(fields) => editFields.mutate({ id: b.id, fields })}
                       onDelete={() => handleDelete(b)}
-                      onOpenAlerts={() => setAlertRow(b)}
                       hasAlert={rowHasAlert(b)}
                       fmt2={fmt2}
                       fmtDate={fmtDate}
@@ -822,17 +814,6 @@ function AvailableCallsSection({
             </div>
           )}
         </div>
-      )}
-
-      {alertRow && (
-        <CallBuybackAlertDialog
-          open={!!alertRow}
-          onOpenChange={(o) => { if (!o) setAlertRow(null); }}
-          row={alertRow}
-          allBuybacks={visibleBuybacks}
-          portfolioId={portfolioId}
-          underlyingPrice={underlyingPrices?.[alertRow.underlying.toUpperCase()]?.price ?? null}
-        />
       )}
     </div>
   );
@@ -1081,7 +1062,6 @@ export function DerivativesSummaryCard({
 
           {/* 9. Covered Call / D-R CC da rivendere - LAST */}
           <AvailableCallsSection
-            underlyingPrices={underlyingPrices}
             items={monitoring.availableCallsToSell}
             portfolioId={selectedPortfolioId}
             allPositions={allPositions}
