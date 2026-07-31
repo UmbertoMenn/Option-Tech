@@ -8,6 +8,7 @@ import {
   formatCallBuybackAlertMessage,
   groupTranchesByCall,
   isMarketPriceKnown,
+  isPriceThresholdTriggered,
   triggeredDirection,
   weightedAverageBuybackPrice,
 } from '@/lib/callBuybackAlerts';
@@ -123,6 +124,37 @@ describe('direzioni indipendenti', () => {
     expect(triggeredDirection(30, 20, 15)).toBe('gain');
     expect(triggeredDirection(-30, 20, 15)).toBe('loss');
     expect(triggeredDirection(5, 20, 15)).toBeNull();
+  });
+});
+
+describe('soglia sul prezzo del sottostante', () => {
+  it('scatta sopra e sotto includendo esattamente il prezzo target', () => {
+    expect(isPriceThresholdTriggered(250, 'above', 250)).toBe(true);
+    expect(isPriceThresholdTriggered(249.99, 'above', 250)).toBe(false);
+    expect(isPriceThresholdTriggered(250, 'below', 250)).toBe(true);
+    expect(isPriceThresholdTriggered(250.01, 'below', 250)).toBe(false);
+  });
+
+  it('rifiuta prezzi o target non positivi', () => {
+    expect(isPriceThresholdTriggered(0, 'above', 250)).toBe(false);
+    expect(isPriceThresholdTriggered(250, 'above', 0)).toBe(false);
+    expect(isPriceThresholdTriggered(Number.NaN, 'below', 250)).toBe(false);
+  });
+
+  it('una config prezzo non viene valutata come G/P del premio', () => {
+    const out = evaluateCallBuybackAlerts(
+      [config({
+        id: 'price',
+        scope: 'tranche',
+        buyback_id: 't1',
+        alert_mode: 'price',
+        price_direction: 'above',
+        price_target: 250,
+      })],
+      [tranche({ id: 't1', market_price: 1_000 })],
+      TODAY,
+    );
+    expect(out).toHaveLength(0);
   });
 });
 

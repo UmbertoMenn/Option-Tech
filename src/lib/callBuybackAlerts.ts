@@ -29,6 +29,8 @@ export interface BuybackTranche {
 
 export type CallBuybackAlertScope = 'tranche' | 'call';
 export type CallBuybackAlertDirection = 'gain' | 'loss';
+export type CallBuybackAlertMode = 'gain_pct' | 'price';
+export type CallBuybackPriceDirection = 'above' | 'below';
 
 export interface CallBuybackAlertConfig {
   id: string;
@@ -38,8 +40,12 @@ export interface CallBuybackAlertConfig {
   underlying: string;
   strike: number;
   expiry_date: string;
+  /** Assente sui record precedenti alla migration: equivale a gain_pct. */
+  alert_mode?: CallBuybackAlertMode;
   gain_threshold_pct: number | null;
   loss_threshold_pct: number | null;
+  price_direction?: CallBuybackPriceDirection | null;
+  price_target?: number | null;
   enabled: boolean;
   cooldown_minutes: number;
 }
@@ -130,6 +136,19 @@ export function triggeredDirection(
   return null;
 }
 
+/** Valuta l'attraversamento della soglia sul prezzo del sottostante. */
+export function isPriceThresholdTriggered(
+  currentPrice: number,
+  direction: CallBuybackPriceDirection,
+  targetPrice: number,
+): boolean {
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+  if (!Number.isFinite(targetPrice) || targetPrice <= 0) return false;
+  return direction === 'above'
+    ? currentPrice >= targetPrice
+    : currentPrice <= targetPrice;
+}
+
 export interface CallBuybackAlertEvaluation {
   config: CallBuybackAlertConfig;
   direction: CallBuybackAlertDirection;
@@ -172,6 +191,9 @@ export function evaluateCallBuybackAlerts(
 
   for (const config of configs) {
     if (!config.enabled) continue;
+    // Le soglie prezzo usano il prezzo del sottostante e vengono valutate dal
+    // motore alert; questa funzione pura resta dedicata al G/P del premio.
+    if (config.alert_mode === 'price') continue;
 
     const subject: BuybackTranche[] = config.scope === 'tranche'
       ? (config.buyback_id && byId.has(config.buyback_id) ? [byId.get(config.buyback_id)!] : [])

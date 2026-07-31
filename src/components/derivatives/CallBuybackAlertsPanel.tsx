@@ -5,13 +5,14 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { TrendingUp, TrendingDown, DollarSign, Trash2, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Percent, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCallBuybacks, CallBuybackRow } from '@/hooks/useCallBuybacks';
 import { useCallBuybackAlerts, useCallBuybackAlertMutations } from '@/hooks/useCallBuybackAlerts';
-import { usePriceAlerts, useCreatePriceAlert, useDeletePriceAlert } from '@/hooks/usePriceAlerts';
 import {
   BuybackTranche,
+  CallBuybackAlertMode,
+  CallBuybackPriceDirection,
   evaluateGain,
   triggeredDirection,
 } from '@/lib/callBuybackAlerts';
@@ -24,8 +25,8 @@ function parseNum(s: string): number {
   return parseFloat(t);
 }
 
-/** Campo percentuale: vuoto = direzione non monitorata. */
-function parseThreshold(s: string): { value: number | null; valid: boolean } {
+/** Campo numerico positivo: vuoto = valore non impostato. */
+function parsePositive(s: string): { value: number | null; valid: boolean } {
   if (!s.trim()) return { value: null, valid: true };
   const n = parseNum(s);
   if (!Number.isFinite(n) || n <= 0) return { value: null, valid: false };
@@ -51,18 +52,29 @@ function toTranche(b: CallBuybackRow): BuybackTranche {
   };
 }
 
+interface EditorValue {
+  alertMode: CallBuybackAlertMode;
+  gain: number | null;
+  loss: number | null;
+  priceDirection: CallBuybackPriceDirection | null;
+  priceTarget: number | null;
+}
+
 /**
- * Riga di configurazione di una soglia, riusata sia per l'aggregato di call sia
- * per la singola tranche: i due campi % sono indipendenti e lasciarli vuoti
- * entrambi rimuove l'avviso.
+ * Editor della singola call. La modalità è esclusiva: la stessa configurazione
+ * monitora il G/P percentuale oppure il prezzo del sottostante.
  */
-function ThresholdEditor({
+function AlertEditor({
   label,
   sublabel,
+  ticker,
   tranches,
   today,
+  existingMode,
   existingGain,
   existingLoss,
+  existingPriceDirection,
+  existingPriceTarget,
   enabled,
   onSave,
   onToggleEnabled,
@@ -70,36 +82,69 @@ function ThresholdEditor({
 }: {
   label: string;
   sublabel: string;
+  ticker: string;
   tranches: BuybackTranche[];
   today: string;
+  existingMode: CallBuybackAlertMode;
   existingGain: number | null;
   existingLoss: number | null;
+  existingPriceDirection: CallBuybackPriceDirection | null;
+  existingPriceTarget: number | null;
   enabled: boolean | null;
-  onSave: (gain: number | null, loss: number | null) => void;
+  onSave: (value: EditorValue) => void;
   onToggleEnabled: (enabled: boolean) => void;
   isSaving: boolean;
 }) {
+  const [mode, setMode] = useState<CallBuybackAlertMode>(existingMode);
   const [gain, setGain] = useState(existingGain != null ? String(existingGain) : '');
   const [loss, setLoss] = useState(existingLoss != null ? String(existingLoss) : '');
+  const [priceDirection, setPriceDirection] = useState<CallBuybackPriceDirection>(existingPriceDirection ?? 'above');
+  const [priceTarget, setPriceTarget] = useState(existingPriceTarget != null ? String(existingPriceTarget) : '');
 
   const evaluation = useMemo(() => evaluateGain(tranches, today), [tranches, today]);
-  const preview = evaluation
-    ? triggeredDirection(evaluation.gainPct, parseThreshold(gain).value, parseThreshold(loss).value)
+  const preview = mode === 'gain_pct' && evaluation
+    ? triggeredDirection(evaluation.gainPct, parsePositive(gain).value, parsePositive(loss).value)
     : null;
 
-  const dirty = gain !== (existingGain != null ? String(existingGain) : '')
-    || loss !== (existingLoss != null ? String(existingLoss) : '');
+  const dirty = mode !== existingMode
+    || (mode === 'gain_pct' && (
+      gain !== (existingGain != null ? String(existingGain) : '')
+      || loss !== (existingLoss != null ? String(existingLoss) : '')
+    ))
+    || (mode === 'price' && (
+      priceDirection !== (existingPriceDirection ?? 'above')
+      || priceTarget !== (existingPriceTarget != null ? String(existingPriceTarget) : '')
+    ));
 
   const save = () => {
-    const g = parseThreshold(gain);
-    const l = parseThreshold(loss);
-    if (!g.valid) return toast.error('Soglia di guadagno non valida', { description: 'Percentuale positiva, oppure vuoto.' });
-    if (!l.valid) return toast.error('Soglia di perdita non valida', { description: 'Percentuale positiva, oppure vuoto.' });
-    onSave(g.value, l.value);
+    if (mode === 'gain_pct') {
+      const g = parsePositive(gain);
+      const l = parsePositive(loss);
+      if (!g.valid) return toast.error('Soglia di guadagno non valida', { description: 'Percentuale positiva, oppure vuoto.' });
+      if (!l.valid) return toast.error('Soglia di perdita non valida', { description: 'Percentuale positiva, oppure vuoto.' });
+      onSave({
+        alertMode: mode,
+        gain: g.value,
+        loss: l.value,
+        priceDirection: null,
+        priceTarget: null,
+      });
+      return;
+    }
+
+    const target = parsePositive(priceTarget);
+    if (!target.valid) return toast.error('Prezzo target non valido', { description: 'Inserisci un prezzo positivo.' });
+    onSave({
+      alertMode: mode,
+      gain: null,
+      loss: null,
+      priceDirection: target.value == null ? null : priceDirection,
+      priceTarget: target.value,
+    });
   };
 
   return (
-    <div className="rounded-lg border p-3 space-y-2 bg-background">
+    <div className="rounded-lg border p-3 space-y-3 bg-background">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium flex items-center gap-2">
@@ -115,39 +160,89 @@ function ThresholdEditor({
         )}
       </div>
 
-      {evaluation ? (
-        <p className="text-xs text-muted-foreground">
-          Premio {fmt(evaluation.referencePrice)} → mercato {fmt(evaluation.marketPrice)} ={' '}
-          <span className={evaluation.gainPct >= 0 ? 'text-green-500' : 'text-red-500'}>
-            {evaluation.gainPct >= 0 ? '+' : ''}{fmt(evaluation.gainPct)}%
-          </span>
-        </p>
-      ) : (
-        <p className="text-xs text-amber-500">
-          Prezzo di mercato non disponibile: la soglia si salva ma non viene valutata.
-        </p>
-      )}
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
-            <TrendingUp className="w-3 h-3 text-green-500" /> Guadagno ≥ %
-          </Label>
-          <Input value={gain} onChange={e => setGain(e.target.value)} placeholder="es. 20" className="h-8 text-xs" inputMode="decimal" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
-            <TrendingDown className="w-3 h-3 text-red-500" /> Perdita ≥ %
-          </Label>
-          <Input value={loss} onChange={e => setLoss(e.target.value)} placeholder="es. 15" className="h-8 text-xs" inputMode="decimal" />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-xs font-medium">Tipo di avviso</span>
+        <div className="inline-flex rounded-md border p-0.5 bg-muted/30" role="group" aria-label="Tipo di avviso">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'gain_pct' ? 'default' : 'ghost'}
+            className="h-7 px-3 text-xs gap-1.5"
+            onClick={() => setMode('gain_pct')}
+          >
+            <Percent className="w-3.5 h-3.5" /> Gain %
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === 'price' ? 'default' : 'ghost'}
+            className="h-7 px-3 text-xs gap-1.5"
+            onClick={() => setMode('price')}
+          >
+            <DollarSign className="w-3.5 h-3.5" /> Prezzo
+          </Button>
         </div>
       </div>
 
+      {mode === 'gain_pct' ? (
+        <>
+          {evaluation ? (
+            <p className="text-xs text-muted-foreground">
+              Premio {fmt(evaluation.referencePrice)} → mercato {fmt(evaluation.marketPrice)} ={' '}
+              <span className={evaluation.gainPct >= 0 ? 'text-green-500' : 'text-red-500'}>
+                {evaluation.gainPct >= 0 ? '+' : ''}{fmt(evaluation.gainPct)}%
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs text-amber-500">
+              Prezzo di mercato non disponibile: la soglia si salva ma non viene valutata.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-green-500" /> Guadagno ≥ %
+              </Label>
+              <Input value={gain} onChange={e => setGain(e.target.value)} placeholder="es. 20" className="h-8 text-xs" inputMode="decimal" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <TrendingDown className="w-3 h-3 text-red-500" /> Perdita ≥ %
+              </Label>
+              <Input value={loss} onChange={e => setLoss(e.target.value)} placeholder="es. 15" className="h-8 text-xs" inputMode="decimal" />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Avvisa quando il prezzo del sottostante {ticker} attraversa la soglia impostata.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">Direzione</Label>
+              <Select value={priceDirection} onValueChange={v => setPriceDirection(v as CallBuybackPriceDirection)}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="above" className="text-xs">Sopra</SelectItem>
+                  <SelectItem value="below" className="text-xs">Sotto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">Prezzo target</Label>
+              <Input value={priceTarget} onChange={e => setPriceTarget(e.target.value)} placeholder="es. 250" className="h-8 text-xs" inputMode="decimal" />
+            </div>
+          </div>
+        </>
+      )}
+
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
-          {preview
+          {mode === 'gain_pct' && preview
             ? (preview === 'gain' ? 'Scatterebbe adesso (guadagno).' : 'Scatterebbe adesso (perdita).')
-            : 'Vuoti entrambi = avviso rimosso.'}
+            : 'Lascia vuoti i valori e salva per rimuovere l’avviso.'}
         </span>
         <Button size="sm" variant={dirty ? 'default' : 'outline'} className="h-7 text-xs" onClick={save} disabled={isSaving}>
           {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Salva'}
@@ -157,25 +252,12 @@ function ThresholdEditor({
   );
 }
 
-/**
- * Gestione degli avvisi sulle "call da rivendere", dentro il dialog avvisi.
- *
- * Gerarchia esplicita: per ogni call si imposta una soglia sull'AGGREGATO
- * (media ponderata di tutte le tranche aperte) e, opzionalmente, soglie sulle
- * singole TRANCHE. I due livelli generano avvisi separati e non si escludono.
- */
+/** Gestione degli avvisi sulle "call da rivendere", dentro il dialog avvisi. */
 export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | null | undefined }) {
   const today = new Date().toISOString().split('T')[0];
   const { buybacks, isLoading } = useCallBuybacks([portfolioId]);
   const { alerts } = useCallBuybackAlerts(portfolioId);
   const { upsert, setEnabled } = useCallBuybackAlertMutations(portfolioId);
-  const { data: priceAlerts = [] } = usePriceAlerts();
-  const createPriceAlert = useCreatePriceAlert();
-  const deletePriceAlert = useDeletePriceAlert();
-
-  const [priceTicker, setPriceTicker] = useState('');
-  const [priceDirection, setPriceDirection] = useState<'above' | 'below'>('above');
-  const [priceTarget, setPriceTarget] = useState('');
 
   // Una riga per ogni gamba inserita nella card: nessun aggregato di call.
   const rows = useMemo(
@@ -189,21 +271,7 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
     [buybacks],
   );
 
-  const buybackTickers = useMemo(
-    () => Array.from(new Set(rows.map(r => r.underlying.toUpperCase()))).sort(),
-    [rows],
-  );
-
-  const contextPriceAlerts = useMemo(
-    () => priceAlerts.filter(pa => pa.context === 'call_buyback'),
-    [priceAlerts],
-  );
-
-  const saveThreshold = (
-    row: CallBuybackRow,
-    gain: number | null,
-    loss: number | null,
-  ) => {
+  const saveAlert = (row: CallBuybackRow, value: EditorValue) => {
     upsert.mutate(
       {
         scope: 'tranche',
@@ -211,41 +279,22 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
         underlying: row.underlying,
         strike: row.strike,
         expiry_date: row.expiry_date,
-        gain_threshold_pct: gain,
-        loss_threshold_pct: loss,
+        alert_mode: value.alertMode,
+        gain_threshold_pct: value.gain,
+        loss_threshold_pct: value.loss,
+        price_direction: value.priceDirection,
+        price_target: value.priceTarget,
       },
       {
         onSuccess: () => toast.success(
-          gain == null && loss == null ? 'Avviso rimosso' : 'Soglie salvate',
+          value.gain == null && value.loss == null && value.priceTarget == null
+            ? 'Avviso rimosso'
+            : 'Avviso salvato',
           { description: `${row.underlying} C ${row.strike} — riga del ${fmtDate(row.buyback_date)}` },
         ),
         onError: (e: unknown) => toast.error('Salvataggio non riuscito', {
           description: e instanceof Error ? e.message : 'errore sconosciuto',
         }),
-      },
-    );
-  };
-
-  const addPriceAlert = () => {
-    const ticker = priceTicker.trim().toUpperCase();
-    const target = parseNum(priceTarget);
-    if (!ticker) return toast.error('Seleziona un sottostante');
-    if (!Number.isFinite(target) || target <= 0) return toast.error('Prezzo target non valido');
-    createPriceAlert.mutate(
-      { ticker, direction: priceDirection, target_price: target, context: 'call_buyback' },
-      {
-        onSuccess: () => {
-          toast.success('Avviso di prezzo creato', {
-            description: `${ticker} ${priceDirection === 'above' ? 'sopra' : 'sotto'} ${target}`,
-          });
-          setPriceTarget('');
-        },
-        onError: (e: unknown) => {
-          const msg = e instanceof Error ? e.message : 'errore sconosciuto';
-          toast.error('Creazione non riuscita', {
-            description: /duplicate key|unique/i.test(msg) ? 'Esiste già un avviso identico.' : msg,
-          });
-        },
       },
     );
   };
@@ -261,9 +310,8 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Avvisi indipendenti dalle regole delle strategie. Una riga per ogni gamba inserita nella card
-        "Covered Call da rivendere": ogni riga ha il proprio prezzo di riacquisto, quindi la
-        percentuale è calcolata sul premio effettivamente pagato per quel lotto.
+        Per ogni riga della card "Covered Call da rivendere" scegli un solo tipo di avviso:
+        variazione percentuale del premio oppure prezzo del sottostante.
       </p>
 
       {rows.length === 0 && (
@@ -280,86 +328,26 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
       {rows.map(row => {
         const alert = alerts.find(a => a.scope === 'tranche' && a.buyback_id === row.id) ?? null;
         return (
-          <ThresholdEditor
-            key={`${row.id}-${alert?.id ?? 'new'}`}
+          <AlertEditor
+            key={`${row.id}-${alert?.id ?? 'new'}-${alert?.updated_at ?? ''}`}
             label={`${row.underlying} C ${row.strike} — scad. ${fmtDate(row.expiry_date)}`}
             sublabel={`${row.quantity} contratti riacquistati il ${fmtDate(row.buyback_date)} a ${fmt(row.buyback_price)} ${row.currency}`}
+            ticker={row.underlying}
             tranches={[toTranche(row)]}
             today={today}
+            existingMode={alert?.alert_mode ?? 'gain_pct'}
             existingGain={alert?.gain_threshold_pct ?? null}
             existingLoss={alert?.loss_threshold_pct ?? null}
+            existingPriceDirection={alert?.price_direction ?? null}
+            existingPriceTarget={alert?.price_target ?? null}
             enabled={alert ? alert.enabled : null}
             onToggleEnabled={(en) => alert && setEnabled.mutate({ id: alert.id, enabled: en })}
-            onSave={(g, l) => saveThreshold(row, g, l)}
+            onSave={(value) => saveAlert(row, value)}
             isSaving={upsert.isPending}
           />
         );
       })}
-
-      {/* Avvisi di prezzo sul sottostante, con titolo dedicato */}
-      <div className="rounded-lg border p-3 space-y-3">
-        <div>
-          <h4 className="text-sm font-medium flex items-center gap-1.5">
-            <DollarSign className="w-3.5 h-3.5" /> Prezzo del sottostante
-          </h4>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Normale avviso di prezzo, ma l'avviso generato si intitola "Call da rivendere" invece del
-            generico "Avviso Prezzo", così lo riconosci subito nella campanella.
-          </p>
-        </div>
-
-        <div className="flex items-end gap-2 flex-wrap">
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Sottostante</Label>
-            <Select value={priceTicker} onValueChange={setPriceTicker}>
-              <SelectTrigger className="h-8 w-32 text-xs"><SelectValue placeholder="Scegli…" /></SelectTrigger>
-              <SelectContent>
-                {buybackTickers.map(t => (
-                  <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Direzione</Label>
-            <Select value={priceDirection} onValueChange={v => setPriceDirection(v as 'above' | 'below')}>
-              <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="above" className="text-xs">Sopra</SelectItem>
-                <SelectItem value="below" className="text-xs">Sotto</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1 flex-1 min-w-[120px]">
-            <Label className="text-[11px] text-muted-foreground">Prezzo target</Label>
-            <Input value={priceTarget} onChange={e => setPriceTarget(e.target.value)} className="h-8 text-xs" inputMode="decimal" />
-          </div>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={addPriceAlert} disabled={createPriceAlert.isPending}>
-            Aggiungi
-          </Button>
-        </div>
-
-        {contextPriceAlerts.length > 0 && (
-          <div className="space-y-1">
-            {contextPriceAlerts.map(pa => (
-              <div key={pa.id} className="flex items-center justify-between text-xs rounded border px-2 py-1">
-                <span>
-                  {pa.ticker} {pa.direction === 'above' ? 'sopra' : 'sotto'} {fmt(pa.target_price)}
-                  {!pa.enabled && <span className="ml-1 text-muted-foreground">(disattivo)</span>}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => deletePriceAlert.mutate(pa.id)}
-                  className="p-0.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-500"
-                  aria-label="Elimina avviso di prezzo"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
+

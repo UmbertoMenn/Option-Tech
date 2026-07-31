@@ -227,6 +227,28 @@ async function processCallBuybackAlerts(
     return 0;
   }
 
+  // Le configurazioni in modalità prezzo usano il sottostante, non il premio
+  // dell'opzione. Si leggono tutti i ticker necessari in un'unica query.
+  const priceTickers = [...new Set(
+    cbAlertConfigs
+      .filter((cfg: { alert_mode?: string }) => cfg.alert_mode === 'price')
+      .map((cfg: { underlying: string }) => String(cfg.underlying).toUpperCase()),
+  )];
+  const underlyingPriceMap = new Map<string, number>();
+  if (priceTickers.length > 0) {
+    const { data: underlyingPrices, error: underlyingPricesErr } = await supabase
+      .from('underlying_prices')
+      .select('ticker, price')
+      .in('ticker', priceTickers);
+    if (underlyingPricesErr) {
+      console.error(`Error fetching call buyback underlying prices for portfolio ${portfolioId}:`, underlyingPricesErr);
+    } else {
+      (underlyingPrices || []).forEach((row: { ticker: string; price: number }) => {
+        underlyingPriceMap.set(String(row.ticker).toUpperCase(), Number(row.price));
+      });
+    }
+  }
+
   const positionKeys = cbAlertConfigs.map((c: { id: string }) => `call_buyback_alert_${c.id}`);
   const { data: cbStates } = await supabase
     .from('alert_states')
@@ -258,6 +280,71 @@ async function processCallBuybackAlerts(
       : (byCall.get(cbCallKey(cfg)) || []);
     if (subject.length === 0) continue;
 
+    const positionKey = `call_buyback_alert_${cfg.id}`;
+
+    if (cfg.alert_mode === 'price') {
+      const currentPrice = underlyingPriceMap.get(String(cfg.underlying).toUpperCase());
+      const targetPrice = Number(cfg.price_target);
+      const priceDirection = cfg.price_direction === 'below' ? 'below' : 'above';
+      if (currentPrice == null || !Number.isFinite(currentPrice) || currentPrice <= 0
+        || !Number.isFinite(targetPrice) || targetPrice <= 0) {
+        continue;
+      }
+
+      const isTriggered = priceDirection === 'above'
+        ? currentPrice >= targetPrice
+        : currentPrice <= targetPrice;
+      const alertType = priceDirection === 'above'
+        ? ALERT_TYPES.PRICE_ALERT_ABOVE
+        : ALERT_TYPES.PRICE_ALERT_BELOW;
+
+      if (!isTriggered) {
+        // Se la direzione viene cambiata, riarma entrambi gli stati possibili.
+        for (const t of [ALERT_TYPES.PRICE_ALERT_ABOVE, ALERT_TYPES.PRICE_ALERT_BELOW]) {
+          const st = statesMap.get(`${positionKey}:${t}`);
+          if (st?.current_state === 'alerted') {
+            await supabase.from('alert_states').update({ current_state: 'safe' }).eq('id', st.id);
+          }
+        }
+        continue;
+      }
+
+      const currentState = statesMap.get(`${positionKey}:${alertType}`);
+      if (currentState && currentState.current_state !== 'safe') continue;
+      if (!cooldownPassed(currentState?.last_alerted_at || null, cfg.cooldown_minutes)) continue;
+
+      const directionLabel = priceDirection === 'above' ? 'sopra' : 'sotto';
+      const message = `Call da rivendere ${cfg.underlying} C ${cfg.strike} (scad. ${cfg.expiry_date}): `
+        + `il sottostante è ${directionLabel} ${targetPrice.toFixed(2)} `
+        + `(attuale ${currentPrice.toFixed(2)})`;
+
+      await supabase.from('alerts').insert({
+        user_id: userId,
+        portfolio_id: portfolioId,
+        alert_type: alertType,
+        ticker: cfg.underlying,
+        strategy_type: 'Call da rivendere',
+        direction: priceDirection === 'above' ? 'up' : 'down',
+        current_value: currentPrice,
+        threshold_value: targetPrice,
+        strike_price: cfg.strike,
+        underlying_price: currentPrice,
+        message,
+        severity: 'info',
+      });
+      created++;
+
+      await supabase.from('alert_states').upsert({
+        user_id: userId,
+        portfolio_id: portfolioId,
+        position_key: positionKey,
+        alert_type: alertType,
+        current_state: 'alerted',
+        last_alerted_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+      continue;
+    }
+
     const evaluation = cbEvaluateGain(subject, todayISO);
     if (!evaluation) continue;
 
@@ -266,8 +353,6 @@ async function processCallBuybackAlerts(
       cfg.gain_threshold_pct,
       cfg.loss_threshold_pct,
     );
-
-    const positionKey = `call_buyback_alert_${cfg.id}`;
 
     if (!direction) {
       // Rientro sotto soglia: si riarma lo stato su ENTRAMBE le direzioni,

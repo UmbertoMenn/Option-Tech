@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { CallBuybackAlertConfig, CallBuybackAlertScope } from '@/lib/callBuybackAlerts';
+import {
+  CallBuybackAlertConfig,
+  CallBuybackAlertMode,
+  CallBuybackAlertScope,
+  CallBuybackPriceDirection,
+} from '@/lib/callBuybackAlerts';
 
 export type CallBuybackAlertRow = CallBuybackAlertConfig & {
   created_at: string;
@@ -37,8 +42,11 @@ export interface UpsertCallBuybackAlertInput {
   underlying: string;
   strike: number;
   expiry_date: string;
+  alert_mode: CallBuybackAlertMode;
   gain_threshold_pct: number | null;
   loss_threshold_pct: number | null;
+  price_direction: CallBuybackPriceDirection | null;
+  price_target: number | null;
   enabled?: boolean;
   cooldown_minutes?: number;
 }
@@ -57,7 +65,9 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
     mutationFn: async (input: UpsertCallBuybackAlertInput) => {
       if (!portfolioId) throw new Error('Portafoglio non selezionato');
 
-      const hasThreshold = input.gain_threshold_pct != null || input.loss_threshold_pct != null;
+      const hasThreshold = input.alert_mode === 'price'
+        ? input.price_target != null
+        : input.gain_threshold_pct != null || input.loss_threshold_pct != null;
 
       // Individua la config esistente sulla stessa chiave logica.
       let query = supabase
@@ -93,8 +103,11 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
         underlying: input.underlying,
         strike: input.strike,
         expiry_date: input.expiry_date,
+        alert_mode: input.alert_mode,
         gain_threshold_pct: input.gain_threshold_pct,
         loss_threshold_pct: input.loss_threshold_pct,
+        price_direction: input.price_direction,
+        price_target: input.price_target,
         enabled: input.enabled ?? true,
         cooldown_minutes: input.cooldown_minutes ?? 480,
         updated_at: new Date().toISOString(),

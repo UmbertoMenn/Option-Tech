@@ -286,6 +286,7 @@ export type Database = {
       }
       call_buyback_alerts: {
         Row: {
+          alert_mode: string
           buyback_id: string | null
           cooldown_minutes: number
           created_at: string
@@ -295,12 +296,15 @@ export type Database = {
           id: string
           loss_threshold_pct: number | null
           portfolio_id: string
+          price_direction: string | null
+          price_target: number | null
           scope: string
           strike: number
           underlying: string
           updated_at: string
         }
         Insert: {
+          alert_mode?: string
           buyback_id?: string | null
           cooldown_minutes?: number
           created_at?: string
@@ -310,12 +314,15 @@ export type Database = {
           id?: string
           loss_threshold_pct?: number | null
           portfolio_id: string
+          price_direction?: string | null
+          price_target?: number | null
           scope: string
           strike: number
           underlying: string
           updated_at?: string
         }
         Update: {
+          alert_mode?: string
           buyback_id?: string | null
           cooldown_minutes?: number
           created_at?: string
@@ -325,6 +332,8 @@ export type Database = {
           id?: string
           loss_threshold_pct?: number | null
           portfolio_id?: string
+          price_direction?: string | null
+          price_target?: number | null
           scope?: string
           strike?: number
           underlying?: string
