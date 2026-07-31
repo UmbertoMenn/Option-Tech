@@ -230,7 +230,19 @@ async function fetchOptionChain(
   }
 }
 
-function getMidPrice(contract: { bid: number; ask: number; lastPrice: number } | undefined, occSymbol: string): number | null {
+/**
+ * Prezzo di mercato di un contratto opzione.
+ *
+ * REGOLA NON NEGOZIABILE: non si usa MAI l'ultimo scambio (lastPrice).
+ * Su opzioni poco liquide l'ultimo scambio può essere di ore o giorni prima e
+ * a un livello che non esiste più: valorizzare una posizione con quel numero
+ * falsa PMC, netting, G/P potenziale e soglie di avviso.
+ *
+ * Ordine: mid (bid+ask)/2 → bid da solo → nessun prezzo.
+ * "Nessun prezzo" è un esito legittimo: meglio un valore assente e visibile
+ * come tale che un valore plausibile ma sbagliato.
+ */
+function getQuotePrice(contract: { bid: number; ask: number; lastPrice: number } | undefined, occSymbol: string): number | null {
   if (!contract) {
     console.log(`[Match] No contract found for ${occSymbol}`);
     return null;
@@ -240,46 +252,24 @@ function getMidPrice(contract: { bid: number; ask: number; lastPrice: number } |
     console.log(`[Price] ${occSymbol}: bid=${contract.bid}, ask=${contract.ask}, mid=${mid.toFixed(4)}`);
     return mid;
   }
-  if (contract.lastPrice > 0) {
-    console.log(`[Price] ${occSymbol}: lastPrice=${contract.lastPrice}`);
-    return contract.lastPrice;
+  if (contract.bid > 0) {
+    // Solo denaro quotato (tipico fuori orario o su strike illiquidi): il bid è
+    // conservativo — è quanto realizzerei vendendo adesso.
+    console.log(`[Price] ${occSymbol}: solo bid=${contract.bid} (nessun ask), uso il bid`);
+    return contract.bid;
   }
-  console.log(`[Price] ${occSymbol}: no mid/lastPrice from chain`);
+  console.log(`[Price] ${occSymbol}: nessun bid/ask utilizzabile - prezzo NON aggiornato (lastPrice ignorato per policy)`);
   return null;
 }
 
-async function fetchFallbackPrice(occSymbol: string, crumb: string, cookie: string): Promise<number | null> {
-  try {
-    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(occSymbol)}?crumb=${encodeURIComponent(crumb)}`;
-    const response = await fetchWithTimeout(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Cookie': cookie,
-      },
-    }, YAHOO_FETCH_TIMEOUT_MS);
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.log(`[Fallback] ${occSymbol}: v8/chart returned ${response.status}: ${body.slice(0, 200)}`);
-      return null;
-    }
-
-    const data = await response.json();
-    const meta = data.chart?.result?.[0]?.meta;
-    const price = meta?.regularMarketPrice;
-
-    if (price && price > 0) {
-      console.log(`[Price] ${occSymbol}: fallback regularMarketPrice=${price}`);
-      return price;
-    }
-
-    console.log(`[Fallback] ${occSymbol}: no regularMarketPrice in v8 response`);
-    return null;
-  } catch (error) {
-    console.error(`[Fallback] ${occSymbol}: error:`, error);
-    return null;
-  }
-}
+/**
+ * NOTA: qui esisteva fetchFallbackPrice(), che leggeva regularMarketPrice da
+ * v8/chart. Su un contratto opzione quel campo È l'ultimo scambio, quindi il
+ * fallback reintroduceva esattamente ciò che la policy vieta ed è stato
+ * rimosso. Un contratto senza bid/ask semplicemente non viene aggiornato e
+ * mantiene l'ultimo prezzo valido con il suo market_price_updated_at, così
+ * l'interfaccia può mostrarlo come dato fermo.
+ */
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -477,7 +467,8 @@ serve(async (req) => {
     let updated = 0;
     let failed = 0;
     const errors: string[] = [];
-    const fallbackNeeded: PositionToUpdate[] = [];
+    // Contratti la cui catena non espone un bid/ask utilizzabile.
+    const noQuote: PositionToUpdate[] = [];
 
     async function writePrice(pos: PositionToUpdate, price: number): Promise<void> {
       const isBuyback = pos.table === 'call_buybacks';
@@ -500,10 +491,9 @@ serve(async (req) => {
       }
     }
 
-    // Phase A: fetch each ticker+expiry chain once, price every position in it.
-    // Positions with no usable quote in the chain are queued for the per-contract
-    // fallback lookup in Phase B (same matching behaviour as before, just no
-    // longer fully serial).
+    // Si scarica una volta la catena per ticker+scadenza e si prezza ogni
+    // posizione al suo interno. I contratti senza bid/ask utilizzabile NON
+    // vengono aggiornati: nessun ripiego sull'ultimo scambio.
     console.log(`Processing ${groupEntries.length} ticker+expiry groups (concurrency=${CONCURRENCY})...`);
     const { skippedDueToTimeBudget: groupsSkipped } = await processWithConcurrency(
       groupEntries,
@@ -526,12 +516,12 @@ serve(async (req) => {
             const isCall = pos.optionType.toLowerCase() === 'call';
             const contractMap = isCall ? chain.calls : chain.puts;
             const contract = contractMap[pos.occSymbol];
-            const price = getMidPrice(contract, pos.occSymbol);
+            const price = getQuotePrice(contract, pos.occSymbol);
 
             if (price !== null) {
               await writePrice(pos, price);
             } else {
-              fallbackNeeded.push(pos);
+              noQuote.push(pos);
             }
           }
         } catch (error) {
@@ -549,37 +539,16 @@ serve(async (req) => {
       console.log(`Time budget reached: skipped ${groupsSkipped}/${groupEntries.length} groups, will retry next run`);
     }
 
-    // Phase B: per-contract fallback (v8/chart regularMarketPrice) for positions
-    // the chain didn't have a usable quote for.
-    console.log(`Running fallback lookup for ${fallbackNeeded.length} positions (concurrency=${CONCURRENCY})...`);
-    const { skippedDueToTimeBudget: fallbackSkipped } = await processWithConcurrency(
-      fallbackNeeded,
-      CONCURRENCY,
-      PACING_DELAY_MS,
-      isTimeUp,
-      async (pos) => {
-        try {
-          const price = await fetchFallbackPrice(pos.occSymbol, auth.crumb, auth.cookie);
-          if (price !== null) {
-            await writePrice(pos, price);
-          } else {
-            console.log(`[Price] ${pos.occSymbol}: FAILED - no price from chain or fallback`);
-            failed++;
-            errors.push(`${pos.occSymbol}: no price data (chain+fallback)`);
-          }
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          failed++;
-          errors.push(`${pos.occSymbol}: ${errorMsg}`);
-        }
-      },
-    );
-
-    if (fallbackSkipped > 0) {
-      console.log(`Time budget reached: skipped ${fallbackSkipped}/${fallbackNeeded.length} fallback lookups, will retry next run`);
+    // Nessuna Phase B: i contratti senza bid/ask non vengono aggiornati.
+    // Contarli serve a distinguere "Yahoo non risponde" da "il book è vuoto".
+    if (noQuote.length > 0) {
+      console.log(`${noQuote.length} contratti senza bid/ask: prezzo lasciato invariato (policy: mai lastPrice)`);
+      for (const pos of noQuote) {
+        errors.push(`${pos.occSymbol}: nessun bid/ask, prezzo non aggiornato`);
+      }
     }
 
-    const timeBudgetExceeded = groupsSkipped > 0 || fallbackSkipped > 0;
+    const timeBudgetExceeded = groupsSkipped > 0;
     const durationMs = Date.now() - startTime;
     console.log(`=== Option Prices Cron Completed: ${updated} updated, ${failed} failed, ${skipped.length} skipped in ${durationMs}ms ===`);
 
@@ -589,13 +558,13 @@ serve(async (req) => {
         updated,
         failed,
         skipped: skipped.length,
+        no_quote: noQuote.length,
         eurex_idem_skipped: eurexIdemSkipped.length,
         total: allDerivatives.length,
         groups: groupEntries.length,
         duration_ms: durationMs,
         time_budget_exceeded: timeBudgetExceeded,
         groups_skipped_time_budget: groupsSkipped,
-        fallback_skipped_time_budget: fallbackSkipped,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

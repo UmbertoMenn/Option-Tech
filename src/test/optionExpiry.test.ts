@@ -111,3 +111,21 @@ describe('getOptionExpirationDateISO', () => {
     expect(getOptionExpirationDateISO(2027, 0)).toBe('2027-01-15');
   });
 });
+
+describe('convenzione del mese (regressione: dicembre finiva a gennaio)', () => {
+  it('il mese è 0-based: 11 = dicembre, non gennaio successivo', () => {
+    // Terzo venerdì di dicembre 2027 = 17/12/2027.
+    expect(getOptionExpirationDateISO(2027, 11)).toBe('2027-12-17');
+  });
+
+  it('passare il mese 1-based sfora di un mese e a dicembre cambia anno', () => {
+    // È esattamente il bug osservato: 12 interpretato come indice 12 = gennaio 2028.
+    // Il test documenta il comportamento della funzione, così resta chiaro
+    // perché i chiamanti DEVONO convertire a 0-based.
+    expect(getOptionExpirationDateISO(2027, 12)).toBe('2028-01-21');
+  });
+
+  it('gennaio 0-based resta nello stesso anno', () => {
+    expect(getOptionExpirationDateISO(2028, 0)).toBe('2028-01-21');
+  });
+});

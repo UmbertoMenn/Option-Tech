@@ -12,8 +12,6 @@ import { useCallBuybackAlerts, useCallBuybackAlertMutations } from '@/hooks/useC
 import { usePriceAlerts, useCreatePriceAlert, useDeletePriceAlert } from '@/hooks/usePriceAlerts';
 import {
   BuybackTranche,
-  CallBuybackAlertScope,
-  callKey,
   evaluateGain,
   triggeredDirection,
 } from '@/lib/callBuybackAlerts';
@@ -59,7 +57,6 @@ function toTranche(b: CallBuybackRow): BuybackTranche {
  * entrambi rimuove l'avviso.
  */
 function ThresholdEditor({
-  scope,
   label,
   sublabel,
   tranches,
@@ -71,7 +68,6 @@ function ThresholdEditor({
   onToggleEnabled,
   isSaving,
 }: {
-  scope: CallBuybackAlertScope;
   label: string;
   sublabel: string;
   tranches: BuybackTranche[];
@@ -103,7 +99,7 @@ function ThresholdEditor({
   };
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2 ${scope === 'call' ? 'bg-muted/30' : 'bg-background'}`}>
+    <div className="rounded-lg border p-3 space-y-2 bg-background">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium flex items-center gap-2">
@@ -177,27 +173,25 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
   const createPriceAlert = useCreatePriceAlert();
   const deletePriceAlert = useDeletePriceAlert();
 
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [priceTicker, setPriceTicker] = useState('');
   const [priceDirection, setPriceDirection] = useState<'above' | 'below'>('above');
   const [priceTarget, setPriceTarget] = useState('');
 
-  // Le call aperte, raggruppate: una scheda per call, le tranche dentro.
-  const calls = useMemo(() => {
-    const map = new Map<string, { underlying: string; strike: number; expiry_date: string; rows: CallBuybackRow[] }>();
-    for (const b of buybacks) {
-      if (b.quantity <= 0) continue;
-      const key = callKey(b);
-      const entry = map.get(key);
-      if (entry) entry.rows.push(b);
-      else map.set(key, { underlying: b.underlying, strike: b.strike, expiry_date: b.expiry_date, rows: [b] });
-    }
-    return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
-  }, [buybacks]);
+  // Una riga per ogni gamba inserita nella card: nessun aggregato di call.
+  const rows = useMemo(
+    () => buybacks
+      .filter(b => b.quantity > 0)
+      .sort((a, b) =>
+        a.underlying.localeCompare(b.underlying)
+        || a.strike - b.strike
+        || a.expiry_date.localeCompare(b.expiry_date)
+        || a.buyback_date.localeCompare(b.buyback_date)),
+    [buybacks],
+  );
 
   const buybackTickers = useMemo(
-    () => Array.from(new Set(calls.map(c => c.underlying.toUpperCase()))).sort(),
-    [calls],
+    () => Array.from(new Set(rows.map(r => r.underlying.toUpperCase()))).sort(),
+    [rows],
   );
 
   const contextPriceAlerts = useMemo(
@@ -206,26 +200,24 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
   );
 
   const saveThreshold = (
-    scope: CallBuybackAlertScope,
-    call: { underlying: string; strike: number; expiry_date: string },
-    buybackId: string | null,
+    row: CallBuybackRow,
     gain: number | null,
     loss: number | null,
   ) => {
     upsert.mutate(
       {
-        scope,
-        buyback_id: buybackId,
-        underlying: call.underlying,
-        strike: call.strike,
-        expiry_date: call.expiry_date,
+        scope: 'tranche',
+        buyback_id: row.id,
+        underlying: row.underlying,
+        strike: row.strike,
+        expiry_date: row.expiry_date,
         gain_threshold_pct: gain,
         loss_threshold_pct: loss,
       },
       {
         onSuccess: () => toast.success(
           gain == null && loss == null ? 'Avviso rimosso' : 'Soglie salvate',
-          { description: `${call.underlying} C ${call.strike} — ${scope === 'call' ? 'intera call' : 'singola tranche'}` },
+          { description: `${row.underlying} C ${row.strike} — riga del ${fmtDate(row.buyback_date)}` },
         ),
         onError: (e: unknown) => toast.error('Salvataggio non riuscito', {
           description: e instanceof Error ? e.message : 'errore sconosciuto',
@@ -269,11 +261,12 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Avvisi indipendenti dalle regole delle strategie: valgono solo sulle call riacquistate e non
-        ancora rivendute, e si impostano una call alla volta.
+        Avvisi indipendenti dalle regole delle strategie. Una riga per ogni gamba inserita nella card
+        "Covered Call da rivendere": ogni riga ha il proprio prezzo di riacquisto, quindi la
+        percentuale è calcolata sul premio effettivamente pagato per quel lotto.
       </p>
 
-      {calls.length === 0 && (
+      {rows.length === 0 && (
         <div className="rounded-lg border border-dashed p-6 text-center">
           <p className="text-sm text-muted-foreground">
             Nessuna call da rivendere aperta su questo portafoglio.
@@ -284,85 +277,22 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
         </div>
       )}
 
-      {calls.map(call => {
-        const callAlert = alerts.find(a => a.scope === 'call' && callKey(a) === call.key) ?? null;
-        const isOpen = expanded[call.key] ?? false;
-        const tranchesWithAlert = call.rows.filter(r =>
-          alerts.some(a => a.scope === 'tranche' && a.buyback_id === r.id),
-        ).length;
-        const totalQty = call.rows.reduce((s, r) => s + r.quantity, 0);
-
+      {rows.map(row => {
+        const alert = alerts.find(a => a.scope === 'tranche' && a.buyback_id === row.id) ?? null;
         return (
-          <div key={call.key} className="rounded-lg border p-3 space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div>
-                <span className="text-sm font-semibold">
-                  {call.underlying} C {call.strike}
-                </span>
-                <span className="text-xs text-muted-foreground ml-2">
-                  scad. {fmtDate(call.expiry_date)} · {totalQty} contratti · {call.rows.length}{' '}
-                  {call.rows.length === 1 ? 'tranche' : 'tranche'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {callAlert && (
-                  <Badge variant="outline" className="text-[10px] bg-blue-500/10 border-blue-500/30 text-blue-400">
-                    soglia sulla call
-                  </Badge>
-                )}
-                {tranchesWithAlert > 0 && (
-                  <Badge variant="outline" className="text-[10px] bg-purple-500/10 border-purple-500/30 text-purple-400">
-                    {tranchesWithAlert} su tranche
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            <ThresholdEditor
-              key={`call-${call.key}-${callAlert?.id ?? 'new'}`}
-              scope="call"
-              label="Intera call"
-              sublabel={`Media ponderata di tutte le tranche aperte (${totalQty} contratti)`}
-              tranches={call.rows.map(toTranche)}
-              today={today}
-              existingGain={callAlert?.gain_threshold_pct ?? null}
-              existingLoss={callAlert?.loss_threshold_pct ?? null}
-              enabled={callAlert ? callAlert.enabled : null}
-              onToggleEnabled={(en) => callAlert && setEnabled.mutate({ id: callAlert.id, enabled: en })}
-              onSave={(g, l) => saveThreshold('call', call, null, g, l)}
-              isSaving={upsert.isPending}
-            />
-
-            {call.rows.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setExpanded(p => ({ ...p, [call.key]: !isOpen }))}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {isOpen ? '▲ Nascondi' : '▼ Mostra'} le {call.rows.length} tranche singole
-              </button>
-            )}
-
-            {(isOpen || call.rows.length === 1) && call.rows.map(row => {
-              const trancheAlert = alerts.find(a => a.scope === 'tranche' && a.buyback_id === row.id) ?? null;
-              return (
-                <ThresholdEditor
-                  key={`tranche-${row.id}-${trancheAlert?.id ?? 'new'}`}
-                  scope="tranche"
-                  label={`Tranche ${row.quantity} × ${fmt(row.buyback_price)} ${row.currency}`}
-                  sublabel={`Riacquisto del ${fmtDate(row.buyback_date)}`}
-                  tranches={[toTranche(row)]}
-                  today={today}
-                  existingGain={trancheAlert?.gain_threshold_pct ?? null}
-                  existingLoss={trancheAlert?.loss_threshold_pct ?? null}
-                  enabled={trancheAlert ? trancheAlert.enabled : null}
-                  onToggleEnabled={(en) => trancheAlert && setEnabled.mutate({ id: trancheAlert.id, enabled: en })}
-                  onSave={(g, l) => saveThreshold('tranche', call, row.id, g, l)}
-                  isSaving={upsert.isPending}
-                />
-              );
-            })}
-          </div>
+          <ThresholdEditor
+            key={`${row.id}-${alert?.id ?? 'new'}`}
+            label={`${row.underlying} C ${row.strike} — scad. ${fmtDate(row.expiry_date)}`}
+            sublabel={`${row.quantity} contratti riacquistati il ${fmtDate(row.buyback_date)} a ${fmt(row.buyback_price)} ${row.currency}`}
+            tranches={[toTranche(row)]}
+            today={today}
+            existingGain={alert?.gain_threshold_pct ?? null}
+            existingLoss={alert?.loss_threshold_pct ?? null}
+            enabled={alert ? alert.enabled : null}
+            onToggleEnabled={(en) => alert && setEnabled.mutate({ id: alert.id, enabled: en })}
+            onSave={(g, l) => saveThreshold(row, g, l)}
+            isSaving={upsert.isPending}
+          />
         );
       })}
 

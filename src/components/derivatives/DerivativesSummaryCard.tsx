@@ -123,6 +123,27 @@ function CompactSection({
  * Il salvataggio marca la riga come manually_edited (il CSV non la sovrascrive
  * più). Il prezzo di mercato resta gestito dal cron.
  */
+/**
+ * Scadenza ISO dal mese/anno digitati.
+ *
+ * ATTENZIONE: getOptionExpirationDateISO vuole il mese 0-based (convenzione
+ * Date nativa). Passargli il valore 1-12 dell'interfaccia faceva slittare la
+ * scadenza al mese successivo — con dicembre finiva addirittura nell'anno dopo
+ * (12/2027 -> gennaio 2028). Il -1 va fatto qui, in un unico punto.
+ */
+function expiryFromMonthYear(month1to12: number, year: number): string | null {
+  if (!Number.isInteger(month1to12) || month1to12 < 1 || month1to12 > 12) return null;
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
+  return getOptionExpirationDateISO(year, month1to12 - 1);
+}
+
+/** Anno digitato a 2 o 4 cifre: "27" e "2027" valgono entrambi 2027. */
+function normalizeYear(raw: string): number {
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n)) return NaN;
+  return n < 100 ? 2000 + n : n;
+}
+
 function BuybackRow({
   b,
   today,
@@ -154,9 +175,6 @@ function BuybackRow({
   const [expMonth, setExpMonth] = useState(initMonth);
   const [expYear, setExpYear] = useState(initYear);
 
-  const MONTHS = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
-  const nowYear = new Date().getFullYear();
-  const YEARS = Array.from(new Set([nowYear, nowYear + 1, nowYear + 2, parseInt(initYear, 10)])).sort();
 
   const parsePrice = (s: string): number => {
     const t = s.trim();
@@ -178,12 +196,16 @@ function BuybackRow({
     const bp = parsePrice(buybackPrice);
     const qty = parseInt(quantity, 10);
     const stk = parsePrice(strike);
-    const newExpiry = getOptionExpirationDateISO(parseInt(expYear, 10), parseInt(expMonth, 10));
+    const newExpiry = expiryFromMonthYear(parseInt(expMonth, 10), normalizeYear(expYear));
     const fields: CallBuybackEditableFields = {};
     if (Number.isFinite(bp) && bp !== b.buyback_price) fields.buyback_price = bp;
     if (Number.isFinite(qty) && qty > 0 && qty !== b.quantity) fields.quantity = qty;
     if (Number.isFinite(stk) && stk > 0 && stk !== b.strike) fields.strike = stk;
-    if (newExpiry && newExpiry !== b.expiry_date) fields.expiry_date = newExpiry;
+    if (!newExpiry) {
+      toast.error('Scadenza non valida', { description: 'Mese 1-12 e anno a 2 o 4 cifre.' });
+      return;
+    }
+    if (newExpiry !== b.expiry_date) fields.expiry_date = newExpiry;
     if (Object.keys(fields).length > 0) onSaveFields(fields);
     setEditing(false);
   };
@@ -212,22 +234,23 @@ function BuybackRow({
               inputMode="decimal"
               aria-label="Strike"
             />
-            <Select value={expMonth} onValueChange={setExpMonth}>
-              <SelectTrigger className="h-6 w-16 text-xs px-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {MONTHS.map((m, idx) => (
-                  <SelectItem key={idx} value={String(idx + 1)} className="text-xs">{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={expYear} onValueChange={setExpYear}>
-              <SelectTrigger className="h-6 w-20 text-xs px-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {YEARS.map(y => (
-                  <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              value={expMonth}
+              onChange={e => setExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
+              className="h-6 w-11 text-xs px-1 text-center"
+              inputMode="numeric"
+              placeholder="MM"
+              aria-label="Mese di scadenza (1-12)"
+            />
+            <span className="text-muted-foreground">/</span>
+            <Input
+              value={expYear}
+              onChange={e => setExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              className="h-6 w-14 text-xs px-1 text-center"
+              inputMode="numeric"
+              placeholder="AAAA"
+              aria-label="Anno di scadenza"
+            />
           </div>
         </td>
         <td className="text-right py-1 px-2">
@@ -420,8 +443,9 @@ function AddBuybackForm({
 
   const meta = tickerMeta[ticker] ?? { currency: 'USD', exchangeRate: 1 };
 
-  const MONTHS = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
-  const YEARS = [currentYear, currentYear + 1, currentYear + 2];
+  // Anteprima della scadenza reale: conferma a video che il mese digitato è
+  // quello che finisce a DB (il bug del +1 mese non sarebbe stato invisibile).
+  const previewExpiry = expiryFromMonthYear(parseInt(expMonth, 10), normalizeYear(expYear));
 
   // Parse tollerante del prezzo in formato IT o US:
   // "4,55" -> 4.55 (virgola = decimale, punto = migliaia) ; "4.55" -> 4.55.
@@ -450,7 +474,10 @@ function AddBuybackForm({
       });
     }
     if (!Number.isFinite(bp) || bp < 0) return toast.error('Prezzo di riacquisto non valido');
-    const expiry_date = getOptionExpirationDateISO(parseInt(expYear, 10), parseInt(expMonth, 10));
+    const expiry_date = expiryFromMonthYear(parseInt(expMonth, 10), normalizeYear(expYear));
+    if (!expiry_date) {
+      return toast.error('Scadenza non valida', { description: 'Mese da 1 a 12, anno a 2 o 4 cifre.' });
+    }
     onSubmit({
       underlying: ticker,
       strike: stk,
@@ -492,27 +519,25 @@ function AddBuybackForm({
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-          Scadenza — mese
-          <Select value={expMonth} onValueChange={setExpMonth}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MONTHS.map((m, idx) => (
-                <SelectItem key={idx} value={String(idx + 1)} className="text-xs">{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          Scadenza — mese (1-12)
+          <Input
+            value={expMonth}
+            onChange={e => setExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
+            className="h-8 text-xs"
+            inputMode="numeric"
+            placeholder="MM"
+          />
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Scadenza — anno
-          <Select value={expYear} onValueChange={setExpYear}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {YEARS.map(y => (
-                <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            value={expYear}
+            onChange={e => setExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            className="h-8 text-xs"
+            inputMode="numeric"
+            placeholder="AAAA"
+          />
         </label>
 
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -523,7 +548,10 @@ function AddBuybackForm({
 
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
-          Scadenza: 3° venerdì di {MONTHS[parseInt(expMonth, 10) - 1]} {expYear}. Cambio→EUR {meta.exchangeRate}. Il prezzo di mercato lo aggiorna il cron.
+          {previewExpiry
+            ? `Scadenza calcolata: ${previewExpiry.split('-').reverse().join('/')} (3° venerdì).`
+            : 'Scadenza: inserisci mese 1-12 e anno.'}
+          {' '}Cambio→EUR {meta.exchangeRate}. Il prezzo di mercato lo aggiorna il cron.
           {residual > 0
             ? ` Residui ${residual} contratti: salva più tranche a prezzi diversi fino a zero.`
             : ' Nessun contratto residuo su questo sottostante.'}
