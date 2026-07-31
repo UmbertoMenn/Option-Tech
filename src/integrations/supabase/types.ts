@@ -284,6 +284,69 @@ export type Database = {
           },
         ]
       }
+      call_buyback_alerts: {
+        Row: {
+          buyback_id: string | null
+          cooldown_minutes: number
+          created_at: string
+          enabled: boolean
+          expiry_date: string
+          gain_threshold_pct: number | null
+          id: string
+          loss_threshold_pct: number | null
+          portfolio_id: string
+          scope: string
+          strike: number
+          underlying: string
+          updated_at: string
+        }
+        Insert: {
+          buyback_id?: string | null
+          cooldown_minutes?: number
+          created_at?: string
+          enabled?: boolean
+          expiry_date: string
+          gain_threshold_pct?: number | null
+          id?: string
+          loss_threshold_pct?: number | null
+          portfolio_id: string
+          scope: string
+          strike: number
+          underlying: string
+          updated_at?: string
+        }
+        Update: {
+          buyback_id?: string | null
+          cooldown_minutes?: number
+          created_at?: string
+          enabled?: boolean
+          expiry_date?: string
+          gain_threshold_pct?: number | null
+          id?: string
+          loss_threshold_pct?: number | null
+          portfolio_id?: string
+          scope?: string
+          strike?: number
+          underlying?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_buyback_alerts_buyback_id_fkey"
+            columns: ["buyback_id"]
+            isOneToOne: false
+            referencedRelation: "call_buybacks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_buyback_alerts_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       call_buybacks: {
         Row: {
           buyback_date: string
@@ -1276,6 +1339,7 @@ export type Database = {
       }
       price_alerts: {
         Row: {
+          context: string
           cooldown_minutes: number
           context: string
           created_at: string
@@ -1290,6 +1354,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          context?: string
           cooldown_minutes?: number
           context?: string
           created_at?: string
@@ -1304,6 +1369,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          context?: string
           cooldown_minutes?: number
           context?: string
           created_at?: string
@@ -1854,7 +1920,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      stopgap_refresh_underlying_prices: { Args: never; Returns: undefined }
       verify_cron_secret: { Args: { p_secret: string }; Returns: boolean }
     }
     Enums: {
@@ -2034,6 +2099,8 @@ export const Constants = {
         "price_alert_below",
         "action_put_roll_up_otm",
         "distance_put_roll_up",
+        "action_call_buyback_gain",
+        "action_call_buyback_loss",
       ],
       app_role: ["admin", "user"],
     },
