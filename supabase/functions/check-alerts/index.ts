@@ -331,6 +331,8 @@ async function processCallBuybackAlerts(
         underlying_price: currentPrice,
         message,
         severity: 'info',
+        option_type: 'call',
+        option_expiry: cfg.expiry_date,
       });
       created++;
 
@@ -378,7 +380,7 @@ async function processCallBuybackAlerts(
       ? `tranche da ${evaluation.quantity}`
       : `${evaluation.quantity} contratti, media ponderata`;
     const verb = direction === 'gain' ? 'guadagna' : 'perde';
-    const message = `Call da rivendere ${cfg.underlying} C ${cfg.strike}: ${verb} il `
+    const message = `Call da rivendere ${cfg.underlying} C ${cfg.strike} (scad. ${cfg.expiry_date}): ${verb} il `
       + `${Math.abs(evaluation.gainPct).toFixed(1)}% sul premio pagato `
       + `(riacquisto ${evaluation.referencePrice.toFixed(2)} → mercato `
       + `${evaluation.marketPrice.toFixed(2)}, ${scopeLabel})`;
@@ -396,6 +398,8 @@ async function processCallBuybackAlerts(
       underlying_price: null,
       message,
       severity: direction === 'gain' ? 'info' : 'warning',
+      option_type: 'call',
+      option_expiry: cfg.expiry_date,
     });
     created++;
 
