@@ -22,6 +22,9 @@ export const ALERT_TYPES = {
   ACTION_LEAP_GAIN_30: 'action_leap_gain_30',
   ACTION_LEAP_GAIN_40: 'action_leap_gain_40',
   ACTION_LEAP_GAIN_50: 'action_leap_gain_50',
+  // Call da rivendere: G/P potenziale in % sul premio pagato al riacquisto
+  ACTION_CALL_BUYBACK_GAIN: 'action_call_buyback_gain',
+  ACTION_CALL_BUYBACK_LOSS: 'action_call_buyback_loss',
   // Price alerts (custom ticker monitoring)
   PRICE_ALERT_ABOVE: 'price_alert_above',
   PRICE_ALERT_BELOW: 'price_alert_below',
@@ -63,6 +66,12 @@ export const LEAP_GAIN_ALERT_TYPES: AlertType[] = [
   ALERT_TYPES.ACTION_LEAP_GAIN_50,
 ];
 
+// Call buyback alert types (soglie impostate per singola call dalla card)
+export const CALL_BUYBACK_ALERT_TYPES: AlertType[] = [
+  ALERT_TYPES.ACTION_CALL_BUYBACK_GAIN,
+  ALERT_TYPES.ACTION_CALL_BUYBACK_LOSS,
+];
+
 // Price alert types
 export const PRICE_ALERT_TYPES: AlertType[] = [
   ALERT_TYPES.PRICE_ALERT_ABOVE,
@@ -89,6 +98,8 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   [ALERT_TYPES.ACTION_LEAP_GAIN_30]: 'Leap +30%',
   [ALERT_TYPES.ACTION_LEAP_GAIN_40]: 'Leap +40%',
   [ALERT_TYPES.ACTION_LEAP_GAIN_50]: 'Leap +50%',
+  [ALERT_TYPES.ACTION_CALL_BUYBACK_GAIN]: 'Call da rivendere — guadagno potenziale',
+  [ALERT_TYPES.ACTION_CALL_BUYBACK_LOSS]: 'Call da rivendere — perdita potenziale',
   [ALERT_TYPES.PRICE_ALERT_ABOVE]: 'Prezzo sopra soglia',
   [ALERT_TYPES.PRICE_ALERT_BELOW]: 'Prezzo sotto soglia',
 };
@@ -137,6 +148,17 @@ export interface Alert {
   read_at: string | null;
 }
 
+/**
+ * Contesto di un avviso di prezzo: la logica di trigger è identica, cambia solo
+ * il titolo dell'avviso generato ('Avviso Prezzo' vs 'Call da rivendere').
+ */
+export type PriceAlertContext = 'generic' | 'call_buyback';
+
+export const PRICE_ALERT_CONTEXT_LABELS: Record<PriceAlertContext, string> = {
+  generic: 'Avviso Prezzo',
+  call_buyback: 'Call da rivendere',
+};
+
 // Price alert interface
 export interface PriceAlert {
   id: string;
@@ -148,6 +170,7 @@ export interface PriceAlert {
   last_triggered_at: string | null;
   cooldown_minutes: number;
   delete_after_trigger: boolean;
+  context: PriceAlertContext;
   created_at: string;
   updated_at: string;
 }

@@ -64,6 +64,8 @@ const ALERT_TYPES = {
   ACTION_LEAP_GAIN_30: 'action_leap_gain_30',
   ACTION_LEAP_GAIN_40: 'action_leap_gain_40',
   ACTION_LEAP_GAIN_50: 'action_leap_gain_50',
+  ACTION_CALL_BUYBACK_GAIN: 'action_call_buyback_gain',
+  ACTION_CALL_BUYBACK_LOSS: 'action_call_buyback_loss',
   PRICE_ALERT_ABOVE: 'price_alert_above',
   PRICE_ALERT_BELOW: 'price_alert_below',
 };
@@ -118,6 +120,211 @@ interface Position {
   avg_cost: number | null;
   expiry_date: string | null;
   market_value: number | null;
+}
+
+// ============ CALL DA RIVENDERE: G/P POTENZIALE ============
+// Speculare a src/lib/callBuybackAlerts.ts (le edge function non possono
+// importare da src/). Ogni modifica va tenuta allineata: i test unitari
+// coprono il modulo condiviso.
+
+interface BuybackTranche {
+  id: string;
+  underlying: string;
+  strike: number;
+  expiry_date: string;
+  quantity: number;
+  buyback_price: number;
+  market_price: number | null;
+}
+
+function cbCallKey(t: { underlying: string; strike: number; expiry_date: string }): string {
+  return `${String(t.underlying).toUpperCase()}|${t.strike}|${t.expiry_date}`;
+}
+
+/**
+ * Prezzo di mercato noto? Una call scaduta vale zero per davvero; una call viva
+ * senza market_price è un dato MANCANTE e non va valutata, altrimenti farebbe
+ * scattare qualunque soglia di perdita solo perché il cron opzioni non è ancora
+ * passato.
+ */
+function cbPriceKnown(t: BuybackTranche, todayISO: string): boolean {
+  if (t.expiry_date < todayISO) return true;
+  return t.market_price != null;
+}
+
+function cbEffectivePrice(t: BuybackTranche, todayISO: string): number {
+  if (t.expiry_date < todayISO) return 0;
+  return t.market_price ?? 0;
+}
+
+function cbEvaluateGain(tranches: BuybackTranche[], todayISO: string):
+  { referencePrice: number; marketPrice: number; quantity: number; gainPct: number } | null {
+  const open = tranches.filter(t => t.quantity > 0);
+  if (open.length === 0) return null;
+  if (!open.every(t => cbPriceKnown(t, todayISO))) return null;
+
+  let weighted = 0;
+  let qty = 0;
+  for (const t of open) {
+    weighted += t.buyback_price * t.quantity;
+    qty += t.quantity;
+  }
+  const referencePrice = qty > 0 ? weighted / qty : 0;
+  if (referencePrice <= 0) return null;
+
+  const marketPrice = cbEffectivePrice(open[0], todayISO);
+  const gainPct = ((marketPrice - referencePrice) / referencePrice) * 100;
+  return { referencePrice, marketPrice, quantity: qty, gainPct };
+}
+
+function cbTriggeredDirection(
+  gainPct: number,
+  gainThreshold: number | null,
+  lossThreshold: number | null,
+): 'gain' | 'loss' | null {
+  if (gainThreshold != null && gainThreshold > 0 && gainPct >= gainThreshold) return 'gain';
+  if (lossThreshold != null && lossThreshold > 0 && gainPct <= -lossThreshold) return 'loss';
+  return null;
+}
+
+
+/**
+ * Avvisi sulle "call da rivendere": soglie sul G/P potenziale in % sul premio
+ * pagato al riacquisto.
+ *
+ * Volutamente indipendente da strategy_cache: un portafoglio con riacquisti
+ * registrati ma senza cache strategie (pagina Derivati mai aperta) deve
+ * comunque ricevere gli avvisi, quindi questa funzione viene invocata prima
+ * dell'uscita anticipata del loop principale e si legge da sé i propri stati.
+ *
+ * Ritorna il numero di avvisi creati.
+ */
+async function processCallBuybackAlerts(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  portfolioId: string,
+): Promise<number> {
+  const { data: cbAlertConfigs, error: cbAlertErr } = await supabase
+    .from('call_buyback_alerts')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .eq('enabled', true);
+
+  if (cbAlertErr) {
+    console.error(`Error fetching call buyback alerts for portfolio ${portfolioId}:`, cbAlertErr);
+    return 0;
+  }
+  if (!cbAlertConfigs || cbAlertConfigs.length === 0) return 0;
+
+  const { data: cbRows, error: cbRowsErr } = await supabase
+    .from('call_buybacks')
+    .select('id, underlying, strike, expiry_date, quantity, buyback_price, market_price')
+    .eq('portfolio_id', portfolioId)
+    .gt('quantity', 0);
+
+  if (cbRowsErr) {
+    console.error(`Error fetching call buybacks for portfolio ${portfolioId}:`, cbRowsErr);
+    return 0;
+  }
+
+  const positionKeys = cbAlertConfigs.map((c: { id: string }) => `call_buyback_alert_${c.id}`);
+  const { data: cbStates } = await supabase
+    .from('alert_states')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('portfolio_id', portfolioId)
+    .in('position_key', positionKeys);
+
+  const statesMap = new Map<string, AlertState>();
+  (cbStates || []).forEach((st: AlertState) => {
+    statesMap.set(`${st.position_key}:${st.alert_type}`, st);
+  });
+
+  const todayISO = new Date().toISOString().split('T')[0];
+  const tranches: BuybackTranche[] = (cbRows || []) as BuybackTranche[];
+  const byId = new Map(tranches.map(t => [t.id, t]));
+  const byCall = new Map<string, BuybackTranche[]>();
+  for (const t of tranches) {
+    const key = cbCallKey(t);
+    const list = byCall.get(key);
+    if (list) list.push(t); else byCall.set(key, [t]);
+  }
+
+  let created = 0;
+
+  for (const cfg of cbAlertConfigs) {
+    const subject: BuybackTranche[] = cfg.scope === 'tranche'
+      ? (cfg.buyback_id && byId.has(cfg.buyback_id) ? [byId.get(cfg.buyback_id)!] : [])
+      : (byCall.get(cbCallKey(cfg)) || []);
+    if (subject.length === 0) continue;
+
+    const evaluation = cbEvaluateGain(subject, todayISO);
+    if (!evaluation) continue;
+
+    const direction = cbTriggeredDirection(
+      evaluation.gainPct,
+      cfg.gain_threshold_pct,
+      cfg.loss_threshold_pct,
+    );
+
+    const positionKey = `call_buyback_alert_${cfg.id}`;
+
+    if (!direction) {
+      // Rientro sotto soglia: si riarma lo stato su ENTRAMBE le direzioni,
+      // altrimenti un avviso di guadagno lascerebbe 'alerted' anche il lato
+      // perdita e viceversa.
+      for (const t of [ALERT_TYPES.ACTION_CALL_BUYBACK_GAIN, ALERT_TYPES.ACTION_CALL_BUYBACK_LOSS]) {
+        const st = statesMap.get(`${positionKey}:${t}`);
+        if (st?.current_state === 'alerted') {
+          await supabase.from('alert_states').update({ current_state: 'safe' }).eq('id', st.id);
+        }
+      }
+      continue;
+    }
+
+    const alertType = direction === 'loss'
+      ? ALERT_TYPES.ACTION_CALL_BUYBACK_LOSS
+      : ALERT_TYPES.ACTION_CALL_BUYBACK_GAIN;
+    const currentState = statesMap.get(`${positionKey}:${alertType}`);
+    if (currentState && currentState.current_state !== 'safe') continue;
+    if (!cooldownPassed(currentState?.last_alerted_at || null, cfg.cooldown_minutes)) continue;
+
+    const scopeLabel = cfg.scope === 'tranche'
+      ? `tranche da ${evaluation.quantity}`
+      : `${evaluation.quantity} contratti, media ponderata`;
+    const verb = direction === 'gain' ? 'guadagna' : 'perde';
+    const message = `Call da rivendere ${cfg.underlying} C ${cfg.strike}: ${verb} il `
+      + `${Math.abs(evaluation.gainPct).toFixed(1)}% sul premio pagato `
+      + `(riacquisto ${evaluation.referencePrice.toFixed(2)} → mercato `
+      + `${evaluation.marketPrice.toFixed(2)}, ${scopeLabel})`;
+
+    await supabase.from('alerts').insert({
+      user_id: userId,
+      portfolio_id: portfolioId,
+      alert_type: alertType,
+      ticker: cfg.underlying,
+      strategy_type: 'Call da rivendere',
+      direction: direction === 'gain' ? 'up' : 'down',
+      current_value: evaluation.gainPct,
+      threshold_value: direction === 'gain' ? cfg.gain_threshold_pct : -cfg.loss_threshold_pct,
+      strike_price: cfg.strike,
+      underlying_price: null,
+      message,
+      severity: direction === 'gain' ? 'info' : 'warning',
+    });
+    created++;
+
+    await supabase.from('alert_states').upsert({
+      user_id: userId,
+      portfolio_id: portfolioId,
+      position_key: positionKey,
+      alert_type: alertType,
+      current_state: 'alerted',
+      last_alerted_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+  }
+
+  return created;
 }
 
 // ============ HELPER FUNCTIONS ============
@@ -328,8 +535,22 @@ serve(async (req) => {
     
     if (usersError) throw usersError;
     
-    const uniqueUserIds = [...new Set(usersWithConfigs?.map(c => c.user_id) || [])];
-    console.log(`Found ${uniqueUserIds.length} users with alert configs`);
+    // Un cliente può avere avvisi "call da rivendere" impostati dal consulente
+    // senza avere alcuna riga in alert_configs: senza questa unione il suo
+    // portafoglio non verrebbe mai valutato.
+    const { data: cbAlertPortfolios } = await supabase
+      .from('call_buyback_alerts')
+      .select('portfolios!inner(user_id)')
+      .eq('enabled', true);
+    const cbUserIds = (cbAlertPortfolios || [])
+      .map((r: { portfolios?: { user_id?: string } }) => r.portfolios?.user_id)
+      .filter((id): id is string => !!id);
+
+    const uniqueUserIds = [...new Set([
+      ...(usersWithConfigs?.map(c => c.user_id) || []),
+      ...cbUserIds,
+    ])];
+    console.log(`Found ${uniqueUserIds.length} users with alert configs or call buyback alerts`);
     
     let totalAlertsCreated = 0;
     
@@ -358,6 +579,10 @@ serve(async (req) => {
       
       for (const portfolio of portfolios || []) {
         const portfolioId = portfolio.id;
+        
+        // Avvisi "call da rivendere": indipendenti da strategy_cache, quindi
+        // valutati PRIMA delle uscite anticipate qui sotto.
+        totalAlertsCreated += await processCallBuybackAlerts(supabase, userId, portfolioId);
         
         // ============ GET STRATEGY CACHE ============
         const { data: strategiesCache, error: cacheError } = await supabase
@@ -1495,6 +1720,7 @@ serve(async (req) => {
             }
           }
         }
+
       }
       
       // === PRICE ALERTS ===
@@ -1547,14 +1773,20 @@ serve(async (req) => {
             if (isTriggered && (!currentState || currentState.current_state === 'safe')) {
               if (cooldownPassed(currentState?.last_alerted_at || priceAlert.last_triggered_at, priceAlert.cooldown_minutes)) {
                 const direction = priceAlert.direction === 'above' ? 'sopra' : 'sotto';
-                const message = `${priceAlert.ticker} ha raggiunto il prezzo target (${direction} $${priceAlert.target_price.toFixed(2)})`;
+                // Stessa identica logica di trigger: cambia solo il titolo, che
+                // per gli avvisi nati dalla card diventa esplicito.
+                const isBuybackContext = priceAlert.context === 'call_buyback';
+                const alertTitle = isBuybackContext ? 'Call da rivendere' : 'Avviso Prezzo';
+                const message = isBuybackContext
+                  ? `Call da rivendere ${priceAlert.ticker}: il titolo è ${direction} $${priceAlert.target_price.toFixed(2)} (attuale $${currentPrice.toFixed(2)})`
+                  : `${priceAlert.ticker} ha raggiunto il prezzo target (${direction} $${priceAlert.target_price.toFixed(2)})`;
                 
                 await supabase.from('alerts').insert({
                   user_id: userId,
                   portfolio_id: null,
                   alert_type: alertType,
                   ticker: priceAlert.ticker,
-                  strategy_type: 'Avviso Prezzo',
+                  strategy_type: alertTitle,
                   direction: priceAlert.direction === 'above' ? 'up' : 'down',
                   current_value: currentPrice,
                   threshold_value: priceAlert.target_price,

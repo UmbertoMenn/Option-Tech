@@ -1277,6 +1277,7 @@ export type Database = {
       price_alerts: {
         Row: {
           cooldown_minutes: number
+          context: string
           created_at: string
           delete_after_trigger: boolean
           direction: string
@@ -1290,6 +1291,7 @@ export type Database = {
         }
         Insert: {
           cooldown_minutes?: number
+          context?: string
           created_at?: string
           delete_after_trigger?: boolean
           direction: string
@@ -1303,6 +1305,7 @@ export type Database = {
         }
         Update: {
           cooldown_minutes?: number
+          context?: string
           created_at?: string
           delete_after_trigger?: boolean
           direction?: string
@@ -1878,6 +1881,8 @@ export type Database = {
         | "price_alert_below"
         | "action_put_roll_up_otm"
         | "distance_put_roll_up"
+        | "action_call_buyback_gain"
+        | "action_call_buyback_loss"
       app_role: "admin" | "user"
     }
     CompositeTypes: {

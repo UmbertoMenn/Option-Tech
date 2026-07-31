@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
-import { PriceAlert, DEFAULT_COOLDOWN_MINUTES } from '@/types/alerts';
+import { PriceAlert, PriceAlertContext, DEFAULT_COOLDOWN_MINUTES } from '@/types/alerts';
 
 function useEffectiveUserId() {
   const { user } = useAuth();
@@ -46,6 +46,8 @@ export function useCreatePriceAlert() {
       target_price: number;
       cooldown_minutes?: number;
       delete_after_trigger?: boolean;
+      /** 'call_buyback' cambia solo il titolo dell'avviso generato. */
+      context?: PriceAlertContext;
     }) => {
       if (!user || !effectiveUserId) throw new Error('User not authenticated');
       
@@ -58,6 +60,7 @@ export function useCreatePriceAlert() {
           target_price: alert.target_price,
           cooldown_minutes: alert.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES,
           delete_after_trigger: alert.delete_after_trigger ?? false,
+          context: alert.context ?? 'generic',
           enabled: true,
         })
         .select()

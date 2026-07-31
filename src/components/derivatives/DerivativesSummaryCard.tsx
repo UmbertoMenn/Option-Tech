@@ -6,12 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Plus, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Plus, Trash2, Loader2, CheckCircle2, Bell } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
 import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, hasKnownMarketPrice, unknownMarketPriceCount, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields, ManualCallBuybackInput } from '@/hooks/useCallBuybacks';
 import { computeAvailableCallResiduals } from '@/lib/callBuybacks';
+import { callKey } from '@/lib/callBuybackAlerts';
+import { useCallBuybackAlerts } from '@/hooks/useCallBuybackAlerts';
+import { CallBuybackAlertDialog } from '@/components/derivatives/CallBuybackAlertDialog';
 import { toast } from 'sonner';
 import { getOptionExpirationDateISO } from '@/lib/optionExpiry';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -128,6 +131,8 @@ function BuybackRow({
   onToggleIncluded,
   onSaveFields,
   onDelete,
+  onOpenAlerts,
+  hasAlert,
   fmt2,
   fmtDate,
 }: {
@@ -137,6 +142,8 @@ function BuybackRow({
   onToggleIncluded: (included: boolean) => void;
   onSaveFields: (fields: CallBuybackEditableFields) => void;
   onDelete: () => void;
+  onOpenAlerts: () => void;
+  hasAlert: boolean;
   fmt2: (n: number) => string;
   fmtDate: (iso: string) => string;
 }) {
@@ -307,6 +314,15 @@ function BuybackRow({
               ? `${potentialGainLoss >= 0 ? '+' : ''}${fmt2(potentialGainLoss)} ${b.currency}`
               : 'n.d.'}
           </span>
+          <button
+            type="button"
+            onClick={onOpenAlerts}
+            className={`p-0.5 rounded hover:bg-muted transition-colors ${hasAlert ? 'text-blue-400' : 'text-muted-foreground'}`}
+            aria-label={`Avvisi per ${b.underlying} C ${b.strike}`}
+            title={hasAlert ? 'Avvisi configurati' : 'Imposta avvisi'}
+          >
+            <Bell className="w-3 h-3" />
+          </button>
           <button
             type="button"
             onClick={beginEdit}
@@ -546,17 +562,21 @@ function AvailableCallsSection({
   allPositions,
   archivedKeys = [],
   dynamicAliases,
+  underlyingPrices,
 }: {
   items: { ticker: string; availableContracts: number }[];
   portfolioId: string | null | undefined;
   allPositions: Position[];
   archivedKeys?: string[];
   dynamicAliases?: DynamicAliases;
+  underlyingPrices?: Record<string, UnderlyingPrice>;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [savedTick, setSavedTick] = useState(0);
+  const [alertRow, setAlertRow] = useState<CallBuybackRow | null>(null);
   const { buybacks } = useCallBuybacks([portfolioId]);
+  const { alerts: buybackAlerts } = useCallBuybackAlerts(portfolioId);
   const { setIncluded, editFields, insertManual, remove } = useCallBuybackMutations([portfolioId]);
 
   // Meta per sottostante (valuta + cambio→EUR) ricavata dalle posizioni:
@@ -670,6 +690,15 @@ function AvailableCallsSection({
   const hasIncluded = visibleBuybacks.some(b => b.included_in_netting !== false);
   const missingPriceRows = unknownMarketPriceCount(visibleBuybacks, today);
 
+  // Una riga è "sotto avviso" se ha una config di tranche oppure se la call a
+  // cui appartiene ha una config aggregata: entrambe la riguardano.
+  const rowHasAlert = (b: CallBuybackRow) => buybackAlerts.some(a =>
+    a.enabled && (
+      (a.scope === 'tranche' && a.buyback_id === b.id) ||
+      (a.scope === 'call' && callKey(a) === callKey(b))
+    ),
+  );
+
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
       <div
@@ -767,6 +796,8 @@ function AvailableCallsSection({
                       onToggleIncluded={(included) => setIncluded.mutate({ id: b.id, included })}
                       onSaveFields={(fields) => editFields.mutate({ id: b.id, fields })}
                       onDelete={() => handleDelete(b)}
+                      onOpenAlerts={() => setAlertRow(b)}
+                      hasAlert={rowHasAlert(b)}
                       fmt2={fmt2}
                       fmtDate={fmtDate}
                     />
@@ -791,6 +822,17 @@ function AvailableCallsSection({
             </div>
           )}
         </div>
+      )}
+
+      {alertRow && (
+        <CallBuybackAlertDialog
+          open={!!alertRow}
+          onOpenChange={(o) => { if (!o) setAlertRow(null); }}
+          row={alertRow}
+          allBuybacks={visibleBuybacks}
+          portfolioId={portfolioId}
+          underlyingPrice={underlyingPrices?.[alertRow.underlying.toUpperCase()]?.price ?? null}
+        />
       )}
     </div>
   );
@@ -1039,6 +1081,7 @@ export function DerivativesSummaryCard({
 
           {/* 9. Covered Call / D-R CC da rivendere - LAST */}
           <AvailableCallsSection
+            underlyingPrices={underlyingPrices}
             items={monitoring.availableCallsToSell}
             portfolioId={selectedPortfolioId}
             allPositions={allPositions}
