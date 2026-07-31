@@ -22,6 +22,7 @@ import path from 'path';
  */
 
 const FUNCTIONS_DIR = path.resolve(__dirname, '../../supabase/functions');
+const MIGRATIONS_DIR = path.resolve(__dirname, '../../supabase/migrations');
 
 const CRON_AUTHENTICATED_FUNCTIONS = [
   'check-alerts',
@@ -35,6 +36,22 @@ function readFunctionSource(name: string): string {
   const file = path.join(FUNCTIONS_DIR, name, 'index.ts');
   expect(existsSync(file), `edge function mancante: ${name}`).toBe(true);
   return readFileSync(file, 'utf8');
+}
+
+function readLatestNotifyTriggerMigration(): string {
+  const definitions = readdirSync(MIGRATIONS_DIR)
+    .filter((file) => file.endsWith('.sql'))
+    .sort()
+    .map((file) => ({
+      file,
+      sql: readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8'),
+    }))
+    .filter(({ sql }) =>
+      /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.notify_on_new_alert\s*\(\s*\)/i.test(sql),
+    );
+
+  expect(definitions.length, 'definizione versionata di notify_on_new_alert mancante').toBeGreaterThan(0);
+  return definitions.at(-1)!.sql;
 }
 
 /** Pattern esatto del bug: guardia che dipende solo dalla env var. */
@@ -95,14 +112,22 @@ describe('autenticazione cron delle edge function', () => {
   });
 
   it('la migrazione della RPC verify_cron_secret e la sua GRANT sono versionate', () => {
-    const migrationsDir = path.resolve(__dirname, '../../supabase/migrations');
-    const sql = readdirSync(migrationsDir)
+    const sql = readdirSync(MIGRATIONS_DIR)
       .filter((f) => f.endsWith('.sql'))
-      .map((f) => readFileSync(path.join(migrationsDir, f), 'utf8'))
+      .map((f) => readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8'))
       .join('\n');
 
     expect(sql).toContain('FUNCTION public.verify_cron_secret');
     expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION public\.verify_cron_secret\(text\) TO service_role/);
     expect(sql).toMatch(/REVOKE ALL ON FUNCTION public\.verify_cron_secret\(text\) FROM PUBLIC, anon, authenticated/);
+  });
+
+  it('il trigger alert invia a send-notification il cron_secret letto dal Vault', () => {
+    const sql = readLatestNotifyTriggerMigration();
+
+    expect(sql).toMatch(/FROM\s+vault\.decrypted_secrets/i);
+    expect(sql).toMatch(/WHERE\s+name\s*=\s*'cron_secret'/i);
+    expect(sql).toMatch(/net\.http_post\s*\(/i);
+    expect(sql).toMatch(/['"]x-cron-secret['"]\s*,\s*v_cron_secret/i);
   });
 });
