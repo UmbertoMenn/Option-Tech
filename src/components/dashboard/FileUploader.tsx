@@ -270,7 +270,7 @@ export function FileUploader() {
         if (synced > 0) console.log(`[CostBasis] store sincronizzato da Excel: ${synced} titoli`);
         const store = await fetchCostBasisStore(targetPortfolioId);
         const { applied } = applyCostBasisToPositions(positions, store, dynamicAliases);
-        if (applied > 0) console.log(`[CostBasis] PMC applicato a ${applied} posizioni dallo store`);
+        if (applied > 0) console.log(`[CostBasis] prezzo medio fiscale applicato a ${applied} posizioni dallo store`);
 
         // Flussi CSV senza store: le posizioni restano senza PMC e nessuno lo
         // segnala. Il PMC iniziale va caricato una volta per portafoglio dal
@@ -653,7 +653,7 @@ export function FileUploader() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground text-center mb-3 px-2">
-              Parser storici separati. Il Portfolio Excel importa anche il PMC presente nel file; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
+              Parser storici separati. Il Portfolio Excel importa anche il prezzo medio fiscale presente nel file; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
             </p>
             <div className="mb-3 flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-xs text-amber-950 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
