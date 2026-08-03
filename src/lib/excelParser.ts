@@ -475,7 +475,7 @@ function parseDerivativeRow(
   
   // Get price values
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
-  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO CARICO', 'PREZZO CARICO']));
+  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO FISCALE']));
   const marketValue = parseExcelNumber(findColumnValue(row, headers, ['CONTROVALORE EUR', 'CONTROVALORE']));
   const profitLoss = parseExcelNumber(findColumnValue(row, headers, ['GUADAGNO_PERDITA_EUR', 'GUADAGNO PERDITA', 'CONTROVALORE_SCOST_SU_PREZZO']));
   const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
@@ -563,7 +563,7 @@ function parsePositionRow(
   const exchangeRate = parseExcelNumber(findColumnValue(row, headers, ['CAMBIO ULTIMO', 'CAMBIO', 'TASSO CAMBIO']));
   const quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
-  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO CARICO', 'PREZZO CARICO']));
+  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO FISCALE']));
   const marketValue = parseExcelNumber(findColumnValue(row, headers, ['CONTROVALORE EUR', 'CONTROVALORE']));
   const profitLoss = parseExcelNumber(findColumnValue(row, headers, ['GUADAGNO_PERDITA_EUR', 'GUADAGNO PERDITA', 'CONTROVALORE_SCOST_SU_PREZZO']));
   const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
