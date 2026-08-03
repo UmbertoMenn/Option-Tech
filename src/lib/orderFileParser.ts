@@ -16,6 +16,26 @@ export interface ParsedOrder {
   assignmentPutSymbol?: string; // symbol of the assigned PUT (for URL generation)
 }
 
+/**
+ * Valore firmato di una riga d'ordine, per la sola visualizzazione (colore e
+ * segno +/- nella tabella "Operazioni" della calcolatrice premi).
+ *
+ * `order.orderValue` e' per costruzione una magnitudine sempre positiva
+ * (quantity * avgPrice * 100): il segno di acquisto/vendita viene applicato
+ * solo in fase di somma nei totali (netPremium += per le vendite, -= per gli
+ * acquisti), mai memorizzato nel campo stesso. Usare `orderValue >= 0`
+ * direttamente per decidere colore/segno di una riga fa apparire ogni
+ * acquisto con "+" invece che con "-" (bug del 2026-08-03).
+ *
+ * Le righe di assegnazione (isAssignment, da buildAssignmentOrder) sono
+ * l'unica eccezione: il loro orderValue e' gia' naturalmente firmato come
+ * guadagno/perdita e va usato cosi' com'e'.
+ */
+export function getSignedOrderValue(order: Pick<ParsedOrder, 'orderValue' | 'operation' | 'isAssignment'>): number {
+  if (order.isAssignment) return order.orderValue;
+  return (order.operation === 'sell' ? 1 : -1) * Math.abs(order.orderValue);
+}
+
 export interface OrderParseResult {
   allOrders: ParsedOrder[];
   filteredOrders: ParsedOrder[];

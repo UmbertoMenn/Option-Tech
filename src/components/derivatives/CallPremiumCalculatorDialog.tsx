@@ -26,7 +26,7 @@ import {
   buildAssignmentOrder,
   symbolMatchesTicker,
   toIsoDateFromIT,
-  
+  getSignedOrderValue,
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult,
@@ -761,9 +761,14 @@ export function CallPremiumCalculatorDialog({
                                 <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
                                 <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
-                                <TableCell className={`text-xs text-right ${order.orderValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {order.orderValue >= 0 ? '+' : ''}{formatCurrency(order.orderValue, 'USD')}
-                                </TableCell>
+                                {(() => {
+                                  const displayValue = getSignedOrderValue(order);
+                                  return (
+                                    <TableCell className={`text-xs text-right ${displayValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                      {displayValue >= 0 ? '+' : ''}{formatCurrency(displayValue, 'USD')}
+                                    </TableCell>
+                                  );
+                                })()}
                                 <TableCell className="text-xs">
                                   <Button
                                     variant="ghost"
