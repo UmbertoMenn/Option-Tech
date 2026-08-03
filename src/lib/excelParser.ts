@@ -475,7 +475,7 @@ function parseDerivativeRow(
   
   // Get price values
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
-  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO FISCALE']));
+  const avgCost = parseAverageCost(row, headers);
   const marketValue = parseExcelNumber(findColumnValue(row, headers, ['CONTROVALORE EUR', 'CONTROVALORE']));
   const profitLoss = parseExcelNumber(findColumnValue(row, headers, ['GUADAGNO_PERDITA_EUR', 'GUADAGNO PERDITA', 'CONTROVALORE_SCOST_SU_PREZZO']));
   const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
@@ -563,7 +563,7 @@ function parsePositionRow(
   const exchangeRate = parseExcelNumber(findColumnValue(row, headers, ['CAMBIO ULTIMO', 'CAMBIO', 'TASSO CAMBIO']));
   const quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
-  const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO FISCALE']));
+  const avgCost = parseAverageCost(row, headers);
   const marketValue = parseExcelNumber(findColumnValue(row, headers, ['CONTROVALORE EUR', 'CONTROVALORE']));
   const profitLoss = parseExcelNumber(findColumnValue(row, headers, ['GUADAGNO_PERDITA_EUR', 'GUADAGNO PERDITA', 'CONTROVALORE_SCOST_SU_PREZZO']));
   const profitLossPct = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VARIAZ PERC', 'VARIAZIONE %']));
@@ -678,4 +678,29 @@ function findColumnValue(row: any[], headers: string[], possibleNames: string[])
   // Description at index 2
   // etc.
   return null;
+}
+
+/**
+ * Il PMC bancario ("Prezzo medio di carico") non coincide necessariamente
+ * con il prezzo medio fiscale. Per cost basis, P&L e rischio usiamo sempre il
+ * dato fiscale quando il file lo espone; il prezzo di carico resta solo il
+ * fallback per i derivati, per i quali la colonna fiscale e' normalmente "-".
+ */
+function parseAverageCost(row: any[], headers: string[]): number {
+  const fiscalValue = findColumnValue(row, headers, ['PREZZO MEDIO FISCALE']);
+  // Nei derivati il file usa "-" per segnalare che il prezzo fiscale non
+  // esiste. Uno zero numerico, invece, e' comunque un valore esplicito e non
+  // deve fare riesumare il prezzo medio di carico.
+  if (hasExcelNumericValue(fiscalValue)) return parseExcelNumber(fiscalValue);
+
+  return parseExcelNumber(
+    findColumnValue(row, headers, ['PREZZO MEDIO CARICO', 'PREZZO CARICO']),
+  );
+}
+
+function hasExcelNumericValue(value: string | number | null): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (value == null) return false;
+  const normalized = value.trim();
+  return normalized !== '' && !/^[-–—]+$/.test(normalized);
 }
