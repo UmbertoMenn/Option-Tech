@@ -1,7 +1,7 @@
 /**
  * Wizard di caricamento PMC dal vecchio file Excel.
  *
- * I flussi CSV della banca non includono più il prezzo medio di carico: il
+ * I flussi CSV della banca non includono più il prezzo medio fiscale: il
  * primo caricamento (e ogni riallineamento successivo) avviene da qui. Il
  * file viene parsato con l'excelParser esistente, i PMC dei titoli (azioni/
  * ETF) vengono salvati nello store persistente stock_cost_basis e applicati
@@ -46,7 +46,7 @@ export function PmcUploadDialog({
       );
       if (withPmc.length === 0) {
         toast.error('Nessun PMC trovato nel file', {
-          description: 'Il file non contiene prezzi medi di carico. Serve il vecchio file Excel del portafoglio.',
+          description: 'Il file non contiene prezzi medi fiscali. Serve il vecchio file Excel del portafoglio.',
         });
         return;
       }
@@ -113,7 +113,7 @@ export function PmcUploadDialog({
         <DialogHeader>
           <DialogTitle>Carica PMC da file Excel</DialogTitle>
           <DialogDescription>
-            I flussi CSV della banca non includono più il prezzo medio di carico.
+            I flussi CSV della banca non includono più il prezzo medio fiscale.
             Carica il vecchio file Excel del portafoglio per impostare (o riallineare)
             i PMC di azioni, ETF e opzioni aperte. Dai successivi upload dei movimenti titoli il PMC
             viene mantenuto aggiornato automaticamente: gli acquisti ricalcolano la
