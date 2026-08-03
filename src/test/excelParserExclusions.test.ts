@@ -72,6 +72,19 @@ describe('parsePortfolioData exclusions', () => {
     expect(result.positions[0].avg_cost).toBe(33);
   });
 
+  it('mantiene il prezzo medio di carico delle opzioni quando il fiscale non è disponibile', () => {
+    const rows = [
+      ['DERIVATI ESTERO'],
+      ['CODICE_VALORE', 'ISIN', 'DESCRIZIONE ESTESA', 'DIVISA CODICE', 'PREZZO VALORE', 'PREZZO MEDIO CARICO', 'PREZZO MEDIO FISCALE', 'QUANTITA', 'CONTROVALORE EUR'],
+      ['', '', 'APPLE INC OPTION CALL 290 DEC/26', 'USD', '56,700', '22,750', '-', '-1,000', '-5.670,00'],
+    ];
+
+    const result = parsePortfolioData(rows);
+
+    expect(result.positions).toHaveLength(1);
+    expect(result.positions[0].avg_cost).toBe(22.75);
+  });
+
   it('applica al vecchio Excel le esclusioni configurate sui conti liquidità', () => {
     const rows = [
       ['LIQUIDITA'],
