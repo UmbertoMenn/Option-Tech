@@ -1,5 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  hasBudgetLeft,
+  isEuropeanTicker,
+  runWithConcurrency,
+  selectStaleFirst,
+  type LastUpdatedMap,
+} from "./scheduler.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,21 +51,30 @@ function unauthorizedCronResponse(): Response {
   });
 }
 
-// EU ticker suffixes - use Yahoo Finance for these
-const EU_SUFFIXES = ['.MI', '.DE', '.SW', '.PA', '.AS', '.L', '.MC', '.BR', '.VI', '.CO', '.HE', '.ST', '.OL', '.LS'];
+// --- Budget di esecuzione e quote per run --------------------------------
+// Incidente del 2026-07-31: la funzione processava tutti i ticker US in una
+// sola invocazione con una pausa di 60 secondi tra un batch Finnhub e l'altro.
+// Con ~90 ticker US il run sforava e il gateway rispondeva 504 (10 volte in 3
+// ore) lasciando i prezzi fermi.
+//
+// Il job gira ogni 5 minuti: ogni invocazione consuma al massimo la quota di
+// una finestra di rate limit Finnhub (60 chiamate/minuto) partendo dai ticker
+// piu' stantii. Nessuna attesa artificiale, nessun run appeso; il ciclo
+// completo si chiude in ceil(N / quota) run.
+const RUN_BUDGET_MS = Number(Deno.env.get("UNDERLYING_CRON_BUDGET_MS") ?? 90_000);
+const FINNHUB_MAX_CALLS_PER_RUN = Number(Deno.env.get("FINNHUB_MAX_CALLS_PER_RUN") ?? 60);
+const YAHOO_MAX_CALLS_PER_RUN = Number(Deno.env.get("YAHOO_MAX_CALLS_PER_RUN") ?? 60);
+const FINNHUB_CONCURRENCY = 6;
+const YAHOO_CONCURRENCY = 4;
+// Le scritture vengono svuotate a blocchi: se il run venisse comunque troncato,
+// i prezzi gia' letti sarebbero gia' a database invece di andare persi.
+const UPSERT_FLUSH_SIZE = 20;
 
-function isEuropeanTicker(ticker: string): boolean {
-  const upperTicker = ticker.toUpperCase();
-  return EU_SUFFIXES.some(suffix => upperTicker.endsWith(suffix));
-}
-
-// Chunk array into batches
-function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
+interface PriceRow {
+  ticker: string;
+  price: number;
+  currency: string;
+  updated_at: string;
 }
 
 // Fetch price from Yahoo Finance (for EU tickers)
@@ -134,11 +150,6 @@ async function fetchFinnhubPrice(ticker: string, apiKey: string): Promise<{ pric
     console.error(`Error fetching Finnhub price for ${ticker}:`, error);
     return null;
   }
-}
-
-// Delay helper
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 serve(async (req) => {
@@ -292,166 +303,152 @@ serve(async (req) => {
       );
     }
 
-    // Step 4: Separate EU and US tickers
-    const euTickers = uniqueTickers.filter(t => isEuropeanTicker(t));
-    const usTickers = uniqueTickers.filter(t => !isEuropeanTicker(t));
-    
-    console.log(`EU tickers (Yahoo Finance): ${euTickers.length}`);
-    console.log(`US tickers (Finnhub): ${usTickers.length}`);
+    // Step 5: Leggi l'ultimo aggiornamento noto per ordinare i ticker dal piu'
+    // stantio al piu' fresco. Cosi' il lavoro si distribuisce sui run
+    // successivi senza mai lasciare indietro sempre gli stessi ticker.
+    const lastUpdated: LastUpdatedMap = {};
+    const { data: existingPrices, error: existingError } = await supabase
+      .from('underlying_prices')
+      .select('ticker, updated_at');
+
+    if (existingError) {
+      console.error("Error fetching underlying_prices:", existingError.message);
+    }
+    (existingPrices || []).forEach((row: any) => {
+      if (row?.ticker) lastUpdated[row.ticker] = row.updated_at;
+    });
+
+    // Step 6: Separa EU e US e applica le quote per singolo run
+    const allEuTickers = uniqueTickers.filter(t => isEuropeanTicker(t));
+    const allUsTickers = uniqueTickers.filter(t => !isEuropeanTicker(t));
+
+    const useFinnhub = Boolean(finnhubApiKey);
+    const euTickers = selectStaleFirst(allEuTickers, lastUpdated, YAHOO_MAX_CALLS_PER_RUN);
+    const usTickers = selectStaleFirst(
+      allUsTickers,
+      lastUpdated,
+      useFinnhub ? FINNHUB_MAX_CALLS_PER_RUN : YAHOO_MAX_CALLS_PER_RUN,
+    );
+
+    console.log(`EU tickers (Yahoo Finance): ${euTickers.length}/${allEuTickers.length}`);
+    console.log(`US tickers (${useFinnhub ? 'Finnhub' : 'Yahoo fallback'}): ${usTickers.length}/${allUsTickers.length}`);
 
     let updated = 0;
     let failed = 0;
+    let skipped = 0;
     const errors: string[] = [];
+    let pending: PriceRow[] = [];
 
-    // Step 5: Fetch EU prices via Yahoo Finance
+    const withinBudget = () => hasBudgetLeft(startTime, RUN_BUDGET_MS, Date.now());
+
+    async function flushPending(force = false): Promise<void> {
+      if (pending.length === 0) return;
+      if (!force && pending.length < UPSERT_FLUSH_SIZE) return;
+
+      const batch = pending;
+      pending = [];
+
+      const { error: upsertError } = await supabase
+        .from('underlying_prices')
+        .upsert(batch, { onConflict: 'ticker' });
+
+      if (upsertError) {
+        console.error(`Failed to upsert ${batch.length} prices:`, upsertError.message);
+        failed += batch.length;
+        errors.push(`upsert failed for ${batch.length} tickers: ${upsertError.message}`);
+      } else {
+        updated += batch.length;
+      }
+    }
+
+    async function processTicker(
+      ticker: string,
+      fetcher: (t: string) => Promise<{ price: number; currency: string } | null>,
+      label: string,
+    ): Promise<void> {
+      try {
+        const priceResult = await fetcher(ticker);
+
+        if (priceResult) {
+          pending.push({
+            ticker,
+            price: priceResult.price,
+            currency: priceResult.currency,
+            updated_at: new Date().toISOString(),
+          });
+          console.log(`[${label}] Fetched ${ticker}: ${priceResult.price} ${priceResult.currency}`);
+          await flushPending();
+        } else {
+          console.log(`[${label}] No price for ${ticker}`);
+          failed++;
+          errors.push(`${ticker}: no ${label} data`);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error processing ${ticker}:`, errorMsg);
+        failed++;
+        errors.push(`${ticker}: ${errorMsg}`);
+      }
+    }
+
+    // Step 7: prezzi EU via Yahoo Finance
     if (euTickers.length > 0) {
       console.log(`--- Fetching ${euTickers.length} EU tickers via Yahoo Finance ---`);
-      for (const ticker of euTickers) {
-        try {
-          const priceResult = await fetchYahooPrice(ticker);
-          
-          if (priceResult) {
-            const { error: upsertError } = await supabase
-              .from('underlying_prices')
-              .upsert({
-                ticker,
-                price: priceResult.price,
-                currency: priceResult.currency,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'ticker' });
-            
-            if (upsertError) {
-              console.error(`Failed to upsert price for ${ticker}:`, upsertError.message);
-              failed++;
-              errors.push(`${ticker}: upsert failed`);
-            } else {
-              console.log(`[Yahoo] Updated ${ticker}: ${priceResult.price} ${priceResult.currency}`);
-              updated++;
-            }
-          } else {
-            console.log(`[Yahoo] No price for ${ticker}`);
-            failed++;
-            errors.push(`${ticker}: no Yahoo data`);
-          }
-          
-          // Rate limiting for Yahoo
-          await delay(100);
-          
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`Error processing ${ticker}:`, errorMsg);
-          failed++;
-          errors.push(`${ticker}: ${errorMsg}`);
-        }
+      const { skipped: euSkipped } = await runWithConcurrency(
+        euTickers,
+        YAHOO_CONCURRENCY,
+        (ticker) => processTicker(ticker, fetchYahooPrice, 'Yahoo'),
+        withinBudget,
+      );
+      skipped += euSkipped.length;
+      if (euSkipped.length > 0) {
+        console.warn(`Budget esaurito: ${euSkipped.length} ticker EU rimandati al run successivo`);
       }
     }
 
-    // Step 6: Fetch US prices via Finnhub with batching (60/min limit)
-    if (usTickers.length > 0 && finnhubApiKey) {
-      const FINNHUB_RATE_LIMIT = 60;
-      const batches = chunkArray(usTickers, FINNHUB_RATE_LIMIT);
-      
-      console.log(`--- Fetching ${usTickers.length} US tickers via Finnhub (${batches.length} batch${batches.length > 1 ? 'es' : ''}) ---`);
-      
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        
-        // Wait 60 seconds between batches (except for first batch)
-        if (batchIndex > 0) {
-          console.log(`Waiting 60 seconds for Finnhub rate limit (batch ${batchIndex + 1}/${batches.length})...`);
-          await delay(60000);
-        }
-        
-        console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} tickers)`);
-        
-        for (const ticker of batch) {
-          try {
-            const priceResult = await fetchFinnhubPrice(ticker, finnhubApiKey);
-            
-            if (priceResult) {
-              const { error: upsertError } = await supabase
-                .from('underlying_prices')
-                .upsert({
-                  ticker,
-                  price: priceResult.price,
-                  currency: priceResult.currency,
-                  updated_at: new Date().toISOString(),
-                }, { onConflict: 'ticker' });
-              
-              if (upsertError) {
-                console.error(`Failed to upsert price for ${ticker}:`, upsertError.message);
-                failed++;
-                errors.push(`${ticker}: upsert failed`);
-              } else {
-                console.log(`[Finnhub] Updated ${ticker}: ${priceResult.price} USD`);
-                updated++;
-              }
-            } else {
-              console.log(`[Finnhub] No price for ${ticker}`);
-              failed++;
-              errors.push(`${ticker}: no Finnhub data`);
-            }
-            
-            // Small delay between Finnhub calls to be nice
-            await delay(50);
-            
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`Error processing ${ticker}:`, errorMsg);
-            failed++;
-            errors.push(`${ticker}: ${errorMsg}`);
-          }
-        }
-      }
-    } else if (usTickers.length > 0 && !finnhubApiKey) {
-      // Fallback to Yahoo for US if no Finnhub key
-      console.log(`--- Fallback: Fetching ${usTickers.length} US tickers via Yahoo Finance ---`);
-      for (const ticker of usTickers) {
-        try {
-          const priceResult = await fetchYahooPrice(ticker);
-          
-          if (priceResult) {
-            const { error: upsertError } = await supabase
-              .from('underlying_prices')
-              .upsert({
-                ticker,
-                price: priceResult.price,
-                currency: priceResult.currency,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'ticker' });
-            
-            if (upsertError) {
-              failed++;
-              errors.push(`${ticker}: upsert failed`);
-            } else {
-              console.log(`[Yahoo-Fallback] Updated ${ticker}: ${priceResult.price} ${priceResult.currency}`);
-              updated++;
-            }
-          } else {
-            failed++;
-            errors.push(`${ticker}: no Yahoo data`);
-          }
-          
-          await delay(100);
-          
-        } catch (error) {
-          failed++;
-          errors.push(`${ticker}: error`);
-        }
+    await flushPending(true);
+
+    // Step 8: prezzi US. Nessuna attesa tra batch: la quota per run tiene la
+    // singola invocazione entro il rate limit Finnhub (60 chiamate/minuto).
+    if (usTickers.length > 0) {
+      const label = useFinnhub ? 'Finnhub' : 'Yahoo-Fallback';
+      console.log(`--- Fetching ${usTickers.length} US tickers via ${label} ---`);
+
+      const fetcher = useFinnhub
+        ? (ticker: string) => fetchFinnhubPrice(ticker, finnhubApiKey!)
+        : (ticker: string) => fetchYahooPrice(ticker);
+
+      const { skipped: usSkipped } = await runWithConcurrency(
+        usTickers,
+        useFinnhub ? FINNHUB_CONCURRENCY : YAHOO_CONCURRENCY,
+        (ticker) => processTicker(ticker, fetcher, label),
+        withinBudget,
+      );
+      skipped += usSkipped.length;
+      if (usSkipped.length > 0) {
+        console.warn(`Budget esaurito: ${usSkipped.length} ticker US rimandati al run successivo`);
       }
     }
+
+    await flushPending(true);
+
+    const deferred = (allEuTickers.length - euTickers.length)
+      + (allUsTickers.length - usTickers.length)
+      + skipped;
 
     const durationMs = Date.now() - startTime;
-    console.log(`=== Cron Job Completed: ${updated} updated, ${failed} failed in ${durationMs}ms ===`);
+    console.log(`=== Cron Job Completed: ${updated} updated, ${failed} failed, ${deferred} deferred in ${durationMs}ms ===`);
 
     return new Response(
       JSON.stringify({
         success: true,
         updated,
         failed,
+        deferred,
         total: uniqueTickers.length,
         eu_tickers: euTickers.length,
         us_tickers: usTickers.length,
+        budget_exhausted: skipped > 0,
         duration_ms: durationMs,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),

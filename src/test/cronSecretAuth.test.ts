@@ -54,6 +54,15 @@ function readLatestNotifyTriggerMigration(): string {
   return definitions.at(-1)!.sql;
 }
 
+/** Rimuove i commenti SQL: le asserzioni devono guardare il codice, non le note. */
+function stripSqlComments(sql: string): string {
+  return sql
+    .split('\n')
+    .filter((line) => !/^\s*--/.test(line))
+    .map((line) => line.replace(/\s--.*$/, ''))
+    .join('\n');
+}
+
 /** Pattern esatto del bug: guardia che dipende solo dalla env var. */
 export function hasEnvOnlyCronGuard(source: string): boolean {
   return /if\s*\(\s*!cronSecret\s*\|\|\s*req\.headers\.get\(\s*['"]x-cron-secret['"]\s*\)\s*!==\s*cronSecret\s*\)/.test(
@@ -129,5 +138,26 @@ describe('autenticazione cron delle edge function', () => {
     expect(sql).toMatch(/WHERE\s+name\s*=\s*'cron_secret'/i);
     expect(sql).toMatch(/net\.http_post\s*\(/i);
     expect(sql).toMatch(/['"]x-cron-secret['"]\s*,\s*v_cron_secret/i);
+  });
+
+  /**
+   * Regressione: l'header Authorization del trigger veniva costruito con
+   * `'Bearer ' || current_setting('supabase.service_role_key', true)`. Quella
+   * GUC non esiste nel database, quindi la concatenazione produce NULL e
+   * jsonb_build_object emette 'Authorization': null. Passa solo finche'
+   * send-notification resta con verify_jwt = false: al ripristino della
+   * verifica JWT le notifiche sparirebbero in silenzio.
+   */
+  it('il trigger alert non costruisce Authorization da una GUC inesistente', () => {
+    const sql = stripSqlComments(readLatestNotifyTriggerMigration());
+
+    expect(sql).not.toMatch(/current_setting\(\s*'supabase\.service_role_key'/i);
+    expect(sql).toMatch(/['"]Authorization['"]\s*,\s*'Bearer '\s*\|\|/i);
+    expect(sql).toMatch(/['"]apikey['"]\s*,/i);
+  });
+
+  it('il trigger alert fissa un timeout esplicito su net.http_post', () => {
+    const sql = readLatestNotifyTriggerMigration();
+    expect(sql).toMatch(/timeout_milliseconds\s*:=\s*\d+/i);
   });
 });
