@@ -33,29 +33,43 @@ describe('parsePortfolioData exclusions', () => {
     expect(result.positionsSnapshotPresent).toBe(true);
   });
 
-  it('mantiene il PMC presente nel vecchio Excel', () => {
+  it('usa il prezzo medio fiscale del vecchio Excel, non il prezzo medio di carico', () => {
     const rows = [
       ['AZIONI ED ETF'],
-      ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'PREZZO MEDIO CARICO', 'PREZZO VALORE', 'CONTROVALORE EUR'],
-      ['US0378331005', 'APPLE INC', 'USD', 10, 185.25, 210, 2100],
+      ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'PREZZO MEDIO CARICO', 'PREZZO MEDIO FISCALE', 'PREZZO VALORE', 'CONTROVALORE EUR'],
+      ['US0378331005', 'APPLE INC', 'USD', 10, 301.54, 264.164, 333.43, 3334.3],
     ];
 
     const result = parsePortfolioData(rows);
 
     expect(result.positions).toHaveLength(1);
-    expect(result.positions[0].avg_cost).toBe(185.25);
+    expect(result.positions[0].avg_cost).toBe(264.164);
   });
 
-  it('legge anche il PMC testuale nel formato italiano del vecchio Excel', () => {
+  it('legge anche il prezzo medio fiscale testuale nel formato italiano del vecchio Excel', () => {
     const rows = [
       ['AZIONI ED ETF'],
-      ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'PREZZO MEDIO CARICO', 'PREZZO VALORE', 'CONTROVALORE EUR'],
-      ['US0378331005', 'APPLE INC', 'USD', 10, '1.185,25', '1.210,00', '12.100,00'],
+      ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'PREZZO MEDIO CARICO', 'PREZZO MEDIO FISCALE', 'PREZZO VALORE', 'CONTROVALORE EUR'],
+      ['US0378331005', 'APPLE INC', 'USD', 10, '1.185,25', '1.164,25', '1.210,00', '12.100,00'],
     ];
 
     const result = parsePortfolioData(rows);
 
-    expect(result.positions[0].avg_cost).toBe(1185.25);
+    expect(result.positions[0].avg_cost).toBe(1164.25);
+  });
+
+  it('usa il prezzo medio fiscale anche per le opzioni del vecchio Excel', () => {
+    const rows = [
+      ['DERIVATI'],
+      ['DESCRIZIONE ESTESA', 'DIVISA CODICE', 'QUANTITA', 'PREZZO MEDIO CARICO', 'PREZZO MEDIO FISCALE', 'PREZZO VALORE', 'CONTROVALORE EUR'],
+      ['NVIDIA CORP OPTION CALL 200 DEC/25', 'USD', -1, 20, 33, 34, -3400],
+    ];
+
+    const result = parsePortfolioData(rows);
+
+    expect(result.positions).toHaveLength(1);
+    expect(result.positions[0].asset_type).toBe('derivative');
+    expect(result.positions[0].avg_cost).toBe(33);
   });
 
   it('applica al vecchio Excel le esclusioni configurate sui conti liquidità', () => {
