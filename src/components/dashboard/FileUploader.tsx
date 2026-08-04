@@ -3,11 +3,9 @@ import { useDropzone } from 'react-dropzone';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, ArrowLeftRight, AlertTriangle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { parsePortfolioExcel, type PortfolioParseOptions } from '@/lib/excelParser';
 import { parseGPExcel } from '@/lib/gpExcelParser';
-import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
-import { ingestCashMovements, ingestTitoliTrades, ingestStockTradesCostBasis } from '@/lib/flussiMovementsIngest';
 import { applyCostBasisToPositions, fetchCostBasisStore, syncCostBasisStoreFromPositions, fetchDynamicAliases } from '@/lib/costBasisStore';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useNavigate } from 'react-router-dom';
@@ -21,10 +19,7 @@ import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 import {
   getEffectiveUploadUserId,
   getPortfolioParseOptions,
-  shouldRefreshGpSnapshot,
-  shouldRefreshPositionsSnapshot,
   filterSupportedUploadFiles,
-  type PortfolioUploadMode,
 } from '@/lib/portfolioUpload';
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
@@ -103,8 +98,7 @@ function DropzoneContent({
 }
 
 export function FileUploader() {
-  const [uploadMode, setUploadMode] = useState<PortfolioUploadMode>('csv');
-  const [legacyTarget, setLegacyTarget] = useState<'portfolio' | 'gp'>('portfolio');
+  const [excelTarget, setExcelTarget] = useState<'portfolio' | 'gp'>('portfolio');
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [isProcessingGP, setIsProcessingGP] = useState(false);
@@ -116,14 +110,7 @@ export function FileUploader() {
   const navigate = useNavigate();
   const effectiveUserId = getEffectiveUploadUserId(isAdminMode, adminViewUserId, user?.id);
 
-  const switchUploadMode = useCallback(() => {
-    if (isProcessing || isProcessingGP) return;
-    setUploadMode(mode => mode === 'csv' ? 'legacy' : 'csv');
-    setUploadSuccess(false);
-    setUploadGPSuccess(false);
-  }, [isProcessing, isProcessingGP]);
-
-  // ============ PORTFOLIO UPLOAD (1 o 2 file) ============
+  // ============ PORTFOLIO EXCEL ============
   const onDropPortfolio = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles || acceptedFiles.length === 0) return;
 
@@ -139,94 +126,7 @@ export function FileUploader() {
     try {
       const parseOptions = await resolveParseOptions(effectiveUserId);
 
-      // ---- Smistamento: file MOVIMENTI (mov cash / mov titoli) vs SNAPSHOT (saldi/Excel) ----
-      const snapshotFiles: File[] = [];
-      const movementTexts: { type: 'mov_cash' | 'mov_titoli'; text: string }[] = [];
-      for (const f of acceptedFiles) {
-        if (/\.csv$/i.test(f.name)) {
-          const text = await f.text();
-          const t = detectFlussiCsvType(text);
-          if (t === 'mov_cash' || t === 'mov_titoli') {
-            movementTexts.push({ type: t, text });
-            continue;
-          }
-        }
-        snapshotFiles.push(f);
-      }
-
-      // ---- Parse degli snapshot PRIMA dei movimenti: il rilevamento delle
-      // assegnazioni anticipate confronta le put del saldo aggiornato con
-      // quelle pre-upload nel DB (che i movimenti non hanno ancora toccato). ----
-      const parsed = snapshotFiles.length > 0
-        ? await Promise.all(snapshotFiles.map(f => parsePortfolioExcel(f, parseOptions)))
-        : [];
-      const parsedSnapshotPositions = parsed.flatMap(p => p.positions);
-
-      // ---- Movimenti: processati PRIMA dell'aggiornamento posizioni, così i
-      // riacquisti call e i PMC vengono confrontati con lo stato PRE-upload.
-      // Idempotenti: ricaricare lo stesso file non raddoppia nulla. ----
-      const movementSummary: string[] = [];
-      for (const m of movementTexts) {
-        const parsedMov = parseFlussiCsvText(m.text, parseOptions);
-        if (m.type === 'mov_cash') {
-          const res = await ingestCashMovements(targetPortfolioId, parsedMov.cashMovements);
-          if (res.depositsUpserted > 0) {
-            movementSummary.push(`${res.depositsUpserted} versamenti/prelievi (${res.totalAmount.toLocaleString('it-IT', { maximumFractionDigits: 0 })} €)`);
-          } else {
-            movementSummary.push('nessun bonifico/giroconto nei movimenti cash');
-          }
-          if (res.skippedManualDates.length > 0) {
-            movementSummary.push(`${res.skippedManualDates.length} date con versamenti manuali preservati (${res.skippedManualDates.join(', ')})`);
-          }
-          if (res.internalTransfersExcluded > 0) {
-            movementSummary.push(`${res.internalTransfersExcluded} giroconti interni esclusi`);
-          }
-        } else {
-          const res = await ingestTitoliTrades(targetPortfolioId, parsedMov.titoliOptionTrades);
-          const parts: string[] = [];
-          if (res.buybacksUpserted > 0) parts.push(`${res.buybacksUpserted} riacquisti call tracciati`);
-          if (res.resellsApplied > 0) parts.push(`${res.resellsApplied} contratti rivenduti applicati`);
-          for (const w of res.warnings) {
-            toast.warning('Call da rivendere', { description: w });
-          }
-
-          // PMC: acquisti/vendite titoli aggiornano la media ponderata; le
-          // vendite che chiudono lotti assegnati (assegnazione anticipata di
-          // put) vengono nettate a parte senza toccare il PMC.
-          try {
-            const cb = await ingestStockTradesCostBasis(
-              targetPortfolioId,
-              parsedMov.titoliStockTrades,
-              parsedMov.titoliOptionTrades,
-              parsedSnapshotPositions.length > 0 ? parsedSnapshotPositions : undefined,
-            );
-            if (cb.tradesApplied > 0) parts.push(`${cb.tradesApplied} operazioni titoli applicate al PMC`);
-            if (cb.assignmentsDetected > 0) parts.push(`${cb.assignmentsDetected} assegnazioni anticipate rilevate`);
-            for (const w of cb.warnings) {
-              toast.warning('PMC', { description: w });
-            }
-          } catch (cbErr) {
-            console.error('[FileUploader] aggiornamento PMC fallito:', cbErr);
-            toast.error('Aggiornamento PMC non riuscito', {
-              description: cbErr instanceof Error ? cbErr.message : 'errore sconosciuto',
-            });
-          }
-
-          movementSummary.push(parts.length > 0 ? parts.join(', ') : 'nessun riacquisto call nei movimenti titoli');
-        }
-      }
-      if (movementSummary.length > 0) {
-        await queryClient.invalidateQueries({ queryKey: ['deposits'] });
-        await queryClient.invalidateQueries({ queryKey: ['call-buybacks'] });
-        await queryClient.invalidateQueries({ queryKey: ['performance-attribution'] });
-        toast.success('Movimenti elaborati', { description: movementSummary.join(' • ') });
-      }
-
-      // Solo file movimenti: fine, niente aggiornamento posizioni.
-      if (snapshotFiles.length === 0) {
-        setUploadSuccess(true);
-        return;
-      }
+      const parsed = await Promise.all(acceptedFiles.map(f => parsePortfolioExcel(f, parseOptions)));
 
       // Verifica che le snapshot date siano coerenti
       const dates = parsed.map(p => p.snapshotDate).filter((d): d is string => !!d);
@@ -270,17 +170,14 @@ export function FileUploader() {
         if (synced > 0) console.log(`[CostBasis] store sincronizzato da Excel: ${synced} titoli`);
         const store = await fetchCostBasisStore(targetPortfolioId);
         const { applied } = applyCostBasisToPositions(positions, store, dynamicAliases);
-        if (applied > 0) console.log(`[CostBasis] prezzo medio fiscale applicato a ${applied} posizioni dallo store`);
+        if (applied > 0) console.log(`[CostBasis] PMC applicato a ${applied} posizioni dallo store`);
 
-        // Flussi CSV senza store: le posizioni restano senza PMC e nessuno lo
-        // segnala. Il PMC iniziale va caricato una volta per portafoglio dal
-        // vecchio Excel, altrimenti P&L e prezzo di carico restano vuoti.
         const needingPmc = positions.filter(
           p => ['stock', 'etf', 'derivative'].includes(p.asset_type) && p.avg_cost == null,
         ).length;
         if (needingPmc > 0 && synced === 0) {
           toast.warning('PMC iniziale mancante', {
-            description: `${needingPmc} posizioni senza prezzo medio di carico. Carica una volta il vecchio file Excel con "Carica PMC" per questo portafoglio: dai movimenti successivi il PMC si aggiorna da solo.`,
+            description: `${needingPmc} posizioni senza prezzo medio di carico nel file Excel.`,
             duration: 12000,
           });
         }
@@ -323,21 +220,7 @@ export function FileUploader() {
         .filter(v => v.restricted)
         .reduce((s, v) => s + v.value, 0);
 
-      // GP dai flussi CSV: depositi "08..." (titoli) + conti "B0..." (liquidità)
-      const gpHoldingsFromCsv = parsed.flatMap(p => p.gpHoldings || []);
-      const seenGpCash = new Map<string, number>();
-      for (const p of parsed) {
-        for (const acc of (p.gpCashAccounts || [])) {
-          const id = (acc.accountId || '').trim();
-          if (id && !seenGpCash.has(id)) seenGpCash.set(id, acc.value);
-        }
-      }
-      const gpCashFromCsv = Array.from(seenGpCash.values()).reduce((s, v) => s + v, 0);
-      const hasGpFromCsv = shouldRefreshGpSnapshot(parsed);
-      const hasGpTitoliSource = parsed.some(p => p.gpSnapshotPresent);
-      const hasPositionsSource = shouldRefreshPositionsSnapshot(parsed);
-
-      if (positions.length === 0 && !hasGpTitoliSource && !hasPositionsSource) {
+      if (positions.length === 0) {
         toast.error('Nessuna posizione trovata');
         return;
       }
@@ -364,70 +247,12 @@ export function FileUploader() {
         console.error('[FileUploader] restricted_cash_value non salvata:', restrictedErr);
       }
 
-      // GP dai flussi CSV: sostituisce le holdings e aggiorna i totali PRIMA
-      // dello snapshot, così saveFullSnapshot congela la GP aggiornata.
-      if (hasGpFromCsv) {
-        const gpCashHoldings = gpCashFromCsv !== 0
-          ? [{
-              asset_type: 'cash' as const,
-              description: 'Liquidità GP',
-              quantity: 0,
-              market_value: gpCashFromCsv,
-              price: null,
-              currency: 'EUR',
-              exchange_rate: 1,
-              weight_pct: null,
-              ticker_code: null,
-              price_date: snapshotDate,
-            }]
-          : [];
-        const allGpHoldings = [...gpHoldingsFromCsv, ...gpCashHoldings];
-        const gpTotalValue = allGpHoldings.reduce((s, h) => s + (h.market_value || 0), 0);
-
-        const { error: gpDeleteError } = await supabase
-          .from('gp_holdings')
-          .delete()
-          .eq('portfolio_id', targetPortfolioId);
-        if (gpDeleteError) {
-          console.error('[FileUploader] Errore cancellazione GP precedente:', gpDeleteError.message);
-        } else {
-          const gpInsertResult = allGpHoldings.length > 0
-            ? await supabase.from('gp_holdings').insert(
-                allGpHoldings.map(h => ({
-                  portfolio_id: targetPortfolioId,
-                  asset_type: h.asset_type,
-                  description: h.description,
-                  quantity: h.quantity,
-                  market_value: h.market_value,
-                  price: h.price,
-                  currency: h.currency,
-                  exchange_rate: h.exchange_rate,
-                  weight_pct: h.weight_pct,
-                  ticker_code: h.ticker_code,
-                  price_date: h.price_date,
-                }))
-              )
-            : { error: null };
-          if (gpInsertResult.error) {
-            console.error('[FileUploader] Errore inserimento GP da CSV:', gpInsertResult.error.message);
-          } else {
-            await supabase.from('portfolios').update({
-              gp_total_value: gpTotalValue,
-              gp_cash_value: gpCashFromCsv,
-            }).eq('id', targetPortfolioId);
-            console.log(`[FileUploader] GP da CSV: ${allGpHoldings.length} holdings aggiornate`);
-          }
-        }
-      }
-
       if (!error) {
         await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       }
 
-      if (positions.length > 0 || hasPositionsSource) {
-        await updatePositionsAsync({ positions, targetPortfolioId });
-      }
+      await updatePositionsAsync({ positions, targetPortfolioId });
       setUploadSuccess(true);
 
       if (snapshotDate) {
@@ -436,7 +261,7 @@ export function FileUploader() {
             portfolioId: targetPortfolioId,
             snapshotDate,
             cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
-            gpRefreshedInThisUpload: hasGpFromCsv,
+            gpRefreshedInThisUpload: false,
           });
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
@@ -454,9 +279,8 @@ export function FileUploader() {
       refreshStrategyCacheForPortfolio(targetPortfolioId);
 
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
-      const filesInfo = snapshotFiles.length > 1 ? ` da ${snapshotFiles.length} file` : '';
       toast.success('Portfolio caricato!', {
-        description: `${positions.length} posizioni importate${filesInfo}${dateInfo}.`,
+        description: `${positions.length} posizioni importate${dateInfo}.`,
       });
 
       const hasDerivatives = positions.some(p => p.asset_type === 'derivative');
@@ -471,7 +295,7 @@ export function FileUploader() {
     }
   }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient, effectiveUserId, navigate]);
 
-  // ============ VECCHIO EXCEL GP ============
+  // ============ GP EXCEL ============
   const onDropGP = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
@@ -544,7 +368,7 @@ export function FileUploader() {
 
       setUploadGPSuccess(true);
       toast.success('Gestione Patrimoniale caricata!', {
-        description: `${holdings.length} posizioni importate dal vecchio Excel GP.`,
+        description: `${holdings.length} posizioni importate dal file Excel GP.`,
       });
     } catch (error) {
       console.error('[FileUploader] Errore parser GP legacy:', error instanceof Error ? error.message : 'errore sconosciuto');
@@ -557,14 +381,12 @@ export function FileUploader() {
   }, [portfolio?.id, portfolio?.snapshot_date, portfolio?.cash_value, queryClient]);
 
   const portfolioDropzone = useDropzone({
-    onDrop: uploadMode === 'legacy' && legacyTarget === 'gp' ? onDropGP : onDropPortfolio,
-    accept: uploadMode === 'csv'
-      ? { 'text/csv': ['.csv'] }
-      : {
-          'application/vnd.ms-excel': ['.xls'],
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-        },
-    maxFiles: uploadMode === 'csv' ? 4 : 1,
+    onDrop: excelTarget === 'gp' ? onDropGP : onDropPortfolio,
+    accept: {
+      'application/vnd.ms-excel': ['.xls'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    },
+    maxFiles: 1,
     disabled: isProcessing || isProcessingGP,
   });
 
@@ -580,59 +402,33 @@ export function FileUploader() {
       if (isProcessing || isProcessingGP) return;
       const files = event.clipboardData?.files;
       if (!files || files.length === 0) return; // paste di solo testo: non intercettare
-      const supported = filterSupportedUploadFiles(Array.from(files), uploadMode);
+      const supported = filterSupportedUploadFiles(Array.from(files), 'legacy');
       if (supported.length === 0) {
-        toast.error(uploadMode === 'csv'
-          ? 'Nessun file CSV riconosciuto negli appunti'
-          : 'Nessun file Excel riconosciuto negli appunti');
+        toast.error('Nessun file Excel riconosciuto negli appunti');
         return;
       }
       event.preventDefault();
-      if (uploadMode === 'legacy' && legacyTarget === 'gp') {
+      if (excelTarget === 'gp') {
         onDropGP(supported.slice(0, 1));
       } else {
-        onDropPortfolio(uploadMode === 'csv' ? supported : supported.slice(0, 1));
+        onDropPortfolio(supported.slice(0, 1));
       }
     };
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, [isProcessing, isProcessingGP, legacyTarget, onDropGP, onDropPortfolio, uploadMode]);
+  }, [isProcessing, isProcessingGP, excelTarget, onDropGP, onDropPortfolio]);
 
   return (
     <Card className="border-dashed border-2 border-border hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
-        <div className="flex justify-end mb-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={switchUploadMode}
-            disabled={isProcessing || isProcessingGP}
-          >
-            <ArrowLeftRight className="h-3.5 w-3.5" />
-            {uploadMode === 'csv' ? 'Usa Excel + GP' : 'Torna ai CSV'}
-          </Button>
-        </div>
-
-        {uploadMode === 'csv' ? (
-          <>
-            <p className="text-xs text-muted-foreground text-center mb-3 px-2">
-              Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
-            </p>
-            <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
-              Trascinare l'allegato direttamente dal client email spesso non funziona. Salva prima gli allegati in una cartella, poi trascinali da lì o clicca qui per selezionarli.
-            </p>
-          </>
-        ) : (
-          <>
+        <>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <Button
                 type="button"
                 size="sm"
-                variant={legacyTarget === 'portfolio' ? 'default' : 'outline'}
+                variant={excelTarget === 'portfolio' ? 'default' : 'outline'}
                 onClick={() => {
-                  setLegacyTarget('portfolio');
+                  setExcelTarget('portfolio');
                   setUploadSuccess(false);
                 }}
                 disabled={isProcessing || isProcessingGP}
@@ -642,9 +438,9 @@ export function FileUploader() {
               <Button
                 type="button"
                 size="sm"
-                variant={legacyTarget === 'gp' ? 'default' : 'outline'}
+                variant={excelTarget === 'gp' ? 'default' : 'outline'}
                 onClick={() => {
-                  setLegacyTarget('gp');
+                  setExcelTarget('gp');
                   setUploadGPSuccess(false);
                 }}
                 disabled={isProcessing || isProcessingGP}
@@ -653,7 +449,7 @@ export function FileUploader() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground text-center mb-3 px-2">
-              Parser storici separati. Il Portfolio Excel importa anche il prezzo medio fiscale presente nel file; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
+              Il Portfolio Excel importa anche il prezzo medio fiscale; il GP Excel aggiorna soltanto la Gestione Patrimoniale.
             </p>
             <div className="mb-3 flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-xs text-amber-950 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -665,8 +461,7 @@ export function FileUploader() {
             <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
               Il file viene elaborato localmente nel browser e non viene conservato. Sul Portfolio Excel restano attive le esclusioni dei conti liquidità configurate per l'utente.
             </p>
-          </>
-        )}
+        </>
         <div
           {...portfolioDropzone.getRootProps()}
           className={`flex flex-col items-center justify-center gap-3 py-6 cursor-pointer rounded-lg transition-colors ${
@@ -675,14 +470,12 @@ export function FileUploader() {
         >
           <input {...portfolioDropzone.getInputProps()} />
           <DropzoneContent
-            isProcessing={legacyTarget === 'gp' && uploadMode === 'legacy' ? isProcessingGP : isProcessing}
-            uploadSuccess={legacyTarget === 'gp' && uploadMode === 'legacy' ? uploadGPSuccess : uploadSuccess}
+            isProcessing={excelTarget === 'gp' ? isProcessingGP : isProcessing}
+            uploadSuccess={excelTarget === 'gp' ? uploadGPSuccess : uploadSuccess}
             isDragActive={portfolioDropzone.isDragActive}
-            label={uploadMode === 'csv'
-              ? 'Carica Portfolio (fino a 4 CSV)'
-              : legacyTarget === 'portfolio'
-                ? 'Carica vecchio Portfolio Excel'
-                : 'Carica vecchio Excel GP'}
+            label={excelTarget === 'portfolio'
+              ? 'Carica Portfolio Excel'
+              : 'Carica Excel GP'}
           />
         </div>
       </CardContent>
