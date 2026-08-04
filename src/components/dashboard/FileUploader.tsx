@@ -145,8 +145,8 @@ export function FileUploader() {
       // ---- PMC ----
       // 1. Se l'upload contiene PMC (vecchio file Excel): sincronizza lo store
       //    (fonte 'excel') — è il riallineamento.
-      // 2. Applica lo store alle posizioni senza PMC (flussi CSV): i saldi
-      //    banca non includono più il prezzo di carico.
+      // 2. Applica lo store alle posizioni senza PMC, così i dati persistiti
+      //    restano coerenti con il prezzo medio fiscale importato.
       try {
         const dynamicAliases = await fetchDynamicAliases();
 
