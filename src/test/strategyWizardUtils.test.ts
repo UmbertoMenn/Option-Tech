@@ -488,3 +488,41 @@ describe('autoClassify — dual DRCC on same underlying: distinct stock slots', 
     expect(muStrategies[0].positions.some(p => p.id === soldCall1.id)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REGRESSIONE (maurog, agosto 2026): slot da 100 azioni fantasma
+// ---------------------------------------------------------------------------
+describe('autoClassify — nessuno slot azionario inventato', () => {
+  it('100 azioni + 2 call vendute: SOLO una strategia possiede le azioni, nessuno slot', () => {
+    // Bug: senza tracking del consumo azioni, entrambe le call diventavano
+    // covered call sulla stessa azione e il post-process creava slot_0 e
+    // slot_1 da 100 azioni ciascuno (200 azioni inventate da 100 reali).
+    const stock = makeStock({ description: 'AZ.ALIBABA GROUP HOLDING LTD', quantity: 100 });
+    const c1 = makeOption({ underlying: 'ALIBABA GROUP HOLDING LTD', option_type: 'call', strike_price: 145, expiry_date: '2026-08-21', quantity: -1 });
+    const c2 = makeOption({ underlying: 'ALIBABA GROUP HOLDING LTD', option_type: 'call', strike_price: 160, expiry_date: '2026-12-18', quantity: -1 });
+
+    const strategies = autoClassify([c1, c2], [stock, c1, c2]);
+
+    const stockLegs = strategies.flatMap(s => s.positions.filter(p => p.asset_type === 'stock'));
+    // L'azione compare in UNA sola strategia
+    expect(stockLegs).toHaveLength(1);
+    // Nessuno slot virtuale: 100 azioni non si dividono
+    expect(stockLegs[0].id).not.toMatch(/__slot_\d+$/);
+    expect(stockLegs[0].quantity).toBe(100);
+    // Le azioni totali rappresentate non superano quelle reali
+    const totalShares = stockLegs.reduce((s, p) => s + p.quantity, 0);
+    expect(totalShares).toBeLessThanOrEqual(100);
+  });
+
+  it('300 azioni + 2 strategie sulla stessa azione: slot limitati ai lotti reali', () => {
+    const stock = makeStock({ description: 'AZ.GOOGLE', quantity: 200 });
+    const c1 = makeOption({ underlying: 'GOOGLE', option_type: 'call', strike_price: 200, expiry_date: '2026-08-21', quantity: -1 });
+    const c2 = makeOption({ underlying: 'GOOGLE', option_type: 'call', strike_price: 220, expiry_date: '2026-12-18', quantity: -1 });
+
+    const strategies = autoClassify([c1, c2], [stock, c1, c2]);
+    const stockLegs = strategies.flatMap(s => s.positions.filter(p => p.asset_type === 'stock'));
+    const totalShares = stockLegs.reduce((s, p) => s + p.quantity, 0);
+    // 200 azioni reali → mai più di 200 azioni rappresentate negli slot
+    expect(totalShares).toBeLessThanOrEqual(200);
+  });
+});

@@ -35,6 +35,23 @@ export function useArchiveUnderlying() {
       portfolioId: string; underlyingKey: string; displayName: string;
     }) => {
       if (!user) throw new Error('Not authenticated');
+      // Idempotente: rimuovi eventuali righe già presenti per lo stesso titolo
+      // (stessa chiave O stesso display name). Le versioni precedenti del
+      // canonicalizzatore salvavano chiavi diverse per lo stesso sottostante,
+      // producendo voci doppie/triple in archivio. Due delete separate: la
+      // sintassi .or() di PostgREST si rompe con virgole nei valori.
+      await supabase
+        .from('archived_underlyings' as any)
+        .delete()
+        .eq('user_id', user.id)
+        .eq('portfolio_id', portfolioId)
+        .eq('underlying_key', underlyingKey);
+      await supabase
+        .from('archived_underlyings' as any)
+        .delete()
+        .eq('user_id', user.id)
+        .eq('portfolio_id', portfolioId)
+        .eq('display_name', displayName);
       const { error } = await supabase
         .from('archived_underlyings' as any)
         .insert({

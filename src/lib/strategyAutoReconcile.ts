@@ -60,6 +60,19 @@
  *
  *  5. Più config dello stesso tipo POSSONO coesistere sullo stesso
  *     sottostante.
+ *
+ *  6. OVERRIDE (config_locked) — semantica di PRIORITÀ, non di blocco
+ *     (concordata con l'utente, agosto 2026): una config marcata come
+ *     override partecipa normalmente alla riconciliazione (roll, riduzioni,
+ *     chiusure, aggiunte), ma:
+ *       a) il suo strategy_type NON viene mai riclassificato (Regola 4
+ *          saltata) — la classificazione scelta dall'utente ha priorità;
+ *       b) quando una gamba nuova cerca una config di destinazione, le
+ *          config override vengono preferite rispetto alle auto-generate;
+ *       c) il flag config_locked viene preservato nel set risultante.
+ *     Escludere le config locked dalla riconciliazione (comportamento
+ *     precedente) faceva apparire le loro gambe come "new" → config
+ *     duplicate sullo stesso sottostante.
  */
 import { StrategyConfiguration, PositionSignature, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
 import { ReconciliationItem } from '@/lib/strategyReconciliation';
@@ -242,16 +255,11 @@ export function autoReconcileStrategies(
   underlyingPrices?: Record<string, { price?: number | null }>,
   dynamicAliases?: Map<string, string> | Record<string, string>,
 ): AutoReconcileResult {
-  const editableConfigs = configs.filter(c => !c.config_locked);
-  const lockedConfigs = configs.filter(c => c.config_locked);
+  // Regola 6: le config override (config_locked) partecipano come le altre;
+  // il lock incide solo su retype (saltato) e priorità di destinazione.
+  const editableConfigs = configs;
   const changes: string[] = [];
   const unresolvedItems: ReconciliationItem[] = [];
-  if (configs.length > 0 && editableConfigs.length === 0) {
-    return { resolvedConfigs: null, changes, unresolvedItems, hasAutoChanges: false };
-  }
-  const lockedUnderlyingKeys = new Set(
-    lockedConfigs.map(config => normalizeUnderlying(config.underlying, null, dynamicAliases)),
-  );
 
   // Config di lavoro: mappa id -> firme mutabili (deep copy)
   const workingSigs = new Map<string, (PositionSignature | null)[]>();
@@ -304,6 +312,7 @@ export function autoReconcileStrategies(
       for (const sid of c.linked_stock_slot_ids || []) alreadyLinkedStockIds.add(sid);
     }
     for (const c of editableConfigs) {
+      if (c.config_locked) continue; // override: mai dissolto/rimappato dalla riparazione
       if (c.linked_stock_id || (c.linked_stock_slot_ids || []).length > 0) continue;
       const sigs = ((c.position_signatures as unknown as PositionSignature[]) || []);
       if (sigs.length === 0) continue;
@@ -352,10 +361,6 @@ export function autoReconcileStrategies(
   // ------------------------------------------------------------------
   const itemsByUnderlying = new Map<string, ReconciliationItem[]>();
   for (const item of items) {
-    if (
-      item.config.config_locked ||
-      lockedUnderlyingKeys.has(normalizeUnderlying(item.underlying, null, dynamicAliases))
-    ) continue;
     const key = normalizeUnderlying(item.underlying, resolveLinkedStock(item.config), dynamicAliases);
     if (!itemsByUnderlying.has(key)) itemsByUnderlying.set(key, []);
     itemsByUnderlying.get(key)!.push(item);
@@ -503,6 +508,9 @@ export function autoReconcileStrategies(
           is_synthetic: false,
           linked_stock_id: linkedStockId,
           linked_stock_slot_ids: [],
+          // CRITICO: esplicito, perché upsertBatch fa default config_locked→true.
+          // Una config creata dalla riconciliazione automatica NON è mai un override.
+          config_locked: false,
         };
         newConfigs.push(params);
         runCreated.push({ underlyingKey, params });
@@ -517,8 +525,14 @@ export function autoReconcileStrategies(
         changes.push(`${target.underlying} (${target.strategy_type}): aggiunta gamba ${sigLabel(sig)}${extra ? ` — ${extra}` : ''}`);
         anyChange = true;
       };
-      const findExistingOfType = (...types: string[]) =>
-        configsForUnderlying.find(c => types.includes(repairedTypes.get(c.id) || c.strategy_type));
+      // Regola 6b: a parità di tipo, le config override (config_locked)
+      // hanno priorità come destinazione delle gambe nuove.
+      const findExistingOfType = (...types: string[]) => {
+        const matching = configsForUnderlying.filter(
+          c => types.includes(repairedTypes.get(c.id) || c.strategy_type),
+        );
+        return matching.find(c => c.config_locked) || matching[0];
+      };
       const findRunCreatedOfType = (...types: string[]) =>
         runCreated.find(rc => rc.underlyingKey === underlyingKey && types.includes(rc.params.strategy_type))?.params;
 
@@ -666,7 +680,8 @@ export function autoReconcileStrategies(
     const effectiveLinkedStockId = repairedLinkedStock.get(c.id) ?? c.linked_stock_id;
     const hasLinkedStock = !!effectiveLinkedStockId || (c.linked_stock_slot_ids || []).length > 0;
     let strategyType = c.strategy_type;
-    if (touchedConfigIds.has(c.id)) {
+    // Regola 6a: il tipo di una config override ha priorità → niente retype.
+    if (touchedConfigIds.has(c.id) && !c.config_locked) {
       const newType = classifyConfigType(finalSigs, hasLinkedStock, c.strategy_type);
       if (newType !== c.strategy_type) {
         changes.push(`${c.underlying}: strategia riclassificata ${c.strategy_type} → ${newType}`);
@@ -681,20 +696,7 @@ export function autoReconcileStrategies(
       linked_stock_id: effectiveLinkedStockId,
       linked_stock_slot_ids: c.linked_stock_slot_ids || [],
       sort_order: c.sort_order,
-      config_locked: false,
-      override_canceled_at: c.override_canceled_at,
-    });
-  }
-  for (const c of lockedConfigs) {
-    resolvedConfigs.push({
-      underlying: c.underlying,
-      strategy_type: c.strategy_type,
-      position_signatures: c.position_signatures,
-      is_synthetic: c.is_synthetic,
-      linked_stock_id: c.linked_stock_id,
-      linked_stock_slot_ids: c.linked_stock_slot_ids || [],
-      sort_order: c.sort_order,
-      config_locked: true,
+      config_locked: !!c.config_locked, // Regola 6c: il flag override si conserva
       override_canceled_at: c.override_canceled_at,
     });
   }

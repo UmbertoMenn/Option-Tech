@@ -305,8 +305,8 @@ export function parsePortfolioData(rows: any[][], options?: PortfolioParseOption
       continue;
     }
     
-    // Detect header row
-    if (firstCell.includes('CODICE_VALORE') || firstCell.includes('ISIN') || firstCell === 'CONTO') {
+    // Detect header row — il vecchio formato derivati apre con "DESCRIZIONE ESTESA"
+    if (firstCell.includes('CODICE_VALORE') || firstCell.includes('ISIN') || firstCell === 'CONTO' || firstCell.startsWith('DESCRIZIONE')) {
       headerRow = row.map(cell => String(cell || '').toUpperCase());
       continue;
     }

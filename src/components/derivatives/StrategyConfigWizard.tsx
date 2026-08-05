@@ -423,12 +423,22 @@ export function autoClassify(
   }
   for (const [stockId, usedBy] of stockStrategyMap) {
     if (usedBy.length <= 1) continue; // single strategy — no splitting needed
+    // CAP: non inventare azioni. Gli slot da 100 assegnabili sono al massimo
+    // floor(quantità/100); le strategie in eccesso PERDONO la gamba azionaria
+    // (con 100 azioni e 2 strategie, solo la prima è realmente coperta).
+    const baseStock = usedBy[0].positions.find(p => p.id === stockId);
+    const totalShares = Math.abs(baseStock?.quantity || 0);
+    const maxSlots = Math.max(1, Math.floor(totalShares / 100));
     usedBy.forEach((strat, slotIdx) => {
-      strat.positions = strat.positions.map(p =>
-        (p.asset_type === 'stock' || p.asset_type === 'etf') && p.id === stockId
-          ? { ...p, id: `${stockId}__slot_${slotIdx}`, quantity: 100 }
-          : p,
-      );
+      if (slotIdx < maxSlots) {
+        strat.positions = strat.positions.map(p =>
+          (p.asset_type === 'stock' || p.asset_type === 'etf') && p.id === stockId
+            ? { ...p, id: `${stockId}__slot_${slotIdx}`, quantity: 100 }
+            : p,
+        );
+      } else {
+        strat.positions = strat.positions.filter(p => p.id !== stockId);
+      }
     });
   }
 
@@ -629,6 +639,37 @@ export function StrategyConfigWizard({
       dynamicAliases,
     );
   }, [open, derivatives, allPositions, archivedKeys, dynamicAliases]);
+
+  /** Archivio in chiave canonica → chiavi raw a DB. Le righe storiche possono
+   *  avere chiavi non canoniche (versioni precedenti del resolver): il vecchio
+   *  confronto per uguaglianza esatta riproponeva "Archivia" sullo stesso
+   *  titolo e accumulava righe doppie/triple in archivio. */
+  const archivedByCanonical = useMemo(() => {
+    const map = new Map<string, { rawKeys: string[]; displayName: string }>();
+    const source = archivedItems.length > 0
+      ? archivedItems
+      : archivedKeys.map(k => ({ key: k, displayName: k }));
+    for (const item of source) {
+      const canonical = canonicalKeyForText(item.key, dynamicAliases) || item.key;
+      if (!map.has(canonical)) map.set(canonical, { rawKeys: [], displayName: item.displayName });
+      map.get(canonical)!.rawKeys.push(item.key);
+    }
+    return map;
+  }, [archivedItems, archivedKeys, dynamicAliases]);
+
+  const isGroupArchived = useCallback(
+    (groupKey: string) => archivedByCanonical.has(groupKey),
+    [archivedByCanonical],
+  );
+
+  /** Ripristina un sottostante rimuovendo TUTTE le chiavi raw archiviate che
+   *  gli corrispondono (anche i duplicati legacy), in un solo click. */
+  const unarchiveGroup = useCallback((canonicalKey: string) => {
+    if (!onUnarchive) return;
+    const entry = archivedByCanonical.get(canonicalKey);
+    if (!entry) { onUnarchive(canonicalKey); return; }
+    for (const rawKey of entry.rawKeys) onUnarchive(rawKey);
+  }, [archivedByCanonical, onUnarchive]);
 
   const markGroupTouched = useCallback((groupKey: string) => {
     setTouchedGroupKeys(prev => {
@@ -970,7 +1011,9 @@ export function StrategyConfigWizard({
 
   const handleAutoClassify = () => {
     startTransition(() => {
-      const auto = autoClassify(derivatives, allPositions, archivedKeys);
+      // CRITICO: stessi dynamicAliases usati da autoClassifiedConfigs, altrimenti
+      // matchesAutoClassify fallisce al salvataggio e tutto diventa override.
+      const auto = autoClassify(derivatives, allPositions, archivedKeys, dynamicAliases);
 
       // If autoClassify assigned virtual stock slots (two or more strategies sharing
       // the same stock), register those base stock IDs as split so effectivePositions
@@ -993,14 +1036,14 @@ export function StrategyConfigWizard({
   };
 
   /** Resets the wizard state for a specific underlying group back to auto-classification
-   *  and immediately cancels the override in the DB (if onCancelOverride is provided). */
-  const handleCancelOverrideForGroup = (group: UnderlyingGroup, configId: string) => {
+   *  and immediately cancels ALL overrides of the group in the DB (single click). */
+  const handleCancelOverrideForGroup = (group: UnderlyingGroup, configIds: string[]) => {
     startTransition(() => {
       const groupPosIds = new Set(group.positions.map(p => p.id));
 
       // Auto-classify only the derivatives belonging to this group
       const groupDerivatives = group.positions.filter(p => p.asset_type === 'derivative');
-      const autoGroupStrategies = autoClassify(groupDerivatives, allPositions, archivedKeys);
+      const autoGroupStrategies = autoClassify(groupDerivatives, allPositions, archivedKeys, dynamicAliases);
 
       // If autoClassify assigned virtual stock slots, register the base IDs as split
       const newSplitIds = new Set<string>();
@@ -1022,8 +1065,10 @@ export function StrategyConfigWizard({
       ]);
       setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(group.key); return next; });
     });
-    // Persist the unlock to the DB immediately
-    if (onCancelOverride) onCancelOverride(configId);
+    // Persist the unlock to the DB immediately — ALL overrides of the group
+    if (onCancelOverride) {
+      for (const id of configIds) onCancelOverride(id);
+    }
   };
 
   const handleSave = async () => {
@@ -1126,9 +1171,9 @@ export function StrategyConfigWizard({
   const filteredGroups = useMemo(() => {
     let groups: UnderlyingGroup[];
     if (groupFilter === 'archived') {
-      groups = underlyingGroups.filter(g => archivedKeys.includes(g.key));
+      groups = underlyingGroups.filter(g => isGroupArchived(g.key));
     } else {
-      groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+      groups = underlyingGroups.filter(g => !isGroupArchived(g.key));
       if (groupFilter === 'unassigned') {
         groups = groups.filter(g =>
           g.positions.some(p => !assignedIds.has(p.id)) || touchedGroupKeys.has(g.key)
@@ -1145,7 +1190,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds, touchedGroupKeys]);
+  }, [underlyingGroups, searchQuery, isGroupArchived, groupFilter, assignedIds, touchedGroupKeys]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
@@ -1156,9 +1201,9 @@ export function StrategyConfigWizard({
   const totalStrategies = strategies.length;
   const archivedPosIds = useMemo(() => {
     const ids = new Set<string>();
-    underlyingGroups.filter(g => archivedKeys.includes(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
+    underlyingGroups.filter(g => isGroupArchived(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
     return ids;
-  }, [underlyingGroups, archivedKeys]);
+  }, [underlyingGroups, isGroupArchived]);
   const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
@@ -1292,9 +1337,9 @@ export function StrategyConfigWizard({
                             )}
                           </div>
                           {(() => {
-                            // Find a locked config for this group that is a genuine override
-                            // (i.e. differs from auto-classification)
-                            const lockedOverride = existingConfigs.find(c => {
+                            // All locked configs for this group that are genuine overrides
+                            // (i.e. differ from auto-classification) — one click cancels all
+                            const lockedOverrides = existingConfigs.filter(c => {
                               if (!c.config_locked) return false;
                               const configKey = canonicalKeyForText(c.underlying, dynamicAliases);
                               if (configKey !== group.key) return false;
@@ -1308,7 +1353,7 @@ export function StrategyConfigWizard({
                                 dynamicAliases,
                               );
                             });
-                            if (lockedOverride) {
+                            if (lockedOverrides.length > 0) {
                               return (
                                 <Button
                                   variant="outline"
@@ -1316,15 +1361,15 @@ export function StrategyConfigWizard({
                                   className="h-6 text-[11px] px-2 border-orange-400/60 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleCancelOverrideForGroup(group, lockedOverride.id);
+                                    handleCancelOverrideForGroup(group, lockedOverrides.map(c => c.id));
                                   }}
                                 >
                                   <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                                  Annulla override
+                                  Annulla override{lockedOverrides.length > 1 ? ` (${lockedOverrides.length})` : ''}
                                 </Button>
                               );
                             }
-                            if (archivedKeys.includes(group.key) && onUnarchive) {
+                            if (isGroupArchived(group.key) && onUnarchive) {
                               return (
                                 <Button
                                   variant="ghost"
@@ -1332,7 +1377,7 @@ export function StrategyConfigWizard({
                                   className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onUnarchive(group.key);
+                                    unarchiveGroup(group.key);
                                   }}
                                 >
                                   <RotateCcw className="w-3.5 h-3.5 mr-1" />
@@ -1660,24 +1705,26 @@ export function StrategyConfigWizard({
                 </Collapsible>
               );
             })}
-            {/* Archived section */}
-            {archivedItems.length > 0 && onUnarchive && (
+            {/* Archived section — deduplicata per chiave canonica (le righe
+                legacy con chiavi diverse per lo stesso titolo appaiono una volta
+                sola; Ripristina le rimuove tutte) */}
+            {archivedByCanonical.size > 0 && onUnarchive && (
               <Collapsible open={archiveOpen} onOpenChange={setArchiveOpen}>
                 <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                   {archiveOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   <Archive className="w-4 h-4" />
-                  Archivio ({archivedItems.length} sottostant{archivedItems.length === 1 ? 'e' : 'i'})
+                  Archivio ({archivedByCanonical.size} sottostant{archivedByCanonical.size === 1 ? 'e' : 'i'})
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="space-y-1 pl-6 pt-1">
-                    {archivedItems.map(item => (
-                      <div key={item.key} className="flex items-center justify-between py-1.5 px-3 rounded-md border border-dashed border-border">
-                        <span className="text-xs font-medium uppercase">{item.displayName}</span>
+                    {Array.from(archivedByCanonical.entries()).map(([canonicalKey, entry]) => (
+                      <div key={canonicalKey} className="flex items-center justify-between py-1.5 px-3 rounded-md border border-dashed border-border">
+                        <span className="text-xs font-medium uppercase">{entry.displayName}</span>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 text-[11px] px-2"
-                          onClick={() => onUnarchive(item.key)}
+                          onClick={() => unarchiveGroup(canonicalKey)}
                         >
                           <RotateCcw className="w-3.5 h-3.5 mr-1" />
                           Ripristina

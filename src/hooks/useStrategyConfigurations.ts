@@ -116,7 +116,7 @@ export function useStrategyConfigurations() {
           linked_stock_id: params.linked_stock_id || null,
           linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
           sort_order: params.sort_order ?? 0,
-          config_locked: params.config_locked ?? true,
+          config_locked: params.config_locked ?? false,
           override_canceled_at: params.override_canceled_at ?? null,
         })
         .select().single();
@@ -157,7 +157,7 @@ export function useStrategyConfigurations() {
         linked_stock_id: c.linked_stock_id || null,
         linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
         sort_order: c.sort_order ?? index,
-        config_locked: c.config_locked ?? true,
+        config_locked: c.config_locked ?? false,
         override_canceled_at: c.override_canceled_at ?? null,
       }));
       

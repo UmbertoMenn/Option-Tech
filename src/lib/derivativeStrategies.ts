@@ -1009,6 +1009,12 @@ function categorizeDerivativesImpl(
   // ============ STEP 1: Find Covered Calls ============
   const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
 
+  // BUGFIX (slot fantasma): le azioni consumate da una covered call NON sono
+  // riutilizzabili dalle call vendute successive sullo stesso sottostante.
+  // Senza questo tracking, con 100 azioni e 2 call vendute nascevano 2 CC
+  // entrambe "coperte" dalla stessa azione (→ slot da 100 inventati a valle).
+  const stockSharesUsed = new Map<string, number>();
+
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 
     underlying: c.underlying, 
@@ -1028,13 +1034,15 @@ function categorizeDerivativesImpl(
     
     if (underlyingStock && underlyingStock.quantity > 0) {
       const contractsSold = Math.abs(call.quantity);
-      const sharesOwned = underlyingStock.quantity;
+      const alreadyUsedShares = stockSharesUsed.get(underlyingStock.id) || 0;
+      const sharesOwned = Math.max(0, underlyingStock.quantity - alreadyUsedShares);
       
       const contractsCoverable = Math.floor(sharesOwned / 100);
       const contractsCovered = Math.min(contractsSold, contractsCoverable);
       
       if (contractsCovered > 0) {
         const sharesCovered = contractsCovered * 100;
+        stockSharesUsed.set(underlyingStock.id, alreadyUsedShares + sharesCovered);
         const coveredRatio = contractsCovered / contractsSold;
         const scaleBy = (value: number | null | undefined, ratio: number) =>
           value == null ? value : value * ratio;

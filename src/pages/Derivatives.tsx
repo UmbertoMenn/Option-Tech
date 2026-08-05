@@ -621,11 +621,14 @@ export function Derivatives() {
     });
   }, [portfolio?.id, categories, underlyingPrices]);
 
-  // Reconciliation: compare saved configs vs current positions
+  // Reconciliation: compare saved configs vs current positions.
+  // Include anche le config override (config_locked): la nuova semantica è
+  // "priorità, non blocco" — escluderle faceva risultare le loro gambe come
+  // "new" e la riconciliazione creava config duplicate sullo stesso sottostante.
   const reconciliationItems = useMemo(() => {
     if (!hasConfigurations || strategyConfigs.length === 0 || positions.length === 0) return [];
     return reconcileConfigs(
-      strategyConfigs.filter(config => !config.config_locked),
+      strategyConfigs,
       positions,
       dynamicAliases,
     );

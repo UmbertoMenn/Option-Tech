@@ -47,7 +47,7 @@ function run(configs: StrategyConfiguration[], positions: Position[]) {
 }
 
 describe('autoReconcileStrategies — roll di una gamba (caso dominante)', () => {
-  it('non modifica una configurazione bloccata', () => {
+  it('config override (config_locked): il roll viene applicato, il tipo resta quello scelto e il flag si conserva', () => {
     const config = makeConfig({
       underlying: 'MU',
       strategy_type: 'naked_put',
@@ -58,8 +58,81 @@ describe('autoReconcileStrategies — roll di una gamba (caso dominante)', () =>
 
     const result = run([config], positions);
 
+    // Nuova semantica: l'override dà PRIORITÀ alla classificazione, non blocca
+    // la riconciliazione. Il roll P900→P960 deve essere applicato.
+    expect(result.hasAutoChanges).toBe(true);
+    expect(result.resolvedConfigs).toHaveLength(1);
+    const out = result.resolvedConfigs![0];
+    expect(out.position_signatures[0].strike).toBe(960);
+    expect(out.strategy_type).toBe('naked_put');
+    expect(out.config_locked).toBe(true);
+  });
+
+  it('config override: nessuna gamba della config appare come "new" → nessuna config duplicata', () => {
+    // Bug storico: escludere le config locked da reconcileConfigs faceva
+    // risultare le loro gambe come "new" e l'auto-reconcile creava naked_put
+    // duplicate sullo stesso sottostante (caso CRWV su maurog).
+    const config = makeConfig({
+      underlying: 'CRWV',
+      strategy_type: 'naked_put',
+      config_locked: true,
+      position_signatures: [{ option_type: 'put', strike: 60, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const positions = [makeOption({ underlying: 'CRWV', option_type: 'put', strike_price: 60, expiry_date: '2026-08-21', quantity: -1 })];
+
+    const result = run([config], positions);
+    // Posizione già coperta dalla firma della config locked: nessuna modifica
     expect(result.hasAutoChanges).toBe(false);
     expect(result.resolvedConfigs).toBeNull();
+  });
+
+  it('config override: gamba nuova preferisce la config override come destinazione e il tipo non viene riclassificato', () => {
+    const lockedCc = makeConfig({
+      underlying: 'BABA',
+      strategy_type: 'covered_call',
+      config_locked: true,
+      linked_stock_id: 'stock_baba',
+      position_signatures: [{ option_type: 'call', strike: 145, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const stock = { id: 'stock_baba', asset_type: 'stock', description: 'AZ.ALIBABA GROUP HOLDING LTD', ticker: 'BABA', quantity: 100 } as unknown as Position;
+    const positions = [
+      stock,
+      makeOption({ underlying: 'BABA', option_type: 'call', strike_price: 145, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'BABA', option_type: 'put', strike_price: 100, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const result = run([lockedCc], positions);
+    expect(result.hasAutoChanges).toBe(true);
+    const out = result.resolvedConfigs!.find(c => c.underlying === 'BABA');
+    expect(out).toBeDefined();
+    // La put comprata è confluita nella CC override…
+    expect(out!.position_signatures).toHaveLength(2);
+    // …ma il tipo NON è stato riclassificato (priorità all'override)
+    expect(out!.strategy_type).toBe('covered_call');
+    expect(out!.config_locked).toBe(true);
+  });
+
+  it('config nuove create dalla riconciliazione: config_locked esplicitamente false', () => {
+    // Bug storico: upsertBatch fa default config_locked→true; le config create
+    // dall'auto-reconcile senza flag esplicito diventavano override spuri.
+    const configs = [
+      makeConfig({
+        underlying: 'LRCX',
+        strategy_type: 'naked_put',
+        config_locked: false,
+        position_signatures: [{ option_type: 'put', strike: 230, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'LRCX', option_type: 'put', strike_price: 230, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'LRCX', option_type: 'put', strike_price: 250, expiry_date: '2026-08-21', quantity: -1 }),
+    ];
+
+    const result = run(configs, positions);
+    expect(result.hasAutoChanges).toBe(true);
+    const created = result.resolvedConfigs!.filter(c => c.position_signatures.some(s => s.strike === 250));
+    expect(created).toHaveLength(1);
+    expect(created[0].config_locked).toBe(false);
   });
 
   it('naked put MU: roll P900 → P960 stessa scadenza (stesso caso del file movimenti reale)', () => {
