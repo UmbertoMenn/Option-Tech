@@ -84,6 +84,53 @@ export function selectEntryStrike(
 }
 
 /**
+ * Diagnostica di un ingresso fallito: spiega con i numeri perché nessuno
+ * strike è valido, distinguendo il vincolo che ha effettivamente bloccato.
+ */
+export function diagnoseEntryFailure(
+  chain: PutQuote[],
+  expiration: string,
+  spot: number,
+  entry: ShortPutConfig['entry'],
+  fills: FillEngine,
+): string {
+  const candidates = chain.filter((q) => q.expiration === expiration && q.strike < spot && isTradeable(q));
+  if (candidates.length === 0) return `nessuna PUT OTM quotata su ${expiration}`;
+
+  const maxStrike = spot * (1 - entry.distancePct / 100);
+  const withinDistance = candidates.filter((q) => q.strike <= maxStrike);
+
+  if (entry.strikeMode === 'distance') {
+    return `nessuno strike ≤ ${maxStrike.toFixed(2)} (distanza ${entry.distancePct}% da spot ${spot.toFixed(2)})`;
+  }
+
+  const lo = entry.premiumTargetPct - entry.premiumTolerancePct;
+  const hi = entry.premiumTargetPct + entry.premiumTolerancePct;
+  const pct = (q: PutQuote) => premiumPct(fills.sellFill(q), q.strike);
+
+  // Modalità "premium": nessun vincolo di distanza, quindi è la sola finestra premio.
+  if (entry.strikeMode === 'premium') {
+    const best = candidates.reduce((a, b) => (Math.abs(pct(b) - entry.premiumTargetPct) < Math.abs(pct(a) - entry.premiumTargetPct) ? b : a));
+    return `nessuno strike con premio ${lo.toFixed(2)}–${hi.toFixed(2)}% su ${expiration}; il più vicino è ${best.strike} al ${pct(best).toFixed(2)}%`;
+  }
+
+  // Modalità "both": il caso tipico è il conflitto distanza ↔ premio.
+  if (withinDistance.length === 0) {
+    return `nessuno strike ≤ ${maxStrike.toFixed(2)} (distanza ${entry.distancePct}%) su ${expiration}`;
+  }
+  const bestByPremium = withinDistance.reduce((a, b) => (pct(b) > pct(a) ? b : a));
+  const bestPct = pct(bestByPremium);
+  if (bestPct < lo) {
+    const reachesTarget = candidates.filter((q) => pct(q) >= lo).sort((a, b) => b.strike - a.strike)[0];
+    const hint = reachesTarget
+      ? `; il premio ${lo.toFixed(2)}% si raggiunge solo da strike ${reachesTarget.strike} in su, cioè a ${(((spot - reachesTarget.strike) / spot) * 100).toFixed(1)}% dal prezzo`
+      : `; il premio ${lo.toFixed(2)}% non è raggiungibile su questa scadenza a nessuno strike`;
+    return `conflitto distanza/premio su ${expiration}: rispettando la distanza ${entry.distancePct}% il premio massimo è ${bestPct.toFixed(2)}% (strike ${bestByPremium.strike}), sotto il minimo richiesto ${lo.toFixed(2)}%${hint}`;
+  }
+  return `nessuno strike con premio ${lo.toFixed(2)}–${hi.toFixed(2)}% tra quelli a distanza ≥ ${entry.distancePct}% su ${expiration} (passo strike troppo largo per la tolleranza)`;
+}
+
+/**
  * Roll in discesa: scadenze mensili successive a quella corrente (ordine dato,
  * dalla più vicina), strike più basso del corrente e OTM (strike < spot),
  * premio netto in target ± tolleranza sul nuovo nozionale. Sulla prima

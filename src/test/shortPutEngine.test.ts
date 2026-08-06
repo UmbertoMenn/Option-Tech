@@ -260,6 +260,34 @@ describe('motore end-to-end su dati sintetici', () => {
     expect(last.equity).toBeLessThan(last.cash);
   });
 
+  it('con distanza 5% e premio 2%±0.2% non entra mai e spiega il conflitto (caso reale segnalato)', async () => {
+    const config = baseConfig({
+      basket: [{ symbol: 'CONF', contracts: 1 }],
+      startDate: '2025-01-02',
+      endDate: '2025-06-30',
+      entry: { strikeMode: 'both', distancePct: 5, premiumTargetPct: 2, premiumTolerancePct: 0.2, minDte: 10 },
+    });
+    const provider = new SyntheticMarketDataProvider(new Map([['CONF', params()]]), config.startDate, config.endDate);
+    const result = await runShortPutBacktest(config, provider, 'synthetic');
+
+    expect(result.bySymbol[0].entries).toBe(0);
+    expect(result.totalPL).toBe(0);
+    const skipped = result.events.filter((e) => e.type === 'entry_skipped');
+    expect(skipped.length).toBeGreaterThan(0);
+    // La diagnostica deve nominare il conflitto e riportare il premio massimo raggiungibile.
+    expect(skipped[0].description).toContain('conflitto distanza/premio');
+    expect(skipped[0].description).toMatch(/premio massimo è \d+\.\d+%/);
+
+    // Stessa configurazione con distanza ridotta: gli ingressi avvengono.
+    const relaxed = baseConfig({
+      ...config,
+      entry: { ...config.entry, distancePct: 1, premiumTolerancePct: 0.5 },
+    });
+    const provider2 = new SyntheticMarketDataProvider(new Map([['CONF', params()]]), relaxed.startDate, relaxed.endDate);
+    const result2 = await runShortPutBacktest(relaxed, provider2, 'synthetic');
+    expect(result2.bySymbol[0].entries).toBeGreaterThan(0);
+  });
+
   it('valida la configurazione e rifiuta paniere vuoto o regole incomplete', () => {
     const bad = baseConfig({ basket: [] });
     expect(validateShortPutConfig(bad)).not.toHaveLength(0);

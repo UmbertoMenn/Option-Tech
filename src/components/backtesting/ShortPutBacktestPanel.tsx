@@ -412,6 +412,22 @@ export function ShortPutBacktestPanel() {
         <span className="text-[11px] text-muted-foreground">Test motore: prezzi Black-Scholes, non storici.</span>
       </div>
 
+      {result && result.bySymbol.every((s) => s.entries === 0) && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 space-y-1.5">
+          <p className="text-sm font-semibold text-destructive">Nessun trade eseguito: i criteri di ingresso non sono mai soddisfatti</p>
+          {[...new Set(result.events.filter((e) => e.type === 'entry_skipped').map((e) => e.description))]
+            .slice(0, 3)
+            .map((d) => (
+              <p key={d} className="text-xs text-muted-foreground">{d}</p>
+            ))}
+          <p className="text-xs text-muted-foreground pt-0.5">
+            Con criterio "Entrambe" distanza e premio devono valere insieme: uno strike lontano dal prezzo incassa poco, quindi
+            distanze alte e premi alti si escludono a vicenda. Riduci la distanza OTM, abbassa il premio target, o allarga la
+            tolleranza.
+          </p>
+        </div>
+      )}
+
       {result && (
         <div className="space-y-3">
           <div className="grid grid-cols-3 md:grid-cols-6 gap-2">

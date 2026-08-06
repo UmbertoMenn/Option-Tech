@@ -18,6 +18,7 @@ import {
 } from './expiryCalendar';
 import {
   createFillEngine,
+  diagnoseEntryFailure,
   netPremiumPct,
   premiumPct,
   selectDownsideRoll,
@@ -320,7 +321,7 @@ export async function runShortPutBacktest(
               date,
               symbol: state.symbol,
               type: 'entry_skipped',
-              description: `Nessuno strike valido su ${expiration} (spot ${spot.toFixed(2)}): riprovo ai prossimi close`,
+              description: `Ingresso rimandato: ${diagnoseEntryFailure(chain, expiration, spot, config.entry, fills)}`,
               spot,
               cashFlow: 0,
               commissions: 0,
