@@ -27,8 +27,9 @@
  *     sopravvivono anche senza gambe (stock-only covered call).
  *
  *  3. GAMBE NUOVE (non-roll) — pipeline per sottostante:
- *     a. Tutti e 4 i ruoli (put V+C, call V+C) → UN'unica iron_condor
- *        (stessa scadenza) o double_diagonal.
+ *     a. Cerca sottostrutture valide da 4 gambe: iron_condor (stessa
+ *        scadenza) o double_diagonal. Eventuali gambe extra restano residue
+ *        e vengono classificate dopo (es. IC + naked put sullo stesso ticker).
  *     b. COPPIE contestuali venduta+comprata dello stesso tipo → config
  *        spread 1:1 per quantità (put_spread/call_spread, varianti
  *        diagonal se scadenze diverse). Residui alle regole per-gamba
@@ -233,10 +234,11 @@ export function classifyConfigType(
     return allSameExpiry(sigs) ? 'put_spread' : 'diagonal_put_spread';
   }
   if (has(soldCalls) && has(boughtCalls) && !has(soldPuts) && !has(boughtPuts)) {
+    if (allSameExpiry(sigs)) return 'call_spread';
     if (soldCalls.length === 1 && boughtCalls.length === 1 && boughtCalls[0].strike <= soldCalls[0].strike) {
       return 'covered_call';
     }
-    return allSameExpiry(sigs) ? 'call_spread' : 'diagonal_call_spread';
+    return 'diagonal_call_spread';
   }
   if (has(soldPuts) && !has(boughtPuts) && !has(soldCalls) && !has(boughtCalls)) return 'naked_put';
   if (has(boughtPuts) && !has(soldPuts) && !has(soldCalls) && !has(boughtCalls)) return 'protection';
@@ -529,6 +531,33 @@ export function autoReconcileStrategies(
         linkedStockId: string | null = null,
         isSynthetic = false,
       ): UpsertConfigParams => {
+        // Stessa strategia ⇔ stesse identiche opzioni/ruoli. La quantità è
+        // irrilevante per l'identità: se lo stesso pattern viene trovato una
+        // seconda volta, somma i contratti nella config già creata anziché
+        // creare un duplicato (regola CEG/APP/ALAB).
+        const structureKey = (xs: PositionSignature[]) => xs
+          .map(s => `${s.option_type}|${s.strike}|${s.expiry}|${s.quantity_sign}`)
+          .sort()
+          .join('::');
+        const key = structureKey(sigs);
+        const existing = newConfigs.find(c =>
+          c.strategy_type === strategyType &&
+          c.linked_stock_id === linkedStockId &&
+          !!c.is_synthetic === isSynthetic &&
+          structureKey(c.position_signatures) === key
+        );
+        if (existing) {
+          for (const incoming of sigs) {
+            const target = existing.position_signatures.find(s =>
+              s.option_type === incoming.option_type && s.strike === incoming.strike &&
+              s.expiry === incoming.expiry && s.quantity_sign === incoming.quantity_sign
+            );
+            if (target) target.quantity_abs = (target.quantity_abs || 1) + (incoming.quantity_abs || 1);
+          }
+          changes.push(`${underlyingLabel}: quantità integrata nella strategia ${strategyType} già riconosciuta (${sigs.map(sigLabel).join(', ')})`);
+          anyChange = true;
+          return existing;
+        }
         const params: UpsertConfigParams = {
           underlying: underlyingLabel,
           strategy_type: strategyType,
@@ -564,34 +593,90 @@ export function autoReconcileStrategies(
       const findRunCreatedOfType = (...types: string[]) =>
         runCreated.find(rc => rc.underlyingKey === underlyingKey && types.includes(rc.params.strategy_type))?.params;
 
-      // -- 3a: IC/DD SOLO quando le ali sono davvero esterne.  La vecchia
-      // regola accorpava qualunque combinazione put/call V+A in un'unica
-      // strategia, anche con una long call interna (caso AAPL).
-      const lc = { sp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === -1),
-                   bp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === 1),
-                   sc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === -1),
-                   bc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === 1) };
-      const oneOfEach = lc.sp.length === 1 && lc.bp.length === 1 && lc.sc.length === 1 && lc.bc.length === 1;
-      const fourLegSigs = oneOfEach ? leftovers.map(l => legToSig(l)) : [];
-      const fourLegType = oneOfEach ? detectFourLegSignatureType(fourLegSigs) : null;
-      if (fourLegType) {
-        createConfig(fourLegType, fourLegSigs);
-        leftovers.forEach(l => { l.qty = 0; });
-      } else {
-        // -- 3b: coppie venduta+comprata dello stesso tipo. Per le CALL:
-        // long strike > short strike = spread; altrimenti Covered Call sintetica.
+      // -- 3a: cerca IC/DD come SOTTOSTRUTTURE del ticker, non solo quando
+      // esistono esattamente quattro righe totali.  Una quinta gamba (MU:
+      // PUT settembre) deve restare fuori dall'IC e proseguire come residuo.
+      const findAndConsumeIronCondor = (): boolean => {
+        const scs = leftovers.filter(l => l.optionType === 'call' && l.quantitySign === -1 && l.qty > 0);
+        const bcs = leftovers.filter(l => l.optionType === 'call' && l.quantitySign === 1 && l.qty > 0);
+        const sps = leftovers.filter(l => l.optionType === 'put' && l.quantitySign === -1 && l.qty > 0);
+        const bps = leftovers.filter(l => l.optionType === 'put' && l.quantitySign === 1 && l.qty > 0);
+        for (const sc of scs) {
+          for (const sp of sps.filter(x => x.expiry === sc.expiry && x.strike < sc.strike)) {
+            const bc = bcs.find(x => x.expiry === sc.expiry && x.strike > sc.strike);
+            const bp = bps.find(x => x.expiry === sc.expiry && x.strike < sp.strike);
+            if (!bc || !bp) continue;
+            const q = Math.min(sc.qty, sp.qty, bc.qty, bp.qty);
+            if (q <= 0) continue;
+            createConfig('iron_condor', [legToSig(sp, q), legToSig(bp, q), legToSig(sc, q), legToSig(bc, q)]);
+            sc.qty -= q; sp.qty -= q; bc.qty -= q; bp.qty -= q;
+            return true;
+          }
+        }
+        return false;
+      };
+      while (findAndConsumeIronCondor()) { /* consume tutti gli IC validi */ }
+
+      const findAndConsumeDoubleDiagonal = (): boolean => {
+        const scs = leftovers.filter(l => l.optionType === 'call' && l.quantitySign === -1 && l.qty > 0);
+        const bcs = leftovers.filter(l => l.optionType === 'call' && l.quantitySign === 1 && l.qty > 0);
+        const sps = leftovers.filter(l => l.optionType === 'put' && l.quantitySign === -1 && l.qty > 0);
+        const bps = leftovers.filter(l => l.optionType === 'put' && l.quantitySign === 1 && l.qty > 0);
+        for (const sc of scs) {
+          const soldTime = expiryToTime(sc.expiry);
+          for (const sp of sps.filter(x => x.expiry === sc.expiry && x.strike < sc.strike)) {
+            const boughtExpiries = [...new Set(bcs
+              .filter(x => expiryToTime(x.expiry) > soldTime && x.strike > sc.strike)
+              .map(x => x.expiry))]
+              .sort((a, b) => expiryToTime(a) - expiryToTime(b));
+            for (const boughtExpiry of boughtExpiries) {
+              const bc = bcs.find(x => x.expiry === boughtExpiry && x.strike > sc.strike);
+              const bp = bps.find(x => x.expiry === boughtExpiry && x.strike < sp.strike);
+              if (!bc || !bp) continue;
+              const q = Math.min(sc.qty, sp.qty, bc.qty, bp.qty);
+              if (q <= 0) continue;
+              createConfig('double_diagonal', [legToSig(sp, q), legToSig(bp, q), legToSig(sc, q), legToSig(bc, q)]);
+              sc.qty -= q; sp.qty -= q; bc.qty -= q; bp.qty -= q;
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+      while (findAndConsumeDoubleDiagonal()) { /* consume tutti i DD validi */ }
+
+      // -- 3b: coppie venduta+comprata dello stesso tipo, una coppia
+      // strutturale alla volta. Stessa scadenza ha priorità assoluta; poi
+      // diagonal solo con long a scadenza successiva. La quantità determina
+      // quanto viene consumato, NON l'identità della strategia.
+      {
         for (const optType of ['put', 'call'] as const) {
           const sold = leftovers.filter(l => l.optionType === optType && l.quantitySign === -1 && l.qty > 0)
-            .sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
+            .sort((a, b) => expiryToTime(a.expiry) - expiryToTime(b.expiry) || a.strike - b.strike);
           const bought = leftovers.filter(l => l.optionType === optType && l.quantitySign === 1 && l.qty > 0)
-            .sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
-          let si = 0, bi = 0;
-          while (si < sold.length && bi < bought.length) {
-            const s = sold[si], b = bought[bi];
+            .sort((a, b) => expiryToTime(a.expiry) - expiryToTime(b.expiry) || a.strike - b.strike);
+          for (const s of sold) {
+            while (s.qty > 0) {
+              const candidates = bought.filter(b => {
+                if (b.qty <= 0) return false;
+                if (optType === 'put' && b.strike >= s.strike) return false;
+                if (optType === 'call' && b.strike === s.strike) return false;
+                if (b.expiry === s.expiry) return true;
+                return expiryToTime(b.expiry) > expiryToTime(s.expiry);
+              }).sort((a, b) => {
+                const aSame = a.expiry === s.expiry ? 0 : 1;
+                const bSame = b.expiry === s.expiry ? 0 : 1;
+                if (aSame !== bSame) return aSame - bSame;
+                const expiryGap = Math.abs(expiryToTime(a.expiry) - expiryToTime(s.expiry))
+                  - Math.abs(expiryToTime(b.expiry) - expiryToTime(s.expiry));
+                return expiryGap || Math.abs(a.strike - s.strike) - Math.abs(b.strike - s.strike);
+              });
+              const b = candidates[0];
+              if (!b) break;
             const q = Math.min(s.qty, b.qty);
             const pairSigs = [legToSig(s, q), legToSig(b, q)];
             const sameExp = s.expiry === b.expiry;
-            if (optType === 'call' && b.strike <= s.strike) {
+            if (optType === 'call' && !sameExp && b.strike < s.strike) {
               createConfig('covered_call', pairSigs, null, true);
             } else {
               const type = optType === 'put'
@@ -600,8 +685,7 @@ export function autoReconcileStrategies(
               createConfig(type, pairSigs);
             }
             s.qty -= q; b.qty -= q;
-            if (s.qty <= 0) si++;
-            if (b.qty <= 0) bi++;
+            }
           }
         }
 
