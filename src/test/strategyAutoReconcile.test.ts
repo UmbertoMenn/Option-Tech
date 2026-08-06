@@ -327,6 +327,49 @@ describe('autoReconcileStrategies — riduzioni e chiusure', () => {
 });
 
 describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
+  it('nuove 4 gambe AAPL con long CALL interna → PUT spread + Covered Call sintetica, non Iron Condor', () => {
+    const base = makeConfig({
+      underlying: 'MU',
+      strategy_type: 'naked_put',
+      position_signatures: [{ option_type: 'put', strike: 80, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 80, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 200, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 190, expiry_date: '2026-09-18', quantity: 1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 240, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 220, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const res = run([base], positions);
+    const aapl = res.resolvedConfigs!.filter(c => c.underlying === 'AAPL');
+    expect(aapl).toHaveLength(2);
+    expect(aapl.map(c => c.strategy_type).sort()).toEqual(['covered_call', 'put_spread']);
+    expect(aapl.find(c => c.strategy_type === 'covered_call')?.is_synthetic).toBe(true);
+    expect(aapl.some(c => c.strategy_type === 'iron_condor')).toBe(false);
+  });
+
+  it('nuove CALL: strike long superiore → diagonal; strike long inferiore → Covered Call sintetica', () => {
+    const base = makeConfig({
+      underlying: 'MU',
+      strategy_type: 'naked_put',
+      position_signatures: [{ option_type: 'put', strike: 80, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const basePos = makeOption({ underlying: 'MU', option_type: 'put', strike_price: 80, expiry_date: '2026-09-18', quantity: -1 });
+    const soldAlab = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 100, expiry_date: '2026-09-18', quantity: -1 });
+    const longAlab = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 120, expiry_date: '2026-12-18', quantity: 1 });
+    const soldAapl = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 240, expiry_date: '2026-09-18', quantity: -1 });
+    const longAapl = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 200, expiry_date: '2026-12-18', quantity: 1 });
+
+    const res = run([base], [basePos, soldAlab, longAlab, soldAapl, longAapl]);
+    const alab = res.resolvedConfigs!.find(c => c.underlying === 'ALAB')!;
+    const aapl = res.resolvedConfigs!.find(c => c.underlying === 'AAPL')!;
+    expect(alab.strategy_type).toBe('diagonal_call_spread');
+    expect(alab.is_synthetic).toBe(false);
+    expect(aapl.strategy_type).toBe('covered_call');
+    expect(aapl.is_synthetic).toBe(true);
+  });
+
   it('put venduta NON-roll su sottostante con una naked_put → NUOVA config separata (mai accodata)', () => {
     const configs = [
       makeConfig({

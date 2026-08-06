@@ -294,6 +294,9 @@ export function Derivatives() {
   );
   const archiveMutation = useArchiveUnderlying();
   const unarchiveMutation = useUnarchiveUnderlying();
+  const reconciliationCheckedRef = useRef(false);
+  const justSavedRef = useRef(false);
+  const autoReconcileRunningRef = useRef(false);
   
   // Manual configurations do not delete the user's existing overrides.
   const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
@@ -363,7 +366,6 @@ export function Derivatives() {
   useEffect(() => () => {
     if (activeKeyRef.current) sessionStorage.removeItem(activeKeyRef.current);
   }, []);
-  const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
@@ -375,6 +377,29 @@ export function Derivatives() {
     positions.filter(p => p.asset_type === 'stock'),
     [positions]
   );
+
+  // Re-run automatic reconciliation whenever the ECONOMIC STRUCTURE changes,
+  // not only once per page mount. Market-price refreshes deliberately do not
+  // participate in this key, so they cannot trigger save loops.
+  const reconciliationStructureKey = useMemo(() => positions
+    .map(p => [
+      p.id,
+      p.asset_type,
+      p.quantity,
+      p.option_type || '',
+      p.strike_price ?? '',
+      p.expiry_date || '',
+      p.underlying || '',
+      p.ticker || '',
+      p.description || '',
+    ].join(':'))
+    .sort()
+    .join('|'), [positions]);
+
+  useEffect(() => {
+    reconciliationCheckedRef.current = false;
+    justSavedRef.current = false;
+  }, [wizardPortfolioKey, reconciliationStructureKey]);
 
   // Short call il cui sottostante non è riconosciuto (codice di banca non mappato):
   // risultano scoperte finché non le si collega al ticker corretto.
@@ -684,11 +709,9 @@ export function Derivatives() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Riconciliazione AUTOMATICA (once per mount): risolve roll, chiusure e
-  // aggiunte deterministiche senza dialog. Il dialog manuale si apre solo
-  // per gli item genuinamente ambigui rimasti irrisolti.
-  const justSavedRef = useRef(false);
-  const autoReconcileRunningRef = useRef(false);
+  // Riconciliazione AUTOMATICA: risolve roll, chiusure e aggiunte ogni volta
+  // che cambia la struttura del portafoglio. Il flag evita loop sul solo
+  // salvataggio delle config dello stesso snapshot.
   useEffect(() => {
     if (reconciliationCheckedRef.current) return;
     if (justSavedRef.current) { justSavedRef.current = false; return; }

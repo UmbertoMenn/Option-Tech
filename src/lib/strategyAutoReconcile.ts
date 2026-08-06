@@ -182,6 +182,26 @@ function allSameExpiry(sigs: PositionSignature[]): boolean {
   return new Set(sigs.map(s => s.expiry)).size <= 1;
 }
 
+function detectFourLegSignatureType(sigs: PositionSignature[]): 'iron_condor' | 'double_diagonal' | null {
+  const { soldPuts, boughtPuts, soldCalls, boughtCalls } = countLegs(sigs);
+  if (soldPuts.length !== 1 || boughtPuts.length !== 1 || soldCalls.length !== 1 || boughtCalls.length !== 1) {
+    return null;
+  }
+  const [sp] = soldPuts;
+  const [bp] = boughtPuts;
+  const [sc] = soldCalls;
+  const [bc] = boughtCalls;
+  const externalWings = bp.strike < sp.strike && sp.strike < sc.strike && sc.strike < bc.strike;
+  if (!externalWings) return null;
+  if (allSameExpiry(sigs)) return 'iron_condor';
+
+  const soldSameExpiry = sp.expiry === sc.expiry;
+  const boughtSameExpiry = bp.expiry === bc.expiry;
+  return soldSameExpiry && boughtSameExpiry && expiryToTime(bp.expiry) > expiryToTime(sp.expiry)
+    ? 'double_diagonal'
+    : null;
+}
+
 function sumQty(sigs: PositionSignature[]): number {
   return sigs.reduce((s, x) => s + (x.quantity_abs || 1), 0);
 }
@@ -207,12 +227,15 @@ export function classifyConfigType(
 
   const has = (n: PositionSignature[]) => n.length > 0;
   if (has(soldPuts) && has(boughtPuts) && has(soldCalls) && has(boughtCalls)) {
-    return allSameExpiry(sigs) ? 'iron_condor' : 'double_diagonal';
+    return detectFourLegSignatureType(sigs) || 'other';
   }
   if (has(soldPuts) && has(boughtPuts) && !has(soldCalls) && !has(boughtCalls)) {
     return allSameExpiry(sigs) ? 'put_spread' : 'diagonal_put_spread';
   }
   if (has(soldCalls) && has(boughtCalls) && !has(soldPuts) && !has(boughtPuts)) {
+    if (soldCalls.length === 1 && boughtCalls.length === 1 && boughtCalls[0].strike <= soldCalls[0].strike) {
+      return 'covered_call';
+    }
     return allSameExpiry(sigs) ? 'call_spread' : 'diagonal_call_spread';
   }
   if (has(soldPuts) && !has(boughtPuts) && !has(soldCalls) && !has(boughtCalls)) return 'naked_put';
@@ -500,12 +523,17 @@ export function autoReconcileStrategies(
         c => normalizeUnderlying(c.underlying, resolveLinkedStock(c), dynamicAliases) === underlyingKey && !deletedConfigIds.has(c.id),
       );
 
-      const createConfig = (strategyType: string, sigs: PositionSignature[], linkedStockId: string | null = null): UpsertConfigParams => {
+      const createConfig = (
+        strategyType: string,
+        sigs: PositionSignature[],
+        linkedStockId: string | null = null,
+        isSynthetic = false,
+      ): UpsertConfigParams => {
         const params: UpsertConfigParams = {
           underlying: underlyingLabel,
           strategy_type: strategyType,
           position_signatures: sigs,
-          is_synthetic: false,
+          is_synthetic: isSynthetic,
           linked_stock_id: linkedStockId,
           linked_stock_slot_ids: [],
           // CRITICO: esplicito, perché upsertBatch fa default config_locked→true.
@@ -536,18 +564,22 @@ export function autoReconcileStrategies(
       const findRunCreatedOfType = (...types: string[]) =>
         runCreated.find(rc => rc.underlyingKey === underlyingKey && types.includes(rc.params.strategy_type))?.params;
 
-      // -- 3a: tutti e 4 i ruoli presenti → un'unica IC/DD --
+      // -- 3a: IC/DD SOLO quando le ali sono davvero esterne.  La vecchia
+      // regola accorpava qualunque combinazione put/call V+A in un'unica
+      // strategia, anche con una long call interna (caso AAPL).
       const lc = { sp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === -1),
                    bp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === 1),
                    sc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === -1),
                    bc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === 1) };
-      if (lc.sp.length > 0 && lc.bp.length > 0 && lc.sc.length > 0 && lc.bc.length > 0) {
-        const sigs = leftovers.map(l => legToSig(l));
-        const type = allSameExpiry(sigs) ? 'iron_condor' : 'double_diagonal';
-        createConfig(type, sigs);
+      const oneOfEach = lc.sp.length === 1 && lc.bp.length === 1 && lc.sc.length === 1 && lc.bc.length === 1;
+      const fourLegSigs = oneOfEach ? leftovers.map(l => legToSig(l)) : [];
+      const fourLegType = oneOfEach ? detectFourLegSignatureType(fourLegSigs) : null;
+      if (fourLegType) {
+        createConfig(fourLegType, fourLegSigs);
         leftovers.forEach(l => { l.qty = 0; });
       } else {
-        // -- 3b: coppie venduta+comprata dello stesso tipo → spread --
+        // -- 3b: coppie venduta+comprata dello stesso tipo. Per le CALL:
+        // long strike > short strike = spread; altrimenti Covered Call sintetica.
         for (const optType of ['put', 'call'] as const) {
           const sold = leftovers.filter(l => l.optionType === optType && l.quantitySign === -1 && l.qty > 0)
             .sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
@@ -559,10 +591,14 @@ export function autoReconcileStrategies(
             const q = Math.min(s.qty, b.qty);
             const pairSigs = [legToSig(s, q), legToSig(b, q)];
             const sameExp = s.expiry === b.expiry;
-            const type = optType === 'put'
-              ? (sameExp ? 'put_spread' : 'diagonal_put_spread')
-              : (sameExp ? 'call_spread' : 'diagonal_call_spread');
-            createConfig(type, pairSigs);
+            if (optType === 'call' && b.strike <= s.strike) {
+              createConfig('covered_call', pairSigs, null, true);
+            } else {
+              const type = optType === 'put'
+                ? (sameExp ? 'put_spread' : 'diagonal_put_spread')
+                : (sameExp ? 'call_spread' : 'diagonal_call_spread');
+              createConfig(type, pairSigs);
+            }
             s.qty -= q; b.qty -= q;
             if (s.qty <= 0) si++;
             if (b.qty <= 0) bi++;

@@ -196,6 +196,47 @@ describe('autoClassify', () => {
     expect(strategies[0].strategyType).toBe('iron_condor');
   });
 
+  it('REGRESSIONE AAPL: long CALL interna invalida l iron condor e separa PUT spread + Covered Call sintetica', () => {
+    const soldPut = makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 200, expiry_date: '2026-09-18', quantity: -1 });
+    const boughtPut = makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 190, expiry_date: '2026-09-18', quantity: 1 });
+    const soldCall = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 240, expiry_date: '2026-09-18', quantity: -1 });
+    const boughtCall = makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 220, expiry_date: '2026-12-18', quantity: 1 });
+    const legs = [soldPut, boughtPut, soldCall, boughtCall];
+
+    const strategies = autoClassify(legs, legs);
+
+    expect(strategies).toHaveLength(2);
+    expect(strategies.map(s => s.strategyType).sort()).toEqual(['covered_call', 'put_spread']);
+    const syntheticCc = strategies.find(s => s.strategyType === 'covered_call')!;
+    expect(syntheticCc.isSynthetic).toBe(true);
+    expect(syntheticCc.positions.map(p => p.id).sort()).toEqual([soldCall.id, boughtCall.id].sort());
+  });
+
+  it('REGRESSIONE: diagonal CALL solo se la long CALL ha strike superiore alla short', () => {
+    const sold = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 100, expiry_date: '2026-09-18', quantity: -1 });
+    const boughtHigher = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 120, expiry_date: '2026-12-18', quantity: 1 });
+    const diagonal = autoClassify([sold, boughtHigher], [sold, boughtHigher]);
+    expect(diagonal).toHaveLength(1);
+    expect(diagonal[0].strategyType).toBe('diagonal_call_spread');
+    expect(diagonal[0].isSynthetic).toBe(false);
+
+    const boughtLower = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 80, expiry_date: '2026-12-18', quantity: 1 });
+    const synthetic = autoClassify([sold, boughtLower], [sold, boughtLower]);
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].strategyType).toBe('covered_call');
+    expect(synthetic[0].isSynthetic).toBe(true);
+  });
+
+  it('REGRESSIONE MauroG/AMZN: short PUT + long PUT più bassa e più lunga resta diagonal anche con azioni AMZN', () => {
+    const stock = makeStock({ description: 'AMZN', quantity: 100 });
+    const sold = makeOption({ underlying: 'AMZN', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: -2 });
+    const bought = makeOption({ underlying: 'AMZN', option_type: 'put', strike_price: 180, expiry_date: '2027-01-15', quantity: 2 });
+    const strategies = autoClassify([sold, bought], [stock, sold, bought]);
+    expect(strategies).toHaveLength(1);
+    expect(strategies[0].strategyType).toBe('diagonal_put_spread');
+    expect(buildSignatures(strategies[0].positions).map(s => s.quantity_abs)).toEqual([2, 2]);
+  });
+
   it('keeps two de-risking covered calls on the same underlying separate when their structures differ', () => {
     const stock = makeStock({ description: 'GOOGL', quantity: 200 });
     const soldCall1 = makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });

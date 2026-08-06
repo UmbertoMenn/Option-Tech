@@ -1142,6 +1142,29 @@ function categorizeDerivativesImpl(
     const isPartialProtection = stockContracts - totalLongPuts > 0;
     
     for (const put of boughtPuts) {
+      // A long PUT that can hedge a short PUT at a higher strike is a spread
+      // leg first, even when the expiries are far apart.  The old 100-day
+      // clustering could consume the long leg as "protection" before Step 5,
+      // breaking valid diagonal put spreads (e.g. AMZN).
+      const putExpiryTime = put.expiry_date ? new Date(put.expiry_date).getTime() : 0;
+      const hasPutSpreadCandidate = allOptions.some(o => {
+        if (o.option_type !== 'put' || o.quantity >= 0) return false;
+        if ((put.strike_price || 0) >= (o.strike_price || 0)) return false;
+        const shortExpiryTime = o.expiry_date ? new Date(o.expiry_date).getTime() : 0;
+        return !putExpiryTime || !shortExpiryTime || putExpiryTime >= shortExpiryTime;
+      });
+      if (hasPutSpreadCandidate) {
+        if (!partialProtectionCandidates.has(underlyingKey)) {
+          partialProtectionCandidates.set(underlyingKey, {
+            puts: [],
+            stock,
+            deferredForStrategy: true,
+          });
+        }
+        partialProtectionCandidates.get(underlyingKey)!.puts.push(put);
+        continue;
+      }
+
       // Trova il cluster a cui appartiene questa PUT
       const putCluster = clusters.find(c => c.some(o => o.id === put.id));
       
@@ -1474,7 +1497,8 @@ function removeFromArray(arr: Position[], item: Position): void {
 }
 
 /**
- * Try to match an Iron Condor (all 4 legs same expiry, no strike constraints)
+ * Try to match an Iron Condor.  Long wings MUST be outside the short strikes:
+ * long put < short put < short call < long call.
  */
 function tryMatchIronCondor(
   soldCalls: Position[],
@@ -1489,7 +1513,8 @@ function tryMatchIronCondor(
     
     // Find bought CALL with same expiry and same contracts
     const matchingBoughtCall = boughtCalls.find(bc =>
-      bc.expiry_date === expiry && bc.quantity === contracts
+      bc.expiry_date === expiry && bc.quantity === contracts &&
+      (bc.strike_price || 0) > (soldCall.strike_price || 0)
     );
     if (!matchingBoughtCall) continue;
     
@@ -1501,9 +1526,13 @@ function tryMatchIronCondor(
     
     // Find bought PUT with same expiry and same contracts
     const matchingBoughtPut = boughtPuts.find(bp =>
-      bp.expiry_date === expiry && bp.quantity === contracts
+      bp.expiry_date === expiry && bp.quantity === contracts &&
+      (bp.strike_price || 0) < (matchingSoldPut.strike_price || 0)
     );
     if (!matchingBoughtPut) continue;
+
+    // The two short strikes must also be ordered as the inner body.
+    if ((matchingSoldPut.strike_price || 0) >= (soldCall.strike_price || 0)) continue;
     
     // We have an Iron Condor!
     const totalPremium = 
@@ -1562,7 +1591,8 @@ function tryMatchDoubleDiagonal(
     // Find bought CALL with LONGER expiry, same contracts
     const matchingBoughtCall = boughtCalls.find(bc =>
       bc.expiry_date && new Date(bc.expiry_date).getTime() > soldExpiryTime &&
-      bc.quantity === contracts
+      bc.quantity === contracts &&
+      (bc.strike_price || 0) > (soldCall.strike_price || 0)
     );
     if (!matchingBoughtCall) continue;
     
@@ -1570,9 +1600,11 @@ function tryMatchDoubleDiagonal(
     
     // Find bought PUT with SAME expiry as bought CALL, same contracts
     const matchingBoughtPut = boughtPuts.find(bp =>
-      bp.expiry_date === boughtExpiry && bp.quantity === contracts
+      bp.expiry_date === boughtExpiry && bp.quantity === contracts &&
+      (bp.strike_price || 0) < (matchingSoldPut.strike_price || 0)
     );
     if (!matchingBoughtPut) continue;
+    if ((matchingSoldPut.strike_price || 0) >= (soldCall.strike_price || 0)) continue;
     
     // We have a Double Diagonal!
     const totalPremium = 

@@ -74,12 +74,31 @@ function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean
       if (hasShortPut) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
       return { ok: true };
     case 'call_spread':
-    case 'diagonal_call_spread':
       if (hasPut) return { ok: false, reason: 'Call Spread non può contenere PUT' };
       return { ok: true };
+    case 'diagonal_call_spread': {
+      if (hasPut) return { ok: false, reason: 'Diagonal Call Spread non può contenere PUT' };
+      const sold = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+      const bought = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+      if (sold.length > 0 && bought.length > 0 &&
+          !sold.some(s => bought.some(b => (b.strike_price || 0) > (s.strike_price || 0)))) {
+        return { ok: false, reason: 'Diagonal Call Spread richiede la CALL comprata a strike superiore alla CALL venduta' };
+      }
+      return { ok: true };
+    }
+    case 'iron_condor': {
+      const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+      const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+      const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
+      const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+      if (soldCalls.length > 0 && boughtCalls.length > 0 && soldPuts.length > 0 && boughtPuts.length > 0 &&
+          detectFourLegType(soldCalls, boughtCalls, soldPuts, boughtPuts) !== 'iron_condor') {
+        return { ok: false, reason: 'Iron Condor richiede PUT comprata < PUT venduta < CALL venduta < CALL comprata, alla stessa scadenza' };
+      }
+      return { ok: true };
+    }
     case 'covered_call':
     case 'derisking_covered_call':
-    case 'iron_condor':
     case 'double_diagonal':
     case 'put_spread':
     case 'diagonal_put_spread':
@@ -180,6 +199,36 @@ function positionBadgeClass(p: Position): string {
   return p.quantity < 0 ? 'border-green-500/50 text-green-500' : 'border-red-500/50 text-red-500';
 }
 
+function detectFourLegType(
+  soldCalls: Position[],
+  boughtCalls: Position[],
+  soldPuts: Position[],
+  boughtPuts: Position[],
+): 'iron_condor' | 'double_diagonal' | null {
+  if (soldCalls.length !== 1 || boughtCalls.length !== 1 || soldPuts.length !== 1 || boughtPuts.length !== 1) {
+    return null;
+  }
+  const [sc] = soldCalls;
+  const [bc] = boughtCalls;
+  const [sp] = soldPuts;
+  const [bp] = boughtPuts;
+  const externalWings =
+    (bp.strike_price || 0) < (sp.strike_price || 0) &&
+    (sp.strike_price || 0) < (sc.strike_price || 0) &&
+    (sc.strike_price || 0) < (bc.strike_price || 0);
+  if (!externalWings) return null;
+
+  const allSameExpiry = sc.expiry_date === bc.expiry_date &&
+    sc.expiry_date === sp.expiry_date && sc.expiry_date === bp.expiry_date;
+  if (allSameExpiry) return 'iron_condor';
+
+  const soldSameExpiry = sc.expiry_date === sp.expiry_date;
+  const boughtSameExpiry = bc.expiry_date === bp.expiry_date;
+  const soldTime = sc.expiry_date ? new Date(sc.expiry_date).getTime() : 0;
+  const boughtTime = bc.expiry_date ? new Date(bc.expiry_date).getTime() : 0;
+  return soldSameExpiry && boughtSameExpiry && boughtTime > soldTime ? 'double_diagonal' : null;
+}
+
 function detectStrategyType(positions: Position[]): string {
   const options = positions.filter(p => p.asset_type === 'derivative');
   const stocks = positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
@@ -190,11 +239,8 @@ function detectStrategyType(positions: Position[]): string {
   const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
   const hasStock = stocks.some(s => s.quantity > 0);
 
-  if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1) {
-    const expiries = new Set(options.map(o => o.expiry_date));
-    if (expiries.size === 1) return 'iron_condor';
-    if (expiries.size >= 2) return 'double_diagonal';
-  }
+  const fourLegType = detectFourLegType(soldCalls, boughtCalls, soldPuts, boughtPuts);
+  if (fourLegType) return fourLegType;
 
   const hasPutSpread = soldPuts.length > 0 && boughtPuts.length > 0 && (() => {
     const maxSoldPutStrike = Math.max(...soldPuts.map(p => p.strike_price || 0));
@@ -207,9 +253,14 @@ function detectStrategyType(positions: Position[]): string {
     return allPutExpiries.size <= 1 ? 'put_spread' : 'diagonal_put_spread';
   }
 
-  // Call Spread: 1+ Long Call & 1+ Short Call, no PUT, no stock.
-  // Stesse scadenze ⇒ call_spread; scadenze diverse ⇒ diagonal_call_spread.
+  // Regola utente: senza stock, Long Call sotto (o allo) strike della Short
+  // Call replica il sottostante della covered call → Covered Call sintetica.
+  // Il Diagonal Call Spread richiede invece Long Call a strike PIÙ ALTO.
   if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length === 0 && boughtPuts.length === 0 && !hasStock) {
+    if (soldCalls.length === 1 && boughtCalls.length === 1 &&
+        (boughtCalls[0].strike_price || 0) <= (soldCalls[0].strike_price || 0)) {
+      return 'covered_call';
+    }
     const allCallExpiries = new Set([...soldCalls, ...boughtCalls].map(c => c.expiry_date || ''));
     return allCallExpiries.size <= 1 ? 'call_spread' : 'diagonal_call_spread';
   }
@@ -398,14 +449,29 @@ export function autoClassify(
     }
   }
 
-  // Other Strategies → detect put_spread / diagonal_put_spread
+  // Other Strategies.  Never collapse an invalid four-leg shape into one
+  // catch-all strategy: if CALL and PUT structures are independent (AAPL
+  // regression), classify the two sides separately.
   for (const group of result.groupedOtherStrategies) {
     const options = group.options.map(o => o.option);
     const unique = addUnique(options);
     if (unique.length > 0) {
-      consume(unique);
       const detected = detectStrategyType(unique);
-      strategies.push(make(unique, detected));
+      const hasCalls = unique.some(o => o.option_type === 'call');
+      const hasPuts = unique.some(o => o.option_type === 'put');
+
+      if (detected === 'other' && hasCalls && hasPuts) {
+        for (const optionType of ['put', 'call'] as const) {
+          const side = unique.filter(o => o.option_type === optionType);
+          if (side.length === 0) continue;
+          const sideType = detectStrategyType(side);
+          consume(side);
+          strategies.push(make(side, sideType, sideType === 'covered_call' && optionType === 'call'));
+        }
+      } else {
+        consume(unique);
+        strategies.push(make(unique, detected, detected === 'covered_call' && !unique.some(p => p.asset_type === 'stock' || p.asset_type === 'etf')));
+      }
     }
   }
 
@@ -1026,9 +1092,12 @@ export function StrategyConfigWizard({
           }
         }
       }
-      if (newSplitIds.size > 0) {
-        setSplitPositionIds(prev => new Set([...prev, ...newSplitIds]));
-      }
+      // Auto-classify is a full rebuild.  Keeping split IDs from the previous
+      // wizard state makes the base position disappear from effectivePositions
+      // while the new strategy still references that base ID; its generated
+      // slots then look "free" and the free-leg count grows on every click.
+      // Rebuild split state from the auto result so the operation is idempotent.
+      setSplitPositionIds(newSplitIds);
 
       setStrategies(auto);
       setSelectedIdsByGroup(new Map());
