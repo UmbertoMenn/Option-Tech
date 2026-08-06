@@ -1,0 +1,1 @@
+REVOKE ALL ON FUNCTION public.ensure_call_buyback_default_alert() FROM PUBLIC, anon, authenticated;
