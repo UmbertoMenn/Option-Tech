@@ -257,12 +257,16 @@ function detectStrategyType(positions: Position[]): string {
   // Call replica il sottostante della covered call → Covered Call sintetica.
   // Il Diagonal Call Spread richiede invece Long Call a strike PIÙ ALTO.
   if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length === 0 && boughtPuts.length === 0 && !hasStock) {
+    const allCallExpiries = new Set([...soldCalls, ...boughtCalls].map(c => c.expiry_date || ''));
+    // Stessa scadenza = call spread verticale, indipendentemente da quale
+    // strike sia la long.  La Covered Call sintetica nasce solo su scadenze
+    // diverse, con la long call a strike inferiore alla short.
+    if (allCallExpiries.size <= 1) return 'call_spread';
     if (soldCalls.length === 1 && boughtCalls.length === 1 &&
         (boughtCalls[0].strike_price || 0) <= (soldCalls[0].strike_price || 0)) {
       return 'covered_call';
     }
-    const allCallExpiries = new Set([...soldCalls, ...boughtCalls].map(c => c.expiry_date || ''));
-    return allCallExpiries.size <= 1 ? 'call_spread' : 'diagonal_call_spread';
+    return 'diagonal_call_spread';
   }
 
   if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
@@ -449,29 +453,116 @@ export function autoClassify(
     }
   }
 
-  // Other Strategies.  Never collapse an invalid four-leg shape into one
-  // catch-all strategy: if CALL and PUT structures are independent (AAPL
-  // regression), classify the two sides separately.
+  // Other Strategies.  A ticker is NOT a strategy boundary: a bucket can
+  // contain several independent spreads and residual single legs (APP/ALAB/
+  // CEG).  Pair compatible option legs first and classify only the consumed
+  // quantity; a residual quantity becomes its own single-leg strategy.
   for (const group of result.groupedOtherStrategies) {
     const options = group.options.map(o => o.option);
     const unique = addUnique(options);
     if (unique.length > 0) {
-      const detected = detectStrategyType(unique);
-      const hasCalls = unique.some(o => o.option_type === 'call');
-      const hasPuts = unique.some(o => o.option_type === 'put');
-
-      if (detected === 'other' && hasCalls && hasPuts) {
-        for (const optionType of ['put', 'call'] as const) {
-          const side = unique.filter(o => o.option_type === optionType);
-          if (side.length === 0) continue;
-          const sideType = detectStrategyType(side);
-          consume(side);
-          strategies.push(make(side, sideType, sideType === 'covered_call' && optionType === 'call'));
+      type Alloc = { p: Position; remaining: number };
+      const allocs: Alloc[] = unique.map(p => ({ p, remaining: Math.abs(p.quantity) }));
+      const slice = (a: Alloc, qty: number): Position => {
+        const total = Math.max(1, Math.abs(a.p.quantity));
+        const ratio = qty / total;
+        const scale = (v: number | null | undefined) => v == null ? v : v * ratio;
+        return {
+          ...a.p,
+          quantity: (a.p.quantity < 0 ? -1 : 1) * qty,
+          market_value: scale(a.p.market_value) ?? null,
+          snapshot_market_value: scale(a.p.snapshot_market_value) ?? null,
+          profit_loss: scale(a.p.profit_loss) ?? null,
+        };
+      };
+      const pairByIdentity = new Map<string, WizardStrategy>();
+      const emitPair = (short: Alloc, long: Alloc, qty: number, type: string, synthetic = false) => {
+        const key = `${type}|${optionIdentityKey(short.p, dynamicAliases)}|${optionIdentityKey(long.p, dynamicAliases)}`;
+        const legs = [slice(short, qty), slice(long, qty)];
+        const existing = pairByIdentity.get(key);
+        if (existing) existing.positions.push(...legs);
+        else {
+          const created = make(legs, type, synthetic);
+          pairByIdentity.set(key, created);
+          strategies.push(created);
         }
-      } else {
-        consume(unique);
-        strategies.push(make(unique, detected, detected === 'covered_call' && !unique.some(p => p.asset_type === 'stock' || p.asset_type === 'etf')));
+      };
+
+      for (const optionType of ['put', 'call'] as const) {
+        const shorts = allocs
+          .filter(a => a.p.option_type === optionType && a.p.quantity < 0)
+          .sort((a, b) => new Date(a.p.expiry_date || 0).getTime() - new Date(b.p.expiry_date || 0).getTime()
+            || (a.p.strike_price || 0) - (b.p.strike_price || 0));
+        const longs = allocs.filter(a => a.p.option_type === optionType && a.p.quantity > 0);
+
+        for (const short of shorts) {
+          while (short.remaining > 0) {
+            const shortStrike = short.p.strike_price || 0;
+            const shortTime = new Date(short.p.expiry_date || 0).getTime();
+            const candidates = longs.filter(long => {
+              if (long.remaining <= 0) return false;
+              const longStrike = long.p.strike_price || 0;
+              const sameExpiry = long.p.expiry_date === short.p.expiry_date;
+              if (optionType === 'put' && longStrike >= shortStrike) return false;
+              if (optionType === 'call' && longStrike === shortStrike) return false;
+              if (sameExpiry) return true;
+              const longTime = new Date(long.p.expiry_date || 0).getTime();
+              return Number.isFinite(longTime) && Number.isFinite(shortTime) && longTime > shortTime;
+            }).sort((a, b) => {
+              // Un verticale esatto ha sempre precedenza su un diagonal: è la
+              // regola che lascia la PUT OTM di APP naked invece di legarla
+              // alla long destinata al put spread della stessa scadenza.
+              const aSame = a.p.expiry_date === short.p.expiry_date ? 0 : 1;
+              const bSame = b.p.expiry_date === short.p.expiry_date ? 0 : 1;
+              if (aSame !== bSame) return aSame - bSame;
+              const aTime = new Date(a.p.expiry_date || 0).getTime();
+              const bTime = new Date(b.p.expiry_date || 0).getTime();
+              const timeDiff = Math.abs(aTime - shortTime) - Math.abs(bTime - shortTime);
+              if (timeDiff !== 0) return timeDiff;
+              return Math.abs((a.p.strike_price || 0) - shortStrike) - Math.abs((b.p.strike_price || 0) - shortStrike);
+            });
+            const long = candidates[0];
+            if (!long) break;
+
+            const qty = Math.min(short.remaining, long.remaining);
+            const sameExpiry = short.p.expiry_date === long.p.expiry_date;
+            let type: string;
+            let synthetic = false;
+            if (optionType === 'put') {
+              type = sameExpiry ? 'put_spread' : 'diagonal_put_spread';
+            } else if (sameExpiry) {
+              type = 'call_spread';
+            } else if ((long.p.strike_price || 0) > shortStrike) {
+              type = 'diagonal_call_spread';
+            } else {
+              type = 'covered_call';
+              synthetic = true;
+            }
+            emitPair(short, long, qty, type, synthetic);
+            short.remaining -= qty;
+            long.remaining -= qty;
+          }
+        }
       }
+
+      // Residui: ogni opzione diversa resta una strategia diversa.  La
+      // quantità non crea una nuova strategia (P380 x2 = una Naked Put x2).
+      const residualByIdentity = new Map<string, WizardStrategy>();
+      for (const a of allocs.filter(x => x.remaining > 0)) {
+        const p = slice(a, a.remaining);
+        let type = 'other';
+        if (p.option_type === 'put' && p.quantity < 0) type = 'naked_put';
+        else if (p.option_type === 'call' && p.quantity > 0) type = 'leap_call';
+        const key = `${type}|${optionIdentityKey(p, dynamicAliases)}`;
+        const existing = residualByIdentity.get(key);
+        if (existing) existing.positions.push(p);
+        else {
+          const created = make([p], type);
+          residualByIdentity.set(key, created);
+          strategies.push(created);
+        }
+      }
+      consume(unique);
     }
   }
 
