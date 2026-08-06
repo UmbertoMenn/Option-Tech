@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ChevronDown, FlaskConical, Loader2, Plus, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, FlaskConical, HelpCircle, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -14,7 +14,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  deleteConfig,
+  listSavedConfigs,
+  saveConfig,
+  SavedBacktestConfig,
+} from '@/lib/backtesting/shortPut/configStorage';
+import { FIELD_HELP, SECTION_HELP } from './shortPutHelp';
 import { runShortPutBacktest, validateShortPutConfig } from '@/lib/backtesting/shortPut/engine';
 import {
   SyntheticMarketDataProvider,
@@ -60,11 +68,36 @@ const EVENT_VARIANTS: Record<ShortPutEvent['type'], 'default' | 'secondary' | 'd
 const num = (v: string, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 const fmt = (v: number) => v.toLocaleString('it-IT', { maximumFractionDigits: 0 });
 
-/** Campo compatto: label micro sopra input basso. */
-function F({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
+/** Spiegazione su click: funziona anche su touch, a differenza dell'hover. */
+function Info({ text, className = '' }: { text: string; className?: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Spiegazione"
+          className={`text-muted-foreground/60 hover:text-foreground transition-colors ${className}`}
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 text-xs leading-relaxed whitespace-pre-line">
+        {text}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Campo compatto: label micro sopra input basso, con spiegazione opzionale. */
+function F({ label, help, children, className = '' }: { label: string; help?: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={`space-y-1 ${className}`}>
-      <label className="block text-[11px] leading-tight text-muted-foreground">{label}</label>
+      {label && (
+        <label className="flex items-center gap-1 text-[11px] leading-tight text-muted-foreground">
+          <span className="truncate">{label}</span>
+          {help && <Info text={help} className="shrink-0" />}
+        </label>
+      )}
       {children}
     </div>
   );
@@ -74,11 +107,12 @@ function N({ value, onChange, ...rest }: { value: number; onChange: (v: number) 
   return <Input className="h-8" type="number" value={value} onChange={(e) => onChange(num(e.target.value))} {...rest} />;
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Section({ title, hint, help, children }: { title: string; hint?: string; help?: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border bg-card p-3">
-      <div className="flex items-baseline gap-2 mb-2.5">
+      <div className="flex items-center gap-1.5 mb-2.5">
         <h3 className="text-sm font-semibold">{title}</h3>
+        {help && <Info text={help} />}
         {hint && <span className="text-[11px] text-muted-foreground truncate">{hint}</span>}
       </div>
       {children}
@@ -92,6 +126,63 @@ export function ShortPutBacktestPanel() {
   const [running, setRunning] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [eventsOpen, setEventsOpen] = useState(false);
+  const [saved, setSaved] = useState<SavedBacktestConfig[]>([]);
+  const [configName, setConfigName] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    listSavedConfigs()
+      .then(setSaved)
+      .catch((e) => toast.error(`Configurazioni non caricate: ${e instanceof Error ? e.message : e}`));
+  }, []);
+
+  const handleSaveConfig = async () => {
+    const validation = validateShortPutConfig(config);
+    if (validation.length > 0) {
+      setErrors(validation);
+      toast.error('Correggi la configurazione prima di salvarla');
+      return;
+    }
+    if (!configName.trim()) {
+      toast.error('Dai un nome alla configurazione');
+      return;
+    }
+    setSavingConfig(true);
+    try {
+      const stored = await saveConfig(configName, config);
+      setSaved((prev) => [stored, ...prev.filter((c) => c.id !== stored.id)]);
+      setLoadedId(stored.id);
+      toast.success(`Configurazione "${stored.name}" salvata`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Salvataggio non riuscito');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleLoadConfig = (id: string) => {
+    const entry = saved.find((c) => c.id === id);
+    if (!entry) return;
+    setConfig(structuredClone(entry.config));
+    setConfigName(entry.name);
+    setLoadedId(entry.id);
+    setErrors([]);
+    toast.success(`Configurazione "${entry.name}" caricata`);
+  };
+
+  const handleDeleteConfig = async () => {
+    if (!loadedId) return;
+    const entry = saved.find((c) => c.id === loadedId);
+    try {
+      await deleteConfig(loadedId);
+      setSaved((prev) => prev.filter((c) => c.id !== loadedId));
+      setLoadedId(null);
+      toast.success(`Configurazione "${entry?.name ?? ''}" eliminata`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Eliminazione non riuscita');
+    }
+  };
 
   const set = <K extends keyof ShortPutConfig>(k: K, v: ShortPutConfig[K]) => setConfig((c) => ({ ...c, [k]: v }));
   const setEntry = <K extends keyof ShortPutConfig['entry']>(k: K, v: ShortPutConfig['entry'][K]) =>
@@ -141,12 +232,44 @@ export function ShortPutBacktestPanel() {
 
   return (
     <div className="space-y-3">
+      {/* Barra configurazioni salvate */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+        <Input
+          className="h-8 w-52"
+          placeholder="Nome configurazione"
+          value={configName}
+          onChange={(e) => setConfigName(e.target.value)}
+        />
+        <Button size="sm" className="h-8" onClick={handleSaveConfig} disabled={savingConfig}>
+          {savingConfig ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+          Salva configurazione
+        </Button>
+        {saved.length > 0 && (
+          <>
+            <div className="h-6 w-px bg-border" />
+            <Select value={loadedId ?? ''} onValueChange={handleLoadConfig}>
+              <SelectTrigger className="h-8 w-52"><SelectValue placeholder="Carica salvata…" /></SelectTrigger>
+              <SelectContent>
+                {saved.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {loadedId && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleDeleteConfig} title="Elimina configurazione">
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+
       {/* Riga 1: paniere + periodo + capitale */}
-      <Section title="Paniere e periodo">
+      <Section title="Paniere e periodo" help={SECTION_HELP.basket}>
         <div className="flex flex-wrap items-end gap-2">
           {config.basket.map((item, i) => (
             <div key={i} className="flex items-end gap-1">
-              <F label={i === 0 ? 'Ticker' : ''}>
+              <F label={i === 0 ? 'Ticker' : ''} help={i === 0 ? FIELD_HELP.ticker : undefined}>
                 <Input
                   className="h-8 w-24"
                   value={item.symbol}
@@ -156,7 +279,7 @@ export function ShortPutBacktestPanel() {
                   }
                 />
               </F>
-              <F label={i === 0 ? 'Contratti' : ''}>
+              <F label={i === 0 ? 'Contratti' : ''} help={i === 0 ? FIELD_HELP.contracts : undefined}>
                 <Input
                   className="h-8 w-16"
                   type="number"
@@ -178,13 +301,13 @@ export function ShortPutBacktestPanel() {
             <Plus className="w-3.5 h-3.5" />
           </Button>
           <div className="h-8 w-px bg-border mx-1" />
-          <F label="Dal">
+          <F label="Dal" help={FIELD_HELP.startDate}>
             <Input className="h-8 w-[140px]" type="date" value={config.startDate} onChange={(e) => set('startDate', e.target.value)} />
           </F>
-          <F label="Al">
+          <F label="Al" help={FIELD_HELP.endDate}>
             <Input className="h-8 w-[140px]" type="date" value={config.endDate} onChange={(e) => set('endDate', e.target.value)} />
           </F>
-          <F label="Capitale">
+          <F label="Capitale" help={FIELD_HELP.capital}>
             <Input className="h-8 w-28" type="number" value={config.initialCapital} onChange={(e) => set('initialCapital', num(e.target.value))} />
           </F>
         </div>
@@ -192,9 +315,9 @@ export function ShortPutBacktestPanel() {
 
       {/* Riga 2: ingresso + esecuzione affiancati */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Section title="Ingresso" hint="PUT OTM, mensile più vicina">
+        <Section title="Ingresso" hint="PUT OTM, mensile più vicina" help={SECTION_HELP.entry}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <F label="Criterio strike" className="col-span-2 sm:col-span-1">
+            <F label="Criterio strike" help={FIELD_HELP.strikeMode} className="col-span-2 sm:col-span-1">
               <Select value={config.entry.strikeMode} onValueChange={(v) => setEntry('strikeMode', v as ShortPutConfig['entry']['strikeMode'])}>
                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -204,17 +327,17 @@ export function ShortPutBacktestPanel() {
                 </SelectContent>
               </Select>
             </F>
-            <F label="Distanza OTM %"><N value={config.entry.distancePct} min={0} step={0.5} onChange={(v) => setEntry('distancePct', v)} /></F>
-            <F label="DTE min"><N value={config.entry.minDte} min={0} onChange={(v) => setEntry('minDte', Math.round(v))} /></F>
-            <F label="Premio target %"><N value={config.entry.premiumTargetPct} step={0.1} onChange={(v) => setEntry('premiumTargetPct', v)} /></F>
-            <F label="Tolleranza ±%"><N value={config.entry.premiumTolerancePct} min={0} step={0.1} onChange={(v) => setEntry('premiumTolerancePct', v)} /></F>
-            <F label="Roll sotto DTE"><N value={config.maintenance.timeRollAtDte} min={0} onChange={(v) => setConfig((c) => ({ ...c, maintenance: { timeRollAtDte: Math.round(v) } }))} /></F>
+            <F label="Distanza OTM %" help={FIELD_HELP.distancePct}><N value={config.entry.distancePct} min={0} step={0.5} onChange={(v) => setEntry('distancePct', v)} /></F>
+            <F label="DTE min" help={FIELD_HELP.minDte}><N value={config.entry.minDte} min={0} onChange={(v) => setEntry('minDte', Math.round(v))} /></F>
+            <F label="Premio target %" help={FIELD_HELP.premiumTargetPct}><N value={config.entry.premiumTargetPct} step={0.1} onChange={(v) => setEntry('premiumTargetPct', v)} /></F>
+            <F label="Tolleranza ±%" help={FIELD_HELP.premiumToleranceP}><N value={config.entry.premiumTolerancePct} min={0} step={0.1} onChange={(v) => setEntry('premiumTolerancePct', v)} /></F>
+            <F label="Roll sotto DTE" help={FIELD_HELP.timeRollAtDte}><N value={config.maintenance.timeRollAtDte} min={0} onChange={(v) => setConfig((c) => ({ ...c, maintenance: { timeRollAtDte: Math.round(v) } }))} /></F>
           </div>
         </Section>
 
-        <Section title="Esecuzione">
+        <Section title="Esecuzione" help={SECTION_HELP.execution}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <F label="Fill" className="col-span-2 sm:col-span-1">
+            <F label="Fill" help={FIELD_HELP.fillModel} className="col-span-2 sm:col-span-1">
               <Select value={config.execution.fillModel} onValueChange={(v) => setExec('fillModel', v as ShortPutConfig['execution']['fillModel'])}>
                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -224,25 +347,29 @@ export function ShortPutBacktestPanel() {
                 </SelectContent>
               </Select>
             </F>
-            <F label="Slippage % spread"><N value={config.execution.slippagePctOfHalfSpread} min={0} max={100} onChange={(v) => setExec('slippagePctOfHalfSpread', v)} /></F>
-            <F label="Commiss./contratto"><N value={config.execution.commissionPerContract} min={0} step={0.01} onChange={(v) => setExec('commissionPerContract', v)} /></F>
+            <F label="Slippage % spread" help={FIELD_HELP.slippage}><N value={config.execution.slippagePctOfHalfSpread} min={0} max={100} onChange={(v) => setExec('slippagePctOfHalfSpread', v)} /></F>
+            <F label="Commiss./contratto" help={FIELD_HELP.commission}><N value={config.execution.commissionPerContract} min={0} step={0.01} onChange={(v) => setExec('commissionPerContract', v)} /></F>
           </div>
         </Section>
       </div>
 
       {/* Riga 3: discesa + salita affiancate */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Section title="Gestione discesa" hint="strike più basso e OTM, premio netto ±">
+        <Section title="Gestione discesa" hint="4 roll + roll orizzontale" help={SECTION_HELP.downside}>
           <div className="grid grid-cols-2 gap-2 mb-2">
-            <F label="Trigger: spot ≤ strike +%"><N value={config.downside.triggerDistancePct} min={0} step={0.5} onChange={(v) => setDown('triggerDistancePct', v)} /></F>
-            <F label="Cap mesi scadenza"><N value={config.downside.maxMonthsForward} min={1} max={24} onChange={(v) => setDown('maxMonthsForward', Math.round(v))} /></F>
+            <F label="Trigger: spot ≤ strike +%" help={FIELD_HELP.downTrigger}><N value={config.downside.triggerDistancePct} min={0} step={0.5} onChange={(v) => setDown('triggerDistancePct', v)} /></F>
+            <F label="Cap mesi scadenza" help={FIELD_HELP.maxMonths}><N value={config.downside.maxMonthsForward} min={1} max={24} onChange={(v) => setDown('maxMonthsForward', Math.round(v))} /></F>
           </div>
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[11px] text-muted-foreground">
                 <th className="text-left font-normal pb-1 w-16">Roll</th>
-                <th className="text-left font-normal pb-1">Netto target %</th>
-                <th className="text-left font-normal pb-1">Tolleranza ±%</th>
+                <th className="text-left font-normal pb-1">
+                  <span className="inline-flex items-center gap-1">Netto target % <Info text={FIELD_HELP.rollTarget} /></span>
+                </th>
+                <th className="text-left font-normal pb-1">
+                  <span className="inline-flex items-center gap-1">Tolleranza ±% <Info text={FIELD_HELP.rollTolerance} /></span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -261,14 +388,14 @@ export function ShortPutBacktestPanel() {
           </table>
         </Section>
 
-        <Section title="Gestione salita" hint="solo su recupero reale">
+        <Section title="Gestione salita" hint="solo su recupero reale" help={SECTION_HELP.upside}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <F label="Trigger distanza %"><N value={config.upside.triggerDistancePct} min={0.5} step={0.5} onChange={(v) => setUp('triggerDistancePct', v)} /></F>
-            <F label="Recupero min. %"><N value={config.upside.minRecoveryAbovePct} min={0} step={0.5} onChange={(v) => setUp('minRecoveryAbovePct', v)} /></F>
-            <F label="Distanza min. strike %"><N value={config.upside.minDistancePct} min={0} step={0.5} onChange={(v) => setUp('minDistancePct', v)} /></F>
-            <F label="Netto min. roll ↑ %"><N value={config.upside.minNetPremiumPct} step={0.1} onChange={(v) => setUp('minNetPremiumPct', v)} /></F>
-            <F label="Rientro netto %"><N value={config.upside.recoveryNetPremiumTargetPct} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTargetPct', v)} /></F>
-            <F label="Rientro ±%"><N value={config.upside.recoveryNetPremiumTolerancePct} min={0} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTolerancePct', v)} /></F>
+            <F label="Trigger distanza %" help={FIELD_HELP.upTrigger}><N value={config.upside.triggerDistancePct} min={0.5} step={0.5} onChange={(v) => setUp('triggerDistancePct', v)} /></F>
+            <F label="Recupero min. %" help={FIELD_HELP.minRecovery}><N value={config.upside.minRecoveryAbovePct} min={0} step={0.5} onChange={(v) => setUp('minRecoveryAbovePct', v)} /></F>
+            <F label="Distanza min. strike %" help={FIELD_HELP.upMinDistance}><N value={config.upside.minDistancePct} min={0} step={0.5} onChange={(v) => setUp('minDistancePct', v)} /></F>
+            <F label="Netto min. roll ↑ %" help={FIELD_HELP.upMinNet}><N value={config.upside.minNetPremiumPct} step={0.1} onChange={(v) => setUp('minNetPremiumPct', v)} /></F>
+            <F label="Rientro netto %" help={FIELD_HELP.recoveryTarget}><N value={config.upside.recoveryNetPremiumTargetPct} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTargetPct', v)} /></F>
+            <F label="Rientro ±%" help={FIELD_HELP.recoveryTolerance}><N value={config.upside.recoveryNetPremiumTolerancePct} min={0} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTolerancePct', v)} /></F>
           </div>
         </Section>
       </div>

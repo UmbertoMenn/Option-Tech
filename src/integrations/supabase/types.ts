@@ -219,6 +219,36 @@ export type Database = {
         }
         Relationships: []
       }
+      backtest_configs: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          name: string
+          strategy_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          config: Json
+          created_at?: string
+          id?: string
+          name: string
+          strategy_id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          strategy_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       benchmark_prices: {
         Row: {
           close_price: number
