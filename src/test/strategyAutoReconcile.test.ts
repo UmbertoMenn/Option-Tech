@@ -370,6 +370,62 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     expect(aapl.is_synthetic).toBe(true);
   });
 
+  it('REGRESSIONE AMD: CALL stessa scadenza → call spread anche con long strike inferiore', () => {
+    const base = makeConfig({
+      underlying: 'BASE', strategy_type: 'naked_put',
+      position_signatures: [{ option_type: 'put', strike: 10, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const positions = [
+      makeOption({ underlying: 'BASE', option_type: 'put', strike_price: 10, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AMD', option_type: 'call', strike_price: 220, expiry_date: '2026-12-18', quantity: -1 }),
+      makeOption({ underlying: 'AMD', option_type: 'call', strike_price: 180, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+    const res = run([base], positions);
+    const amd = res.resolvedConfigs!.filter(c => c.underlying === 'AMD');
+    expect(amd).toHaveLength(1);
+    expect(amd[0].strategy_type).toBe('call_spread');
+    expect(amd[0].is_synthetic).toBe(false);
+  });
+
+  it('REGRESSIONE MU: trova Iron Condor dentro cinque gambe e lascia P810 settembre naked', () => {
+    const base = makeConfig({
+      underlying: 'BASE', strategy_type: 'naked_put',
+      position_signatures: [{ option_type: 'put', strike: 10, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const positions = [
+      makeOption({ underlying: 'BASE', option_type: 'put', strike_price: 10, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 810, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 750, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 700, expiry_date: '2026-10-16', quantity: 1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 900, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 950, expiry_date: '2026-10-16', quantity: 1 }),
+    ];
+    const res = run([base], positions);
+    const mu = res.resolvedConfigs!.filter(c => c.underlying === 'MU');
+    expect(mu.map(c => c.strategy_type).sort()).toEqual(['iron_condor', 'naked_put']);
+    const naked = mu.find(c => c.strategy_type === 'naked_put')!;
+    expect(naked.position_signatures[0].strike).toBe(810);
+  });
+
+  it('REGRESSIONE CEG: più coppie PUT non vengono accorpate in un solo diagonal', () => {
+    const base = makeConfig({
+      underlying: 'BASE', strategy_type: 'naked_put',
+      position_signatures: [{ option_type: 'put', strike: 10, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+    });
+    const positions = [
+      makeOption({ underlying: 'BASE', option_type: 'put', strike_price: 10, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 300, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 250, expiry_date: '2026-12-18', quantity: 1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 280, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 240, expiry_date: '2027-01-15', quantity: 1 }),
+    ];
+    const res = run([base], positions);
+    const ceg = res.resolvedConfigs!.filter(c => c.underlying === 'CEG');
+    expect(ceg).toHaveLength(2);
+    expect(ceg.every(c => c.strategy_type === 'diagonal_put_spread')).toBe(true);
+    expect(ceg.every(c => c.position_signatures.length === 2)).toBe(true);
+  });
+
   it('put venduta NON-roll su sottostante con una naked_put → NUOVA config separata (mai accodata)', () => {
     const configs = [
       makeConfig({
