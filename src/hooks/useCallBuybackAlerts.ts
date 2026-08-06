@@ -47,7 +47,6 @@ export interface UpsertCallBuybackAlertInput {
   loss_threshold_pct: number | null;
   price_direction: CallBuybackPriceDirection | null;
   price_target: number | null;
-  enabled?: boolean;
   cooldown_minutes?: number;
 }
 
@@ -65,9 +64,14 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
     mutationFn: async (input: UpsertCallBuybackAlertInput) => {
       if (!portfolioId) throw new Error('Portafoglio non selezionato');
 
-      const hasThreshold = input.alert_mode === 'price'
+      const hasRequiredThreshold = input.alert_mode === 'price'
         ? input.price_target != null
-        : input.gain_threshold_pct != null || input.loss_threshold_pct != null;
+        : input.gain_threshold_pct != null;
+      if (!hasRequiredThreshold) {
+        throw new Error(input.alert_mode === 'price'
+          ? 'Inserisci un prezzo target per mantenere attivo l’avviso.'
+          : 'Inserisci una soglia di guadagno per mantenere attivo l’avviso.');
+      }
 
       // Individua la config esistente sulla stessa chiave logica.
       let query = supabase
@@ -85,17 +89,6 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
       if (readErr) throw new Error(readErr.message);
       const existingId = (existing as unknown as { id: string } | null)?.id ?? null;
 
-      if (!hasThreshold) {
-        if (existingId) {
-          const { error } = await supabase
-            .from('call_buyback_alerts' as never)
-            .delete()
-            .eq('id', existingId);
-          if (error) throw new Error(error.message);
-        }
-        return;
-      }
-
       const payload = {
         portfolio_id: portfolioId,
         scope: input.scope,
@@ -108,7 +101,9 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
         loss_threshold_pct: input.loss_threshold_pct,
         price_direction: input.price_direction,
         price_target: input.price_target,
-        enabled: input.enabled ?? true,
+        // Gli avvisi delle call da rivendere sono sempre attivi. L'utente può
+        // modificarne soglia/modalità, ma non spegnerli accidentalmente.
+        enabled: true,
         cooldown_minutes: input.cooldown_minutes ?? 480,
         updated_at: new Date().toISOString(),
       };
@@ -130,27 +125,5 @@ export function useCallBuybackAlertMutations(portfolioId: string | null | undefi
     onSuccess: invalidate,
   });
 
-  const setEnabled = useMutation({
-    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
-      const { error } = await supabase
-        .from('call_buyback_alerts' as never)
-        .update({ enabled, updated_at: new Date().toISOString() } as never)
-        .eq('id', id);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: invalidate,
-  });
-
-  const remove = useMutation({
-    mutationFn: async ({ id }: { id: string }) => {
-      const { error } = await supabase
-        .from('call_buyback_alerts' as never)
-        .delete()
-        .eq('id', id);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: invalidate,
-  });
-
-  return { upsert, setEnabled, remove };
+  return { upsert };
 }

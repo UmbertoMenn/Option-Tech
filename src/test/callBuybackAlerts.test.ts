@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   BuybackTranche,
   CallBuybackAlertConfig,
+  DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT,
   callKey,
   evaluateCallBuybackAlerts,
   evaluateGain,
@@ -104,6 +105,13 @@ describe('media ponderata e G/P%', () => {
 });
 
 describe('direzioni indipendenti', () => {
+  it('il default call da rivendere scatta a +20% dal prezzo di riacquisto', () => {
+    expect(DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT).toBe(20);
+    const ev = evaluateGain([tranche({ id: 'default', buyback_price: 40, market_price: 48 })], TODAY);
+    expect(ev?.gainPct).toBeCloseTo(DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT, 6);
+    expect(triggeredDirection(ev!.gainPct, DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT, null)).toBe('gain');
+  });
+
   it('scatta il guadagno al raggiungimento della soglia', () => {
     expect(triggeredDirection(25, 20, null)).toBe('gain');
     expect(triggeredDirection(20, 20, null)).toBe('gain'); // soglia inclusiva

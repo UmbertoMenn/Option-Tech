@@ -2,8 +2,6 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TrendingUp, TrendingDown, DollarSign, Percent, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,6 +11,7 @@ import {
   BuybackTranche,
   CallBuybackAlertMode,
   CallBuybackPriceDirection,
+  DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT,
   evaluateGain,
   triggeredDirection,
 } from '@/lib/callBuybackAlerts';
@@ -75,9 +74,7 @@ function AlertEditor({
   existingLoss,
   existingPriceDirection,
   existingPriceTarget,
-  enabled,
   onSave,
-  onToggleEnabled,
   isSaving,
 }: {
   label: string;
@@ -90,9 +87,7 @@ function AlertEditor({
   existingLoss: number | null;
   existingPriceDirection: CallBuybackPriceDirection | null;
   existingPriceTarget: number | null;
-  enabled: boolean | null;
   onSave: (value: EditorValue) => void;
-  onToggleEnabled: (enabled: boolean) => void;
   isSaving: boolean;
 }) {
   const [mode, setMode] = useState<CallBuybackAlertMode>(existingMode);
@@ -120,7 +115,7 @@ function AlertEditor({
     if (mode === 'gain_pct') {
       const g = parsePositive(gain);
       const l = parsePositive(loss);
-      if (!g.valid) return toast.error('Soglia di guadagno non valida', { description: 'Percentuale positiva, oppure vuoto.' });
+      if (!g.valid || g.value == null) return toast.error('Soglia di guadagno non valida', { description: 'Inserisci una percentuale positiva.' });
       if (!l.valid) return toast.error('Soglia di perdita non valida', { description: 'Percentuale positiva, oppure vuoto.' });
       onSave({
         alertMode: mode,
@@ -133,7 +128,7 @@ function AlertEditor({
     }
 
     const target = parsePositive(priceTarget);
-    if (!target.valid) return toast.error('Prezzo target non valido', { description: 'Inserisci un prezzo positivo.' });
+    if (!target.valid || target.value == null) return toast.error('Prezzo target non valido', { description: 'Inserisci un prezzo positivo.' });
     onSave({
       alertMode: mode,
       gain: null,
@@ -149,15 +144,9 @@ function AlertEditor({
         <div className="min-w-0">
           <div className="text-sm font-medium flex items-center gap-2">
             {label}
-            {enabled === false && (
-              <Badge variant="outline" className="text-[10px] text-muted-foreground">disattivo</Badge>
-            )}
           </div>
           <div className="text-xs text-muted-foreground">{sublabel}</div>
         </div>
-        {enabled !== null && (
-          <Switch checked={enabled} onCheckedChange={onToggleEnabled} aria-label={`Attiva ${label}`} />
-        )}
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -242,7 +231,7 @@ function AlertEditor({
         <span className="text-[10px] text-muted-foreground">
           {mode === 'gain_pct' && preview
             ? (preview === 'gain' ? 'Scatterebbe adesso (guadagno).' : 'Scatterebbe adesso (perdita).')
-            : 'Lascia vuoti i valori e salva per rimuovere l’avviso.'}
+            : 'L’avviso resta sempre attivo; puoi modificarne il parametro.'}
         </span>
         <Button size="sm" variant={dirty ? 'default' : 'outline'} className="h-7 text-xs" onClick={save} disabled={isSaving}>
           {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Salva'}
@@ -257,7 +246,7 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
   const today = new Date().toISOString().split('T')[0];
   const { buybacks, isLoading } = useCallBuybacks([portfolioId]);
   const { alerts } = useCallBuybackAlerts(portfolioId);
-  const { upsert, setEnabled } = useCallBuybackAlertMutations(portfolioId);
+  const { upsert } = useCallBuybackAlertMutations(portfolioId);
 
   // Una riga per ogni gamba inserita nella card: nessun aggregato di call.
   const rows = useMemo(
@@ -287,9 +276,7 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
       },
       {
         onSuccess: () => toast.success(
-          value.gain == null && value.loss == null && value.priceTarget == null
-            ? 'Avviso rimosso'
-            : 'Avviso salvato',
+          'Avviso salvato',
           { description: `${row.underlying} C ${row.strike} — riga del ${fmtDate(row.buyback_date)}` },
         ),
         onError: (e: unknown) => toast.error('Salvataggio non riuscito', {
@@ -336,12 +323,10 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
             tranches={[toTranche(row)]}
             today={today}
             existingMode={alert?.alert_mode ?? 'gain_pct'}
-            existingGain={alert?.gain_threshold_pct ?? null}
+            existingGain={alert?.gain_threshold_pct ?? DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT}
             existingLoss={alert?.loss_threshold_pct ?? null}
             existingPriceDirection={alert?.price_direction ?? null}
             existingPriceTarget={alert?.price_target ?? null}
-            enabled={alert ? alert.enabled : null}
-            onToggleEnabled={(en) => alert && setEnabled.mutate({ id: alert.id, enabled: en })}
             onSave={(value) => saveAlert(row, value)}
             isSaving={upsert.isPending}
           />
@@ -350,4 +335,3 @@ export function CallBuybackAlertsPanel({ portfolioId }: { portfolioId: string | 
     </div>
   );
 }
-

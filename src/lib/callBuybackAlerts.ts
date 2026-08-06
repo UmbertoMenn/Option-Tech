@@ -32,6 +32,9 @@ export type CallBuybackAlertDirection = 'gain' | 'loss';
 export type CallBuybackAlertMode = 'gain_pct' | 'price';
 export type CallBuybackPriceDirection = 'above' | 'below';
 
+/** Soglia iniziale obbligatoria per ogni nuova call da rivendere. */
+export const DEFAULT_CALL_BUYBACK_GAIN_THRESHOLD_PCT = 20;
+
 export interface CallBuybackAlertConfig {
   id: string;
   portfolio_id: string;
