@@ -237,6 +237,62 @@ describe('autoClassify', () => {
     expect(buildSignatures(strategies[0].positions).map(s => s.quantity_abs)).toEqual([2, 2]);
   });
 
+  it('REGRESSIONE MauroG/AMD: CALL stessa scadenza con long a strike inferiore → call spread, non CC sintetica', () => {
+    const sold = makeOption({ underlying: 'AMD', option_type: 'call', strike_price: 220, expiry_date: '2026-12-18', quantity: -1 });
+    const bought = makeOption({ underlying: 'AMD', option_type: 'call', strike_price: 180, expiry_date: '2026-12-18', quantity: 1 });
+    const strategies = autoClassify([sold, bought], [sold, bought]);
+    expect(strategies).toHaveLength(1);
+    expect(strategies[0].strategyType).toBe('call_spread');
+    expect(strategies[0].isSynthetic).toBe(false);
+  });
+
+  it('REGRESSIONE MauroG/APP: prima abbina il put spread stessa scadenza e lascia la PUT OTM naked', () => {
+    const naked = makeOption({ underlying: 'APP', option_type: 'put', strike_price: 350, expiry_date: '2026-09-18', quantity: -1 });
+    const sold = makeOption({ underlying: 'APP', option_type: 'put', strike_price: 500, expiry_date: '2026-12-18', quantity: -1 });
+    const bought = makeOption({ underlying: 'APP', option_type: 'put', strike_price: 450, expiry_date: '2026-12-18', quantity: 1 });
+    const strategies = autoClassify([naked, sold, bought], [naked, sold, bought]);
+    expect(strategies.map(s => s.strategyType).sort()).toEqual(['naked_put', 'put_spread']);
+    expect(strategies.find(s => s.strategyType === 'naked_put')?.positions[0].strike_price).toBe(350);
+    expect(strategies.find(s => s.strategyType === 'put_spread')?.positions.map(p => p.strike_price).sort()).toEqual([450, 500]);
+  });
+
+  it('REGRESSIONE MauroG/ALAB: quantità diverse → residuo P380 x2 naked + diagonal put spread + LEAP', () => {
+    const naked = makeOption({ underlying: 'ALAB', option_type: 'put', strike_price: 380, expiry_date: '2026-09-18', quantity: -2 });
+    const sold = makeOption({ underlying: 'ALAB', option_type: 'put', strike_price: 500, expiry_date: '2026-10-16', quantity: -1 });
+    const bought = makeOption({ underlying: 'ALAB', option_type: 'put', strike_price: 420, expiry_date: '2027-01-15', quantity: 1 });
+    const leap = makeOption({ underlying: 'ALAB', option_type: 'call', strike_price: 300, expiry_date: '2027-12-17', quantity: 1 });
+    const strategies = autoClassify([naked, sold, bought, leap], [naked, sold, bought, leap]);
+    expect(strategies.map(s => s.strategyType).sort()).toEqual(['diagonal_put_spread', 'leap_call', 'naked_put']);
+    const np = strategies.find(s => s.strategyType === 'naked_put')!;
+    expect(buildSignatures(np.positions)[0]).toMatchObject({ strike: 380, quantity_abs: 2 });
+  });
+
+  it('REGRESSIONE MauroG/CEG: quattro PUT diverse formano due diagonal put spread distinti', () => {
+    const legs = [
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 300, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 250, expiry_date: '2026-12-18', quantity: 1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 280, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 240, expiry_date: '2027-01-15', quantity: 1 }),
+    ];
+    const strategies = autoClassify(legs, legs);
+    const diagonals = strategies.filter(s => s.strategyType === 'diagonal_put_spread');
+    expect(diagonals).toHaveLength(2);
+    expect(diagonals.every(s => s.positions.length === 2)).toBe(true);
+  });
+
+  it('REGRESSIONE MauroG/MU: quinta PUT con scadenza diversa resta naked e le quattro coeve restano Iron Condor', () => {
+    const septemberNaked = makeOption({ underlying: 'MU', option_type: 'put', strike_price: 810, expiry_date: '2026-09-18', quantity: -1 });
+    const condor = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 750, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 700, expiry_date: '2026-10-16', quantity: 1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 900, expiry_date: '2026-10-16', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 950, expiry_date: '2026-10-16', quantity: 1 }),
+    ];
+    const strategies = autoClassify([septemberNaked, ...condor], [septemberNaked, ...condor]);
+    expect(strategies.map(s => s.strategyType).sort()).toEqual(['iron_condor', 'naked_put']);
+    expect(strategies.find(s => s.strategyType === 'naked_put')?.positions[0].strike_price).toBe(810);
+  });
+
   it('keeps two de-risking covered calls on the same underlying separate when their structures differ', () => {
     const stock = makeStock({ description: 'GOOGL', quantity: 200 });
     const soldCall1 = makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-06-20', quantity: -1 });
