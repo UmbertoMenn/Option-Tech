@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, FlaskConical, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, FlaskConical, Loader2, Plus, X } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -10,14 +10,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { runShortPutBacktest, validateShortPutConfig } from '@/lib/backtesting/shortPut/engine';
 import {
   SyntheticMarketDataProvider,
@@ -35,69 +32,81 @@ import { toast } from 'sonner';
 const EVENT_LABELS: Record<ShortPutEvent['type'], string> = {
   entry: 'Ingresso',
   entry_skipped: 'Ingresso rimandato',
-  roll_down: 'Roll discesa',
-  roll_down_failed: 'Roll discesa non eseguibile',
-  roll_up: 'Roll rialzo',
-  roll_to_front: 'Rientro prima scadenza',
-  time_roll: 'Roll di scadenza',
+  roll_down: 'Roll ↓',
+  roll_down_failed: 'Roll ↓ non eseguibile',
+  roll_up: 'Roll ↑',
+  roll_to_front: 'Rientro front',
+  time_roll: 'Roll scadenza',
   survival_roll: 'Roll orizzontale',
-  max_rolls_reached: 'Roll gestiti esauriti',
+  max_rolls_reached: 'Roll esauriti',
   expired_otm: 'Scaduta OTM',
   assignment: 'Assegnazione',
 };
 
-const EVENT_VARIANTS: Partial<Record<ShortPutEvent['type'], 'default' | 'secondary' | 'destructive' | 'outline'>> = {
+const EVENT_VARIANTS: Record<ShortPutEvent['type'], 'default' | 'secondary' | 'destructive' | 'outline'> = {
   entry: 'default',
+  entry_skipped: 'outline',
   roll_down: 'secondary',
+  roll_down_failed: 'outline',
   roll_up: 'secondary',
   roll_to_front: 'secondary',
   time_roll: 'outline',
   survival_roll: 'secondary',
-  assignment: 'destructive',
   max_rolls_reached: 'outline',
-  roll_down_failed: 'outline',
-  entry_skipped: 'outline',
   expired_otm: 'outline',
+  assignment: 'destructive',
 };
 
-function num(value: string, fallback = 0): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+const num = (v: string, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+const fmt = (v: number) => v.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+
+/** Campo compatto: label micro sopra input basso. */
+function F({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`space-y-1 ${className}`}>
+      <label className="block text-[11px] leading-tight text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
 }
 
-const fmtEur = (v: number) =>
-  v.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+function N({ value, onChange, ...rest }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number }) {
+  return <Input className="h-8" type="number" value={value} onChange={(e) => onChange(num(e.target.value))} {...rest} />;
+}
+
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border bg-card p-3">
+      <div className="flex items-baseline gap-2 mb-2.5">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {hint && <span className="text-[11px] text-muted-foreground truncate">{hint}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export function ShortPutBacktestPanel() {
   const [config, setConfig] = useState<ShortPutConfig>(() => structuredClone(DEFAULT_SHORT_PUT_CONFIG));
   const [result, setResult] = useState<ShortPutBacktestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [eventsOpen, setEventsOpen] = useState(false);
 
-  const set = <K extends keyof ShortPutConfig>(key: K, value: ShortPutConfig[K]) =>
-    setConfig((c) => ({ ...c, [key]: value }));
-  const setEntry = <K extends keyof ShortPutConfig['entry']>(key: K, value: ShortPutConfig['entry'][K]) =>
-    setConfig((c) => ({ ...c, entry: { ...c.entry, [key]: value } }));
-  const setDownside = <K extends keyof ShortPutConfig['downside']>(key: K, value: ShortPutConfig['downside'][K]) =>
-    setConfig((c) => ({ ...c, downside: { ...c.downside, [key]: value } }));
-  const setUpside = <K extends keyof ShortPutConfig['upside']>(key: K, value: ShortPutConfig['upside'][K]) =>
-    setConfig((c) => ({ ...c, upside: { ...c.upside, [key]: value } }));
-  const setExecution = <K extends keyof ShortPutConfig['execution']>(key: K, value: ShortPutConfig['execution'][K]) =>
-    setConfig((c) => ({ ...c, execution: { ...c.execution, [key]: value } }));
-  const setRoll = (index: number, key: 'netPremiumTargetPct' | 'netPremiumTolerancePct', value: number) =>
+  const set = <K extends keyof ShortPutConfig>(k: K, v: ShortPutConfig[K]) => setConfig((c) => ({ ...c, [k]: v }));
+  const setEntry = <K extends keyof ShortPutConfig['entry']>(k: K, v: ShortPutConfig['entry'][K]) =>
+    setConfig((c) => ({ ...c, entry: { ...c.entry, [k]: v } }));
+  const setDown = <K extends keyof ShortPutConfig['downside']>(k: K, v: ShortPutConfig['downside'][K]) =>
+    setConfig((c) => ({ ...c, downside: { ...c.downside, [k]: v } }));
+  const setUp = <K extends keyof ShortPutConfig['upside']>(k: K, v: ShortPutConfig['upside'][K]) =>
+    setConfig((c) => ({ ...c, upside: { ...c.upside, [k]: v } }));
+  const setExec = <K extends keyof ShortPutConfig['execution']>(k: K, v: ShortPutConfig['execution'][K]) =>
+    setConfig((c) => ({ ...c, execution: { ...c.execution, [k]: v } }));
+  const setRoll = (i: number, k: 'netPremiumTargetPct' | 'netPremiumTolerancePct', v: number) =>
     setConfig((c) => {
       const rolls = [...c.downside.rolls] as ShortPutConfig['downside']['rolls'];
-      rolls[index] = { ...rolls[index], [key]: value };
+      rolls[i] = { ...rolls[i], [k]: v };
       return { ...c, downside: { ...c.downside, rolls } };
-    });
-  const setBasketItem = (index: number, key: 'symbol' | 'contracts', value: string) =>
-    setConfig((c) => {
-      const basket = c.basket.map((item, i) =>
-        i === index
-          ? { ...item, [key]: key === 'symbol' ? value.toUpperCase() : Math.max(1, Math.round(num(value, 1))) }
-          : item,
-      );
-      return { ...c, basket };
     });
 
   const chartData = useMemo(
@@ -109,7 +118,7 @@ export function ShortPutBacktestPanel() {
     const validation = validateShortPutConfig(config);
     setErrors(validation);
     if (validation.length > 0) {
-      toast.error('Correggi la configurazione prima di eseguire');
+      toast.error(validation[0]);
       return;
     }
     setRunning(true);
@@ -122,9 +131,7 @@ export function ShortPutBacktestPanel() {
         ]),
       );
       const provider = new SyntheticMarketDataProvider(params, config.startDate, config.endDate);
-      const run = await runShortPutBacktest(config, provider, 'Dati sintetici Black-Scholes (test motore)');
-      setResult(run);
-      toast.success('Backtest completato su dati sintetici');
+      setResult(await runShortPutBacktest(config, provider, 'Dati sintetici (test motore)'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Errore durante il backtest');
     } finally {
@@ -133,338 +140,254 @@ export function ShortPutBacktestPanel() {
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Paniere e periodo</CardTitle>
-          <CardDescription>Posizioni indipendenti per titolo, contratti fissi, cassa unica di portafoglio.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            {config.basket.map((item, index) => (
-              <div key={index} className="flex items-end gap-3">
-                <div className="space-y-1.5 flex-1">
-                  <Label>Ticker</Label>
-                  <Input value={item.symbol} onChange={(e) => setBasketItem(index, 'symbol', e.target.value)} placeholder="AAPL" />
-                </div>
-                <div className="space-y-1.5 w-32">
-                  <Label>Contratti</Label>
-                  <Input type="number" min={1} value={item.contracts} onChange={(e) => setBasketItem(index, 'contracts', e.target.value)} />
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={config.basket.length <= 1}
-                  onClick={() => set('basket', config.basket.filter((_, i) => i !== index))}
-                >
-                  <Trash2 className="w-4 h-4" />
+    <div className="space-y-3">
+      {/* Riga 1: paniere + periodo + capitale */}
+      <Section title="Paniere e periodo">
+        <div className="flex flex-wrap items-end gap-2">
+          {config.basket.map((item, i) => (
+            <div key={i} className="flex items-end gap-1">
+              <F label={i === 0 ? 'Ticker' : ''}>
+                <Input
+                  className="h-8 w-24"
+                  value={item.symbol}
+                  placeholder="AAPL"
+                  onChange={(e) =>
+                    set('basket', config.basket.map((b, j) => (j === i ? { ...b, symbol: e.target.value.toUpperCase() } : b)))
+                  }
+                />
+              </F>
+              <F label={i === 0 ? 'Contratti' : ''}>
+                <Input
+                  className="h-8 w-16"
+                  type="number"
+                  min={1}
+                  value={item.contracts}
+                  onChange={(e) =>
+                    set('basket', config.basket.map((b, j) => (j === i ? { ...b, contracts: Math.max(1, Math.round(num(e.target.value, 1))) } : b)))
+                  }
+                />
+              </F>
+              {config.basket.length > 1 && (
+                <Button variant="ghost" size="icon" className="h-8 w-7" onClick={() => set('basket', config.basket.filter((_, j) => j !== i))}>
+                  <X className="w-3.5 h-3.5" />
                 </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" onClick={() => set('basket', [...config.basket, { symbol: '', contracts: 1 }])}>
-              <Plus className="w-4 h-4 mr-1" /> Aggiungi titolo
-            </Button>
-          </div>
-          <Separator />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label>Data inizio</Label>
-              <Input type="date" value={config.startDate} onChange={(e) => set('startDate', e.target.value)} />
+              )}
             </div>
-            <div className="space-y-1.5">
-              <Label>Data fine</Label>
-              <Input type="date" value={config.endDate} onChange={(e) => set('endDate', e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Capitale iniziale</Label>
-              <Input type="number" min={1} value={config.initialCapital} onChange={(e) => set('initialCapital', num(e.target.value))} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          ))}
+          <Button variant="outline" size="sm" className="h-8" onClick={() => set('basket', [...config.basket, { symbol: '', contracts: 1 }])}>
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+          <div className="h-8 w-px bg-border mx-1" />
+          <F label="Dal">
+            <Input className="h-8 w-[140px]" type="date" value={config.startDate} onChange={(e) => set('startDate', e.target.value)} />
+          </F>
+          <F label="Al">
+            <Input className="h-8 w-[140px]" type="date" value={config.endDate} onChange={(e) => set('endDate', e.target.value)} />
+          </F>
+          <F label="Capitale">
+            <Input className="h-8 w-28" type="number" value={config.initialCapital} onChange={(e) => set('initialCapital', num(e.target.value))} />
+          </F>
+        </div>
+      </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Ingresso — PUT OTM su mensile più vicina (DTE ≥ minimo)</CardTitle>
-          <CardDescription>Strike per distanza dal prezzo, premio % sul nozionale (strike × contratti × 100), o entrambe.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="space-y-1.5">
-            <Label>Criterio strike</Label>
-            <Select value={config.entry.strikeMode} onValueChange={(v) => setEntry('strikeMode', v as ShortPutConfig['entry']['strikeMode'])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="distance">Distanza dal prezzo</SelectItem>
-                <SelectItem value="premium">Premio % sul nozionale</SelectItem>
-                <SelectItem value="both">Entrambe</SelectItem>
-              </SelectContent>
-            </Select>
+      {/* Riga 2: ingresso + esecuzione affiancati */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Section title="Ingresso" hint="PUT OTM, mensile più vicina">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <F label="Criterio strike" className="col-span-2 sm:col-span-1">
+              <Select value={config.entry.strikeMode} onValueChange={(v) => setEntry('strikeMode', v as ShortPutConfig['entry']['strikeMode'])}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="distance">Distanza</SelectItem>
+                  <SelectItem value="premium">Premio %</SelectItem>
+                  <SelectItem value="both">Entrambe</SelectItem>
+                </SelectContent>
+              </Select>
+            </F>
+            <F label="Distanza OTM %"><N value={config.entry.distancePct} min={0} step={0.5} onChange={(v) => setEntry('distancePct', v)} /></F>
+            <F label="DTE min"><N value={config.entry.minDte} min={0} onChange={(v) => setEntry('minDte', Math.round(v))} /></F>
+            <F label="Premio target %"><N value={config.entry.premiumTargetPct} step={0.1} onChange={(v) => setEntry('premiumTargetPct', v)} /></F>
+            <F label="Tolleranza ±%"><N value={config.entry.premiumTolerancePct} min={0} step={0.1} onChange={(v) => setEntry('premiumTolerancePct', v)} /></F>
+            <F label="Roll sotto DTE"><N value={config.maintenance.timeRollAtDte} min={0} onChange={(v) => setConfig((c) => ({ ...c, maintenance: { timeRollAtDte: Math.round(v) } }))} /></F>
           </div>
-          <div className="space-y-1.5">
-            <Label>Distanza OTM %</Label>
-            <Input type="number" min={0} step={0.5} value={config.entry.distancePct} onChange={(e) => setEntry('distancePct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Premio target %</Label>
-            <Input type="number" min={0} step={0.1} value={config.entry.premiumTargetPct} onChange={(e) => setEntry('premiumTargetPct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Tolleranza ± %</Label>
-            <Input type="number" min={0} step={0.1} value={config.entry.premiumTolerancePct} onChange={(e) => setEntry('premiumTolerancePct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>DTE minimo</Label>
-            <Input type="number" min={0} value={config.entry.minDte} onChange={(e) => setEntry('minDte', Math.round(num(e.target.value)))} />
-          </div>
-        </CardContent>
-      </Card>
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <ArrowDownRight className="w-4 h-4 text-destructive" />
-            <CardTitle className="text-base">Gestione discesa — roll 1/2/3/4</CardTitle>
+        <Section title="Esecuzione">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <F label="Fill" className="col-span-2 sm:col-span-1">
+              <Select value={config.execution.fillModel} onValueChange={(v) => setExec('fillModel', v as ShortPutConfig['execution']['fillModel'])}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="natural">Natural (bid/ask)</SelectItem>
+                  <SelectItem value="mid">Mid</SelectItem>
+                  <SelectItem value="mid_with_slippage">Mid + slippage</SelectItem>
+                </SelectContent>
+              </Select>
+            </F>
+            <F label="Slippage % spread"><N value={config.execution.slippagePctOfHalfSpread} min={0} max={100} onChange={(v) => setExec('slippagePctOfHalfSpread', v)} /></F>
+            <F label="Commiss./contratto"><N value={config.execution.commissionPerContract} min={0} step={0.01} onChange={(v) => setExec('commissionPerContract', v)} /></F>
           </div>
-          <CardDescription>
-            Trigger: spot ≤ strike × (1 + soglia%). Nuovo strike più basso e OTM, scadenza mensile successiva più vicina che centra
-            il premio netto target ± tolleranza sul nuovo nozionale; tra i candidati si sceglie lo strike più basso. Se ITM con time
-            value &lt; spread: roll orizzontale anticipato (max uno per scadenza). Esauriti i 4 roll: roll orizzontale a ogni
-            scadenza finché OTM.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label>Soglia trigger % (unica)</Label>
-              <Input type="number" min={0} step={0.5} value={config.downside.triggerDistancePct} onChange={(e) => setDownside('triggerDistancePct', num(e.target.value))} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Cap mesi nuova scadenza</Label>
-              <Input type="number" min={1} max={24} value={config.downside.maxMonthsForward} onChange={(e) => setDownside('maxMonthsForward', Math.round(num(e.target.value)))} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {config.downside.rolls.map((rule, index) => (
-              <div key={index} className="rounded-lg border p-3 space-y-2">
-                <p className="text-sm font-semibold">Roll {index + 1}</p>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Premio netto target %</Label>
-                  <Input type="number" step={0.1} value={rule.netPremiumTargetPct} onChange={(e) => setRoll(index, 'netPremiumTargetPct', num(e.target.value))} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Tolleranza ± %</Label>
-                  <Input type="number" min={0} step={0.1} value={rule.netPremiumTolerancePct} onChange={(e) => setRoll(index, 'netPremiumTolerancePct', num(e.target.value))} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        </Section>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-            <CardTitle className="text-base">Gestione salita</CardTitle>
+      {/* Riga 3: discesa + salita affiancate */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Section title="Gestione discesa" hint="strike più basso e OTM, premio netto ±">
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <F label="Trigger: spot ≤ strike +%"><N value={config.downside.triggerDistancePct} min={0} step={0.5} onChange={(v) => setDown('triggerDistancePct', v)} /></F>
+            <F label="Cap mesi scadenza"><N value={config.downside.maxMonthsForward} min={1} max={24} onChange={(v) => setDown('maxMonthsForward', Math.round(v))} /></F>
           </div>
-          <CardDescription>
-            Trigger: distanza spot-strike ≥ soglia %. Su prima scadenza: roll al rialzo con distanza minima dal sottostante e
-            premio netto ≥ minimo. Su scadenze successive: rientro sulla prima scadenza con premio netto target ± tolleranza.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="space-y-1.5">
-            <Label>Soglia trigger %</Label>
-            <Input type="number" min={0.5} step={0.5} value={config.upside.triggerDistancePct} onChange={(e) => setUpside('triggerDistancePct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Recupero min. oltre spot ultimo roll ↓ %</Label>
-            <Input type="number" min={0} step={0.5} value={config.upside.minRecoveryAbovePct} onChange={(e) => setUpside('minRecoveryAbovePct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Distanza minima strike %</Label>
-            <Input type="number" min={0} step={0.5} value={config.upside.minDistancePct} onChange={(e) => setUpside('minDistancePct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Netto minimo roll rialzo %</Label>
-            <Input type="number" step={0.1} value={config.upside.minNetPremiumPct} onChange={(e) => setUpside('minNetPremiumPct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Rientro: netto target %</Label>
-            <Input type="number" step={0.1} value={config.upside.recoveryNetPremiumTargetPct} onChange={(e) => setUpside('recoveryNetPremiumTargetPct', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Rientro: tolleranza ± %</Label>
-            <Input type="number" min={0} step={0.1} value={config.upside.recoveryNetPremiumTolerancePct} onChange={(e) => setUpside('recoveryNetPremiumTolerancePct', num(e.target.value))} />
-          </div>
-        </CardContent>
-      </Card>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[11px] text-muted-foreground">
+                <th className="text-left font-normal pb-1 w-16">Roll</th>
+                <th className="text-left font-normal pb-1">Netto target %</th>
+                <th className="text-left font-normal pb-1">Tolleranza ±%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {config.downside.rolls.map((rule, i) => (
+                <tr key={i}>
+                  <td className="pr-2 py-0.5 font-medium">{i + 1}</td>
+                  <td className="pr-2 py-0.5">
+                    <Input className="h-7" type="number" step={0.1} value={rule.netPremiumTargetPct} onChange={(e) => setRoll(i, 'netPremiumTargetPct', num(e.target.value))} />
+                  </td>
+                  <td className="py-0.5">
+                    <Input className="h-7" type="number" min={0} step={0.1} value={rule.netPremiumTolerancePct} onChange={(e) => setRoll(i, 'netPremiumTolerancePct', num(e.target.value))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Esecuzione e mantenimento scadenza</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="space-y-1.5">
-            <Label>Modello di fill</Label>
-            <Select value={config.execution.fillModel} onValueChange={(v) => setExecution('fillModel', v as ShortPutConfig['execution']['fillModel'])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="natural">Natural: vendo bid / compro ask</SelectItem>
-                <SelectItem value="mid">Mid puro</SelectItem>
-                <SelectItem value="mid_with_slippage">Mid + slippage</SelectItem>
-              </SelectContent>
-            </Select>
+        <Section title="Gestione salita" hint="solo su recupero reale">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <F label="Trigger distanza %"><N value={config.upside.triggerDistancePct} min={0.5} step={0.5} onChange={(v) => setUp('triggerDistancePct', v)} /></F>
+            <F label="Recupero min. %"><N value={config.upside.minRecoveryAbovePct} min={0} step={0.5} onChange={(v) => setUp('minRecoveryAbovePct', v)} /></F>
+            <F label="Distanza min. strike %"><N value={config.upside.minDistancePct} min={0} step={0.5} onChange={(v) => setUp('minDistancePct', v)} /></F>
+            <F label="Netto min. roll ↑ %"><N value={config.upside.minNetPremiumPct} step={0.1} onChange={(v) => setUp('minNetPremiumPct', v)} /></F>
+            <F label="Rientro netto %"><N value={config.upside.recoveryNetPremiumTargetPct} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTargetPct', v)} /></F>
+            <F label="Rientro ±%"><N value={config.upside.recoveryNetPremiumTolerancePct} min={0} step={0.1} onChange={(v) => setUp('recoveryNetPremiumTolerancePct', v)} /></F>
           </div>
-          <div className="space-y-1.5">
-            <Label>Slippage % half-spread</Label>
-            <Input type="number" min={0} max={100} value={config.execution.slippagePctOfHalfSpread} onChange={(e) => setExecution('slippagePctOfHalfSpread', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Commissione / contratto</Label>
-            <Input type="number" min={0} step={0.01} value={config.execution.commissionPerContract} onChange={(e) => setExecution('commissionPerContract', num(e.target.value))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Roll di scadenza sotto DTE (0 = mai)</Label>
-            <Input
-              type="number"
-              min={0}
-              value={config.maintenance.timeRollAtDte}
-              onChange={(e) => setConfig((c) => ({ ...c, maintenance: { timeRollAtDte: Math.round(num(e.target.value)) } }))}
-            />
-          </div>
-        </CardContent>
-      </Card>
+        </Section>
+      </div>
 
       {errors.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTitle>Configurazione non valida</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc pl-4">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
-          </AlertDescription>
-        </Alert>
+        <p className="text-xs text-destructive">{errors.join(' · ')}</p>
       )}
 
-      <div className="flex flex-col items-center gap-2">
-        <Button size="lg" onClick={handleRun} disabled={running}>
-          {running ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <FlaskConical className="w-5 h-5 mr-2" />}
-          Esegui su dati sintetici (test motore)
+      <div className="flex items-center gap-3">
+        <Button onClick={handleRun} disabled={running}>
+          {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FlaskConical className="w-4 h-4 mr-2" />}
+          Esegui su dati sintetici
         </Button>
-        <p className="text-xs text-center text-muted-foreground max-w-2xl">
-          Il run usa un provider Black-Scholes deterministico per validare regole e contabilità del motore. I risultati non sono
-          storici: il run su dati reali si attiva collegando ThetaData, con lo stesso identico motore.
-        </p>
+        <span className="text-[11px] text-muted-foreground">Test motore: prezzi Black-Scholes, non storici.</span>
       </div>
 
       {result && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">{result.dataProviderLabel}</Badge>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <KpiCard label="Equity finale" value={fmtEur(result.finalEquity)} />
-            <KpiCard label="P&L" value={`${fmtEur(result.totalPL)} (${result.totalPLPct.toFixed(2)}%)`} tone={result.totalPL >= 0 ? 'positive' : 'negative'} />
-            <KpiCard label="Premi netti" value={fmtEur(result.totalNetPremiums)} />
-            <KpiCard label="Commissioni" value={fmtEur(result.totalCommissions)} />
-            <KpiCard label="Max drawdown" value={`${result.maxDrawdownPct.toFixed(2)}%`} tone="negative" />
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            <Kpi label="Equity finale" value={fmt(result.finalEquity)} />
+            <Kpi label="P&L" value={fmt(result.totalPL)} tone={result.totalPL >= 0 ? 'pos' : 'neg'} />
+            <Kpi label="P&L %" value={`${result.totalPLPct.toFixed(2)}%`} tone={result.totalPL >= 0 ? 'pos' : 'neg'} />
+            <Kpi label="Premi netti" value={fmt(result.totalNetPremiums)} />
+            <Kpi label="Commissioni" value={fmt(result.totalCommissions)} />
+            <Kpi label="Max DD" value={`${result.maxDrawdownPct.toFixed(2)}%`} tone="neg" />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Equity curve</CardTitle>
-            </CardHeader>
-            <CardContent className="h-72">
+          <Section title="Equity curve">
+            <div className="h-60">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={48} />
-                  <YAxis tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={72} tickFormatter={(v: number) => fmtEur(v)} />
-                  <Tooltip formatter={(v: number) => fmtEur(v)} />
+                <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={56} />
+                  <YAxis tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={60} tickFormatter={fmt} />
+                  <Tooltip formatter={(v: number) => fmt(v)} />
                   <ReferenceLine y={result.config.initialCapital} strokeDasharray="4 4" />
                   <Line type="monotone" dataKey="equity" dot={false} strokeWidth={2} stroke="hsl(var(--primary))" />
                 </LineChart>
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Riepilogo per titolo</CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="w-full text-sm">
+          <Section title="Per titolo">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-left text-xs uppercase text-muted-foreground border-b">
-                    <th className="py-2 pr-3">Titolo</th>
-                    <th className="py-2 pr-3">Contratti</th>
-                    <th className="py-2 pr-3">Ingressi</th>
-                    <th className="py-2 pr-3">Roll ↓</th>
-                    <th className="py-2 pr-3">Roll ↑</th>
-                    <th className="py-2 pr-3">Rientri</th>
-                    <th className="py-2 pr-3">Roll scad.</th>
-                    <th className="py-2 pr-3">Roll orizz.</th>
-                    <th className="py-2 pr-3">Assegn.</th>
-                    <th className="py-2 pr-3 text-right">Premi netti</th>
-                    <th className="py-2 pr-3 text-right">P&L realizzato</th>
+                  <tr className="text-left text-[11px] text-muted-foreground border-b">
+                    <th className="py-1 pr-2 font-normal">Titolo</th>
+                    <th className="py-1 pr-2 font-normal">Ctr</th>
+                    <th className="py-1 pr-2 font-normal">Ingr.</th>
+                    <th className="py-1 pr-2 font-normal">↓</th>
+                    <th className="py-1 pr-2 font-normal">↑</th>
+                    <th className="py-1 pr-2 font-normal">Rientri</th>
+                    <th className="py-1 pr-2 font-normal">Scad.</th>
+                    <th className="py-1 pr-2 font-normal">Orizz.</th>
+                    <th className="py-1 pr-2 font-normal">Assegn.</th>
+                    <th className="py-1 pr-2 font-normal text-right">Premi netti</th>
+                    <th className="py-1 font-normal text-right">P&L</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.bySymbol.map((s) => (
                     <tr key={s.symbol} className="border-b last:border-0">
-                      <td className="py-2 pr-3 font-medium">{s.symbol}</td>
-                      <td className="py-2 pr-3">{s.contracts}</td>
-                      <td className="py-2 pr-3">{s.entries}</td>
-                      <td className="py-2 pr-3">{s.rollsDown}</td>
-                      <td className="py-2 pr-3">{s.rollsUp}</td>
-                      <td className="py-2 pr-3">{s.rollsToFront}</td>
-                      <td className="py-2 pr-3">{s.timeRolls}</td>
-                      <td className="py-2 pr-3">{s.survivalRolls}</td>
-                      <td className="py-2 pr-3">{s.assignments}</td>
-                      <td className="py-2 pr-3 text-right">{fmtEur(s.netPremiums)}</td>
-                      <td className={`py-2 pr-3 text-right ${s.realizedPL >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmtEur(s.realizedPL)}</td>
+                      <td className="py-1 pr-2 font-medium">{s.symbol}</td>
+                      <td className="py-1 pr-2">{s.contracts}</td>
+                      <td className="py-1 pr-2">{s.entries}</td>
+                      <td className="py-1 pr-2">{s.rollsDown}</td>
+                      <td className="py-1 pr-2">{s.rollsUp}</td>
+                      <td className="py-1 pr-2">{s.rollsToFront}</td>
+                      <td className="py-1 pr-2">{s.timeRolls}</td>
+                      <td className="py-1 pr-2">{s.survivalRolls}</td>
+                      <td className="py-1 pr-2">{s.assignments}</td>
+                      <td className="py-1 pr-2 text-right">{fmt(s.netPremiums)}</td>
+                      <td className={`py-1 text-right ${s.realizedPL >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmt(s.realizedPL)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Registro eventi ({result.events.length})</CardTitle>
-              <CardDescription>Ogni ingresso, roll, scadenza e assegnazione con flussi di cassa e premio % di riferimento.</CardDescription>
-            </CardHeader>
-            <CardContent className="max-h-96 overflow-y-auto space-y-2">
-              {result.events.map((event, index) => (
-                <div key={index} className="rounded-lg border p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="font-mono text-xs text-muted-foreground">{event.date}</span>
-                  <span className="font-medium">{event.symbol}</span>
-                  <Badge variant={EVENT_VARIANTS[event.type] ?? 'outline'}>{EVENT_LABELS[event.type]}</Badge>
-                  <span className="text-muted-foreground flex-1 min-w-48">{event.description}</span>
-                  {event.premiumPct != null && <span className="text-xs">{event.premiumPct.toFixed(2)}%</span>}
-                  {event.cashFlow !== 0 && (
-                    <span className={`text-xs font-medium ${event.cashFlow >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>
-                      {event.cashFlow >= 0 ? '+' : ''}{fmtEur(event.cashFlow)}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <Collapsible open={eventsOpen} onOpenChange={setEventsOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="outline" size="sm" className="w-full justify-between h-8">
+                <span className="text-xs">Registro eventi ({result.events.length})</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${eventsOpen ? 'rotate-180' : ''}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <div className="rounded-lg border max-h-80 overflow-y-auto divide-y">
+                {result.events.map((e, i) => (
+                  <div key={i} className="px-2.5 py-1.5 text-xs flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="font-mono text-[11px] text-muted-foreground">{e.date}</span>
+                    <span className="font-medium">{e.symbol}</span>
+                    <Badge variant={EVENT_VARIANTS[e.type]} className="h-4 px-1.5 text-[10px]">{EVENT_LABELS[e.type]}</Badge>
+                    <span className="text-muted-foreground flex-1 min-w-40 truncate" title={e.description}>{e.description}</span>
+                    {e.premiumPct != null && <span className="text-[11px] tabular-nums">{e.premiumPct.toFixed(2)}%</span>}
+                    {e.cashFlow !== 0 && (
+                      <span className={`text-[11px] font-medium tabular-nums ${e.cashFlow >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>
+                        {e.cashFlow >= 0 ? '+' : ''}{fmt(e.cashFlow)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       )}
     </div>
   );
 }
 
-function KpiCard({ label, value, tone }: { label: string; value: string; tone?: 'positive' | 'negative' }) {
+function Kpi({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`text-lg font-bold ${tone === 'positive' ? 'text-emerald-500' : tone === 'negative' ? 'text-destructive' : ''}`}>{value}</p>
-      </CardContent>
-    </Card>
+    <div className="rounded-lg border bg-card px-2.5 py-2">
+      <p className="text-[11px] text-muted-foreground truncate">{label}</p>
+      <p className={`text-sm font-bold tabular-nums ${tone === 'pos' ? 'text-emerald-500' : tone === 'neg' ? 'text-destructive' : ''}`}>{value}</p>
+    </div>
   );
 }
 
