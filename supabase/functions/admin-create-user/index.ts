@@ -75,10 +75,20 @@ serve(async (req) => {
     });
 
     if (createError) {
-      console.error("Error creating user:", createError);
+      const alreadyExists =
+        (createError as { code?: string }).code === "email_exists" ||
+        /already been registered/i.test(createError.message);
+      console.error("Error creating user:", createError.message);
       return new Response(
-        JSON.stringify({ error: createError.message }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: alreadyExists
+            ? `Lo username "${username.trim().toLowerCase()}" è già in uso. Scegline un altro.`
+            : createError.message,
+        }),
+        {
+          status: alreadyExists ? 409 : 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
