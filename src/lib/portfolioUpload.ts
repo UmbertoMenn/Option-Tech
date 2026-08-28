@@ -26,6 +26,14 @@ const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
   maurog: {
     excludedCashPatterns: [{ mid: '2789', last: '0' }],
   },
+  mattiap: {
+    // Il patrimonio monitorato non comprende fondi comuni e SICAV: sono
+    // gestiti fuori dalla consulenza e vanno ignorati ad ogni upload.
+    excludeFundsAndSicav: true,
+    // Liquidità del conto "0624..." fuori dal perimetro: esclusa dai saldi e
+    // dai movimenti cash (versamenti/prelievi), non dai movimenti titoli.
+    excludedCashPrefixes: ['0624'],
+  },
 };
 
 export function getEffectiveUploadUserId(
@@ -52,6 +60,10 @@ export function getPortfolioParseOptions(
     excludedPositionIsins: usernameOptions?.excludedPositionIsins
       ? [...usernameOptions.excludedPositionIsins]
       : undefined,
+    excludedCashPrefixes: usernameOptions?.excludedCashPrefixes
+      ? [...usernameOptions.excludedCashPrefixes]
+      : undefined,
+    excludeFundsAndSicav: usernameOptions?.excludeFundsAndSicav,
     includeGpCashInCash: usernameOptions?.includeGpCashInCash,
   };
 }

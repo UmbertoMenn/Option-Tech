@@ -39,6 +39,45 @@ const ETF_SUBSTRING_PATTERNS = [
 // Index patterns che indicano un ETF quando combinati con ISIN IE/LU
 const ETF_INDEX_PATTERNS = ['MSCI', 'FTSE', 'S&P', 'STOXX', 'NASDAQ', 'DOW', 'RUSSELL', 'EURO'];
 
+// ---------------------------------------------------------------------------
+// Fondi comuni / SICAV
+// ---------------------------------------------------------------------------
+// Marcatori di OICR "tradizionale" (non quotato) nella descrizione della banca.
+// Volutamente NON include 'UCITS': anche le SICAV sono UCITS, quindi non
+// distingue nulla.
+const FUND_WORD_PATTERNS = [
+  'SICAV', 'SICAF', 'FONDO', 'FONDI', 'FDO', 'FCP', 'OICR', 'OEIC', 'COMPARTO',
+  'FUND', 'FUNDS',
+];
+
+// Marcatori che qualificano lo strumento come quotato (ETF/ETC/ETP/ETN) e che
+// quindi vincono sui marcatori "fondo": un "UCITS ETF Fund" resta un ETF.
+const EXCHANGE_TRADED_PATTERNS = ['ETF', 'ETC', 'ETP', 'ETN'];
+
+// Prefissi di categoria usati dalla banca nella descrizione ("AZ." = azioni,
+// "OB." = obbligazioni, "FD."/"QF."/"FO."/"SIC." = quote di fondi/SICAV).
+const FUND_DESCRIPTION_PREFIX_RE = /^(FD|FO|QF|SIC)\./;
+
+/**
+ * Riconosce fondi comuni e SICAV (OICR non quotati) dalla descrizione della
+ * banca. Gli strumenti quotati (ETF/ETC/ETP/ETN) sono esplicitamente esclusi:
+ * giuridicamente sono fondi anch'essi, ma nel modello di portafoglio restano
+ * posizioni a sé (asset_type 'etf'/'commodity').
+ */
+export function isFundOrSicav(description: string): boolean {
+  const descUpper = (description || '').toUpperCase();
+  if (!descUpper.trim()) return false;
+
+  // Guardia: se è uno strumento quotato non è un fondo "da escludere".
+  for (const pattern of EXCHANGE_TRADED_PATTERNS) {
+    if (new RegExp(`\\b${pattern}\\b`).test(descUpper)) return false;
+  }
+
+  if (FUND_DESCRIPTION_PREFIX_RE.test(descUpper)) return true;
+
+  return FUND_WORD_PATTERNS.some(pattern => new RegExp(`\\b${pattern}\\b`).test(descUpper));
+}
+
 /**
  * Check if ISIN suggests European ETF domicile
  */
@@ -100,8 +139,16 @@ export interface ParsedPortfolioFile {
 export interface PortfolioParseOptions {
   excludedCashAccounts?: string[];
   excludedCashPatterns?: { mid?: string; last: string }[];
+  /**
+   * Prefissi del NUMERO CONTO la cui LIQUIDITÀ va ignorata (es. '0624' → "il
+   * conto che inizia per 0624"). Applicato ai saldi e ai movimenti cash
+   * (versamenti/prelievi, per non falsare il TWR), NON ai movimenti titoli.
+   */
+  excludedCashPrefixes?: string[];
   excludedPositionDescriptions?: string[];
   excludedPositionIsins?: string[];
+  /** Esclude fondi comuni e SICAV dalle posizioni e dagli holdings GP. */
+  excludeFundsAndSicav?: boolean;
   includeGpCashInCash?: boolean;
 }
 
@@ -118,7 +165,8 @@ function isExcludedPosition(
   const excludedByIsin = options?.excludedPositionIsins?.some(
     excluded => excluded.trim().replace(/^'/, '').toUpperCase() === normalizedIsin,
   ) ?? false;
-  return excludedByDescription || excludedByIsin;
+  const excludedAsFund = !!options?.excludeFundsAndSicav && isFundOrSicav(description);
+  return excludedByDescription || excludedByIsin || excludedAsFund;
 }
 
 export async function parsePortfolioExcel(file: File, options?: PortfolioParseOptions): Promise<ParsedPortfolioFile> {
@@ -328,7 +376,10 @@ export function parsePortfolioData(rows: any[][], options?: PortfolioParseOption
         const mid = accountId.slice(midStart, midStart + p.mid.length);
         return mid === p.mid;
       });
-      if (isExcludedByList || isExcludedByPattern) {
+      const isExcludedByPrefix = options?.excludedCashPrefixes?.some(
+        prefix => accountId.toUpperCase().startsWith(prefix.toUpperCase()),
+      );
+      if (isExcludedByList || isExcludedByPattern || isExcludedByPrefix) {
         console.log(`[ExcelParser] Excluding cash account`);
         continue;
       }

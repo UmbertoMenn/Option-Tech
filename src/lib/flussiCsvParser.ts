@@ -31,7 +31,7 @@
  */
 import { Position, AssetType } from '@/types/portfolio';
 import { parseExcelNumber } from './formatters';
-import { isETF } from './excelParser';
+import { isETF, isFundOrSicav } from './excelParser';
 import { getOptionExpirationDateISO } from './optionExpiry';
 import type { GPHolding } from './gpExcelParser';
 
@@ -159,10 +159,21 @@ export interface FlussiParseOptions {
    * comparire anche al centro del numero conto.
    */
   excludedCashPatterns?: { mid?: string; last: string }[];
+  /**
+   * Prefissi del NUMERO CONTO la cui LIQUIDITÀ va ignorata (es. '0624' → "il
+   * conto che inizia per 0624"). A differenza di `excludedCashAccounts`, che
+   * mette il conto interamente fuori bilancio, questa regola tocca solo il lato
+   * cash: saldi e movimenti cash (versamenti/prelievi, esclusi anch'essi per
+   * non falsare il TWR con capitale che non entra nel patrimonio). I movimenti
+   * titoli dello stesso conto restano validi.
+   */
+  excludedCashPrefixes?: string[];
   /** Descrizioni titolo da non includere nelle posizioni o holdings GP. */
   excludedPositionDescriptions?: string[];
   /** ISIN titolo da non includere nelle posizioni o holdings GP. */
   excludedPositionIsins?: string[];
+  /** Esclude fondi comuni e SICAV dalle posizioni e dagli holdings GP. */
+  excludeFundsAndSicav?: boolean;
   /** Include i conti B0 nella liquidità ordinaria invece di classificarli come GP. */
   includeGpCashInCash?: boolean;
 }
@@ -203,7 +214,15 @@ export function detectFlussiCsvType(text: string): FlussiCsvType | null {
 /** Descrittore opzione nel campo ISIN: [AAPL][12/27][C][300] (strike anche decimale: 82.5) */
 const OPTION_DESCRIPTOR_RE = /^\[([A-Z0-9.\-]+)\]\[(\d{2})\/(\d{2})\]\[([CP])\]\[(\d+(?:\.\d+)?)\]$/i;
 
-function isExcludedAccount(accountId: string, options?: FlussiParseOptions): boolean {
+/**
+ * @param scope 'cash' per saldi e movimenti cash, 'titoli' per i movimenti
+ * titoli. I prefissi `excludedCashPrefixes` valgono solo sul lato cash.
+ */
+function isExcludedAccount(
+  accountId: string,
+  options?: FlussiParseOptions,
+  scope: 'cash' | 'titoli' = 'cash',
+): boolean {
   const byList = options?.excludedCashAccounts?.some(acc => accountId.includes(acc));
   const byPattern = options?.excludedCashPatterns?.some(p => {
     if (!accountId.endsWith(p.last)) return false;
@@ -212,7 +231,10 @@ function isExcludedAccount(accountId: string, options?: FlussiParseOptions): boo
     const mid = accountId.slice(midStart, midStart + p.mid.length);
     return mid === p.mid;
   });
-  return !!byList || !!byPattern;
+  const byPrefix = scope === 'cash' && options?.excludedCashPrefixes?.some(
+    prefix => accountId.toUpperCase().startsWith(prefix.toUpperCase()),
+  );
+  return !!byList || !!byPattern || !!byPrefix;
 }
 
 function isExcludedPosition(description: string, isin: string, options?: FlussiParseOptions): boolean {
@@ -224,7 +246,8 @@ function isExcludedPosition(description: string, isin: string, options?: FlussiP
   const excludedByIsin = options?.excludedPositionIsins?.some(
     excluded => stripQuote(excluded).toUpperCase() === normalizedIsin,
   ) ?? false;
-  return excludedByDescription || excludedByIsin;
+  const excludedAsFund = !!options?.excludeFundsAndSicav && isFundOrSicav(description);
+  return excludedByDescription || excludedByIsin || excludedAsFund;
 }
 
 /** Word-boundary "ETC" (es. "ETC-INVESCO PHYSICAL") → commodity. */
@@ -667,8 +690,9 @@ function parseMovTitoliRow(cells: string[], result: FlussiParseResult, options?:
   const accountId = stripQuote(cells[3] || '');
   if (!accountId) return;
 
-  // Stesse eccezioni cliente già usate per liquidità e movimenti cash.
-  if (isExcludedAccount(accountId, options)) return;
+  // Stesse eccezioni cliente già usate per liquidità e movimenti cash, escluse
+  // quelle che riguardano solo la liquidità (`excludedCashPrefixes`).
+  if (isExcludedAccount(accountId, options, 'titoli')) return;
 
   const causale = (cells[10] || '').trim().toUpperCase();
   if (causale !== 'ACQ' && causale !== 'VEN') return; // DIV, cedole, ecc. esclusi
