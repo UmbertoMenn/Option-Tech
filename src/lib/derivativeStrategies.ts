@@ -1988,6 +1988,71 @@ export function getCanonicalKey(text: string): string | null {
  *
  * IMPORTANT: Only matches stocks, never ETFs.
  */
+/**
+ * Token societari generici: da soli NON identificano un'azienda. Senza questo
+ * filtro "CREDO TECHNOLOGY GROUP HOLDING" e "ALIBABA GROUP HOLDING" condividono
+ * 2 token (GROUP, HOLDING) e la put CRDO veniva collegata all'azione BABA,
+ * ereditandone lo spot (112,66 invece di ~168).
+ */
+const GENERIC_NAME_TOKENS = new Set([
+  'GROUP', 'GRP', 'HOLDING', 'HOLDINGS', 'HLDG', 'HLDGS', 'COMPANY', 'COMPANIES',
+  'INTERNATIONAL', 'INTL', 'GLOBAL', 'WORLDWIDE', 'TECHNOLOGY', 'TECHNOLOGIES', 'TECH',
+  'SYSTEMS', 'SOLUTIONS', 'SERVICES', 'INDUSTRIES', 'ENTERPRISES', 'PLATFORMS',
+  'NETWORKS', 'SOFTWARE', 'SEMICONDUCTOR', 'SEMICONDUCTORS', 'DEVICES', 'MANUFACTURING',
+  'COMMUNICATIONS', 'FINANCIAL', 'CAPITAL', 'PARTNERS', 'BRANDS', 'RESOURCES',
+  'ENERGY', 'HEALTH', 'HEALTHCARE', 'PHARMACEUTICALS', 'THERAPEUTICS', 'BIOSCIENCES',
+  'MOTORS', 'AIRLINES', 'BANCORP', 'TRUST', 'FUND', 'SHARES', 'ORD', 'ORDINARY',
+  'REIT', 'NEW', 'AND', 'OPTION', 'OPTIONS', 'CALL', 'PUT',
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+]);
+
+function distinctiveTokens(normalized: string): string[] {
+  return normalized.split(' ').filter(w => w.length > 2 && !GENERIC_NAME_TOKENS.has(w) && !/^\d+$/.test(w));
+}
+
+/** Contenimento a confini di parola (le cifre a destra sono ammesse per i simboli OCC "AAPL260918P..."). */
+function containsPhrase(haystack: string, needle: string): boolean {
+  if (!needle || !haystack) return false;
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^A-Z0-9])${esc}([^A-Z]|$)`).test(haystack);
+}
+
+/**
+ * Chiave ticker canonica dell'azione (ticker → ISIN → alias descrizione),
+ * null se l'azione non è identificabile con un ticker (chiave NAME:...).
+ */
+function stockTickerKey(stock: Position): string | null {
+  const k = resolveUnderlyingKey(stock.ticker || stock.description || '', stock);
+  return k && !k.startsWith('NAME:') ? k : null;
+}
+
+/**
+ * Chiave ticker canonica dell'opzione, null se non identificabile.
+ */
+function optionTickerKey(option: Position): string | null {
+  const k = resolveUnderlyingKey(option.underlying || option.description || '');
+  return k && !k.startsWith('NAME:') ? k : null;
+}
+
+/**
+ * True se opzione e azione hanno entrambe un'identità ticker certa e DIVERSA:
+ * in tal caso nessuna euristica testuale può collegarle.
+ */
+function tickerIdentityConflict(option: Position, stock: Position): boolean {
+  const ok = optionTickerKey(option);
+  if (!ok) return false;
+  const sk = stockTickerKey(stock);
+  return !!sk && sk !== ok;
+}
+
+/**
+ * Predicato "questa opzione ha come sottostante questa azione", unica fonte
+ * di verità (usato anche da riskCalculator).
+ */
+export function optionMatchesStock(option: Position, stock: Position): boolean {
+  return matchOptionToStocks(option, [stock]) !== undefined;
+}
+
 export function findUnderlyingStock(option: Position, stocks: Position[]): Position | undefined {
   const stocksOnly = stocks.filter(s => s.asset_type === 'stock');
 
@@ -2057,30 +2122,37 @@ function matchOptionToStocks(option: Position, candidates: Position[]): Position
   const optionCollapsed = collapseShortTokens(optionNormalized);
 
   for (const stock of candidates) {
+    // Identità ticker certa e diversa (es. opzione CRDO vs azione BABA):
+    // nessuna euristica testuale può collegarle.
+    if (tickerIdentityConflict(option, stock)) continue;
+
     const stockName = normalizeForMatching(stock.description);
     const stockTokens = stockName.split(' ').filter(w => w.length > 2);
     const stockCollapsed = collapseShortTokens(stockName);
 
-    // Ticker containment (when available)
+    // Ticker containment (when available) — a confini di parola: "ALL" non è in "ALLY"
     if (stock.ticker) {
       const t = normalizeForMatching(stock.ticker);
-      if (t && optionNormalized.includes(t)) return stock;
+      if (t && containsPhrase(optionNormalized, t)) return stock;
     }
 
     // Name containment / token overlap
-    if (stockName && optionNormalized.includes(stockName)) return stock;
+    if (stockName && containsPhrase(optionNormalized, stockName)) return stock;
     
     // Collapsed name matching (for "JP MORGAN" vs "JPMORGAN")
-    if (stockCollapsed && optionCollapsed.includes(stockCollapsed)) return stock;
+    if (stockCollapsed && containsPhrase(optionCollapsed, stockCollapsed)) return stock;
     if (optionCollapsed && stockCollapsed && stockCollapsed.includes(optionCollapsed.split(' ')[0])) {
       const optionPrimaryToken = optionCollapsed.split(' ')[0];
-      if (optionPrimaryToken.length >= 5 && stockCollapsed.startsWith(optionPrimaryToken)) return stock;
+      if (optionPrimaryToken.length >= 5 && !GENERIC_NAME_TOKENS.has(optionPrimaryToken) && stockCollapsed.startsWith(optionPrimaryToken)) return stock;
     }
 
+    // Overlap di token: almeno uno dei token condivisi deve essere
+    // DISTINTIVO (GROUP/HOLDING/TECHNOLOGY... da soli non identificano nulla).
     if (stockTokens.length > 0) {
-      const shared = stockTokens.filter(t => optionTokens.includes(t)).length;
+      const sharedTokens = stockTokens.filter(t => optionTokens.includes(t));
       const required = stockTokens.length === 1 ? 1 : Math.min(2, stockTokens.length);
-      if (shared >= required) return stock;
+      const hasDistinctive = distinctiveTokens(sharedTokens.join(' ')).length > 0;
+      if (sharedTokens.length >= required && hasDistinctive) return stock;
     }
   }
 

@@ -10,7 +10,8 @@ import {
   CoveredCallPosition,
   DeRiskingCoveredCallPosition,
   normalizeForMatching,
-  getCanonicalKey
+  getCanonicalKey,
+  optionMatchesStock
 } from './derivativeStrategies';
 import { 
   calculateUniversalMaxLoss, 
@@ -174,56 +175,14 @@ function getEffectiveExchangeRate(position: Position): number {
 }
 
 /**
- * Checks if an option matches a stock using flexible matching logic.
- * This is consistent with derivativeStrategies.ts findUnderlyingStock logic.
+ * Checks if an option matches a stock. Delega al predicato unico di
+ * derivativeStrategies (optionMatchesStock): la vecchia copia locale aveva
+ * stopword minuscole mai applicate a testo normalizzato MAIUSCOLO, per cui
+ * "CREDO TECHNOLOGY GROUP HOLDING" risultava coperta/protetta da
+ * "ALIBABA GROUP HOLDING" (token GROUP + HOLDING).
  */
 function matchesUnderlying(option: Position, stock: Position): boolean {
-  // Build full text for matching
-  const optionText = normalizeForMatching(
-    `${option.underlying || ''} ${option.description || ''} ${option.ticker || ''}`
-  );
-  const stockText = normalizeForMatching(
-    `${stock.ticker || ''} ${stock.description || ''}`
-  );
-  
-  // 1. Direct match
-  if (optionText === stockText && optionText.length > 0) return true;
-  
-  // 2. Check for ticker containment
-  if (stock.ticker) {
-    const tickerNorm = normalizeForMatching(stock.ticker);
-    if (tickerNorm.length > 0 && optionText.includes(tickerNorm)) return true;
-  }
-  
-  // 3. Check for stock name containment
-  const stockName = normalizeForMatching(stock.description);
-  if (stockName.length > 0 && optionText.includes(stockName)) return true;
-  
-  // 4. Token-based matching (filter corporate stopwords to avoid false positives)
-  const CORPORATE_STOPWORDS = new Set([
-    'group', 'holding', 'holdings', 'company', 'companies', 'corp',
-    'corporation', 'limited', 'ltd', 'inc', 'incorporated', 'plc',
-    'ag', 'sa', 'spa', 'nv', 'bv', 'se', 'the'
-  ]);
-  const optionTokens = optionText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
-  const stockTokens = stockText.split(' ').filter(t => t.length > 2 && !CORPORATE_STOPWORDS.has(t));
-  
-  if (stockTokens.length > 0) {
-    const matchCount = stockTokens.filter(t => optionTokens.includes(t)).length;
-    // For single-word names (e.g., NVIDIA), require 1 match
-    // For compound names, require at least half
-    const threshold = stockTokens.length === 1 ? 1 : Math.ceil(stockTokens.length / 2);
-    if (matchCount >= threshold) return true;
-  }
-  
-  // 5. Special aliases (GOOGLE = ALPHABET, etc.)
-  const optionCanonical = getCanonicalKey(optionText);
-  const stockCanonical = getCanonicalKey(stockText);
-  if (optionCanonical && stockCanonical && optionCanonical === stockCanonical) {
-    return true;
-  }
-  
-  return false;
+  return optionMatchesStock(option, stock);
 }
 
 // ============= RISK CALCULATION FUNCTIONS =============
