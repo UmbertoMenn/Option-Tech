@@ -296,7 +296,7 @@ export function HistoricalDataForm({
                                   size="icon"
                                   className="h-8 w-8"
                                   onClick={() => startEdit(entry)}
-                                  disabled={isEditing}
+                                  disabled={isEditing || isLoading}
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </Button>
@@ -305,7 +305,7 @@ export function HistoricalDataForm({
                                   size="icon"
                                   className="h-8 w-8 text-destructive hover:text-destructive"
                                   onClick={() => onDelete(entry.id)}
-                                  disabled={isEditing}
+                                  disabled={isEditing || isLoading}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>

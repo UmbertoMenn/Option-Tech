@@ -3,10 +3,12 @@ import { useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { HistoricalDataEntry, HistoricalDataInput, SyntheticDeposit, AggregatedHistoricalResult } from '@/types/historicalData';
-import { AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUserIdFromAggregatedId, isAnyAggregatedId } from '@/contexts/PortfolioContext';
+import { AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUserIdFromAggregatedId, isAnyAggregatedId, usePortfolioContext } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
+import { deleteHistoricalSnapshot, invalidateSnapshotQueries } from '@/lib/deleteHistoricalSnapshot';
+import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 
 // Helper: interpola il valore tra due snapshot
 function interpolateValue(
@@ -186,6 +188,7 @@ function aggregateHistoricalWithInterpolation(
 export function useHistoricalData(portfolioId: string | undefined, viewMode: ViewMode = 'netting_total') {
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
+  const { selectedPortfolioId, historicalViewDate, exitHistoricalView } = usePortfolioContext();
   const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
   const isAggregated = isAnyAggregatedId(portfolioId);
   const { portfolioIds: userPortfolioIds, isUserAggregated } = useUserPortfolioIds(portfolioId);
@@ -287,12 +290,24 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('historical_data').delete().eq('id', id);
-      if (error) throw error;
+      if (!portfolioId || isAggregated) throw new Error('Seleziona un portafoglio singolo');
+      return deleteHistoricalSnapshot(portfolioId, id);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['historical-data'] });
-      toast.success('Dato storico eliminato');
+    onSuccess: async (result) => {
+      if (selectedPortfolioId === result.portfolio_id && historicalViewDate === result.deleted_date) {
+        exitHistoricalView();
+      }
+      await invalidateSnapshotQueries(queryClient);
+      if (result.restored) {
+        void refreshStrategyCacheForPortfolio(result.portfolio_id);
+      }
+      toast.success('Dato storico eliminato', {
+        description: result.restored
+          ? result.snapshot_date
+            ? `Portafoglio ripristinato al ${result.snapshot_date.split('-').reverse().join('/')}`
+            : 'Nessuno snapshot rimasto: portafoglio vuoto'
+          : undefined,
+      });
     },
     onError: (error) => { toast.error('Errore nell\'eliminazione', { description: error.message }); },
   });

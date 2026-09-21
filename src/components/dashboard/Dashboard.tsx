@@ -142,6 +142,7 @@ export function Dashboard() {
     upsertHistoricalData, 
     deleteHistoricalData,
     isUpserting,
+    isDeleting,
   } = useHistoricalData(portfolio?.id, viewMode);
 
   // Prezzi CONGELATI dello snapshot corrente: la card di netting NON deve muoversi
@@ -440,7 +441,7 @@ export function Dashboard() {
                     historicalData={historicalData}
                     onSave={upsertHistoricalData}
                     onDelete={deleteHistoricalData}
-                    isLoading={isUpserting}
+                    isLoading={isUpserting || isDeleting}
                     currentTotalValue={summary?.totalValue ?? 0}
                     currentNettingTotal={netting.nettingTotal}
                     currentNettingIntrinsicA={nettingIntrinsicA}

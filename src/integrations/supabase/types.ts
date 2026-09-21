@@ -1149,6 +1149,7 @@ export type Database = {
           derivative_overrides: Json
           gp_holdings: Json
           gp_total_value: number | null
+          restricted_cash_value: number | null
           id: string
           portfolio_id: string
           positions: Json
@@ -1162,6 +1163,7 @@ export type Database = {
           derivative_overrides?: Json
           gp_holdings?: Json
           gp_total_value?: number | null
+          restricted_cash_value?: number | null
           id?: string
           portfolio_id: string
           positions?: Json
@@ -1175,6 +1177,7 @@ export type Database = {
           derivative_overrides?: Json
           gp_holdings?: Json
           gp_total_value?: number | null
+          restricted_cash_value?: number | null
           id?: string
           portfolio_id?: string
           positions?: Json
@@ -1949,6 +1952,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      delete_historical_snapshot: {
+        Args: { p_history_id: string; p_portfolio_id: string }
+        Returns: Json
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

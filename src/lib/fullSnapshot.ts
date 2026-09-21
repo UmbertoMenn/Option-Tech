@@ -25,6 +25,7 @@ export interface FullSnapshot {
   gp_holdings: GPHoldingRow[];
   cash_value: number;
   gp_total_value: number | null;
+  restricted_cash_value?: number | null;
 }
 
 /**
@@ -43,11 +44,12 @@ export async function saveFullSnapshot(
       supabase.from('strategy_configurations').select('*').eq('portfolio_id', portfolioId),
       supabase.from('derivative_overrides').select('*').eq('portfolio_id', portfolioId),
       supabase.from('gp_holdings').select('*').eq('portfolio_id', portfolioId),
-      supabase.from('portfolios').select('gp_total_value').eq('id', portfolioId).single(),
+      supabase.from('portfolios').select('gp_total_value, restricted_cash_value').eq('id', portfolioId).single(),
     ]);
 
-    if (posRes.error) {
-      console.error('[FullSnapshot] Error fetching positions:', posRes.error.message);
+    const readError = [posRes, cfgRes, ovrRes, gpRes, pfRes].find(result => result.error)?.error;
+    if (readError) {
+      console.error('[FullSnapshot] Incomplete read; snapshot not saved:', readError.message);
       return;
     }
 
@@ -62,6 +64,7 @@ export async function saveFullSnapshot(
         gp_holdings: (gpRes.data ?? []) as unknown as never,
         cash_value: cashValue,
         gp_total_value: (pfRes.data?.gp_total_value as number | null) ?? null,
+        restricted_cash_value: pfRes.data?.restricted_cash_value ?? 0,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'portfolio_id,snapshot_date' });
 
@@ -104,6 +107,7 @@ export async function fetchFullSnapshot(
     gp_holdings: (data.gp_holdings ?? []) as unknown as GPHoldingRow[],
     cash_value: Number(data.cash_value ?? 0),
     gp_total_value: data.gp_total_value != null ? Number(data.gp_total_value) : null,
+    restricted_cash_value: data.restricted_cash_value != null ? Number(data.restricted_cash_value) : null,
   };
 }
 
