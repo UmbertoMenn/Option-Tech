@@ -642,7 +642,7 @@ export function movementPeriodWarnings(
     warnings.push(`${count(inputs.orphanCash)} movimenti cash senza il movimento titoli corrispondente (file titoli di un altro mese?): ricostruiti dalla sola riga cash`);
   }
   if (count(inputs.orphanOptionPremiums) > 0) {
-    warnings.push(`Premi opzioni per ${eur(sum(inputs.orphanOptionPremiums))} registrati in cash senza movimento titoli: carica il file titoli del periodo per attribuirli`);
+    warnings.push(`Premi opzioni per ${eur(sum(inputs.orphanOptionPremiums))} (tempo + intrinseco, non separabili) registrati in cash senza movimento titoli: carica il file titoli del periodo per attribuirli`);
   }
   if (count(inputs.unmatchedExercises) > 0) {
     warnings.push(`${count(inputs.unmatchedExercises)} esercizi di opzioni senza acquisto/vendita a strike corrispondente`);

@@ -59,7 +59,7 @@ const slides = [
     id: 'attribution',
     title: 'Scomposizione Rendimento',
     icon: ChartNoAxesCombined,
-    description: 'Contributo al rendimento per classe, con premio opzioni separato tra tempo e intrinseco',
+    description: 'Contributo al rendimento per classe, con premi temporali opzioni separati dall\'intrinseco',
   },
 ];
 

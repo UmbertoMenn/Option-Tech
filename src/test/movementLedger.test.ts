@@ -308,6 +308,39 @@ describe('calculatePerformanceAttribution con movimenti', () => {
     expect(result.coverage.uncoveredPositionChanges).toEqual([]);
   });
 
+  it('put venduta ITM: come premio conta solo il valore temporale, l’intrinseco resta sulla sua riga', () => {
+    // Strike 550, spot 500 alla data operazione, premio 60 → intrinseco 50, tempo 10.
+    const line = titLine({ account: '02805213452', desc: 'WDCU6P550', contabile: '21/08/2026', op: '20/08/2026', causale: 'VEN', qty: '1,0', price: '60,0', fx: '1,0', grossLocal: '6000,0', grossEur: '6000,0', net: '6000,0' });
+    const rows = stored(parseMovementFile([TIT_HEADER, line].join('\r\n'), silvias).rows, { underlyingPrice: 500 });
+    const option = {
+      asset_type: 'derivative' as const, ticker: 'WDC', underlying: 'WDC', option_type: 'put' as const,
+      strike_price: 550, expiry_date: '2026-09-18', quantity: -1, snapshot_price: 60,
+    };
+    const start = snapshot('2026-08-11', 0);
+    const end = snapshot('2026-08-25', 6_000, [option]);
+    const inputs = buildMovementAttributionInputs({ rows, uploads: [{ source: 'titoli', periodStart: '2026-08-01', periodEnd: '2026-08-31' }], snapshots: [start, end] });
+    const result = calculatePerformanceAttribution({
+      startSnapshot: start,
+      endSnapshot: end,
+      startHistorical: historical('2026-08-11', 0, { WDC: 500 }),
+      endHistorical: historical('2026-08-25', 0, { WDC: 500 }),
+      allHistoricalData: [],
+      deposits: [],
+      trades: inputs.trades,
+      internalTransfers: [],
+      cashEvents: inputs.cashEvents,
+      movementCoverage: buildMovementCoverage(inputs, '2026-08-11', '2026-08-25'),
+    });
+    const time = result.items.find(item => item.category === 'option_time')!;
+    const intrinsic = result.items.find(item => item.category === 'option_intrinsic')!;
+    expect(time.label).toBe('Premi temporali opzioni');
+    expect(time.breakdown).toEqual([{ label: 'Premi temporali incassati (vendite)', amount: -1_000 }]);
+    expect(intrinsic.breakdown).toEqual([{ label: 'Intrinseco incassato (vendite)', amount: -5_000 }]);
+    // Apertura senza movimento di prezzo: nessun utile né sul tempo né sull'intrinseco.
+    expect(time.amount).toBeCloseTo(0, 6);
+    expect(intrinsic.amount).toBeCloseTo(0, 6);
+  });
+
   it('senza file movimenti le righe di costo restano nascoste', () => {
     const result = calculatePerformanceAttribution({
       startSnapshot: snapshot('2026-08-01', 1_000),

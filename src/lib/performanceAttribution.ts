@@ -49,7 +49,7 @@ export const ATTRIBUTION_CATEGORIES: AttributionCategory[] = [
 export const COST_CATEGORIES: AttributionCategory[] = ['fees', 'capital_gain_tax', 'taxes'];
 
 export const ATTRIBUTION_LABELS: Record<AttributionCategory, string> = {
-  option_time: 'Valore temporale opzioni',
+  option_time: 'Premi temporali opzioni',
   option_intrinsic: 'Intrinseco opzioni',
   stock: 'Azioni',
   etf: 'ETF',
@@ -517,15 +517,24 @@ export function calculatePerformanceAttribution(input: {
         } else {
           coverage.missingOptionTrades += 1;
           flows.unclassified += direction * price * quantity * 100 / exchangeRate;
-          addBreakdown('unclassified', 'Premi opzioni non scomponibili', direction * price * quantity * 100 / exchangeRate);
+          addBreakdown('unclassified', 'Premi opzioni senza split tempo/intrinseco', direction * price * quantity * 100 / exchangeRate);
           continue;
         }
       }
-      const premiumLabel = direction > 0 ? 'Premi pagati (acquisti)' : 'Premi incassati (vendite)';
+      // Premio = solo valore temporale. L'intrinseco (es. put venduta ITM) non è
+      // premio: è un trasferimento che resta sulla riga Intrinseco opzioni.
       flows.option_intrinsic += direction * intrinsic * quantity * 100 / exchangeRate;
       flows.option_time += direction * time * quantity * 100 / exchangeRate;
-      addBreakdown('option_intrinsic', premiumLabel, direction * intrinsic * quantity * 100 / exchangeRate);
-      addBreakdown('option_time', premiumLabel, direction * time * quantity * 100 / exchangeRate);
+      addBreakdown(
+        'option_intrinsic',
+        direction > 0 ? 'Intrinseco pagato (acquisti)' : 'Intrinseco incassato (vendite)',
+        direction * intrinsic * quantity * 100 / exchangeRate,
+      );
+      addBreakdown(
+        'option_time',
+        direction > 0 ? 'Premi temporali pagati (acquisti)' : 'Premi temporali incassati (vendite)',
+        direction * time * quantity * 100 / exchangeRate,
+      );
       continue;
     }
 
