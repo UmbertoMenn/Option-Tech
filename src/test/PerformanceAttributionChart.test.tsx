@@ -26,6 +26,8 @@ describe('scomposizione visibile', () => {
         snapshot_date, netting_total: 10000,
       } as HistoricalDataEntry))} />
     </QueryClientProvider>);
+    expect(screen.queryByTestId('attribution-period-summary')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Filtri e dettagli' }));
     const summary = screen.getByTestId('attribution-period-summary');
     expect(summary).toHaveTextContent('31/07/2026');
     expect(summary).toHaveTextContent('27/08/2026');

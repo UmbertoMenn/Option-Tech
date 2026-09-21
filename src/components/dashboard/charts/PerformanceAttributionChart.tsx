@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Info, Loader2, Upload } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Info, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { DepositEntry } from '@/types/deposits';
 import { HistoricalDataEntry } from '@/types/historicalData';
@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
 import { isClosingPriceMethod } from '@/lib/optionPremiumSplit';
 import { AttributionHelp } from './AttributionHelp';
@@ -193,6 +194,7 @@ export function PerformanceAttributionChart({
   const [hideInactive, setHideInactive] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { data, isLoading, error } = usePerformanceAttribution(portfolioId);
@@ -376,7 +378,58 @@ export function PerformanceAttributionChart({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      {/* Riga unica – selettori T0/T1 + toggle classi inattive + totale periodo */}
+      <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="flex max-h-[50%] shrink-0 flex-col">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px]">
+                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', detailsOpen && 'rotate-180')} />
+                {detailsOpen ? 'Nascondi dettagli' : 'Filtri e dettagli'}
+              </Button>
+            </CollapsibleTrigger>
+            {result && <span className="tabular-nums text-muted-foreground">{formatDate(result.startDate)} – {formatDate(result.endDate)}</span>}
+            {!detailsOpen && flaggedPremiums > 0 && (
+              <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} premi stimati da chiusura: apri dettaglio`} className="inline-flex items-center gap-1 text-warning">
+                <AlertTriangle className="h-3.5 w-3.5" />{flaggedPremiums}
+              </button>
+            )}
+          </div>
+        {result && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Totale</span>
+            <span className={cn('font-semibold tabular-nums', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
+              {formatEUR(result.totalPL)} · {result.totalPercent == null ? 'perc. n.d.' : formatPercentage(result.totalPercent)}
+            </span>
+            <TooltipProvider delayDuration={150}>
+              <UiTooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" aria-label="Informazioni sulla scomposizione">
+                    {result.warnings.length > 0
+                      ? <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                      : <Info className="h-3.5 w-3.5 text-muted-foreground" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-96 text-xs">
+                  <p>
+                    Periodo {formatDate(result.startDate)} – {formatDate(result.endDate)}. Ogni contributo è T1 − T0 − movimenti netti; l'eventuale differenza resta visibile nel residuo.
+                  </p>
+                  <p className="mt-1">
+                    Base delle percentuali: patrimonio medio {formatEUR(result.averageBalance)}. Prezzi opzioni verificati: {result.coverage.optionMarks - result.coverage.optionMarksWithoutSpot}/{result.coverage.optionMarks}.
+                  </p>
+                  {earliestHistoricalDate && earliestHistoricalDate < result.startDate && (
+                    <p className="mt-1 text-warning">
+                      L'attribuzione parte dal {formatDate(result.startDate)}: le date precedenti non soddisfano tutti i requisiti di snapshot completo e copertura dei movimenti.
+                    </p>
+                  )}
+                  {uploadedWindows && <p className="mt-1">Movimenti caricati: {uploadedWindows}.</p>}
+                  {result.warnings.map(warning => <p key={warning} className="mt-1 text-warning">{warning}</p>)}
+                </TooltipContent>
+              </UiTooltip>
+            </TooltipProvider>
+          </div>
+        )}
+        </div>
+        <CollapsibleContent className="min-h-0 space-y-2 overflow-y-auto pt-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {attributableDates.length >= 2 ? (
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -454,40 +507,7 @@ export function PerformanceAttributionChart({
             </TooltipContent>
           </UiTooltip>
         </TooltipProvider>
-        {result && (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Totale</span>
-            <span className={cn('font-semibold tabular-nums', result.totalPL >= 0 ? 'text-profit' : 'text-loss')}>
-              {formatEUR(result.totalPL)} · {result.totalPercent == null ? 'perc. n.d.' : formatPercentage(result.totalPercent)}
-            </span>
-            <TooltipProvider delayDuration={150}>
-              <UiTooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" aria-label="Informazioni sulla scomposizione">
-                    {result.warnings.length > 0
-                      ? <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                      : <Info className="h-3.5 w-3.5 text-muted-foreground" />}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-96 text-xs">
-                  <p>
-                    Periodo {formatDate(result.startDate)} – {formatDate(result.endDate)}. Ogni contributo è T1 − T0 − movimenti netti; l'eventuale differenza resta visibile nel residuo.
-                  </p>
-                  <p className="mt-1">
-                    Base delle percentuali: patrimonio medio {formatEUR(result.averageBalance)}. Prezzi opzioni verificati: {result.coverage.optionMarks - result.coverage.optionMarksWithoutSpot}/{result.coverage.optionMarks}.
-                  </p>
-                  {earliestHistoricalDate && earliestHistoricalDate < result.startDate && (
-                    <p className="mt-1 text-warning">
-                      L'attribuzione parte dal {formatDate(result.startDate)}: gli snapshot precedenti non contengono il dettaglio completo delle posizioni.
-                    </p>
-                  )}
-                  {uploadedWindows && <p className="mt-1">Movimenti caricati: {uploadedWindows}.</p>}
-                  {result.warnings.map(warning => <p key={warning} className="mt-1 text-warning">{warning}</p>)}
-                </TooltipContent>
-              </UiTooltip>
-            </TooltipProvider>
-          </div>
-        )}
+
         </div>
       </div>
 
@@ -502,6 +522,9 @@ export function PerformanceAttributionChart({
           {flaggedPremiums} movimenti con premio temporale stimato dalla chiusura dell’azione (anche OTM). Apri il dettaglio per verificarli o correggerli.
         </button>
       )}
+
+        </CollapsibleContent>
+      </Collapsible>
 
       {!result ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
