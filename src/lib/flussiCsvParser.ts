@@ -146,6 +146,31 @@ export interface FlussiParseResult {
   titoliStockTrades: FlussiTitoliStockTrade[];
 }
 
+/**
+ * Regola di esclusione conto: `last` è il suffisso richiesto, `mid` (opzionale)
+ * deve comparire al centro del numero conto. Con `scope: 'cash'` la regola vale
+ * solo per saldi e movimenti cash: serve quando il deposito titoli ha lo stesso
+ * suffisso del conto da escludere (es. silvias: conto 52...452 da escludere,
+ * dossier 02...452 da mantenere).
+ */
+export interface CashAccountPattern {
+  mid?: string;
+  last: string;
+  scope?: 'cash';
+}
+
+export interface CashAccountRule {
+  prefix?: string;
+  suffix?: string;
+}
+
+export function matchesCashAccountRule(accountId: string, rule: CashAccountRule): boolean {
+  const upper = accountId.toUpperCase();
+  if (rule.prefix && !upper.startsWith(rule.prefix.toUpperCase())) return false;
+  if (rule.suffix && !upper.endsWith(rule.suffix.toUpperCase())) return false;
+  return !!(rule.prefix || rule.suffix);
+}
+
 export interface FlussiParseOptions {
   /**
    * Conti da escludere (match per sottostringa sul NUMERO CONTO). Applicata sia
@@ -158,7 +183,14 @@ export interface FlussiParseOptions {
    * "il conto che finisce per 452"); `mid` è OPZIONALE e, se presente, deve
    * comparire anche al centro del numero conto.
    */
-  excludedCashPatterns?: { mid?: string; last: string }[];
+  excludedCashPatterns?: CashAccountPattern[];
+  /**
+   * Allowlist sul lato CASH (saldi e movimenti cash): se valorizzata, vengono
+   * considerati SOLO i conti che soddisfano almeno una regola (prefisso e/o
+   * suffisso del NUMERO CONTO, es. { prefix: '52', suffix: '53' } → "inizia
+   * per 52 e finisce per 53"). Non tocca i movimenti titoli.
+   */
+  cashAccountAllowlist?: CashAccountRule[];
   /**
    * Prefissi del NUMERO CONTO la cui LIQUIDITÀ va ignorata (es. '0624' → "il
    * conto che inizia per 0624"). A differenza di `excludedCashAccounts`, che
@@ -179,17 +211,17 @@ export interface FlussiParseOptions {
 }
 
 /** Rimuove l'apostrofo iniziale usato come marcatore testuale. */
-function stripQuote(v: string): string {
+export function stripQuote(v: string): string {
   return v.replace(/^'/, '').trim();
 }
 
 /** DD/MM/YYYY → YYYY-MM-DD */
-function parseItalianDate(v: string): string | null {
+export function parseItalianDate(v: string): string | null {
   const m = v.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
 
-function splitCsvLine(line: string): string[] {
+export function splitCsvLine(line: string): string[] {
   return line.replace(/\r$/, '').split(';').map(c => c.trim());
 }
 
@@ -218,13 +250,17 @@ const OPTION_DESCRIPTOR_RE = /^\[([A-Z0-9.\-]+)\]\[(\d{2})\/(\d{2})\]\[([CP])\]\
  * @param scope 'cash' per saldi e movimenti cash, 'titoli' per i movimenti
  * titoli. I prefissi `excludedCashPrefixes` valgono solo sul lato cash.
  */
-function isExcludedAccount(
+export function isExcludedAccount(
   accountId: string,
   options?: FlussiParseOptions,
   scope: 'cash' | 'titoli' = 'cash',
 ): boolean {
   const byList = options?.excludedCashAccounts?.some(acc => accountId.includes(acc));
+  const byAllowlist = scope === 'cash'
+    && !!options?.cashAccountAllowlist?.length
+    && !options.cashAccountAllowlist.some(rule => matchesCashAccountRule(accountId, rule));
   const byPattern = options?.excludedCashPatterns?.some(p => {
+    if (scope === 'titoli' && p.scope === 'cash') return false;
     if (!accountId.endsWith(p.last)) return false;
     if (!p.mid) return true; // solo suffisso (es. "il conto che finisce per 452")
     const midStart = Math.floor((accountId.length - p.mid.length) / 2);
@@ -234,10 +270,10 @@ function isExcludedAccount(
   const byPrefix = scope === 'cash' && options?.excludedCashPrefixes?.some(
     prefix => accountId.toUpperCase().startsWith(prefix.toUpperCase()),
   );
-  return !!byList || !!byPattern || !!byPrefix;
+  return !!byList || byAllowlist || !!byPattern || !!byPrefix;
 }
 
-function isExcludedPosition(description: string, isin: string, options?: FlussiParseOptions): boolean {
+export function isExcludedPosition(description: string, isin: string, options?: FlussiParseOptions): boolean {
   const normalized = description.trim().replace(/\s+/g, ' ').toUpperCase();
   const excludedByDescription = options?.excludedPositionDescriptions?.some(
     excluded => excluded.trim().replace(/\s+/g, ' ').toUpperCase() === normalized,
@@ -474,14 +510,14 @@ function parseTitoliRow(cells: string[], result: FlussiParseResult, options?: Fl
  * a "word boundary" per tollerare varianti (es. "BONIFICO A VOSTRO FAVORE",
  * "BONIFICO DISPOSTO", "VS BONIFICO ESTERO", "GIROCONTO INTERNO", ecc.).
  */
-const BONIFICO_RE = /\bBONIFIC[OI]\b/i;
+export const BONIFICO_RE = /\bBONIFIC[OI]\b/i;
 const GIROCONTO_RE = /\bGIROCONT[OI]\b/i;
 // Spese/commissioni *relative* a un bonifico (es. "COMMISSIONI PER BONIFICO
 // ESTERO") non sono il movimento di capitale in sé: vanno escluse per non
 // generare un falso prelievo che duplica quello reale.
 const FEE_ON_TRANSFER_RE = /\b(COMMISSION[EI]|SPES[AE]|COMPETENZ[EA]|ADDEBITO PER)\b/i;
 
-function classifyCashMovement(description: string, causaleDescription: string): 'bonifico' | 'giroconto' | null {
+export function classifyCashMovement(description: string, causaleDescription: string): 'bonifico' | 'giroconto' | null {
   const haystack = `${description} ${causaleDescription}`.toUpperCase();
   const isBonifico = BONIFICO_RE.test(haystack);
   const isGiroconto = GIROCONTO_RE.test(haystack);

@@ -138,7 +138,13 @@ export interface ParsedPortfolioFile {
 
 export interface PortfolioParseOptions {
   excludedCashAccounts?: string[];
-  excludedCashPatterns?: { mid?: string; last: string }[];
+  /** `scope: 'cash'` è rilevante solo per i movimenti titoli dei flussi CSV: qui si leggono solo conti cash. */
+  excludedCashPatterns?: { mid?: string; last: string; scope?: 'cash' }[];
+  /**
+   * Solo flussi CSV: allowlist dei conti cash per prefisso/suffisso (vedi
+   * FlussiParseOptions.cashAccountAllowlist). Il parser Excel non la applica.
+   */
+  cashAccountAllowlist?: { prefix?: string; suffix?: string }[];
   /**
    * Prefissi del NUMERO CONTO la cui LIQUIDITÀ va ignorata (es. '0624' → "il
    * conto che inizia per 0624"). Applicato ai saldi e ai movimenti cash

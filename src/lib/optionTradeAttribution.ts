@@ -53,7 +53,7 @@ export function splitOptionPremium(
  * `previous_close`. Il fallimento non blocca mai l'ingest PMC.
  */
 export async function fetchHistoricalUnderlyingPrices(
-  trades: FlussiTitoliOptionTrade[],
+  trades: Pick<FlussiTitoliOptionTrade, 'underlyingTicker' | 'tradeDate'>[],
   resolveUnderlyingKey: (ticker: string) => string,
 ): Promise<Map<string, HistoricalUnderlyingPrice>> {
   const requests = Array.from(new Map(

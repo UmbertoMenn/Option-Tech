@@ -15,6 +15,12 @@ export type AttributionCategory =
   | 'gp'
   | 'commodity'
   | 'cash'
+  /** Commissioni di negoziazione, valutarie, spese su proventi, canoni (da movimenti). */
+  | 'fees'
+  /** Imposta capital gain addebitata/accreditata dalla banca (da movimenti cash). */
+  | 'capital_gain_tax'
+  /** Ritenute su dividendi/cedole e imposta di bollo (da movimenti). */
+  | 'taxes'
   | 'unclassified'
   /**
    * Differenza esplicita tra il P/L del Netting e la somma delle componenti.
@@ -32,9 +38,15 @@ export const ATTRIBUTION_CATEGORIES: AttributionCategory[] = [
   'gp',
   'commodity',
   'cash',
+  'fees',
+  'capital_gain_tax',
+  'taxes',
   'unclassified',
   'reconciliation_gap',
 ];
+
+/** Classi "di costo": valore sempre 0 negli snapshot, contributo = −costi del periodo. */
+export const COST_CATEGORIES: AttributionCategory[] = ['fees', 'capital_gain_tax', 'taxes'];
 
 export const ATTRIBUTION_LABELS: Record<AttributionCategory, string> = {
   option_time: 'Valore temporale opzioni',
@@ -44,7 +56,10 @@ export const ATTRIBUTION_LABELS: Record<AttributionCategory, string> = {
   bond: 'Obbligazioni',
   gp: 'Gestione patrimoniale',
   commodity: 'Materie prime',
-  cash: 'Liquidità / costi',
+  cash: 'Liquidità',
+  fees: 'Commissioni e spese',
+  capital_gain_tax: 'Imposta capital gain',
+  taxes: 'Ritenute e bolli',
   unclassified: 'Non attribuito',
   reconciliation_gap: 'Residuo da verificare',
 };
@@ -69,6 +84,42 @@ export interface AttributionTradeRow {
   intrinsic_per_share?: number | null;
   time_value_per_share?: number | null;
   attribution_price_source?: AttributionPriceSource | null;
+  /** Solo ASG: opzione esercitata venduta (default) o acquistata. */
+  position_side?: 'short' | 'long' | null;
+}
+
+/**
+ * Evento di cassa ricostruito dai file movimenti, senza scambio di titoli:
+ *  - income: provento (dividendo/cedola) che esce dalla classe verso la cassa;
+ *  - cost: costo pagato dalla cassa (commissioni, imposte, bolli).
+ * `amount` > 0 = provento incassato / costo pagato (negativo = rimborso).
+ */
+export interface AttributionCashEvent {
+  date: string;
+  kind: 'income' | 'cost';
+  category: AttributionCategory;
+  amount: number;
+  /** Sottovoce mostrata nel dettaglio (es. 'Dividendi', 'Commissioni opzioni'). */
+  label: string;
+}
+
+/** Evento senza flussi che spiega una variazione di quantità (es. opzione scaduta). */
+export interface AttributionPositionEvent {
+  date: string;
+  categories: AttributionCategory[];
+}
+
+export interface AttributionMovementCoverage {
+  /** Esiste almeno un file movimenti caricato per il portafoglio. */
+  hasUploads: boolean;
+  /** Copertura del periodo da parte dei movimenti titoli / cash. */
+  titoli: 'full' | 'partial' | 'none';
+  cash: 'full' | 'partial' | 'none';
+}
+
+export interface AttributionBreakdownLine {
+  label: string;
+  amount: number;
 }
 
 export interface InternalTransferRow {
@@ -89,6 +140,8 @@ export interface AttributionItem {
   percent: number | null;
   status: 'calculated' | 'partial' | 'unavailable' | 'no_activity';
   reason: string;
+  /** Dettaglio dei movimenti netti della classe (acquisti, vendite, proventi, costi...). */
+  breakdown: AttributionBreakdownLine[];
 }
 
 export interface AttributionCoverage {
@@ -315,6 +368,9 @@ export function calculatePerformanceAttribution(input: {
   deposits: DepositEntry[];
   trades: AttributionTradeRow[];
   internalTransfers: InternalTransferRow[];
+  cashEvents?: AttributionCashEvent[];
+  positionEvents?: AttributionPositionEvent[];
+  movementCoverage?: AttributionMovementCoverage;
 }): PerformanceAttributionResult {
   const {
     startSnapshot,
@@ -325,6 +381,9 @@ export function calculatePerformanceAttribution(input: {
     deposits,
     trades,
     internalTransfers,
+    cashEvents = [],
+    positionEvents = [],
+    movementCoverage,
   } = input;
   const startDate = startSnapshot.snapshot_date;
   const endDate = endSnapshot.snapshot_date;
@@ -344,6 +403,14 @@ export function calculatePerformanceAttribution(input: {
     uncoveredPositionChanges: [],
   };
   const tradeCategories = new Set<AttributionCategory>();
+  const breakdown = new Map<AttributionCategory, Map<string, number>>();
+  const addBreakdown = (category: AttributionCategory, label: string, amount: number) => {
+    if (!Number.isFinite(amount) || Math.abs(amount) < 1e-9) return;
+    const lines = breakdown.get(category) ?? new Map<string, number>();
+    lines.set(label, (lines.get(label) ?? 0) + amount);
+    breakdown.set(category, lines);
+  };
+  const inPeriod = (date: string) => date > startDate && date <= endDate;
 
   const positionsForBasis = [...startSnapshot.positions, ...endSnapshot.positions];
   const basisCategory = new Map<string, AttributionCategory>();
@@ -380,7 +447,12 @@ export function calculatePerformanceAttribution(input: {
       tradeCategories.add(category);
       tradeCategories.add('option_intrinsic');
       const optionType: 'call' | 'put' = trade.option_type === 'call' ? 'call' : 'put';
-      const shareSign = optionType === 'call' ? -1 : 1; // call: azioni escono; put: azioni entrano
+      // Opzione venduta (default): put → azioni entrano, call → azioni escono.
+      // Opzione acquistata esercitata: direzione opposta e l'intrinseco è un
+      // attivo che si trasforma in azioni (flusso negativo sulla classe).
+      const isShort = trade.position_side !== 'long';
+      const shareSign = (optionType === 'put') === isShort ? 1 : -1;
+      const intrinsicSign = isShort ? 1 : -1;
       const quantity = Math.abs(Number(trade.quantity || 0)); // azioni, non contratti
       const strike = Math.abs(Number(trade.strike ?? trade.price ?? 0));
       const exchangeRate = Number(trade.exchange_rate || assignedPosition?.exchange_rate || 1) > 0
@@ -398,12 +470,15 @@ export function calculatePerformanceAttribution(input: {
           : Math.max(0, strike - spot);
         // Le azioni si muovono al valore di mercato (spot), con segno per tipo.
         flows[category] += shareSign * spot * quantity / exchangeRate;
-        flows.option_intrinsic += intrinsic * quantity / exchangeRate;
+        flows.option_intrinsic += intrinsicSign * intrinsic * quantity / exchangeRate;
+        addBreakdown(category, 'Assegnazioni/esercizi (al prezzo di mercato)', shareSign * spot * quantity / exchangeRate);
+        addBreakdown('option_intrinsic', 'Intrinseco estinto da assegnazioni/esercizi', intrinsicSign * intrinsic * quantity / exchangeRate);
       } else {
         // Senza spot si conserva la riconciliazione, ma non si inventa la
         // separazione fair/intrinseco: il trasferimento resta non attribuito
         // (con il segno corretto, così la cassa quadra comunque a ±strike).
         flows.unclassified += shareSign * strike * quantity / exchangeRate;
+        addBreakdown('unclassified', 'Assegnazioni senza prezzo del sottostante', shareSign * strike * quantity / exchangeRate);
         coverage.missingOptionTrades += 1;
       }
       continue;
@@ -442,11 +517,15 @@ export function calculatePerformanceAttribution(input: {
         } else {
           coverage.missingOptionTrades += 1;
           flows.unclassified += direction * price * quantity * 100 / exchangeRate;
+          addBreakdown('unclassified', 'Premi opzioni non scomponibili', direction * price * quantity * 100 / exchangeRate);
           continue;
         }
       }
+      const premiumLabel = direction > 0 ? 'Premi pagati (acquisti)' : 'Premi incassati (vendite)';
       flows.option_intrinsic += direction * intrinsic * quantity * 100 / exchangeRate;
       flows.option_time += direction * time * quantity * 100 / exchangeRate;
+      addBreakdown('option_intrinsic', premiumLabel, direction * intrinsic * quantity * 100 / exchangeRate);
+      addBreakdown('option_time', premiumLabel, direction * time * quantity * 100 / exchangeRate);
       continue;
     }
 
@@ -456,6 +535,27 @@ export function calculatePerformanceAttribution(input: {
       ? Math.abs(Number(trade.gross_eur))
       : price * quantity / exchangeRate;
     flows[category] += direction * gross;
+    addBreakdown(category, direction > 0 ? 'Acquisti' : 'Vendite', direction * gross);
+  }
+
+  for (const event of cashEvents) {
+    if (!inPeriod(event.date)) continue;
+    const amount = Number(event.amount || 0);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    if (event.kind === 'income') {
+      // Il provento esce dalla classe verso la cassa: la classe lo "distribuisce"
+      // e il suo contributo lo include.
+      flows[event.category] -= amount;
+      addBreakdown(event.category, event.label, -amount);
+    } else {
+      flows[event.category] += amount;
+      addBreakdown(event.category, event.label, amount);
+    }
+    tradeCategories.add(event.category);
+  }
+  for (const event of positionEvents) {
+    if (!inPeriod(event.date)) continue;
+    for (const category of event.categories) tradeCategories.add(category);
   }
 
   for (const transfer of internalTransfers) {
@@ -467,6 +567,8 @@ export function calculatePerformanceAttribution(input: {
     const amount = Math.abs(Number(transfer.amount_eur || 0));
     if (transfer.to_gp) flows.gp += amount;
     if (transfer.from_gp) flows.gp -= amount;
+    if (transfer.to_gp) addBreakdown('gp', 'Giroconti verso GP', amount);
+    if (transfer.from_gp) addBreakdown('gp', 'Giroconti da GP', -amount);
   }
 
   const depositsInPeriod = deposits
@@ -476,6 +578,8 @@ export function calculatePerformanceAttribution(input: {
     .filter(category => category !== 'cash')
     .reduce((sum, category) => sum + flows[category], 0);
   flows.cash = depositsInPeriod - internalFlowsOutsideCash;
+  addBreakdown('cash', 'Versamenti/prelievi esterni', depositsInPeriod);
+  addBreakdown('cash', 'Contropartita movimenti delle altre classi', -internalFlowsOutsideCash);
 
   const startValue = historicalValue(startHistorical);
   const endValue = historicalValue(endHistorical);
@@ -555,6 +659,24 @@ export function calculatePerformanceAttribution(input: {
           : 'Non attribuibile: mancano dettagli o movimenti sufficienti per assegnare la differenza a una classe.',
       };
     }
+    if (COST_CATEGORIES.includes(category)) {
+      if (!movementCoverage?.hasUploads) {
+        return { status: 'no_activity', reason: 'Nessun file movimenti caricato: costi e imposte non ricostruibili.' };
+      }
+      const coverageLevel = category === 'capital_gain_tax'
+        ? movementCoverage.cash
+        : (movementCoverage.titoli === 'full' && movementCoverage.cash === 'full'
+          ? 'full'
+          : movementCoverage.titoli === 'none' && movementCoverage.cash === 'none' ? 'none' : 'partial');
+      if (coverageLevel === 'none') {
+        return { status: activity ? 'partial' : 'no_activity', reason: 'Periodo non coperto dai file movimenti caricati.' };
+      }
+      if (coverageLevel === 'partial') {
+        return { status: 'partial', reason: 'Calcolo parziale: i file movimenti coprono solo una parte del periodo.' };
+      }
+      if (!activity) return { status: 'no_activity', reason: 'Nessun addebito nel periodo.' };
+      return { status: 'calculated', reason: 'Somma degli addebiti del periodo dai file movimenti (contributo = −costi).' };
+    }
     if (category === 'option_time' || category === 'option_intrinsic') {
       const issues: string[] = [];
       if (coverage.optionMarksWithoutSpot > 0) issues.push(`${coverage.optionMarksWithoutSpot} mark senza prezzo del sottostante`);
@@ -600,6 +722,9 @@ export function calculatePerformanceAttribution(input: {
       amount: amounts[category],
       percent: averageBalance > 0 ? amounts[category] / averageBalance * 100 : null,
       ...status,
+      breakdown: [...(breakdown.get(category) ?? new Map<string, number>()).entries()]
+        .map(([label, amount]) => ({ label, amount }))
+        .filter(line => Math.abs(line.amount) >= 0.005),
     };
   });
 

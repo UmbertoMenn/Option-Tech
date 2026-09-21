@@ -7,13 +7,20 @@ type GpSnapshotSource = Pick<
 
 type PositionsSnapshotSource = Pick<ParsedPortfolioFile, 'positionsSnapshotPresent'>;
 
-const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> = {
+const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string; scope?: 'cash' }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
 };
 
 const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
   silvias: {
-    excludedCashPatterns: [{ last: '452' }],
+    // Il conto cash 52...452 (spese personali) è fuori perimetro. La regola
+    // vale solo sul lato cash: il dossier titoli 02...452 ha lo stesso
+    // suffisso e i suoi movimenti titoli devono restare validi.
+    excludedCashPatterns: [{ last: '452', scope: 'cash' }],
+    // Flussi cash: si considera SOLO il conto che inizia per 52 e finisce
+    // per 53 (52...453). Esclusi quindi anche il conto spese 52...452 e la
+    // liquidità GP B0...453.
+    cashAccountAllowlist: [{ prefix: '52', suffix: '53' }],
     // Titolo da escludere: Bio-On S.p.A. Nel flusso banca la descrizione
     // esatta è "BIO ON SPA" e l'ISIN è IT0005056236. Le vecchie voci
     // "BION ON"/"BION ON SPA" e l'ISIN US09075V1026 erano trascrizioni
@@ -65,6 +72,9 @@ export function getPortfolioParseOptions(
       : undefined,
     excludeFundsAndSicav: usernameOptions?.excludeFundsAndSicav,
     includeGpCashInCash: usernameOptions?.includeGpCashInCash,
+    cashAccountAllowlist: usernameOptions?.cashAccountAllowlist
+      ? usernameOptions.cashAccountAllowlist.map(rule => ({ ...rule }))
+      : undefined,
   };
 }
 

@@ -1,14 +1,25 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, Info } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Info, Loader2, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { DepositEntry } from '@/types/deposits';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { usePerformanceAttribution } from '@/hooks/usePerformanceAttribution';
 import {
   AttributionCategory,
   AttributionItem,
+  COST_CATEGORIES,
   PerformanceAttributionResult,
   calculatePerformanceAttribution,
 } from '@/lib/performanceAttribution';
+import {
+  buildMovementAttributionInputs,
+  buildMovementCoverage,
+  mergeLegacyTrades,
+  movementPeriodWarnings,
+} from '@/lib/movementAttribution';
+import { ingestMovementFiles } from '@/lib/movementLedgerIngest';
+import { Button } from '@/components/ui/button';
 import { formatDate, formatEUR, formatPercentage } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -64,6 +75,9 @@ const GROUP_ACCENT: Record<AttributionCategory, string> = {
   bond: 'before:bg-indigo-400',
   gp: 'before:bg-violet-400',
   cash: 'before:bg-slate-400',
+  fees: 'before:bg-rose-400',
+  capital_gain_tax: 'before:bg-rose-400',
+  taxes: 'before:bg-rose-400',
   unclassified: 'before:bg-slate-400',
   reconciliation_gap: 'before:bg-warning',
 };
@@ -74,11 +88,16 @@ function signedFormulaValue(value: number): string {
 
 function ContributionCell({ item, result }: { item: AttributionItem; result: PerformanceAttributionResult }) {
   const isGap = item.category === 'reconciliation_gap';
+  const isCost = COST_CATEGORIES.includes(item.category);
   const tone = item.amount >= 0 ? 'text-profit' : 'text-loss';
   const formula = isGap
     ? `${formatEUR(result.totalPL)} − ${signedFormulaValue(result.totalPL - item.amount)}`
-    : `${formatEUR(item.endValue)} − ${formatEUR(item.startValue)} − ${signedFormulaValue(item.netFlows)}`;
-  const caption = isGap ? 'P/L Netting − componenti classificate' : 'T1 − T0 − movimenti netti';
+    : isCost
+      ? `− ${signedFormulaValue(item.netFlows)}`
+      : `${formatEUR(item.endValue)} − ${formatEUR(item.startValue)} − ${signedFormulaValue(item.netFlows)}`;
+  const caption = isGap
+    ? 'P/L Netting − componenti classificate'
+    : isCost ? '− costi pagati nel periodo' : 'T1 − T0 − movimenti netti';
   return (
     <TooltipProvider delayDuration={100}>
       <UiTooltip>
@@ -95,10 +114,52 @@ function ContributionCell({ item, result }: { item: AttributionItem; result: Per
           <p className="mt-0.5 font-mono tabular-nums">
             {formula} = <span className={cn('font-semibold', tone)}>{formatEUR(item.amount)}</span>
           </p>
-          {!isGap && (
+          {!isGap && !isCost && (
             <p className="mt-1 text-muted-foreground">
               Movimenti netti del periodo: {formatEUR(item.netFlows)}
             </p>
+          )}
+        </TooltipContent>
+      </UiTooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Movimenti netti della classe (+ investimenti, − disinvestimenti/proventi) con dettaglio. */
+function FlowsCell({ item }: { item: AttributionItem }) {
+  if (item.category === 'reconciliation_gap') return <span className="text-muted-foreground">—</span>;
+  const isCost = COST_CATEGORIES.includes(item.category);
+  if (Math.abs(item.netFlows) < 0.005 && item.breakdown.length === 0) {
+    return <span className="tabular-nums text-muted-foreground">{formatEUR(0)}</span>;
+  }
+  return (
+    <TooltipProvider delayDuration={100}>
+      <UiTooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="cursor-help tabular-nums text-muted-foreground underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
+          >
+            {formatEUR(item.netFlows)}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 text-xs">
+          <p className="text-muted-foreground">
+            {isCost ? 'Costi pagati nel periodo' : 'Movimenti netti: + investimenti, − disinvestimenti e proventi'}
+          </p>
+          {item.breakdown.length === 0 ? (
+            <p className="mt-1">Nessun dettaglio disponibile.</p>
+          ) : (
+            <table className="mt-1 w-full tabular-nums">
+              <tbody>
+                {item.breakdown.map(line => (
+                  <tr key={line.label}>
+                    <td className="pr-3">{line.label}</td>
+                    <td className="text-right font-mono">{formatEUR(line.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </TooltipContent>
       </UiTooltip>
@@ -114,7 +175,49 @@ export function PerformanceAttributionChart({
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
   const [hideInactive, setHideInactive] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = usePerformanceAttribution(portfolioId);
+
+  const movementInputs = useMemo(
+    () => data
+      ? buildMovementAttributionInputs({ rows: data.movements, uploads: data.movementUploads, snapshots: data.snapshots })
+      : null,
+    [data],
+  );
+
+  const handleMovementFiles = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []).filter(file => /\.csv$/i.test(file.name));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!portfolioId || files.length === 0) return;
+    setIsUploading(true);
+    try {
+      const res = await ingestMovementFiles(portfolioId, files);
+      for (const name of res.rejectedFiles) {
+        toast.error('File non riconosciuto', { description: `${name}: servono FlussoMovContiCash e/o FlussoMovContiTit.` });
+      }
+      if (res.files.length > 0) {
+        const description = res.files.map(file => {
+          const label = file.source === 'cash' ? 'Cash' : 'Titoli';
+          const period = file.periodStart && file.periodEnd
+            ? ` ${formatDate(file.periodStart)}–${formatDate(file.periodEnd)}`
+            : '';
+          const excluded = file.excludedByAccountRule > 0 ? `, ${file.excludedByAccountRule} fuori perimetro` : '';
+          return `${label}${period}: ${file.rows} righe (${file.newRows} nuove${excluded})`;
+        }).join(' • ');
+        toast.success('Movimenti caricati', { description });
+      }
+      for (const warning of res.warnings) toast.warning('Movimenti', { description: warning });
+      await queryClient.invalidateQueries({ queryKey: ['performance-attribution', portfolioId] });
+    } catch (uploadError) {
+      toast.error('Caricamento movimenti non riuscito', {
+        description: uploadError instanceof Error ? uploadError.message : 'errore sconosciuto',
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const earliestHistoricalDate = useMemo(
     () => historicalData.reduce<string | null>(
@@ -169,22 +272,40 @@ export function PerformanceAttributionChart({
       };
     }
 
+    const movements = movementInputs ?? buildMovementAttributionInputs({ rows: [], uploads: [], snapshots: [] });
+    const computed = calculatePerformanceAttribution({
+      startSnapshot,
+      endSnapshot,
+      startHistorical,
+      endHistorical,
+      allHistoricalData: historicalData,
+      deposits,
+      // Dove i movimenti titoli coprono il periodo sostituiscono il ledger storico.
+      trades: mergeLegacyTrades(movements.trades, data.trades, movements.titoliWindows),
+      internalTransfers: data.internalTransfers,
+      cashEvents: movements.cashEvents,
+      positionEvents: movements.positionEvents,
+      movementCoverage: buildMovementCoverage(movements, startDate, endDate),
+    });
+    const movementWarnings = movementPeriodWarnings(movements, startDate, endDate, computed.externalFlows);
+
     return {
       attributableDates,
       period: { startDate, endDate },
       reason: null,
-      result: calculatePerformanceAttribution({
-        startSnapshot,
-        endSnapshot,
-        startHistorical,
-        endHistorical,
-        allHistoricalData: historicalData,
-        deposits,
-        trades: data.trades,
-        internalTransfers: data.internalTransfers,
-      }),
+      result: { ...computed, warnings: [...computed.warnings, ...movementWarnings] },
     };
-  }, [data, deposits, historicalData, selectedStart, selectedEnd]);
+  }, [data, deposits, historicalData, selectedStart, selectedEnd, movementInputs]);
+
+  const uploadedWindows = useMemo(() => {
+    if (!movementInputs) return '';
+    const fmt = (windows: { start: string; end: string }[]) =>
+      windows.map(window => `${formatDate(window.start)}–${formatDate(window.end)}`).join(', ');
+    const parts: string[] = [];
+    if (movementInputs.titoliWindows.length > 0) parts.push(`titoli ${fmt(movementInputs.titoliWindows)}`);
+    if (movementInputs.cashWindows.length > 0) parts.push(`cash ${fmt(movementInputs.cashWindows)}`);
+    return parts.join('; ');
+  }, [movementInputs]);
 
   const result = calculation.result;
   const { attributableDates } = calculation;
@@ -263,6 +384,36 @@ export function PerformanceAttributionChart({
             </label>
           </div>
         ) : <div />}
+        <div className="flex items-center gap-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          multiple
+          className="hidden"
+          onChange={event => handleMovementFiles(event.target.files)}
+        />
+        <TooltipProvider delayDuration={150}>
+          <UiTooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[11px]"
+                disabled={isUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Movimenti
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-80 text-xs">
+              <p>Carica FlussoMovContiCash e FlussoMovContiTit (anche insieme): ricostruiscono investimenti/disinvestimenti per classe, commissioni, ritenute, bolli e imposta capital gain.</p>
+              <p className="mt-1 text-muted-foreground">{uploadedWindows ? `Caricati: ${uploadedWindows}.` : 'Nessun file movimenti caricato.'}</p>
+            </TooltipContent>
+          </UiTooltip>
+        </TooltipProvider>
         {result && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Totale</span>
@@ -290,12 +441,14 @@ export function PerformanceAttributionChart({
                       L'attribuzione parte dal {formatDate(result.startDate)}: gli snapshot precedenti non contengono il dettaglio completo delle posizioni.
                     </p>
                   )}
+                  {uploadedWindows && <p className="mt-1">Movimenti caricati: {uploadedWindows}.</p>}
                   {result.warnings.map(warning => <p key={warning} className="mt-1 text-warning">{warning}</p>)}
                 </TooltipContent>
               </UiTooltip>
             </TooltipProvider>
           </div>
         )}
+        </div>
       </div>
 
       {!result ? (
@@ -304,12 +457,13 @@ export function PerformanceAttributionChart({
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border/70">
-          <table className="w-full min-w-[640px] border-collapse text-[11px]">
+          <table className="w-full min-w-[760px] border-collapse text-[11px]">
             <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_hsl(var(--border))]">
               <tr className="text-left text-muted-foreground">
                 <th className="px-3 py-2 font-medium">Classe</th>
                 <th className="w-28 px-3 py-2 text-right font-medium">T0 · {formatDate(result.startDate)}</th>
                 <th className="w-28 px-3 py-2 text-right font-medium">T1 · {formatDate(result.endDate)}</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Movimenti netti</th>
                 <th className="w-28 px-3 py-2 text-right font-medium">Contributo</th>
                 <th className="w-20 px-3 py-2 text-right font-medium">% rend.</th>
                 <th className="min-w-72 px-3 py-2 font-medium">Stato / motivo</th>
@@ -318,6 +472,7 @@ export function PerformanceAttributionChart({
             <tbody>
               {visibleItems.map(item => {
                 const isGap = item.category === 'reconciliation_gap';
+                const noValues = isGap || COST_CATEGORIES.includes(item.category);
                 return (
                   <tr key={item.category} className={cn('border-b border-border/60 align-top hover:bg-muted/30', isGap && 'bg-warning/5')}>
                     <td className={cn(
@@ -327,8 +482,11 @@ export function PerformanceAttributionChart({
                     )}>
                       {item.label}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{isGap ? '—' : formatEUR(item.startValue)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{isGap ? '—' : formatEUR(item.endValue)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.startValue)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.endValue)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <FlowsCell item={item} />
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <ContributionCell item={item} result={result} />
                     </td>
@@ -352,6 +510,7 @@ export function PerformanceAttributionChart({
                 <td className="px-3 py-2">Netting totale</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.startTotal)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.endTotal)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatEUR(result.externalFlows)}</td>
                 <td className="px-3 py-2 text-right">
                   <TooltipProvider delayDuration={100}>
                     <UiTooltip>
