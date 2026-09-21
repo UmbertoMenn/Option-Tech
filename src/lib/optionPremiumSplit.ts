@@ -33,6 +33,10 @@ export type TimeValueMethod =
   | 'close_itm_estimate'
   | 'missing';
 
+/** Both OTM and ITM splits based on a daily close are estimates, not executions. */
+export const isClosingPriceMethod = (method: TimeValueMethod): boolean =>
+  method === 'close' || method === 'close_itm_estimate';
+
 export const TIME_VALUE_METHOD_LABELS: Record<TimeValueMethod, string> = {
   manual: 'Correzione manuale',
   assignment_resale: 'Da vendita azioni assegnate',

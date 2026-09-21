@@ -32,7 +32,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { resolveAttributionPeriod } from '@/lib/attributionPeriod';
+import { resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
+import { isClosingPriceMethod } from '@/lib/optionPremiumSplit';
+import { AttributionHelp } from './AttributionHelp';
 
 interface PerformanceAttributionChartProps {
   portfolioId: string | null;
@@ -83,6 +85,22 @@ const GROUP_ACCENT: Record<AttributionCategory, string> = {
   reconciliation_gap: 'before:bg-warning',
 };
 
+const CLASS_HELP: Record<AttributionCategory, string> = {
+  option_time: 'Parte del prezzo delle opzioni eccedente l’intrinseco. Il contributo include premi temporali incassati meno pagati e variazione del valore temporale delle posizioni aperte. T0/T1 sono negativi per opzioni vendute, positivi per acquistate: un premio incassato non è subito tutto guadagno.',
+  option_intrinsic: 'Valore immediatamente esercitabile: call = max(spot − strike, 0); put = max(strike − spot, 0), limitato al premio osservato. Separato dal tempo. Include i trasferimenti dovuti ad assegnazioni/esercizi.',
+  stock: 'Variazione del valore delle azioni, meno acquisti, più vendite e dividendi. Assegnazioni/esercizi sono valorizzati al prezzo di mercato, con l’intrinseco separato nelle opzioni.',
+  etf: 'Variazione del valore degli ETF, meno acquisti, più vendite e proventi.',
+  bond: 'Variazione del valore delle obbligazioni, meno acquisti, più vendite e cedole.',
+  commodity: 'Variazione del valore degli strumenti su materie prime, corretta per acquisti, vendite e proventi.',
+  gp: 'Variazione del valore della gestione patrimoniale al netto dei giroconti registrati. Le operazioni interne della gestione sono già comprese nel suo valore.',
+  cash: 'Variazione della liquidità al netto dei flussi ricostruiti: versamenti/prelievi, compravendite, proventi, costi e giroconti. Movimenti non classificati possono restare in questa voce.',
+  fees: 'Commissioni di negoziazione e cambio e spese rilevate nei movimenti: il contributo è il loro importo con segno invertito.',
+  capital_gain_tax: 'Imposta capital gain addebitata o rimborsata nei movimenti cash. Il contributo è −addebiti + rimborsi, non una stima delle imposte latenti.',
+  taxes: 'Ritenute e bolli rilevati nei movimenti; gli addebiti riducono il rendimento e i rimborsi lo aumentano.',
+  unclassified: 'Strumenti o movimenti che i dati disponibili non consentono di assegnare a una classe precisa.',
+  reconciliation_gap: 'Differenza fra il risultato complessivo del Netting e la somma delle componenti. Non è una fonte di rendimento identificata: evidenzia valori o movimenti da riconciliare.',
+};
+
 function signedFormulaValue(value: number): string {
   return value < 0 ? `(${formatEUR(value)})` : formatEUR(value);
 }
@@ -130,9 +148,6 @@ function ContributionCell({ item, result }: { item: AttributionItem; result: Per
 function FlowsCell({ item }: { item: AttributionItem }) {
   if (item.category === 'reconciliation_gap') return <span className="text-muted-foreground">—</span>;
   const isCost = COST_CATEGORIES.includes(item.category);
-  if (Math.abs(item.netFlows) < 0.005 && item.breakdown.length === 0) {
-    return <span className="tabular-nums text-muted-foreground">{formatEUR(0)}</span>;
-  }
   return (
     <TooltipProvider delayDuration={100}>
       <UiTooltip>
@@ -189,6 +204,15 @@ export function PerformanceAttributionChart({
     [data],
   );
 
+  const coveredPeriod = useMemo(() => {
+    const historicalDates = new Set(historicalData.map(entry => entry.snapshot_date));
+    return resolveCoveredAttributionPeriod(
+      (data?.snapshots ?? []).map(s => s.snapshot_date).filter(date => historicalDates.has(date)),
+      movementInputs?.titoliWindows ?? [], movementInputs?.cashWindows ?? [],
+      selectedStart, selectedEnd,
+    );
+  }, [data, historicalData, movementInputs, selectedStart, selectedEnd]);
+
   const handleMovementFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? []).filter(file => /\.csv$/i.test(file.name));
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -234,26 +258,21 @@ export function PerformanceAttributionChart({
 
     // Un T0/T1 è selezionabile solo se ha SIA lo snapshot completo delle
     // posizioni SIA il Netting storico: altrimenti l'attribuzione non quadra.
-    const historicalDates = new Set(historicalData.map(entry => entry.snapshot_date));
-    const attributableDates = [...new Set(data.snapshots.map(s => s.snapshot_date))]
-      .filter(date => historicalDates.has(date))
-      .sort((a, b) => a.localeCompare(b));
+    const attributableDates = coveredPeriod.dates;
 
     if (attributableDates.length < 2) {
-      const only = attributableDates[0];
       return {
         result: null,
         attributableDates,
         period: null,
-        reason: only
-          ? `Calcolo non possibile: è disponibile una sola data completa (${formatDate(only)}). Servono sia T0 sia T1.`
-          : 'Calcolo non possibile: non è disponibile alcuno snapshot completo con Netting storico.',
+        reason: coveredPeriod.windows.length === 0
+          ? 'Carica movimenti cash e titoli con un periodo comune: la scomposizione richiede la copertura di entrambi.'
+          : 'Servono due snapshot completi con Netting nello stesso periodo coperto da cash e titoli. T0 può essere il giorno precedente l’inizio dei movimenti; non vengono usati snapshot successivi alla copertura.',
       };
     }
 
-    // Sia T0 sia T1 sono selezionabili; in assenza di selezione si ripiega
-    // su prima/ultima data attribuibile (funzione pura, testata).
-    const resolved = resolveAttributionPeriod(attributableDates, selectedStart, selectedEnd);
+    // Estremi entro una finestra continua coperta da entrambi i ledger.
+    const resolved = coveredPeriod.period;
     if (!resolved) {
       return { result: null, attributableDates, period: null, reason: 'Periodo non valido: la data T0 deve precedere la data T1.' };
     }
@@ -297,14 +316,14 @@ export function PerformanceAttributionChart({
       reason: null,
       result: { ...computed, warnings: [...computed.warnings, ...movementWarnings] },
     };
-  }, [data, deposits, historicalData, selectedStart, selectedEnd, movementInputs]);
+  }, [data, deposits, historicalData, coveredPeriod, movementInputs]);
 
   const periodReview = useMemo(() => {
     if (!movementInputs || !calculation.period) return [];
     const { startDate, endDate } = calculation.period;
     return movementInputs.premiumReview.filter(row => row.date > startDate && row.date <= endDate);
   }, [movementInputs, calculation.period]);
-  const flaggedPremiums = periodReview.filter(row => row.method === 'close_itm_estimate').length;
+  const flaggedPremiums = Math.max(periodReview.filter(row => isClosingPriceMethod(row.method)).length, calculation.result?.coverage.closingPriceTrades ?? 0);
 
   const uploadedWindows = useMemo(() => {
     if (!movementInputs) return '';
@@ -380,8 +399,8 @@ export function PerformanceAttributionChart({
                 <SelectValue placeholder="T1" />
               </SelectTrigger>
               <SelectContent>
-                {attributableDates.slice(1).map(date => (
-                  <SelectItem key={date} value={date} disabled={activeStart != null && date <= activeStart} className="text-[11px]">
+                {coveredPeriod.endDates.map(date => (
+                  <SelectItem key={date} value={date} className="text-[11px]">
                     {formatDate(date)}
                   </SelectItem>
                 ))}
@@ -411,7 +430,7 @@ export function PerformanceAttributionChart({
             onClick={() => setReviewOpen(true)}
           >
             {flaggedPremiums > 0 && <AlertTriangle className="h-3.5 w-3.5" />}
-            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} da verificare` : ''}
+            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} da chiusura` : ''}
           </Button>
         )}
         <TooltipProvider delayDuration={150}>
@@ -472,6 +491,18 @@ export function PerformanceAttributionChart({
         </div>
       </div>
 
+      <div className="text-[11px] leading-4 text-muted-foreground" data-testid="attribution-period-summary">
+        <p>Movimenti caricati: {uploadedWindows || 'nessuno'}. La scomposizione usa solo periodi coperti da entrambi i file.</p>
+        {result && <p>Valore iniziale al {formatDate(result.startDate)}; valore finale al {formatDate(result.endDate)}. Movimenti successivi a T0 e fino a T1 incluso. Il rendimento si ferma a T1, non alla data odierna.</p>}
+        <p>Clicca sulle icone ⓘ e sugli importi sottolineati per leggere significato, formule e dettaglio dei movimenti.</p>
+      </div>
+      {flaggedPremiums > 0 && (
+        <button type="button" onClick={() => setReviewOpen(true)} className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-left text-[11px] text-warning">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {flaggedPremiums} movimenti con premio temporale stimato dalla chiusura dell’azione (anche OTM). Apri il dettaglio per verificarli o correggerli.
+        </button>
+      )}
+
       {!result ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
           {calculation.reason}
@@ -482,11 +513,11 @@ export function PerformanceAttributionChart({
             <thead className="sticky top-0 z-10 bg-card shadow-[0_1px_0_hsl(var(--border))]">
               <tr className="text-left text-muted-foreground">
                 <th className="px-3 py-2 font-medium">Classe</th>
-                <th className="w-28 px-3 py-2 text-right font-medium">T0 · {formatDate(result.startDate)}</th>
-                <th className="w-28 px-3 py-2 text-right font-medium">T1 · {formatDate(result.endDate)}</th>
-                <th className="w-28 px-3 py-2 text-right font-medium">Movimenti netti</th>
-                <th className="w-28 px-3 py-2 text-right font-medium">Contributo</th>
-                <th className="w-20 px-3 py-2 text-right font-medium">% rend.</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">T0 · {formatDate(result.startDate)}<AttributionHelp label="T0">Valore della classe nello snapshot iniziale. Non è il prezzo di acquisto. I movimenti del giorno T0 sono già incorporati e non vengono ricontati.</AttributionHelp></th>
+                <th className="w-28 px-3 py-2 text-right font-medium">T1 · {formatDate(result.endDate)}<AttributionHelp label="T1">Valore della classe nello snapshot finale, entro la copertura comune dei movimenti cash e titoli. Per le opzioni vendute il valore è negativo.</AttributionHelp></th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Movimenti netti<AttributionHelp label="Movimenti netti">Flussi della classe, non guadagni: acquisti e premi pagati positivi; vendite, premi incassati e proventi negativi. Sono sottratti dalla variazione T1 − T0. Esempio: T0 100, T1 130, acquisti 20 → contributo 10. Clicca sull’importo per le sottovoci. Nelle righe di costo: addebiti positivi, rimborsi negativi.</AttributionHelp></th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Contributo<AttributionHelp label="Contributo">Risultato in euro: T1 − T0 − movimenti netti. Per costi e imposte: −costi pagati. Comprende variazioni delle posizioni aperte, non solo guadagni realizzati.</AttributionHelp></th>
+                <th className="w-20 px-3 py-2 text-right font-medium">% rend.<AttributionHelp label="Percentuale di rendimento">Contributo in euro / patrimonio medio del periodo × 100. Base comune: {formatEUR(result.averageBalance)}, calcolata dal patrimonio iniziale e dai versamenti/prelievi ponderati per i giorni. È il contributo al rendimento del portafoglio, non il rendimento della singola classe; non è annualizzato.</AttributionHelp></th>
                 <th className="min-w-72 px-3 py-2 font-medium">Stato / motivo</th>
               </tr>
             </thead>
@@ -502,6 +533,10 @@ export function PerformanceAttributionChart({
                       GROUP_ACCENT[item.category],
                     )}>
                       {item.label}
+                      <AttributionHelp label={item.label}>{CLASS_HELP[item.category]}</AttributionHelp>
+                      {item.category === 'option_time' && flaggedPremiums > 0 && (
+                        <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} premi stimati da chiusura: apri dettaglio`} className="ml-1 inline-flex align-middle text-warning"><AlertTriangle className="h-3.5 w-3.5" /></button>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.startValue)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.endValue)}</td>
@@ -531,7 +566,7 @@ export function PerformanceAttributionChart({
                 <td className="px-3 py-2">Netting totale</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.startTotal)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatEUR(result.endTotal)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatEUR(result.externalFlows)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatEUR(result.externalFlows)}<AttributionHelp label="Flussi esterni">Solo versamenti e prelievi registrati nel periodo: versamenti positivi, prelievi negativi. Non è la somma dei movimenti delle classi, perché compravendite e giroconti sono interni al portafoglio.</AttributionHelp></td>
                 <td className="px-3 py-2 text-right">
                   <TooltipProvider delayDuration={100}>
                     <UiTooltip>

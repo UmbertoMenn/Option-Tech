@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -11,7 +12,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { OptionPremiumReviewRow } from '@/lib/movementAttribution';
-import { TIME_VALUE_METHOD_LABELS } from '@/lib/optionPremiumSplit';
+import { TIME_VALUE_METHOD_LABELS, isClosingPriceMethod } from '@/lib/optionPremiumSplit';
+import { AttributionHelp } from './AttributionHelp';
 import { saveManualTimeValue } from '@/lib/movementLedgerIngest';
 import { formatDate, formatEUR } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
@@ -31,7 +33,7 @@ function ReviewRow({ row, portfolioId }: { row: OptionPremiumReviewRow; portfoli
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(row.manualTimeValuePerShare != null ? String(row.manualTimeValuePerShare).replace('.', ',') : '');
   const [saving, setSaving] = useState(false);
-  const flagged = row.method === 'close_itm_estimate';
+  const flagged = isClosingPriceMethod(row.method);
   const timeEur = row.timeValuePerShare == null ? null : row.timeValuePerShare * row.contracts * 100 / row.exchangeRate;
 
   const persist = async (value: number | null) => {
@@ -67,7 +69,11 @@ function ReviewRow({ row, portfolioId }: { row: OptionPremiumReviewRow; portfoli
       <td className="px-2 py-1.5">{row.side === 'VEN' ? 'Vendita' : 'Acquisto'} ×{row.contracts}</td>
       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.premiumPerShare)}</td>
       <td className="px-2 py-1.5">
-        <span className={cn(flagged && 'font-medium text-warning')}>{TIME_VALUE_METHOD_LABELS[row.method]}</span>
+        <span className={cn('inline-flex items-center gap-1', flagged && 'font-medium text-warning')}>
+          {flagged && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-label="Fallback: chiusura del sottostante" />}
+          {TIME_VALUE_METHOD_LABELS[row.method]}
+        </span>
+        {flagged && <span className="block text-[10px] text-warning">Stima da chiusura, non prezzo all’eseguito</span>}
         {row.reference && <span className="block text-[10px] text-muted-foreground">{row.reference}</span>}
       </td>
       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.referenceSpot)}</td>
@@ -104,20 +110,21 @@ function ReviewRow({ row, portfolioId }: { row: OptionPremiumReviewRow; portfoli
 }
 
 export function OptionPremiumReviewDialog({ open, onOpenChange, portfolioId, rows, periodLabel }: OptionPremiumReviewDialogProps) {
-  const flagged = rows.filter(row => row.method === 'close_itm_estimate').length;
+  const flagged = rows.filter(row => isClosingPriceMethod(row.method)).length;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl">
         <DialogHeader>
           <DialogTitle>Premi temporali opzioni — {periodLabel}</DialogTitle>
           <DialogDescription className="text-xs">
-            Il premio è solo valore temporale. Roll ITM: spot implicito dalla gamba ricomprata (tutta intrinseco).
-            Dopo un'assegnazione: spot = prezzo di vendita delle azioni. Senza riferimento: chiusura del sottostante,
-            da verificare{flagged > 0 ? ` (${flagged} nel periodo)` : ''}. Valori per azione, nella divisa dell'opzione.
+            La colonna Premio è il prezzo totale dell’opzione; Tempo è la sua componente temporale.
+            Nel roll ITM il calcolo assume la gamba ricomprata tutta intrinseco; dopo un’assegnazione usa il prezzo dell’operazione sulle azioni.
+            Il triangolo segnala l’uso della chiusura del sottostante, anche per opzioni OTM: {flagged} movimenti nel periodo.
+            Valori per azione nella divisa dell’opzione, tranne Tempo €.
           </DialogDescription>
         </DialogHeader>
         {rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Nessuna operazione con componente intrinseca nel periodo.</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">Nessun dettaglio opzioni disponibile dai file movimenti per il periodo.</p>
         ) : (
           <div className="max-h-[60vh] overflow-auto rounded-md border border-border/70">
             <table className="w-full min-w-[980px] border-collapse text-[11px]">
@@ -126,12 +133,12 @@ export function OptionPremiumReviewDialog({ open, onOpenChange, portfolioId, row
                   <th className="px-2 py-2 font-medium">Data</th>
                   <th className="px-2 py-2 font-medium">Opzione</th>
                   <th className="px-2 py-2 font-medium">Operazione</th>
-                  <th className="px-2 py-2 text-right font-medium">Premio</th>
-                  <th className="px-2 py-2 font-medium">Metodo</th>
-                  <th className="px-2 py-2 text-right font-medium">Spot rif.</th>
-                  <th className="px-2 py-2 text-right font-medium">Intrinseco</th>
-                  <th className="px-2 py-2 text-right font-medium">Tempo</th>
-                  <th className="px-2 py-2 text-right font-medium">Tempo €</th>
+                  <th className="px-2 py-2 text-right font-medium">Premio<AttributionHelp label="Premio totale">Prezzo dell’opzione per azione nella sua divisa: intrinseco + valore temporale.</AttributionHelp></th>
+                  <th className="px-2 py-2 font-medium">Metodo<AttributionHelp label="Metodo">Origine dello split: correzione manuale, operazione sulle azioni dopo assegnazione, spot implicito da roll, oppure chiusura giornaliera del sottostante. La chiusura è un fallback e può differire dal prezzo al momento dell’eseguito.</AttributionHelp></th>
+                  <th className="px-2 py-2 text-right font-medium">Spot rif.<AttributionHelp label="Spot di riferimento">Prezzo del sottostante usato per separare intrinseco e tempo; può essere implicito dal roll o ricavato dall’operazione sulle azioni. Con correzione manuale resta solo un riferimento informativo.</AttributionHelp></th>
+                  <th className="px-2 py-2 text-right font-medium">Intrinseco<AttributionHelp label="Intrinseco">Call: max(spot − strike, 0). Put: max(strike − spot, 0). Limitato al premio osservato per mantenere intrinseco + tempo = premio. In modalità manuale è premio − tempo inserito.</AttributionHelp></th>
+                  <th className="px-2 py-2 text-right font-medium">Tempo<AttributionHelp label="Tempo">Premio totale meno intrinseco, per azione. Correggibile manualmente tra zero e il premio totale.</AttributionHelp></th>
+                  <th className="px-2 py-2 text-right font-medium">Tempo €<AttributionHelp label="Tempo in euro">Tempo per azione × contratti × 100 / cambio. Qui incassi positivi e pagamenti negativi: segno opposto ai Movimenti netti della tabella principale. Non è da solo il contributo al rendimento, che include anche la variazione delle posizioni aperte.</AttributionHelp></th>
                   <th className="px-2 py-2 font-medium">Correzione</th>
                 </tr>
               </thead>

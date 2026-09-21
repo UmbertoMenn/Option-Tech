@@ -102,10 +102,7 @@ export interface MovementAttributionInputs {
    */
   orphanCash: MovementNote[];
   orphanOptionPremiums: MovementNote[];
-  /**
-   * Compravendite di opzioni con una componente intrinseca o con split non
-   * standard (roll ITM, riassegnazione, stima da chiusura, correzione manuale).
-   */
+  /** All option trades, including OTM closing-price estimates, for review. */
   premiumReview: OptionPremiumReviewRow[];
 }
 
@@ -341,7 +338,8 @@ export function buildMovementAttributionInputs(input: {
           const underlyingKey = row.underlyingKey || row.underlyingTicker || row.descriptor || '';
           const split = splits.get(row.rowKey);
           const hasSplit = split?.intrinsicPerShare != null && split?.timeValuePerShare != null;
-          if (split && (split.method !== 'close' || (split.intrinsicPerShare ?? 0) > 1e-9)) {
+          // Include OTM trades too: they also use the closing-price fallback.
+          if (split) {
             result.premiumReview.push({
               rowKey: row.rowKey,
               date: row.effectiveDate,
