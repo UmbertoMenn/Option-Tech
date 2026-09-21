@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS public.portfolio_movements (
   intrinsic_per_share numeric,
   time_value_per_share numeric,
   attribution_price_source text,
+  -- Premio temporale per azione corretto a mano (vendite ITM senza roll/assegnazione
+  -- di riferimento). Mai toccato dal ricaricamento dei file.
+  manual_time_value_per_share numeric CHECK (manual_time_value_per_share IS NULL OR manual_time_value_per_share >= 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (portfolio_id, row_key)

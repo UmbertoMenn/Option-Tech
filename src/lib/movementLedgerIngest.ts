@@ -262,3 +262,24 @@ export async function ingestMovementFiles(portfolioId: string, files: File[]): P
 
   return result;
 }
+
+/**
+ * Imposta (o azzera con null) il premio temporale per azione di una
+ * compravendita di opzioni. La colonna non fa parte del payload di ingest,
+ * quindi ricaricare i file non la sovrascrive.
+ */
+export async function saveManualTimeValue(
+  portfolioId: string,
+  rowKey: string,
+  timeValuePerShare: number | null,
+): Promise<void> {
+  if (timeValuePerShare != null && (!Number.isFinite(timeValuePerShare) || timeValuePerShare < 0)) {
+    throw new Error('Premio temporale non valido');
+  }
+  const { error } = await supabase
+    .from('portfolio_movements' as never)
+    .update({ manual_time_value_per_share: timeValuePerShare, updated_at: new Date().toISOString() } as never)
+    .eq('portfolio_id', portfolioId)
+    .eq('row_key', rowKey);
+  if (error) throw new Error(`Salvataggio premio temporale non riuscito: ${error.message}`);
+}

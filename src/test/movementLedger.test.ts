@@ -70,6 +70,7 @@ function stored(rows: ReturnType<typeof parseMovementFile>['rows'], extra: Parti
     intrinsicPerShare: null,
     timeValuePerShare: null,
     attributionPriceSource: null,
+    manualTimeValuePerShare: null,
     ...extra,
   }));
 }

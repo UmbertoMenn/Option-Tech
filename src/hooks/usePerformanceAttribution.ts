@@ -58,6 +58,7 @@ interface MovementDbRow {
   intrinsic_per_share: number | string | null;
   time_value_per_share: number | string | null;
   attribution_price_source: AttributionPriceSource | null;
+  manual_time_value_per_share: number | string | null;
 }
 
 const num = (value: number | string | null | undefined): number => Number(value ?? 0) || 0;
@@ -105,6 +106,7 @@ function decodeMovement(row: MovementDbRow): StoredMovementRow {
     intrinsicPerShare: numOrNull(row.intrinsic_per_share),
     timeValuePerShare: numOrNull(row.time_value_per_share),
     attributionPriceSource: row.attribution_price_source,
+    manualTimeValuePerShare: numOrNull(row.manual_time_value_per_share),
   };
 }
 

@@ -4,7 +4,7 @@ import { HistoricalDataEntry } from '@/types/historicalData';
 import { Position } from '@/types/portfolio';
 import { calculateTimeWeightedAverage } from '@/lib/timeWeightedAverage';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
-import { splitOptionPremium, AttributionPriceSource } from '@/lib/optionTradeAttribution';
+import { splitOptionPremium, AttributionPriceSource, RELIABLE_SPLIT_SOURCES } from '@/lib/optionTradeAttribution';
 
 export type AttributionCategory =
   | 'option_time'
@@ -149,6 +149,8 @@ export interface AttributionCoverage {
   optionMarksWithoutSpot: number;
   exactOptionTrades: number;
   proxyOptionTrades: number;
+  /** Vendite ITM senza roll/assegnazione di riferimento: tempo stimato dalla chiusura. */
+  estimatedTimeValueTrades: number;
   missingOptionTrades: number;
   tradesInPeriod: number;
   internalTransfersInPeriod: number;
@@ -395,6 +397,7 @@ export function calculatePerformanceAttribution(input: {
     optionMarksWithoutSpot: start.optionMarksWithoutSpot + end.optionMarksWithoutSpot,
     exactOptionTrades: 0,
     proxyOptionTrades: 0,
+    estimatedTimeValueTrades: 0,
     missingOptionTrades: 0,
     tradesInPeriod: 0,
     internalTransfersInPeriod: 0,
@@ -503,7 +506,8 @@ export function calculatePerformanceAttribution(input: {
         && Math.abs(intrinsic + time - price) < 0.01;
       if (persistedSplitValid) {
         const source = trade.attribution_price_source;
-        if (source === 'exact_trade_date' || source === 'previous_close') coverage.exactOptionTrades += 1;
+        if (source && RELIABLE_SPLIT_SOURCES.includes(source)) coverage.exactOptionTrades += 1;
+        else if (source === 'close_itm_estimate') coverage.estimatedTimeValueTrades += 1;
         else coverage.proxyOptionTrades += 1;
       } else {
         const spot = Number(trade.underlying_price || 0) > 0
@@ -690,6 +694,7 @@ export function calculatePerformanceAttribution(input: {
       const issues: string[] = [];
       if (coverage.optionMarksWithoutSpot > 0) issues.push(`${coverage.optionMarksWithoutSpot} mark senza prezzo del sottostante`);
       if (coverage.proxyOptionTrades > 0) issues.push(`${coverage.proxyOptionTrades} movimenti valorizzati con prezzo proxy`);
+      if (coverage.estimatedTimeValueTrades > 0) issues.push(`${coverage.estimatedTimeValueTrades} vendite ITM senza roll/assegnazione di riferimento: premio temporale stimato dalla chiusura (correggibile)`);
       if (coverage.missingOptionTrades > 0) issues.push(`${coverage.missingOptionTrades} movimenti senza split intrinseco/tempo`);
       if (coverage.uncoveredPositionChanges.includes(category)) issues.push('quantità variate senza movimento registrato');
       if (issues.length > 0) {
@@ -746,6 +751,9 @@ export function calculatePerformanceAttribution(input: {
   }
   if (coverage.missingOptionTrades > 0) {
     warnings.push(`${coverage.missingOptionTrades} movimenti opzione non scomponibili`);
+  }
+  if (coverage.estimatedTimeValueTrades > 0) {
+    warnings.push(`${coverage.estimatedTimeValueTrades} vendite ITM con premio temporale stimato dalla chiusura del sottostante: verifica o correggi in "Premi temporali"`);
   }
   if (Math.abs(amounts.unclassified) >= 1) {
     warnings.push(`${amounts.unclassified.toFixed(0)} € attribuiti a strumenti non classificati`);

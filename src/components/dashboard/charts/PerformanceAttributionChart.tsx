@@ -19,6 +19,7 @@ import {
   movementPeriodWarnings,
 } from '@/lib/movementAttribution';
 import { ingestMovementFiles } from '@/lib/movementLedgerIngest';
+import { OptionPremiumReviewDialog } from './OptionPremiumReviewDialog';
 import { Button } from '@/components/ui/button';
 import { formatDate, formatEUR, formatPercentage } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
@@ -176,6 +177,7 @@ export function PerformanceAttributionChart({
   const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
   const [hideInactive, setHideInactive] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { data, isLoading, error } = usePerformanceAttribution(portfolioId);
@@ -297,6 +299,13 @@ export function PerformanceAttributionChart({
     };
   }, [data, deposits, historicalData, selectedStart, selectedEnd, movementInputs]);
 
+  const periodReview = useMemo(() => {
+    if (!movementInputs || !calculation.period) return [];
+    const { startDate, endDate } = calculation.period;
+    return movementInputs.premiumReview.filter(row => row.date > startDate && row.date <= endDate);
+  }, [movementInputs, calculation.period]);
+  const flaggedPremiums = periodReview.filter(row => row.method === 'close_itm_estimate').length;
+
   const uploadedWindows = useMemo(() => {
     if (!movementInputs) return '';
     const fmt = (windows: { start: string; end: string }[]) =>
@@ -393,6 +402,18 @@ export function PerformanceAttributionChart({
           className="hidden"
           onChange={event => handleMovementFiles(event.target.files)}
         />
+        {periodReview.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn('h-7 gap-1.5 text-[11px]', flaggedPremiums > 0 && 'border-warning/50 text-warning')}
+            onClick={() => setReviewOpen(true)}
+          >
+            {flaggedPremiums > 0 && <AlertTriangle className="h-3.5 w-3.5" />}
+            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} da verificare` : ''}
+          </Button>
+        )}
         <TooltipProvider delayDuration={150}>
           <UiTooltip>
             <TooltipTrigger asChild>
@@ -545,6 +566,15 @@ export function PerformanceAttributionChart({
             </tfoot>
           </table>
         </div>
+      )}
+      {portfolioId && calculation.period && (
+        <OptionPremiumReviewDialog
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          portfolioId={portfolioId}
+          rows={periodReview}
+          periodLabel={`${formatDate(calculation.period.startDate)} – ${formatDate(calculation.period.endDate)}`}
+        />
       )}
     </div>
   );

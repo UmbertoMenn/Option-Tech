@@ -5,7 +5,20 @@ export type AttributionPriceSource =
   | 'exact_trade_date'
   | 'previous_close'
   | 'snapshot_proxy'
-  | 'missing';
+  | 'missing'
+  /** Spot implicito dalla gamba ricomprata di un roll ITM. */
+  | 'roll_implied'
+  /** Spot = prezzo di vendita/acquisto delle azioni dopo l'assegnazione. */
+  | 'assignment_sale'
+  /** Premio temporale impostato a mano. */
+  | 'manual'
+  /** Vendita ITM senza riferimento: split dalla chiusura, da verificare. */
+  | 'close_itm_estimate';
+
+/** Fonti che rendono lo split intrinseco/tempo affidabile senza segnalazioni. */
+export const RELIABLE_SPLIT_SOURCES: AttributionPriceSource[] = [
+  'exact_trade_date', 'previous_close', 'roll_implied', 'assignment_sale', 'manual',
+];
 
 export interface HistoricalUnderlyingPrice {
   ticker: string;

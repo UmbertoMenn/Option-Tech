@@ -22,6 +22,7 @@ import type {
   AttributionTradeRow,
 } from './performanceAttribution';
 import type { MovementLedgerRow, MovementSource } from './movementLedger';
+import { OptionPremiumSplit, TimeValueMethod, resolveOptionPremiumSplits } from './optionPremiumSplit';
 
 export interface StoredMovementRow extends MovementLedgerRow {
   /** Chiave canonica del sottostante (opzioni) o del titolo (azioni). */
@@ -30,7 +31,36 @@ export interface StoredMovementRow extends MovementLedgerRow {
   intrinsicPerShare: number | null;
   timeValuePerShare: number | null;
   attributionPriceSource: AttributionPriceSource | null;
+  /** Premio temporale per azione impostato a mano (null = automatico). */
+  manualTimeValuePerShare: number | null;
 }
+
+/** Riga per la verifica/correzione dei premi temporali in UI. */
+export interface OptionPremiumReviewRow {
+  rowKey: string;
+  date: string;
+  descriptor: string;
+  side: 'ACQ' | 'VEN';
+  contracts: number;
+  premiumPerShare: number;
+  currency: string;
+  exchangeRate: number;
+  method: TimeValueMethod;
+  referenceSpot: number | null;
+  reference: string | null;
+  intrinsicPerShare: number | null;
+  timeValuePerShare: number | null;
+  automaticTimeValuePerShare: number | null;
+  manualTimeValuePerShare: number | null;
+}
+
+const METHOD_SOURCE: Partial<Record<TimeValueMethod, AttributionPriceSource>> = {
+  manual: 'manual',
+  assignment_resale: 'assignment_sale',
+  roll_same_strike: 'roll_implied',
+  roll_new_strike: 'roll_implied',
+  close_itm_estimate: 'close_itm_estimate',
+};
 
 export interface MovementUploadRecord {
   source: MovementSource;
@@ -72,6 +102,11 @@ export interface MovementAttributionInputs {
    */
   orphanCash: MovementNote[];
   orphanOptionPremiums: MovementNote[];
+  /**
+   * Compravendite di opzioni con una componente intrinseca o con split non
+   * standard (roll ITM, riassegnazione, stima da chiusura, correzione manuale).
+   */
+  premiumReview: OptionPremiumReviewRow[];
 }
 
 const EQUITY_LIKE: AttributionCategory[] = ['stock', 'etf', 'bond', 'commodity'];
@@ -222,7 +257,9 @@ export function buildMovementAttributionInputs(input: {
     gpInternal: [],
     orphanCash: [],
     orphanOptionPremiums: [],
+    premiumReview: [],
   };
+  const splits: Map<string, OptionPremiumSplit> = resolveOptionPremiumSplits(rows);
 
   const categoryByIsin = snapshotCategoryByIsin(snapshots);
   const couponIsins = new Set(
@@ -302,6 +339,27 @@ export function buildMovementAttributionInputs(input: {
         const isOption = !!row.descriptor && !!row.optionType && row.strike != null && !!row.expiryDate;
         if (isOption) {
           const underlyingKey = row.underlyingKey || row.underlyingTicker || row.descriptor || '';
+          const split = splits.get(row.rowKey);
+          const hasSplit = split?.intrinsicPerShare != null && split?.timeValuePerShare != null;
+          if (split && (split.method !== 'close' || (split.intrinsicPerShare ?? 0) > 1e-9)) {
+            result.premiumReview.push({
+              rowKey: row.rowKey,
+              date: row.effectiveDate,
+              descriptor: row.descriptor as string,
+              side,
+              contracts: Number(row.quantity || 0),
+              premiumPerShare: Number(row.price || 0),
+              currency: row.currency,
+              exchangeRate: Number(row.exchangeRate || 1) || 1,
+              method: split.method,
+              referenceSpot: split.referenceSpot,
+              reference: split.reference,
+              intrinsicPerShare: split.intrinsicPerShare,
+              timeValuePerShare: split.timeValuePerShare,
+              automaticTimeValuePerShare: split.automaticTimeValuePerShare,
+              manualTimeValuePerShare: row.manualTimeValuePerShare,
+            });
+          }
           result.trades.push({
             basis_key: optionBasisKey(underlyingKey, row.optionType as 'call' | 'put', Number(row.strike), row.expiryDate as string),
             trade_date: row.effectiveDate,
@@ -318,9 +376,11 @@ export function buildMovementAttributionInputs(input: {
             exchange_rate: row.exchangeRate,
             gross_eur: row.grossEur,
             underlying_price: row.underlyingPrice,
-            intrinsic_per_share: row.intrinsicPerShare,
-            time_value_per_share: row.timeValuePerShare,
-            attribution_price_source: row.attributionPriceSource,
+            // Split risolto con il contesto (roll/assegnazione/manuale); senza
+            // prezzo del sottostante il motore ripiega sugli snapshot.
+            intrinsic_per_share: hasSplit ? split!.intrinsicPerShare : null,
+            time_value_per_share: hasSplit ? split!.timeValuePerShare : null,
+            attribution_price_source: (split ? METHOD_SOURCE[split.method] : undefined) ?? row.attributionPriceSource,
           });
           pushTradeCosts(result, row, 'Commissioni opzioni');
           break;
