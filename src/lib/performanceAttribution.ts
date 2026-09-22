@@ -699,17 +699,25 @@ export function calculatePerformanceAttribution(input: {
       const issues: string[] = [];
       if (coverage.optionMarksWithoutSpot > 0) issues.push(`${coverage.optionMarksWithoutSpot} mark senza prezzo del sottostante`);
       if (coverage.proxyOptionTrades > 0) issues.push(`${coverage.proxyOptionTrades} movimenti valorizzati con prezzo proxy`);
-      if (coverage.closingPriceTrades > 0) issues.push(`${coverage.closingPriceTrades} movimenti con split stimato dalla chiusura del sottostante, non dal prezzo all'eseguito`);
+      if (coverage.closingPriceTrades > 0) issues.push(`${coverage.closingPriceTrades} movimenti con split dalla chiusura del sottostante`);
       if (coverage.estimatedTimeValueTrades > 0) issues.push(`${coverage.estimatedTimeValueTrades} vendite ITM senza roll/assegnazione di riferimento: premio temporale stimato dalla chiusura (correggibile)`);
       if (coverage.missingOptionTrades > 0) issues.push(`${coverage.missingOptionTrades} movimenti senza split intrinseco/tempo`);
       if (coverage.uncoveredPositionChanges.includes(category)) issues.push('quantità variate senza movimento registrato');
-      if (issues.length > 0) {
-        const nothingCouldBeSplit = !activity
-          && coverage.optionMarks > 0
-          && coverage.optionMarksWithoutSpot === coverage.optionMarks;
+      const nothingCouldBeSplit = !activity
+        && coverage.optionMarks > 0
+        && coverage.optionMarksWithoutSpot === coverage.optionMarks;
+      if (nothingCouldBeSplit) {
+        return { status: 'unavailable', reason: `Calcolo non possibile: ${issues.join('; ')}.` };
+      }
+      // Il premio temporale è sempre determinato (roll, assegnazione, chiusura
+      // o correzione manuale): la riga è calcolata; i metodi usati restano come
+      // note informative e sono modificabili dal dettaglio Premi temporali.
+      if (activity) {
         return {
-          status: nothingCouldBeSplit ? 'unavailable' : 'partial',
-          reason: `${nothingCouldBeSplit ? 'Calcolo non possibile' : 'Calcolo parziale'}: ${issues.join('; ')}.`,
+          status: 'calculated',
+          reason: issues.length > 0
+            ? `Calcolato come T1 − T0 − movimenti netti. Note: ${issues.join('; ')}.`
+            : 'Calcolato come T1 − T0 − movimenti netti della classe.',
         };
       }
     }
@@ -749,9 +757,6 @@ export function calculatePerformanceAttribution(input: {
   });
 
   const warnings: string[] = [];
-  if (coverage.closingPriceTrades > 0) {
-    warnings.push(`${coverage.closingPriceTrades} movimenti con premio temporale calcolato usando la chiusura del sottostante (anche OTM): verifica il dettaglio Premi temporali`);
-  }
   if (coverage.optionMarksWithoutSpot > 0) {
     warnings.push(`${coverage.optionMarksWithoutSpot} valorizzazioni opzione senza prezzo sottostante`);
   }
@@ -762,7 +767,7 @@ export function calculatePerformanceAttribution(input: {
     warnings.push(`${coverage.missingOptionTrades} movimenti opzione non scomponibili`);
   }
   if (coverage.estimatedTimeValueTrades > 0) {
-    warnings.push(`${coverage.estimatedTimeValueTrades} vendite ITM con premio temporale stimato dalla chiusura del sottostante: verifica o correggi in "Premi temporali"`);
+    warnings.push(`${coverage.estimatedTimeValueTrades} vendite ITM senza roll né assegnazione di riferimento: premio temporale dalla chiusura del sottostante, modificabile in "Premi temporali"`);
   }
   if (Math.abs(amounts.unclassified) >= 1) {
     warnings.push(`${amounts.unclassified.toFixed(0)} € attribuiti a strumenti non classificati`);

@@ -37,13 +37,20 @@ export type TimeValueMethod =
 export const isClosingPriceMethod = (method: TimeValueMethod): boolean =>
   method === 'close' || method === 'close_itm_estimate';
 
+/**
+ * Unico caso da segnalare: vendita ITM "da nuova" (senza roll né assegnazione
+ * di riferimento), dove il premio temporale viene dalla chiusura. Per tutto il
+ * resto il premio temporale è determinato dalle regole (OTM: tutto il premio).
+ */
+export const needsTimeValueReview = (method: TimeValueMethod): boolean => method === 'close_itm_estimate';
+
 export const TIME_VALUE_METHOD_LABELS: Record<TimeValueMethod, string> = {
   manual: 'Correzione manuale',
   assignment_resale: 'Da vendita azioni assegnate',
   roll_same_strike: 'Roll stesso strike',
   roll_new_strike: 'Roll su strike diverso',
   close: 'Chiusura del sottostante',
-  close_itm_estimate: 'Stima da chiusura (da verificare)',
+  close_itm_estimate: 'Vendita ITM senza roll/assegnazione: chiusura del sottostante',
   missing: 'Prezzo del sottostante mancante',
 };
 

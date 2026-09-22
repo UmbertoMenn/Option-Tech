@@ -124,3 +124,19 @@ describe('resolveOptionPremiumSplits — premio temporale dagli eseguiti', () =>
     expect(resolveOptionPremiumSplits([fresh]).get(fresh.rowKey)).toMatchObject({ method: 'missing', timeValuePerShare: null });
   });
 });
+
+describe('parseDecimalInput — campo premio temporale manuale', () => {
+  it('accetta punto e virgola come separatore decimale', async () => {
+    const { parseDecimalInput } = await import('@/lib/formatters');
+    expect(parseDecimalInput('8.30')).toBe(8.3);
+    expect(parseDecimalInput('8,30')).toBe(8.3);
+    expect(parseDecimalInput(' 12.5 ')).toBe(12.5);
+    expect(parseDecimalInput('0.05')).toBe(0.05);
+    expect(parseDecimalInput('1.234,56')).toBe(1234.56);
+    expect(parseDecimalInput('1,234.56')).toBe(1234.56);
+    expect(parseDecimalInput('7')).toBe(7);
+    expect(parseDecimalInput('')).toBeNull();
+    expect(parseDecimalInput('abc')).toBeNull();
+    expect(parseDecimalInput('8.3.0')).toBeNull();
+  });
+});

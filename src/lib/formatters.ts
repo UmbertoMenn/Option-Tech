@@ -107,3 +107,26 @@ export function parseExcelDate(value: string | number | null | undefined): strin
   
   return null;
 }
+/**
+ * Numero digitato a mano: accetta sia la virgola sia il punto come separatore
+ * decimale ("8,30", "8.30"). Se compaiono entrambi, l'ultimo è il decimale e
+ * l'altro è il separatore delle migliaia ("1.234,56", "1,234.56").
+ * Ritorna null se il testo non è un numero.
+ */
+export function parseDecimalInput(value: string): number | null {
+  const text = value.trim().replace(/\s+/g, '');
+  if (!text) return null;
+  const lastComma = text.lastIndexOf(',');
+  const lastDot = text.lastIndexOf('.');
+  let normalized = text;
+  if (lastComma >= 0 && lastDot >= 0) {
+    const decimal = lastComma > lastDot ? ',' : '.';
+    const thousands = decimal === ',' ? '.' : ',';
+    normalized = text.split(thousands).join('').replace(decimal, '.');
+  } else if (lastComma >= 0) {
+    normalized = text.replace(',', '.');
+  }
+  if (!/^[-+]?\d*\.?\d+$|^[-+]?\d+\.$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}

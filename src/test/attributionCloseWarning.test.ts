@@ -45,5 +45,8 @@ describe('warning premi da chiusura', () => {
     const intrinsic = result.items.find(i => i.category === 'option_intrinsic')!;
     expect(Math.abs(time.netFlows + intrinsic.netFlows)).toBe(500);
     if (warning) expect(time.reason).toContain('chiusura del sottostante');
+    // Il premio temporale è sempre determinato: le righe opzioni sono "calcolate", mai "parziali".
+    expect(time.status).toBe('calculated');
+    expect(intrinsic.status).not.toBe('partial'); // OTM: nessun intrinseco → "nessuna attività"
   });
 });

@@ -34,7 +34,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
-import { isClosingPriceMethod } from '@/lib/optionPremiumSplit';
+import { needsTimeValueReview } from '@/lib/optionPremiumSplit';
 import { AttributionHelp } from './AttributionHelp';
 
 interface PerformanceAttributionChartProps {
@@ -325,7 +325,8 @@ export function PerformanceAttributionChart({
     const { startDate, endDate } = calculation.period;
     return movementInputs.premiumReview.filter(row => row.date > startDate && row.date <= endDate);
   }, [movementInputs, calculation.period]);
-  const flaggedPremiums = Math.max(periodReview.filter(row => isClosingPriceMethod(row.method)).length, calculation.result?.coverage.closingPriceTrades ?? 0);
+  // Da segnalare solo le vendite ITM senza roll/assegnazione (caso "da nuova").
+  const flaggedPremiums = periodReview.filter(row => needsTimeValueReview(row.method)).length;
 
   const uploadedWindows = useMemo(() => {
     if (!movementInputs) return '';
@@ -389,7 +390,7 @@ export function PerformanceAttributionChart({
             </CollapsibleTrigger>
             {result && <span className="tabular-nums text-muted-foreground">{formatDate(result.startDate)} – {formatDate(result.endDate)}</span>}
             {!detailsOpen && flaggedPremiums > 0 && (
-              <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} premi stimati da chiusura: apri dettaglio`} className="inline-flex items-center gap-1 text-warning">
+              <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} vendite ITM senza riferimento: apri Premi temporali`} className="inline-flex items-center gap-1 text-warning">
                 <AlertTriangle className="h-3.5 w-3.5" />{flaggedPremiums}
               </button>
             )}
@@ -483,7 +484,7 @@ export function PerformanceAttributionChart({
             onClick={() => setReviewOpen(true)}
           >
             {flaggedPremiums > 0 && <AlertTriangle className="h-3.5 w-3.5" />}
-            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} da chiusura` : ''}
+            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} ITM senza riferimento` : ''}
           </Button>
         )}
         <TooltipProvider delayDuration={150}>
@@ -519,7 +520,7 @@ export function PerformanceAttributionChart({
       {flaggedPremiums > 0 && (
         <button type="button" onClick={() => setReviewOpen(true)} className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-left text-[11px] text-warning">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {flaggedPremiums} movimenti con premio temporale stimato dalla chiusura dell’azione (anche OTM). Apri il dettaglio per verificarli o correggerli.
+          {flaggedPremiums} vendite ITM senza roll né assegnazione di riferimento: premio temporale calcolato dalla chiusura del sottostante. Puoi modificarlo nel dettaglio Premi temporali.
         </button>
       )}
 
@@ -558,7 +559,7 @@ export function PerformanceAttributionChart({
                       {item.label}
                       <AttributionHelp label={item.label}>{CLASS_HELP[item.category]}</AttributionHelp>
                       {item.category === 'option_time' && flaggedPremiums > 0 && (
-                        <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} premi stimati da chiusura: apri dettaglio`} className="ml-1 inline-flex align-middle text-warning"><AlertTriangle className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} vendite ITM senza riferimento: apri Premi temporali`} className="ml-1 inline-flex align-middle text-warning"><AlertTriangle className="h-3.5 w-3.5" /></button>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.startValue)}</td>
