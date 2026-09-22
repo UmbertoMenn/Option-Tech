@@ -74,6 +74,7 @@ import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
 import { nakedPutKeyForPosition, coveredCallKeyForPosition, deRiskingCoveredCallKeyForPosition } from '@/lib/strategyKeys';
 import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
+import { ResellCallCalculatorButton } from '@/components/derivatives/ResellCallCalculatorButton';
 import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
 import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
 import {
@@ -233,9 +234,26 @@ function resolveIncompleteHeader(
 }
 
 /** Riga di una strategia incompleta (gamba mancante), COLLASSABILE come le righe complete. */
+/** Contratti coperti di una CC / DR-CC senza short call: azioni/100 o gamba sintetica. */
+function incompleteCoveredCallContracts(inc: IncompleteStrategyPosition): number {
+  if (inc.isSynthetic) {
+    const synthetic = inc.presentLegs.find(p =>
+      (p.option_type === 'call' && p.quantity > 0) || (p.option_type === 'put' && p.quantity < 0),
+    );
+    if (synthetic) return Math.abs(synthetic.quantity);
+  }
+  const shares = Number(inc.linkedStock?.quantity || 0);
+  return Math.max(1, Math.floor(shares / 100));
+}
+
 function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrategyPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   const [isOpen, setIsOpen] = useState(false);
   const header = resolveIncompleteHeader(inc, underlyingPrices);
+  // Covered call (anche de-risking) a cui manca la call da rivendere: la
+  // calcolatrice dei premi incassati resta disponibile.
+  const isCallToResell = (inc.strategyType === 'covered_call' || inc.strategyType === 'derisking_covered_call')
+    && inc.missingLegs.includes('Short Call');
+  const calculatorTicker = header?.ticker || inc.linkedStock?.ticker || inc.underlying;
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <div
@@ -263,6 +281,16 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
               {leg}
             </Badge>
           ))}
+          {isCallToResell && calculatorTicker && (
+            <ResellCallCalculatorButton
+              ticker={calculatorTicker}
+              underlyingName={inc.underlying}
+              contracts={incompleteCoveredCallContracts(inc)}
+              underlyingPrice={header?.price ?? 0}
+              currency={header?.cur ?? 'USD'}
+              isDeRisking={inc.strategyType === 'derisking_covered_call'}
+            />
+          )}
         </div>
       </div>
       <CollapsibleContent>

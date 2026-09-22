@@ -26,6 +26,7 @@ import { it } from 'date-fns/locale';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { computeMonitoring, buildSnapshotSections, MonitoringResult } from '@/lib/monitoringEngine';
 import { canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
+import { ResellCallCalculatorButton } from './ResellCallCalculatorButton';
 
 interface DerivativesSummaryCardProps {
   categories: DerivativeCategories;
@@ -606,12 +607,14 @@ function AvailableCallsSection({
   allPositions,
   archivedKeys = [],
   dynamicAliases,
+  underlyingPrices = {},
 }: {
   items: { ticker: string; availableContracts: number }[];
   portfolioId: string | null | undefined;
   allPositions: Position[];
   archivedKeys?: string[];
   dynamicAliases?: DynamicAliases;
+  underlyingPrices?: Record<string, UnderlyingPrice>;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -675,6 +678,19 @@ function AvailableCallsSection({
     () => computeAvailableCallResiduals(items, visibleBuybacks),
     [items, visibleBuybacks],
   );
+
+  // Sottostante (nome, prezzo, valuta) per la calcolatrice premi di ogni ticker.
+  const underlyingFor = (ticker: string) => {
+    const wanted = ticker.trim().toUpperCase();
+    const entry = Object.entries(underlyingPrices).find(([name, price]) =>
+      (price?.ticker || '').toUpperCase() === wanted || name.toUpperCase() === wanted,
+    );
+    return {
+      name: entry?.[0] || ticker,
+      price: Number(entry?.[1]?.price || 0),
+      currency: tickerMeta[ticker]?.currency || entry?.[1]?.currency || 'USD',
+    };
+  };
 
   if (items.length === 0) return null;
 
@@ -767,21 +783,33 @@ function AvailableCallsSection({
       {isExpanded && (
         <div className="mt-2 pl-6 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            {residuals.map((item, idx) => (
-              <Badge
-                key={idx}
-                variant="outline"
-                className={`text-xs ${item.residualContracts === 0
-                  ? 'bg-muted border-border text-muted-foreground'
-                  : 'bg-green-500/10 border-green-500/30'}`}
-                title={`${item.availableContracts} disponibili − ${item.registeredContracts} registrati`}
-              >
-                {item.ticker} ×{item.residualContracts}
-                {item.registeredContracts > 0 && (
-                  <span className="ml-1 text-muted-foreground">/{item.availableContracts}</span>
-                )}
-              </Badge>
-            ))}
+            {residuals.map((item, idx) => {
+              const underlyingInfo = underlyingFor(item.ticker);
+              return (
+                <span key={idx} className="inline-flex items-center gap-0.5">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${item.residualContracts === 0
+                      ? 'bg-muted border-border text-muted-foreground'
+                      : 'bg-green-500/10 border-green-500/30'}`}
+                    title={`${item.availableContracts} disponibili − ${item.registeredContracts} registrati`}
+                  >
+                    {item.ticker} ×{item.residualContracts}
+                    {item.registeredContracts > 0 && (
+                      <span className="ml-1 text-muted-foreground">/{item.availableContracts}</span>
+                    )}
+                  </Badge>
+                  {/* Calcolatrice premi anche senza call in portafoglio */}
+                  <ResellCallCalculatorButton
+                    ticker={item.ticker}
+                    underlyingName={underlyingInfo.name}
+                    contracts={item.availableContracts}
+                    underlyingPrice={underlyingInfo.price}
+                    currency={underlyingInfo.currency}
+                  />
+                </span>
+              );
+            })}
           </div>
 
           {/* Pulsante sempre visibile per inserire una call da rivendere a mano */}
@@ -1115,6 +1143,7 @@ export function DerivativesSummaryCard({
             allPositions={allPositions}
             archivedKeys={archivedKeys}
             dynamicAliases={dynamicAliases}
+            underlyingPrices={underlyingPrices}
           />
         </CardContent>
       </Card>

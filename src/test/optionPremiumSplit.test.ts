@@ -187,3 +187,11 @@ describe('parseDecimalInput — campo premio temporale manuale', () => {
     expect(parseDecimalInput('8.3.0')).toBeNull();
   });
 });
+
+describe('resellCallOptionSymbol', () => {
+  it('chiave dedicata alla covered call senza call, distinta dalle call attive', async () => {
+    const { resellCallOptionSymbol } = await import('@/lib/coveredCallPremiumKeys');
+    expect(resellCallOptionSymbol(' baba ')).toBe('RIV_BABA');
+    expect(resellCallOptionSymbol('CEG')).not.toMatch(/^C\d/);
+  });
+});
