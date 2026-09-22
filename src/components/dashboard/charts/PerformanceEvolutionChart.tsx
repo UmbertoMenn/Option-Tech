@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { AlertTriangle, Info } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -16,10 +18,16 @@ import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { cn } from '@/lib/utils';
+import { fetchFullSnapshotDates } from '@/lib/fullSnapshot';
+import { AverageExposureResult, computeAverageEquityExposure, GAP_DAYS } from '@/lib/equityExposureAverage';
+import { formatDate } from '@/lib/formatters';
+import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type TimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX' | 'YTD';
 
 interface PerformanceEvolutionChartProps {
+  /** Portafoglio singolo: la media usa solo le date con Visualizzazione Storica. Null = vista aggregata. */
+  portfolioId?: string | null;
   historicalData: HistoricalDataEntry[];
   viewMode: ViewMode;
   currentValue: number;
@@ -34,6 +42,8 @@ interface ChartDataPoint {
   value: number;
   returnPct: number;
   cumulativeDeposits: number;
+  /** Esposizione azionaria (0-1) se la data ha i dati della Visualizzazione Storica. */
+  equityPct?: number;
 }
 
 // Temporal bucket downsampling: distributes points uniformly over TIME, not index.
@@ -124,12 +134,79 @@ function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): nu
   }
 }
 
+const pctLabel = (value: number | null) =>
+  value == null ? '—' : `${(value * 100).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+/** Esposizione azionaria media del periodo, con copertura dei dati storici. */
+function AverageExposureBadge({ result, aggregated }: { result: AverageExposureResult; aggregated: boolean }) {
+  const incomplete = !!result.missingBefore || !!result.missingAfter || result.gaps.length > 0;
+  if (result.average == null) {
+    return (
+      <span className="inline-flex items-center gap-1 text-warning">
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Esp. azionaria media: nessun dato storico nel periodo
+      </span>
+    );
+  }
+  return (
+    <TooltipProvider delayDuration={100}>
+      <UiTooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn('inline-flex items-center gap-1 rounded px-1 tabular-nums', incomplete ? 'text-warning' : 'text-muted-foreground')}
+            aria-label="Dettaglio esposizione azionaria media"
+          >
+            {incomplete ? <AlertTriangle className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
+            <span>Esp. azionaria media</span>
+            <span className="font-semibold text-foreground">{pctLabel(result.average)}</span>
+            {result.missingBefore && <span>dal {formatDate(result.missingBefore)}</span>}
+            {result.missingAfter && <span>al {formatDate(result.missingAfter)}</span>}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 text-xs">
+          <p className="font-medium">
+            Esposizione azionaria media {pctLabel(result.average)}
+            <span className="font-normal text-muted-foreground"> (min {pctLabel(result.min)} · max {pctLabel(result.max)})</span>
+          </p>
+          <p className="mt-1">
+            Calcolata dal {formatDate(result.from as string)} al {formatDate(result.to as string)} su {result.points} snapshot.
+          </p>
+          {result.missingBefore && (
+            <p className="mt-1 text-warning">
+              Dati storici mancanti prima del {formatDate(result.missingBefore)}: il periodo selezionato parte dal {formatDate(result.requestedStart)}, la media copre solo i giorni successivi.
+            </p>
+          )}
+          {result.missingAfter && (
+            <p className="mt-1 text-warning">
+              Nessuno snapshot storico dopo il {formatDate(result.missingAfter)}: la media si ferma a quella data.
+            </p>
+          )}
+          {result.gaps.map(gap => (
+            <p key={gap.from} className="mt-1 text-warning">
+              Nessuno snapshot tra il {formatDate(gap.from)} e il {formatDate(gap.to)} (oltre {GAP_DAYS} giorni): tratto interpolato.
+            </p>
+          ))}
+          <p className="mt-1 text-muted-foreground">
+            {aggregated
+              ? 'Vista aggregata: esposizione salvata negli storici di ciascun portafoglio, ponderata per valore.'
+              : 'Dagli snapshot della Visualizzazione Storica: esposizione come nel Risk Analyzer (azioni, ETF, commodity, put nude, LEAP, strategie, covered call sintetiche e azioni GP) sul netting totale.'}
+            {' '}Media ponderata per il tempo, con interpolazione lineare tra uno snapshot e il successivo.
+          </p>
+        </TooltipContent>
+      </UiTooltip>
+    </TooltipProvider>
+  );
+}
+
 function CustomLegend({
   timeRange,
   onTimeRangeChange,
+  extra,
 }: {
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
+  extra?: ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between text-xs mb-2">
@@ -138,6 +215,7 @@ function CustomLegend({
           <div className="w-3 h-0.5 bg-profit rounded" />
           <span className="text-foreground">Portafoglio</span>
         </div>
+        {extra}
       </div>
 
       <div className="flex items-center gap-3">
@@ -163,6 +241,7 @@ function CustomLegend({
 }
 
 export function PerformanceEvolutionChart({
+  portfolioId = null,
   historicalData,
   viewMode,
   currentValue,
@@ -170,6 +249,18 @@ export function PerformanceEvolutionChart({
   deposits,
 }: PerformanceEvolutionChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
+
+  // Date con Visualizzazione Storica (snapshot completo) del portafoglio singolo.
+  const { data: fullSnapshotDates } = useQuery({
+    queryKey: ['full-snapshot-dates', portfolioId],
+    queryFn: () => fetchFullSnapshotDates(portfolioId as string),
+    enabled: !!portfolioId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const coveredDates = useMemo(
+    () => (portfolioId ? new Set((fullSnapshotDates ?? []).map(date => date.slice(0, 10))) : null),
+    [portfolioId, fullSnapshotDates],
+  );
 
   const latestSnapshotDate = useMemo(() => {
     if (historicalData.length === 0) return null;
@@ -218,6 +309,39 @@ export function PerformanceEvolutionChart({
     return deposits.filter(d => new Date(d.deposit_date) >= cutoffDate);
   }, [deposits, timeRange]);
 
+  const exposureAverage = useMemo(() => {
+    if (historicalData.length === 0) return null;
+    if (portfolioId && !fullSnapshotDates) return null; // in caricamento
+    const sortedDates = historicalData.map(entry => entry.snapshot_date.slice(0, 10)).sort();
+    const today = new Date();
+    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    let start: string;
+    if (timeRange === 'MAX') {
+      start = sortedDates[0];
+    } else {
+      let cutoff: Date;
+      switch (timeRange) {
+        case '1M': cutoff = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate()); break;
+        case '3M': cutoff = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate()); break;
+        case '6M': cutoff = new Date(today.getFullYear(), today.getMonth() - 6, today.getDate()); break;
+        case '1Y': cutoff = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()); break;
+        case '2Y': cutoff = new Date(today.getFullYear() - 2, today.getMonth(), today.getDate()); break;
+        case '3Y': cutoff = new Date(today.getFullYear() - 3, today.getMonth(), today.getDate()); break;
+        case 'YTD': cutoff = new Date(today.getFullYear(), 0, 1); break;
+        default: cutoff = new Date(0); break;
+      }
+      start = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+    }
+    // Fine periodo = data del valore corrente del grafico (ultimo upload), come la linea del rendimento.
+    const lastHistorical = sortedDates[sortedDates.length - 1];
+    const current = currentDate?.slice(0, 10) ?? null;
+    const end = current && current > lastHistorical ? current : (lastHistorical ?? todayIso);
+    const points = historicalData
+      .filter(entry => entry.equity_exposure_pct != null && (!coveredDates || coveredDates.has(entry.snapshot_date.slice(0, 10))))
+      .map(entry => ({ date: entry.snapshot_date.slice(0, 10), pct: Number(entry.equity_exposure_pct) }));
+    return computeAverageEquityExposure(points, start, end);
+  }, [historicalData, portfolioId, fullSnapshotDates, coveredDates, timeRange, currentDate]);
+
   const chartData = useMemo(() => {
     if (filteredHistoricalData.length === 0) return [];
 
@@ -259,6 +383,9 @@ export function PerformanceEvolutionChart({
         value,
         returnPct,
         cumulativeDeposits,
+        equityPct: entry.equity_exposure_pct != null && (!coveredDates || coveredDates.has(entry.snapshot_date.slice(0, 10)))
+          ? Number(entry.equity_exposure_pct)
+          : undefined,
       };
     });
 
@@ -310,7 +437,7 @@ export function PerformanceEvolutionChart({
       : 24;
     const preserveTs = currentDate ? new Date(currentDate).getTime() : undefined;
     return downsampleData(data, maxPoints, preserveTs);
-  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, timeRange, hasLiveCurrent, latestSnapshotDate]);
+  }, [filteredHistoricalData, viewMode, currentValue, currentDate, filteredDeposits, timeRange, hasLiveCurrent, latestSnapshotDate, coveredDates]);
 
   if (chartData.length === 0) {
     return (
@@ -325,6 +452,7 @@ export function PerformanceEvolutionChart({
       <CustomLegend
         timeRange={timeRange}
         onTimeRangeChange={setTimeRange}
+        extra={exposureAverage ? <AverageExposureBadge result={exposureAverage} aggregated={!portfolioId} /> : null}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -377,6 +505,14 @@ export function PerformanceEvolutionChart({
                         Rendimento: <span className="font-medium">{dataPoint.returnPct.toFixed(2)}%</span>
                       </span>
                     </div>
+                    {dataPoint.equityPct != null && (
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                        <span className="text-foreground text-xs">
+                          Esposizione azionaria: <span className="font-medium">{pctLabel(dataPoint.equityPct)}</span>
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               }}

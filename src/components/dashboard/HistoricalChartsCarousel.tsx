@@ -163,6 +163,7 @@ export function HistoricalChartsCarousel({
               <CarouselItem>
                 <div className="h-[250px]">
                   <PerformanceEvolutionChart
+                    portfolioId={portfolioId}
                     historicalData={historicalData}
                     viewMode={viewMode}
                     currentValue={currentValue}
