@@ -10,7 +10,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { FlussiParseOptions } from '@/lib/flussiCsvParser';
-import { MovementLedgerRow, MovementSource, markInternalGpTransfers, parseMovementFile } from '@/lib/movementLedger';
+import { MovementLedgerRow, MovementSource, parseMovementFile } from '@/lib/movementLedger';
 import { fetchDynamicAliases } from '@/lib/costBasisStore';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { fetchHistoricalUnderlyingPrices, splitOptionPremium } from '@/lib/optionTradeAttribution';
@@ -215,7 +215,7 @@ export async function ingestMovementFiles(portfolioId: string, files: File[]): P
 
     // Giroconti cash ↔ GP: travasi interni, servono a depurare il contributo GP.
     if (parsed.source === 'cash') {
-      const pairs = markInternalGpTransfers(parsed.rows);
+      const pairs = parsed.gpTransferPairs;
       const transfers = pairs.map(([debit, credit]) => {
         const amount = Math.abs(debit.netEur);
         const debitDate = debit.valueDate || debit.effectiveDate;

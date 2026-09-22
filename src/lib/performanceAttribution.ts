@@ -731,7 +731,14 @@ export function calculatePerformanceAttribution(input: {
       return { status: 'partial', reason: 'Calcolo parziale: le quantità sono cambiate tra T0 e T1, ma non risultano movimenti della classe nel ledger.' };
     }
     if (category === 'gp' && coverage.internalTransfersInPeriod === 0 && Math.abs(end.values.gp - start.values.gp) >= 0.01) {
-      return { status: 'partial', reason: 'Calcolato assumendo assenza di giroconti GP: nel periodo non risultano trasferimenti interni registrati.' };
+      // Nessun giroconto con la GP nel periodo = nessun flusso: il contributo è
+      // la variazione di valore della gestione, calcolata e non parziale.
+      return {
+        status: 'calculated',
+        reason: movementCoverage?.cash === 'full'
+          ? 'Calcolato come T1 − T0: nei movimenti cash del periodo non ci sono giroconti con la GP.'
+          : 'Calcolato come T1 − T0: nessun giroconto con la GP registrato nel periodo.',
+      };
     }
     if (averageBalance <= 0) {
       return { status: 'partial', reason: 'Contributo in euro calcolato; percentuale non disponibile perché il patrimonio medio non è positivo.' };

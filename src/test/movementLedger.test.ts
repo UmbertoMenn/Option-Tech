@@ -94,6 +94,23 @@ describe('parseMovementFile — perimetro silvias', () => {
   });
 });
 
+describe('giroconti con la GP', () => {
+  it('silvias: giroconto 52...453 → B0...453 riconosciuto anche con il conto GP fuori perimetro', () => {
+    const csv = [
+      CASH_HEADER,
+      cashLine('52805213453', '10/09/2026', '91', 'GIROCONTO A FAVORE DI - GESTIONE PATRIMONIALE', '-50000', '48000001', 'GIROCONTO'),
+      cashLine('B0805213453', '10/09/2026', '92', 'GIROCONTO A FAVORE DI - GESTIONE PATRIMONIALE', '50000', '48000001', 'GIROCONTO'),
+    ].join('\r\n');
+    const res = parseMovementFile(csv, silvias);
+    expect(res.rows).toHaveLength(1); // la riga GP non viene salvata
+    expect(res.rows[0].kind).toBe('internal_transfer');
+    expect(res.gpTransferPairs).toHaveLength(1);
+    const [debit, credit] = res.gpTransferPairs[0];
+    expect(debit).toMatchObject({ accountId: '52805213453', scope: 'portfolio', netEur: -50000 });
+    expect(credit).toMatchObject({ accountId: 'B0805213453', scope: 'gp', netEur: 50000 });
+  });
+});
+
 describe('parseMovementFile — classificazione e quadratura', () => {
   it('classifica le righe cash e segna quelle già rappresentate nei movimenti titoli', () => {
     const res = parseMovementFile(CASH_CSV, silvias);
@@ -340,6 +357,27 @@ describe('calculatePerformanceAttribution con movimenti', () => {
     // Apertura senza movimento di prezzo: nessun utile né sul tempo né sull'intrinseco.
     expect(time.amount).toBeCloseTo(0, 6);
     expect(intrinsic.amount).toBeCloseTo(0, 6);
+  });
+
+  it('GP senza giroconti nel periodo: contributo calcolato, non parziale', () => {
+    const gpHolding = (value: number) => [{ market_value: value, price_date: null } as unknown as FullSnapshot['gp_holdings'][number]];
+    const start = { ...snapshot('2026-08-01', 1_000), gp_holdings: gpHolding(100_000) };
+    const end = { ...snapshot('2026-08-31', 1_000), gp_holdings: gpHolding(102_000) };
+    const result = calculatePerformanceAttribution({
+      startSnapshot: start,
+      endSnapshot: end,
+      startHistorical: historical('2026-08-01', 101_000),
+      endHistorical: historical('2026-08-31', 103_000),
+      allHistoricalData: [],
+      deposits: [],
+      trades: [],
+      internalTransfers: [],
+      movementCoverage: { hasUploads: true, titoli: 'full', cash: 'full' },
+    });
+    const gp = result.items.find(item => item.category === 'gp')!;
+    expect(gp.amount).toBeCloseTo(2_000, 6);
+    expect(gp.status).toBe('calculated');
+    expect(gp.reason).toContain('non ci sono giroconti con la GP');
   });
 
   it('senza file movimenti le righe di costo restano nascoste', () => {

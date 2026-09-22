@@ -115,6 +115,13 @@ export interface MovementFileParseResult {
   excludedByAccountRule: number;
   /** Righe scartate per esclusione titolo (es. Bio-On, fondi/SICAV). */
   excludedByPositionRule: number;
+  /**
+   * Giroconti tra un conto del perimetro e la liquidità GP ("B0..."), anche
+   * quando il conto GP è fuori dal perimetro cash del cliente (es. silvias):
+   * la riga GP serve solo a riconoscere il travaso, non viene salvata.
+   * Coppie [addebito, accredito].
+   */
+  gpTransferPairs: [MovementLedgerRow, MovementLedgerRow][];
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -191,15 +198,17 @@ function parseMovCashRows(
   result: MovementFileParseResult,
 ): void {
   const pending: { row: Omit<MovementLedgerRow, 'rowKey'>; baseKey: string }[] = [];
+  const gpCounterparts: MovementLedgerRow[] = [];
   for (const line of lines) {
     const cells = splitCsvLine(line);
     if (cells.length < 15) continue;
     const accountId = stripQuote(cells[6] || '');
     if (!accountId) continue;
-    if (isExcludedAccount(accountId, options, 'cash')) {
-      result.excludedByAccountRule += 1;
-      continue;
-    }
+    const excluded = isExcludedAccount(accountId, options, 'cash');
+    if (excluded) result.excludedByAccountRule += 1;
+    // Fuori perimetro: si tiene solo il giroconto sul conto GP, come
+    // controparte per riconoscere i travasi con la gestione.
+    if (excluded && !isGpAccount('cash', accountId)) continue;
     const bookingDate = parseItalianDate(cells[3]);
     const valueDate = parseItalianDate(cells[4]);
     const effectiveDate = bookingDate || valueDate;
@@ -247,6 +256,10 @@ function parseMovCashRows(
       periodStart: result.periodStart,
       periodEnd: result.periodEnd,
     };
+    if (excluded) {
+      if (kind === 'external_transfer') gpCounterparts.push({ ...row, rowKey: `GP-CP|${accountId}|${operationId}|${amount.toFixed(2)}` });
+      continue;
+    }
     const baseKey = [
       'C',
       accountId,
@@ -265,16 +278,19 @@ function parseMovCashRows(
 
   // Giroconti tra conto ordinario e conto GP ("B0...") nello stesso file:
   // sono travasi interni, non apporti/prelievi del cliente.
-  markInternalGpTransfers(result.rows);
+  result.gpTransferPairs = markInternalGpTransfers(result.rows, gpCounterparts);
 }
 
 /**
  * Appaia giroconti di segno opposto e stesso importo tra un conto del
  * portafoglio e un conto GP entro 5 giorni: diventano `internal_transfer`.
  */
-export function markInternalGpTransfers(rows: MovementLedgerRow[]): [MovementLedgerRow, MovementLedgerRow][] {
+export function markInternalGpTransfers(
+  rows: MovementLedgerRow[],
+  counterparts: MovementLedgerRow[] = [],
+): [MovementLedgerRow, MovementLedgerRow][] {
   const pairs: [MovementLedgerRow, MovementLedgerRow][] = [];
-  const transfers = rows.filter(r => r.kind === 'external_transfer' || r.kind === 'internal_transfer');
+  const transfers = [...rows, ...counterparts].filter(r => r.kind === 'external_transfer' || r.kind === 'internal_transfer');
   const used = new Set<MovementLedgerRow>();
   const dayDiff = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
   for (const debit of transfers.filter(r => r.netEur < 0)) {
@@ -457,6 +473,7 @@ export function parseMovementFile(text: string, options?: FlussiParseOptions): M
     rows: [],
     excludedByAccountRule: 0,
     excludedByPositionRule: 0,
+    gpTransferPairs: [],
   };
   if (!result.source) return result;
 
