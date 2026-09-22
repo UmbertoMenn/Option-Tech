@@ -9,6 +9,7 @@ import { GPHoldingRow } from '@/hooks/useGPHoldings';
 import { MovementUploadRecord, StoredMovementRow } from '@/lib/movementAttribution';
 import { MovementKind, MovementSource } from '@/lib/movementLedger';
 import { AttributionPriceSource } from '@/lib/optionTradeAttribution';
+import { fetchDynamicAliases } from '@/lib/costBasisStore';
 
 interface AttributionSourceData {
   snapshots: FullSnapshot[];
@@ -16,6 +17,8 @@ interface AttributionSourceData {
   internalTransfers: InternalTransferRow[];
   movements: StoredMovementRow[];
   movementUploads: MovementUploadRecord[];
+  /** Alias dinamici dei sottostanti (underlying_mappings) per le chiavi canoniche. */
+  dynamicAliases: Map<string, string>;
 }
 
 interface MovementDbRow {
@@ -169,10 +172,10 @@ export function usePerformanceAttribution(portfolioId: string | null) {
     queryKey: ['performance-attribution', portfolioId],
     queryFn: async (): Promise<AttributionSourceData> => {
       if (!portfolioId) {
-        return { snapshots: [], trades: [], internalTransfers: [], movements: [], movementUploads: [] };
+        return { snapshots: [], trades: [], internalTransfers: [], movements: [], movementUploads: [], dynamicAliases: new Map() };
       }
 
-      const [snapshotsResult, tradesResult, transfersResult, movementRows, uploadsResult] = await Promise.all([
+      const [snapshotsResult, tradesResult, transfersResult, movementRows, uploadsResult, dynamicAliases] = await Promise.all([
         supabase
           .from('portfolio_full_snapshots')
           .select('portfolio_id,snapshot_date,positions,strategy_configurations,derivative_overrides,gp_holdings,cash_value,gp_total_value')
@@ -193,6 +196,7 @@ export function usePerformanceAttribution(portfolioId: string | null) {
           .from('portfolio_movement_uploads' as never)
           .select('source,period_start,period_end')
           .eq('portfolio_id', portfolioId),
+        fetchDynamicAliases(),
       ]);
 
       if (snapshotsResult.error) throw snapshotsResult.error;
@@ -208,6 +212,7 @@ export function usePerformanceAttribution(portfolioId: string | null) {
         trades: (tradesResult.data ?? []) as unknown as AttributionTradeRow[],
         internalTransfers: (transfersResult.data ?? []) as unknown as InternalTransferRow[],
         movements: movementRows.map(decodeMovement),
+        dynamicAliases,
         movementUploads: uploads.map(upload => ({
           source: upload.source,
           periodStart: upload.period_start,

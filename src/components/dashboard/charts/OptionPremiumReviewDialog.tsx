@@ -70,10 +70,10 @@ function ReviewRow({ row, portfolioId }: { row: OptionPremiumReviewRow; portfoli
       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.premiumPerShare)}</td>
       <td className="px-2 py-1.5">
         <span className={cn('inline-flex items-center gap-1', flagged && 'font-medium text-warning')}>
-          {flagged && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-label="Vendita ITM senza riferimento" />}
+          {flagged && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-label="Put ITM venduta senza riferimento" />}
           {TIME_VALUE_METHOD_LABELS[row.method]}
         </span>
-        {flagged && <span className="block text-[10px] text-warning">Nessun roll/assegnazione: verifica o correggi</span>}
+        {flagged && <span className="block text-[10px] text-warning">Covered call sintetica senza riferimento: verifica o correggi</span>}
         {row.reference && <span className="block text-[10px] text-muted-foreground">{row.reference}</span>}
       </td>
       <td className="px-2 py-1.5 text-right tabular-nums">{fmt(row.referenceSpot)}</td>
@@ -120,8 +120,8 @@ export function OptionPremiumReviewDialog({ open, onOpenChange, portfolioId, row
           <DialogTitle>Premi temporali opzioni — {periodLabel}</DialogTitle>
           <DialogDescription className="text-xs">
             La colonna Premio è il prezzo totale dell’opzione; Premio temporale è la sua componente di valore temporale.
-            Nel roll ITM la gamba ricomprata è tutta intrinseco; dopo un’assegnazione lo spot è il prezzo dell’operazione sulle azioni; le opzioni OTM sono tutto premio temporale.
-            Il triangolo segnala le vendite ITM senza roll né assegnazione ({flagged} nel periodo): lì il calcolo usa la chiusura del sottostante.
+            Nel roll ITM la gamba ricomprata è tutta intrinseco; dopo un’assegnazione o con un’operazione sulle azioni lo spot è il prezzo delle azioni; le opzioni OTM sono tutto premio temporale; il de-risking si riconosce dalla put comprata.
+            Il triangolo segnala solo le put ITM vendute come covered call sintetica su titoli non posseduti ({flagged} nel periodo): lì il calcolo usa la chiusura del sottostante.
             Ogni riga è modificabile. Valori per azione nella divisa dell’opzione, tranne Premio temporale €.
           </DialogDescription>
         </DialogHeader>

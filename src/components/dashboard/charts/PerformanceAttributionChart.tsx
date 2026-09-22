@@ -201,7 +201,7 @@ export function PerformanceAttributionChart({
 
   const movementInputs = useMemo(
     () => data
-      ? buildMovementAttributionInputs({ rows: data.movements, uploads: data.movementUploads, snapshots: data.snapshots })
+      ? buildMovementAttributionInputs({ rows: data.movements, uploads: data.movementUploads, snapshots: data.snapshots, dynamicAliases: data.dynamicAliases })
       : null,
     [data],
   );
@@ -325,7 +325,7 @@ export function PerformanceAttributionChart({
     const { startDate, endDate } = calculation.period;
     return movementInputs.premiumReview.filter(row => row.date > startDate && row.date <= endDate);
   }, [movementInputs, calculation.period]);
-  // Da segnalare solo le vendite ITM senza roll/assegnazione (caso "da nuova").
+  // Da segnalare solo le put ITM vendute come covered call sintetica su titoli non posseduti.
   const flaggedPremiums = periodReview.filter(row => needsTimeValueReview(row.method)).length;
 
   const uploadedWindows = useMemo(() => {
@@ -390,7 +390,7 @@ export function PerformanceAttributionChart({
             </CollapsibleTrigger>
             {result && <span className="tabular-nums text-muted-foreground">{formatDate(result.startDate)} – {formatDate(result.endDate)}</span>}
             {!detailsOpen && flaggedPremiums > 0 && (
-              <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} vendite ITM senza riferimento: apri Premi temporali`} className="inline-flex items-center gap-1 text-warning">
+              <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} put ITM vendute senza riferimento: apri Premi temporali`} className="inline-flex items-center gap-1 text-warning">
                 <AlertTriangle className="h-3.5 w-3.5" />{flaggedPremiums}
               </button>
             )}
@@ -484,7 +484,7 @@ export function PerformanceAttributionChart({
             onClick={() => setReviewOpen(true)}
           >
             {flaggedPremiums > 0 && <AlertTriangle className="h-3.5 w-3.5" />}
-            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} ITM senza riferimento` : ''}
+            Premi temporali{flaggedPremiums > 0 ? ` · ${flaggedPremiums} da verificare` : ''}
           </Button>
         )}
         <TooltipProvider delayDuration={150}>
@@ -520,7 +520,7 @@ export function PerformanceAttributionChart({
       {flaggedPremiums > 0 && (
         <button type="button" onClick={() => setReviewOpen(true)} className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-left text-[11px] text-warning">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {flaggedPremiums} vendite ITM senza roll né assegnazione di riferimento: premio temporale calcolato dalla chiusura del sottostante. Puoi modificarlo nel dettaglio Premi temporali.
+          {flaggedPremiums} put ITM vendute come covered call sintetica su titoli non posseduti: premio temporale calcolato dalla chiusura del sottostante. Puoi modificarlo nel dettaglio Premi temporali.
         </button>
       )}
 
@@ -559,7 +559,7 @@ export function PerformanceAttributionChart({
                       {item.label}
                       <AttributionHelp label={item.label}>{CLASS_HELP[item.category]}</AttributionHelp>
                       {item.category === 'option_time' && flaggedPremiums > 0 && (
-                        <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} vendite ITM senza riferimento: apri Premi temporali`} className="ml-1 inline-flex align-middle text-warning"><AlertTriangle className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => setReviewOpen(true)} aria-label={`${flaggedPremiums} put ITM vendute senza riferimento: apri Premi temporali`} className="ml-1 inline-flex align-middle text-warning"><AlertTriangle className="h-3.5 w-3.5" /></button>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{noValues ? '—' : formatEUR(item.startValue)}</td>

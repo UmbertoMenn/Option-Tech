@@ -700,7 +700,7 @@ export function calculatePerformanceAttribution(input: {
       if (coverage.optionMarksWithoutSpot > 0) issues.push(`${coverage.optionMarksWithoutSpot} mark senza prezzo del sottostante`);
       if (coverage.proxyOptionTrades > 0) issues.push(`${coverage.proxyOptionTrades} movimenti valorizzati con prezzo proxy`);
       if (coverage.closingPriceTrades > 0) issues.push(`${coverage.closingPriceTrades} movimenti con split dalla chiusura del sottostante`);
-      if (coverage.estimatedTimeValueTrades > 0) issues.push(`${coverage.estimatedTimeValueTrades} vendite ITM senza roll/assegnazione di riferimento: premio temporale stimato dalla chiusura (correggibile)`);
+      if (coverage.estimatedTimeValueTrades > 0) issues.push(`${coverage.estimatedTimeValueTrades} put ITM vendute su titoli non posseduti: premio temporale dalla chiusura (modificabile)`);
       if (coverage.missingOptionTrades > 0) issues.push(`${coverage.missingOptionTrades} movimenti senza split intrinseco/tempo`);
       if (coverage.uncoveredPositionChanges.includes(category)) issues.push('quantità variate senza movimento registrato');
       const nothingCouldBeSplit = !activity
@@ -767,7 +767,7 @@ export function calculatePerformanceAttribution(input: {
     warnings.push(`${coverage.missingOptionTrades} movimenti opzione non scomponibili`);
   }
   if (coverage.estimatedTimeValueTrades > 0) {
-    warnings.push(`${coverage.estimatedTimeValueTrades} vendite ITM senza roll né assegnazione di riferimento: premio temporale dalla chiusura del sottostante, modificabile in "Premi temporali"`);
+    warnings.push(`${coverage.estimatedTimeValueTrades} put ITM vendute come covered call sintetica su titoli non posseduti: premio temporale dalla chiusura del sottostante, modificabile in "Premi temporali"`);
   }
   if (Math.abs(amounts.unclassified) >= 1) {
     warnings.push(`${amounts.unclassified.toFixed(0)} € attribuiti a strumenti non classificati`);

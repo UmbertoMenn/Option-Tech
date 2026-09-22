@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OptionLegInput, resolveOptionPremiumSplits } from '@/lib/optionPremiumSplit';
+import { OptionLegInput, SplitPortfolioContext, needsTimeValueReview, resolveOptionPremiumSplits } from '@/lib/optionPremiumSplit';
 
 let seq = 0;
 function leg(overrides: Partial<OptionLegInput>): OptionLegInput {
@@ -122,6 +122,53 @@ describe('resolveOptionPremiumSplits — premio temporale dagli eseguiti', () =>
   it('senza prezzo del sottostante lo split resta aperto (il motore usa gli snapshot)', () => {
     const fresh = option('sell', 'WDCU6P550', 550, 60, 0);
     expect(resolveOptionPremiumSplits([fresh]).get(fresh.rowKey)).toMatchObject({ method: 'missing', timeValuePerShare: null });
+  });
+});
+
+const ctx = (snapshots: { date: string; held?: string[]; shorts?: SplitPortfolioContext['snapshots'][number]['shortOptions'] }[], isins: Record<string, string> = {}): SplitPortfolioContext => ({
+  snapshots: snapshots.map(s => ({ date: s.date, heldKeys: new Set(s.held ?? []), shortOptions: s.shorts ?? [] })),
+  isinToKey: new Map(Object.entries(isins)),
+});
+
+describe('resolveOptionPremiumSplits — contesto di portafoglio', () => {
+  it('il roll richiede che la put ricomprata fosse short: con lo short nello snapshot è un roll', () => {
+    const old = option('buy', 'MUQ6P780', 780, 41, 740, { expiryDate: '2026-08-21' });
+    const fresh = option('sell', 'MUU6P780', 780, 55, 740);
+    const context = ctx([{ date: '2026-08-11', shorts: [{ key: 'MU', optionType: 'put', strike: 780, expiry: '2026-08-21' }] }]);
+    expect(resolveOptionPremiumSplits([old, fresh], context).get(fresh.rowKey)?.method).toBe('roll_same_strike');
+  });
+
+  it('de-risking di covered call sintetica: put comprata da nuova, nessun roll e nessuna segnalazione', () => {
+    const hedge = option('buy', 'MUU6P700', 700, 20, 690, { expiryDate: '2026-09-18' });
+    const synthetic = option('sell', 'MUU6P780', 780, 95, 690);
+    const context = ctx([{ date: '2026-08-11' }]); // nessuna MU put short aperta
+    const splits = resolveOptionPremiumSplits([hedge, synthetic], context);
+    expect(splits.get(synthetic.rowKey)?.method).toBe('close_derisking');
+    expect(needsTimeValueReview(splits.get(synthetic.rowKey)!.method)).toBe(false);
+    expect(splits.get(hedge.rowKey)?.method).toBe('close');
+  });
+
+  it('unico caso segnalato: put ITM venduta su titolo non posseduto, senza roll/assegnazione/copertura', () => {
+    const synthetic = option('sell', 'WDCU6P550', 550, 60, 500, { underlyingTicker: 'WDC', underlyingKey: 'WDC' });
+    const notHeld = resolveOptionPremiumSplits([synthetic], ctx([{ date: '2026-08-11', held: ['MU'] }])).get(synthetic.rowKey)!;
+    expect(notHeld.method).toBe('close_itm_estimate');
+    expect(needsTimeValueReview(notHeld.method)).toBe(true);
+
+    const held = resolveOptionPremiumSplits([synthetic], ctx([{ date: '2026-08-11', held: ['WDC'] }])).get(synthetic.rowKey)!;
+    expect(held.method).toBe('close');
+    expect(needsTimeValueReview(held.method)).toBe(false);
+
+    const call = option('sell', 'WDCU6C450', 450, 60, 500, { optionType: 'call', underlyingTicker: 'WDC', underlyingKey: 'WDC' });
+    expect(needsTimeValueReview(resolveOptionPremiumSplits([call], ctx([{ date: '2026-08-11' }])).get(call.rowKey)!.method)).toBe(false);
+  });
+
+  it('operazione sulle azioni lo stesso giorno: spot = prezzo delle azioni', () => {
+    const stockSale = leg({ kind: 'sell', causale: 'VEN', isin: 'US9581021055', description: 'WESTERN DIGITAL CORP', optionType: null, underlyingTicker: null, underlyingKey: null, quantity: 100, price: 492.5, effectiveDate: '2026-08-21' });
+    const put = option('sell', 'WDCU6P550', 550, 60, 480, { underlyingTicker: 'WDC', underlyingKey: 'WDC' });
+    const split = resolveOptionPremiumSplits([stockSale, put], ctx([{ date: '2026-08-11', held: ['WDC'] }], { US9581021055: 'WDC' })).get(put.rowKey)!;
+    expect(split.method).toBe('stock_trade');
+    expect(split.referenceSpot).toBe(492.5);
+    expect(split.timeValuePerShare).toBeCloseTo(60 - (550 - 492.5), 6);
   });
 });
 

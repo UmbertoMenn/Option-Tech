@@ -22,7 +22,13 @@ import type {
   AttributionTradeRow,
 } from './performanceAttribution';
 import type { MovementLedgerRow, MovementSource } from './movementLedger';
-import { OptionPremiumSplit, TimeValueMethod, resolveOptionPremiumSplits } from './optionPremiumSplit';
+import {
+  OptionPremiumSplit,
+  SplitPortfolioContext,
+  TimeValueMethod,
+  resolveOptionPremiumSplits,
+} from './optionPremiumSplit';
+import { DynamicAliases, canonicalKeyForPosition } from './tickerIdentity';
 
 export interface StoredMovementRow extends MovementLedgerRow {
   /** Chiave canonica del sottostante (opzioni) o del titolo (azioni). */
@@ -59,6 +65,7 @@ const METHOD_SOURCE: Partial<Record<TimeValueMethod, AttributionPriceSource>> = 
   assignment_resale: 'assignment_sale',
   roll_same_strike: 'roll_implied',
   roll_new_strike: 'roll_implied',
+  stock_trade: 'stock_trade',
   close_itm_estimate: 'close_itm_estimate',
 };
 
@@ -235,12 +242,53 @@ function note(row: StoredMovementRow, amount: number): MovementNote {
   return { date: row.effectiveDate, amount, description: row.description || row.causaleDescription || row.causale };
 }
 
+/**
+ * Contesto per lo split dei premi: sottostanti posseduti, opzioni short aperte
+ * e ISIN → chiave canonica, per ogni snapshot.
+ */
+export function buildSplitPortfolioContext(
+  snapshots: FullSnapshot[],
+  dynamicAliases?: DynamicAliases,
+): SplitPortfolioContext {
+  const isinToKey = new Map<string, string>();
+  const entries = snapshots.map(snapshot => {
+    const heldKeys = new Set<string>();
+    const shortOptions: SplitPortfolioContext['snapshots'][number]['shortOptions'] = [];
+    for (const position of snapshot.positions) {
+      const quantity = Number(position.quantity || 0);
+      let key: string;
+      try {
+        key = canonicalKeyForPosition(position, dynamicAliases);
+      } catch {
+        continue;
+      }
+      if (!key) continue;
+      if (position.asset_type === 'derivative') {
+        if (quantity < 0 && (position.option_type === 'call' || position.option_type === 'put') && position.strike_price != null) {
+          shortOptions.push({
+            key,
+            optionType: position.option_type,
+            strike: Number(position.strike_price),
+            expiry: position.expiry_date ? String(position.expiry_date).slice(0, 10) : null,
+          });
+        }
+      } else if (position.asset_type === 'stock' || position.asset_type === 'etf') {
+        if (quantity > 0) heldKeys.add(key);
+        if (position.isin) isinToKey.set(position.isin.toUpperCase(), key);
+      }
+    }
+    return { date: snapshot.snapshot_date, heldKeys, shortOptions };
+  });
+  return { snapshots: entries, isinToKey };
+}
+
 export function buildMovementAttributionInputs(input: {
   rows: StoredMovementRow[];
   uploads: MovementUploadRecord[];
   snapshots: FullSnapshot[];
+  dynamicAliases?: DynamicAliases;
 }): MovementAttributionInputs {
-  const { rows, uploads, snapshots } = input;
+  const { rows, uploads, snapshots, dynamicAliases } = input;
   const result: MovementAttributionInputs = {
     trades: [],
     cashEvents: [],
@@ -256,7 +304,10 @@ export function buildMovementAttributionInputs(input: {
     orphanOptionPremiums: [],
     premiumReview: [],
   };
-  const splits: Map<string, OptionPremiumSplit> = resolveOptionPremiumSplits(rows);
+  const splits: Map<string, OptionPremiumSplit> = resolveOptionPremiumSplits(
+    rows,
+    buildSplitPortfolioContext(snapshots, dynamicAliases),
+  );
 
   const categoryByIsin = snapshotCategoryByIsin(snapshots);
   const couponIsins = new Set(
