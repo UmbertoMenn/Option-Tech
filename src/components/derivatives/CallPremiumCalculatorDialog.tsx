@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw, ExternalLink, History } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -465,8 +465,8 @@ export function CallPremiumCalculatorDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="w-[96vw] max-w-5xl max-h-[92vh] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-3 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5" />
             {(strategyType === 'double_diagonal' || strategyType === 'iron_condor' || strategyType === 'other_strategy') ? 'Calcola Flussi di cassa' : isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
@@ -477,7 +477,7 @@ export function CallPremiumCalculatorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 pb-4 space-y-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {/* Historical data picker banner */}
           {showHistoricalPicker && historicalPremiums.length > 0 && (
             <Alert className="border-blue-500/50 bg-blue-500/5">
@@ -719,29 +719,29 @@ export function CallPremiumCalculatorDialog({
                     </AccordionTrigger>
                     <AccordionContent>
                       <div>
-                        <Table>
+                        <table className="w-full text-sm">
                           <TableHeader>
                             <TableRow>
-                            <TableHead className="text-xs w-8">Op.</TableHead>
-                              <TableHead className="text-xs">Data</TableHead>
-                              <TableHead className="text-xs">Simbolo</TableHead>
-                              <TableHead className="text-xs">Scad.</TableHead>
-                              <TableHead className="text-xs text-right">Qtà</TableHead>
-                              <TableHead className="text-xs text-right">Prezzo</TableHead>
-                              <TableHead className="text-xs text-right">Valore</TableHead>
-                              <TableHead className="text-xs w-8"></TableHead>
+                            <TableHead className="h-8 px-2 text-xs whitespace-nowrap w-8">Op.</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap">Data</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap">Simbolo</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap">Scad.</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap text-right">Qtà</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap text-right">Prezzo</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap text-right">Valore</TableHead>
+                              <TableHead className="h-8 px-2 text-xs whitespace-nowrap w-8"></TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {filteredOrders.map((order, idx) => (
                               <TableRow key={idx}>
-                                <TableCell className={`text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
+                                <TableCell className={`px-2 py-1.5 text-xs ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
                                   {order.operation === 'sell' ? 'V' : 'A'}
                                 </TableCell>
-                                <TableCell className="text-xs text-muted-foreground">
+                                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap text-muted-foreground">
                                   {order.validityDate || '—'}
                                 </TableCell>
-                                <TableCell className="text-xs font-mono">
+                                <TableCell className="px-2 py-1.5 text-xs font-mono break-words">
                                   {order.symbol}
                                   {order.isAssignment && (
                                     <Badge className="text-[10px] ml-1 px-1 py-0 bg-orange-500/20 text-orange-600 border-orange-500/30 hover:bg-orange-500/30">ASSEGNAZIONE</Badge>
@@ -758,18 +758,18 @@ export function CallPremiumCalculatorDialog({
                                     </span>
                                   )}
                                 </TableCell>
-                                <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
-                                <TableCell className="text-xs text-right">{order.quantity}</TableCell>
-                                <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
+                                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
+                                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap text-right">{order.quantity}</TableCell>
+                                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
                                 {(() => {
                                   const displayValue = getSignedOrderValue(order);
                                   return (
-                                    <TableCell className={`text-xs text-right ${displayValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    <TableCell className={`px-2 py-1.5 text-xs text-right whitespace-nowrap ${displayValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                       {displayValue >= 0 ? '+' : ''}{formatCurrency(displayValue, 'USD')}
                                     </TableCell>
                                   );
                                 })()}
-                                <TableCell className="text-xs">
+                                <TableCell className="px-2 py-1.5 text-xs whitespace-nowrap">
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -782,7 +782,7 @@ export function CallPremiumCalculatorDialog({
                               </TableRow>
                             ))}
                           </TableBody>
-                        </Table>
+                        </table>
                       </div>
                     </AccordionContent>
                   </AccordionItem>
@@ -791,9 +791,11 @@ export function CallPremiumCalculatorDialog({
             </Card>
           )}
 
-          {/* Action buttons */}
-          <div className="flex justify-between">
-            <div className="flex gap-2">
+        </div>
+
+        {/* Action buttons — fissi in basso, fuori dall'area scrollabile */}
+        <div className="shrink-0 border-t border-border px-6 py-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
               {metrics && (
                 <>
                   <Button
@@ -842,7 +844,6 @@ export function CallPremiumCalculatorDialog({
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Chiudi
             </Button>
-          </div>
         </div>
       </DialogContent>
     </Dialog>
