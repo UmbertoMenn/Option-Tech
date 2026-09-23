@@ -89,6 +89,7 @@ import {
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
+import { canOpenStrategyWizard } from '@/lib/strategyConfigGates';
 import { StrategyConfigWizard, autoClassify, buildConfigsFromStrategies } from '@/components/derivatives/StrategyConfigWizard';
 import { useArchivedUnderlyings, useArchiveUnderlying, useUnarchiveUnderlying } from '@/hooks/useArchivedUnderlyings';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
@@ -926,7 +927,7 @@ export function Derivatives() {
               </Tooltip>
             </TooltipProvider>
           </div>
-          {derivatives.length > 0 && (
+          {canOpenStrategyWizard(derivatives.length, strategyConfigs.length) && (
             <Button variant="outline" size="sm" onClick={() => setWizardOpenPersisted(true)} className="relative">
               <Settings className="w-4 h-4 mr-2" />
               {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}

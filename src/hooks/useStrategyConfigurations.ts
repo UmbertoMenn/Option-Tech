@@ -7,6 +7,7 @@ import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/Portfolio
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
 import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 import { recomputeLatestSnapshot } from '@/lib/uploadSnapshot';
+import { shouldRecomputeAfterBatchSave } from '@/lib/strategyConfigGates';
 
 export interface PositionSignature {
   option_type: string; // 'call' | 'put'
@@ -167,7 +168,7 @@ export function useStrategyConfigurations() {
     onSuccess: (_data, configs) => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Configurazione strategie salvata');
-      if (portfolioId && configs.some(config => !config.config_locked)) {
+      if (portfolioId && shouldRecomputeAfterBatchSave(configs)) {
         recomputeLatestSnapshot(portfolioId).then(() => {
           queryClient.invalidateQueries({ queryKey: ['historical-data'] });
         });
