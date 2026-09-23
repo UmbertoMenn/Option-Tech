@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Accordion, 
@@ -306,6 +306,13 @@ export function EquityExposureView({
   const includeSynthCcDrcc = true;
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  // Toggle GP dedicato alle Holdings Consolidate: segue il toggle GP del riepilogo
+  // (ogni cambio lì si propaga qui), ma può essere cambiato solo per questa card
+  // senza toccare il Rischio Totale.
+  const [holdingsIncludeGP, setHoldingsIncludeGP] = useState(includeGP);
+  useEffect(() => {
+    setHoldingsIncludeGP(includeGP);
+  }, [includeGP]);
   
   const {
     totalStockRisk,
@@ -333,7 +340,7 @@ export function EquityExposureView({
     [allMappings.data],
   );
 
-  // Calculate all consolidated holdings (no limit) - include GP stocks
+  // Calculate all consolidated holdings (no limit) - GP stocks secondo il toggle della card
   const consolidatedHoldings = useMemo(() => {
     return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
       includeProtections,
@@ -341,8 +348,8 @@ export function EquityExposureView({
       includeStrategies,
       includeLeapCall,
       includeSynthCcDrcc,
-    }, 100, includeGP ? gpStockHoldings : [], dynamicAliases);
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, includeGP, gpStockHoldings, dynamicAliases]);
+    }, 100, holdingsIncludeGP ? gpStockHoldings : [], dynamicAliases);
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, holdingsIncludeGP, gpStockHoldings, dynamicAliases]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
@@ -472,7 +479,7 @@ export function EquityExposureView({
     [...consolidatedHoldings].sort((a, b) => 
       Math.abs(b.totalExposure) - Math.abs(a.totalExposure)
     ),
-    [consolidatedHoldings, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, includeGP]
+    [consolidatedHoldings, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, holdingsIncludeGP]
   );
 
   const riskCategories = [
@@ -1422,25 +1429,49 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                 </Tooltip>
               </TooltipProvider>
             </CardTitle>
-            <div className="flex items-center gap-2">
-              <Switch 
-                id="include-protections"
-                checked={includeProtections}
-                onCheckedChange={setIncludeProtections}
-              />
-              <Label htmlFor="include-protections" className="text-sm text-muted-foreground cursor-pointer">
-                Includi Protezioni
-              </Label>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs text-sm">
-                    <p>Quando attivo, il rischio stock è calcolato al netto delle protezioni PUT. Quando disattivo, mostra il valore pieno.</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+            <div className="flex items-center gap-4 flex-wrap justify-end">
+              {gpStockHoldings.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="holdings-include-gp"
+                    checked={holdingsIncludeGP}
+                    onCheckedChange={setHoldingsIncludeGP}
+                  />
+                  <Label htmlFor="holdings-include-gp" className="text-sm text-muted-foreground cursor-pointer">
+                    Includi GP
+                  </Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs text-sm">
+                        <p>Quando attivo, le azioni delle Gestioni Patrimoniali sono sommate agli holding (badge GP) e i titoli presenti solo in GP compaiono in elenco. Quando disattivo, gli holding mostrano solo le posizioni dirette. Vale solo per questa card: segue il toggle GP del riepilogo ma non lo modifica.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="include-protections"
+                  checked={includeProtections}
+                  onCheckedChange={setIncludeProtections}
+                />
+                <Label htmlFor="include-protections" className="text-sm text-muted-foreground cursor-pointer">
+                  Includi Protezioni
+                </Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-sm">
+                      <p>Quando attivo, il rischio stock è calcolato al netto delle protezioni PUT. Quando disattivo, mostra il valore pieno.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
             </div>
           </div>
         </CardHeader>
