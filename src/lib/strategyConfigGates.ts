@@ -22,3 +22,13 @@ export function canOpenStrategyWizard(derivativesCount: number, configsCount: nu
 export function shouldRecomputeAfterBatchSave(configs: { config_locked?: boolean }[]): boolean {
   return configs.length === 0 || configs.some(config => !config.config_locked);
 }
+
+/**
+ * "Salva Configurazione" nel wizard: abilitato se c'è almeno una strategia
+ * OPPURE se esistono config salvate. Con zero strategie e config esistenti il
+ * salvataggio è la rimozione di tutte le strategie (es. eliminare l'ultima
+ * DR-CC solo azioni): va consentito. Senza strategie né config è un no-op.
+ */
+export function canSaveStrategyConfig(strategiesCount: number, existingConfigsCount: number): boolean {
+  return strategiesCount > 0 || existingConfigsCount > 0;
+}

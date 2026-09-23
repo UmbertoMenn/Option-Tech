@@ -17,6 +17,7 @@ import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
 import { toast } from 'sonner';
+import { canSaveStrategyConfig } from '@/lib/strategyConfigGates';
 import {
   isSoldPut,
   nakedPutKeyForPosition,
@@ -1902,7 +1903,7 @@ export function StrategyConfigWizard({
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Annulla
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || strategies.length === 0}>
+          <Button onClick={handleSave} disabled={isSaving || !canSaveStrategyConfig(strategies.length, existingConfigs.length)}>
             <Check className="w-4 h-4 mr-2" />
             {isSaving ? 'Salvataggio...' : 'Salva Configurazione'}
           </Button>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canOpenStrategyWizard, shouldRecomputeAfterBatchSave } from '@/lib/strategyConfigGates';
+import { canOpenStrategyWizard, canSaveStrategyConfig, shouldRecomputeAfterBatchSave } from '@/lib/strategyConfigGates';
 import { autoClassify } from '@/components/derivatives/StrategyConfigWizard';
 import { Position } from '@/types/portfolio';
 
@@ -38,5 +38,19 @@ describe('wizard senza derivati', () => {
       asset_type: 'stock', quantity: 600, current_price: 69.89, currency: 'USD',
     } as unknown as Position;
     expect(autoClassify([], [uber])).toEqual([]);
+  });
+});
+
+describe('canSaveStrategyConfig', () => {
+  it('bug: eliminata l\'ultima strategia (DR-CC UBER) → salvataggio consentito per rimuoverla', () => {
+    expect(canSaveStrategyConfig(0, 1)).toBe(true);
+  });
+
+  it('strategie presenti → salvataggio consentito', () => {
+    expect(canSaveStrategyConfig(2, 0)).toBe(true);
+  });
+
+  it('nessuna strategia e nessuna config salvata → niente da salvare', () => {
+    expect(canSaveStrategyConfig(0, 0)).toBe(false);
   });
 });

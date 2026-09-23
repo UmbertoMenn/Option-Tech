@@ -144,7 +144,10 @@ export function useStrategyConfigurations() {
       if (!portfolioId) throw new Error('No portfolio selected');
       
       // Full replacement is intentional: callers include untouched configs too.
-      await supabase.from('strategy_configurations').delete().eq('portfolio_id', portfolioId);
+      const { error: deleteError } = await supabase.from('strategy_configurations').delete().eq('portfolio_id', portfolioId);
+      // Con un set vuoto la cancellazione È il salvataggio: un errore non può
+      // passare in silenzio come "Configurazione strategie salvata".
+      if (deleteError) throw deleteError;
       
       if (configs.length === 0) return;
       
