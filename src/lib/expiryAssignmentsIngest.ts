@@ -93,11 +93,23 @@ export async function ingestExpiryAssignments(
     stockQuantityDeltaByUnderlyingKey.set(k, (newStockByU.get(k)?.quantity || 0) - (oldStockQtyByU.get(k) || 0));
   }
 
+  // Il file Excel porta già il PMC della banca (fiscale o di carico), che
+  // include l'assegnazione: per questi titoli niente ricostruzione del PMC né
+  // avvisi. Si registra solo l'assegnazione nel ledger (serve alla
+  // scomposizione rendimento per i periodi senza file movimenti).
+  const pmcFromFileKeys = new Set<string>();
+  for (const p of newPositions) {
+    if ((p.asset_type === 'stock' || p.asset_type === 'etf') && Number(p.avg_cost) > 0) {
+      pmcFromFileKeys.add(stockUKey(p));
+    }
+  }
+
   const { assignments, warnings } = detectExpiryAssignments({
     oldShortPuts,
     newShortPutFullKeys,
     snapshotDate,
     stockQuantityDeltaByUnderlyingKey,
+    pmcFromFileKeys,
   });
 
   const outWarnings = [...warnings];
@@ -191,6 +203,8 @@ export async function ingestExpiryAssignments(
       // già applicata da un upload precedente
       continue;
     }
+    // PMC dal file: lo store viene sincronizzato subito dopo dall'Excel.
+    if (pmcFromFileKeys.has(a.underlyingKey)) continue;
 
     const existingStore = storeByKey.get(stockBasisKey);
     const preExistingShares = oldStockQtyByU.get(a.underlyingKey) || 0;

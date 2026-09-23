@@ -265,6 +265,12 @@ export interface ExpiryAssignmentInput {
   snapshotDate: string;
   /** Δ azioni (nuovo − vecchio) per underlyingKey. Solo positivi contano. */
   stockQuantityDeltaByUnderlyingKey: Map<string, number>;
+  /**
+   * Sottostanti il cui titolo ha già il PMC nel file caricato. Per questi il
+   * PMC non si ricostruisce (vale quello della banca): i casi non coerenti o
+   * ambigui si saltano in silenzio, senza avvisi sul PMC.
+   */
+  pmcFromFileKeys?: Set<string>;
 }
 
 export interface ExpiryAssignmentDetected {
@@ -283,7 +289,7 @@ export interface ExpiryAssignmentDetectionResult {
 export function detectExpiryAssignments(
   input: ExpiryAssignmentInput,
 ): ExpiryAssignmentDetectionResult {
-  const { oldShortPuts, newShortPutFullKeys, snapshotDate, stockQuantityDeltaByUnderlyingKey } = input;
+  const { oldShortPuts, newShortPutFullKeys, snapshotDate, stockQuantityDeltaByUnderlyingKey, pmcFromFileKeys } = input;
   const assignments: ExpiryAssignmentDetected[] = [];
   const warnings: string[] = [];
 
@@ -302,7 +308,10 @@ export function detectExpiryAssignments(
     const deltaShares = stockQuantityDeltaByUnderlyingKey.get(uKey) || 0;
 
     if (deltaShares <= 0) continue;                     // put scaduta OTM: nessuna azione
+    const pmcFromFile = pmcFromFileKeys?.has(uKey) ?? false;
     if (deltaShares !== expectedShares) {
+      if (pmcFromFile) continue;
+
       // Δ positivo ma non coerente: possibile acquisto indipendente nello
       // stesso upload o assegnazione parziale. Non decidiamo arbitrariamente.
       warnings.push(
@@ -313,6 +322,7 @@ export function detectExpiryAssignments(
 
     const uniqueStrikes = new Set(puts.map(p => p.strike));
     if (uniqueStrikes.size > 1) {
+      if (pmcFromFile) continue;
       warnings.push(
         `Assegnazione a scadenza ambigua per ${uKey}: put a strike diversi (${[...uniqueStrikes].sort((a, b) => a - b).join(', ')}) — PMC non aggiornato automaticamente`,
       );

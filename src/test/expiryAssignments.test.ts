@@ -191,3 +191,59 @@ describe('applyExpiryAssignmentToStore — regole PMC pure', () => {
     expect(first.next?.pmc).toBe(230);
   });
 });
+
+describe('detectExpiryAssignments — PMC già presente nel file Excel', () => {
+  const snapshotDate = '2026-09-18';
+  // 7 put short sparite a scadenza, solo 2 assegnate (+200 azioni)
+  const oldShortPuts: PutPositionLite[] = [
+    { underlyingKey: 'XYZ', strike: 50, expiryDate: '2026-09-18', shortContracts: 2 },
+    { underlyingKey: 'XYZ', strike: 45, expiryDate: '2026-09-18', shortContracts: 5 },
+  ];
+
+  it('bug silvello: assegnazione parziale 2 su 7 con PMC nel file → nessun avviso, nessun PMC ricostruito', () => {
+    const r = detectExpiryAssignments({
+      oldShortPuts,
+      newShortPutFullKeys: new Set(),
+      snapshotDate,
+      stockQuantityDeltaByUnderlyingKey: new Map([['XYZ', 200]]),
+      pmcFromFileKeys: new Set(['XYZ']),
+    });
+    expect(r.assignments).toHaveLength(0);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('stesso caso SENZA PMC nel file → avviso di non coerenza invariato', () => {
+    const r = detectExpiryAssignments({
+      oldShortPuts,
+      newShortPutFullKeys: new Set(),
+      snapshotDate,
+      stockQuantityDeltaByUnderlyingKey: new Map([['XYZ', 200]]),
+    });
+    expect(r.assignments).toHaveLength(0);
+    expect(r.warnings).toHaveLength(1);
+  });
+
+  it('put a strike diversi, tutte assegnate, PMC nel file → nessun avviso di ambiguità', () => {
+    const r = detectExpiryAssignments({
+      oldShortPuts,
+      newShortPutFullKeys: new Set(),
+      snapshotDate,
+      stockQuantityDeltaByUnderlyingKey: new Map([['XYZ', 700]]),
+      pmcFromFileKeys: new Set(['XYZ']),
+    });
+    expect(r.assignments).toHaveLength(0);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it('assegnazione coerente con PMC nel file → rilevata (va nel ledger per la scomposizione)', () => {
+    const r = detectExpiryAssignments({
+      oldShortPuts: [{ underlyingKey: 'XYZ', strike: 50, expiryDate: '2026-09-18', shortContracts: 2 }],
+      newShortPutFullKeys: new Set(),
+      snapshotDate,
+      stockQuantityDeltaByUnderlyingKey: new Map([['XYZ', 200]]),
+      pmcFromFileKeys: new Set(['XYZ']),
+    });
+    expect(r.assignments).toHaveLength(1);
+    expect(r.warnings).toHaveLength(0);
+  });
+});
