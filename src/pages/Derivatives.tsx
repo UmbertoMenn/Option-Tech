@@ -96,6 +96,7 @@ import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
+import { soldOptionPnl, stockPnlVsPmc } from '@/lib/legPnl';
 
 import {
   decideWizardResume,
@@ -162,12 +163,46 @@ function LegDetailCard({ leg, underlyingPrices, label }: { leg: Position; underl
           </p>
         </div>
       </div>
+      {isSold && <SoldOptionPnlStrip leg={leg} spot={uPrice} cur={cur} />}
+    </div>
+  );
+}
+
+function PnlCell({ label, value, cur, hint }: { label: string; value: number; cur: string; hint?: string }) {
+  const color = value > 0 ? 'text-green-500' : value < 0 ? 'text-red-500' : 'text-muted-foreground';
+  return (
+    <div>
+      <p className="text-muted-foreground">{label}</p>
+      <p className={`font-medium font-mono ${color}`}>{value > 0 ? '+' : ''}{formatCurrency(value, cur)}</p>
+      {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+/** Scomposizione P/L di un'opzione venduta al prezzo spot del sottostante:
+ *  perdita intrinseca, P/L temporale (premio − valore temporale residuo), totale. */
+function SoldOptionPnlStrip({ leg, spot, cur }: { leg: Position; spot: number; cur: string }) {
+  const r = soldOptionPnl({
+    optionType: leg.option_type, strike: leg.strike_price, quantity: leg.quantity || 0,
+    avgCost: leg.avg_cost, price: leg.current_price, spot,
+  });
+  if (!r) {
+    return <p className="mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground">P/L intrinseco/temporale non calcolabile: prezzo spot del sottostante non disponibile.</p>;
+  }
+  return (
+    <div className="mt-2 pt-2 border-t border-border/40 grid grid-cols-3 gap-3 text-xs">
+      <PnlCell label="Perdita intrinseca" value={r.intrinsicPnl} cur={cur} hint={`Intrinseco ${formatCurrency(r.intrinsicPerShare, cur)}/az`} />
+      <PnlCell label="P/L temporale" value={r.timePnl} cur={cur} hint={`Temporale residuo ${formatCurrency(r.timeValuePerShare, cur)}/az`} />
+      <PnlCell label="P/L totale" value={r.totalPnl} cur={cur} hint={`Spot ${formatCurrency(spot, cur)}`} />
     </div>
   );
 }
 
 /** Scheda della gamba azionaria (sottostante reale) di una covered call / DR-CC. */
-function StockUnderlyingCard({ stock, cur }: { stock: Position; cur: string }) {
+function StockUnderlyingCard({ stock, cur, spot }: { stock: Position; cur: string; spot?: number }) {
+  const scur = stock.currency || cur;
+  const px = spot && spot > 0 ? spot : (stock.current_price || 0);
+  const pnl = stockPnlVsPmc(stock.quantity || 0, stock.avg_cost, px);
   return (
     <div className="rounded-md bg-background/50 border border-border/50 p-2">
       <div className="flex items-center gap-2 flex-wrap mb-1.5">
@@ -176,8 +211,22 @@ function StockUnderlyingCard({ stock, cur }: { stock: Position; cur: string }) {
       </div>
       <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-xs">
         <div><p className="text-muted-foreground">Azioni</p><p className="font-medium">{formatNumber(stock.quantity || 0)}</p></div>
-        <div><p className="text-muted-foreground">PMC</p><p className="font-medium">{formatCurrency(stock.avg_cost || 0, stock.currency || cur)}</p></div>
-        <div><p className="text-muted-foreground">Prezzo</p><p className="font-medium">{formatCurrency(stock.current_price || 0, stock.currency || cur)}</p></div>
+        <div><p className="text-muted-foreground">PMC (fiscale)</p><p className="font-medium">{formatCurrency(stock.avg_cost || 0, scur)}</p></div>
+        <div><p className="text-muted-foreground">Prezzo</p><p className="font-medium">{formatCurrency(px, scur)}</p></div>
+        {pnl ? (
+          <>
+            <div>
+              <p className="text-muted-foreground">Δ vs PMC</p>
+              <p className={`font-medium font-mono ${pnl.perShare >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {pnl.perShare >= 0 ? '+' : ''}{formatCurrency(pnl.perShare, scur)}/az
+                <span className="ml-1 text-[10px]">({pnl.pct >= 0 ? '+' : ''}{pnl.pct.toFixed(1)}%)</span>
+              </p>
+            </div>
+            <PnlCell label={pnl.total >= 0 ? 'Utile vs PMC' : 'Perdita vs PMC'} value={pnl.total} cur={scur} />
+          </>
+        ) : (
+          <div className="col-span-2"><p className="text-muted-foreground">Perdita vs PMC</p><p className="text-[10px] text-muted-foreground">PMC o prezzo non disponibile</p></div>
+        )}
       </div>
     </div>
   );
@@ -191,9 +240,11 @@ function LegsDetailList({ legs, underlyingPrices, stock, labels }: {
   labels?: (string | undefined)[];
 }) {
   const cur = legs[0] ? getOptionCurrency(legs[0]) : 'USD';
+  const spotKey = legs.find(l => l.underlying && (underlyingPrices[l.underlying]?.price || 0) > 0)?.underlying;
+  const spot = spotKey ? underlyingPrices[spotKey].price : undefined;
   return (
     <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-2">
-      {stock && <StockUnderlyingCard stock={stock} cur={cur} />}
+      {stock && <StockUnderlyingCard stock={stock} cur={cur} spot={spot} />}
       {legs.map((leg, i) => (
         <LegDetailCard key={i} leg={leg} underlyingPrices={underlyingPrices} label={labels?.[i]} />
       ))}
@@ -2831,7 +2882,8 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
   const optionTypeLabel = isCall ? 'CALL' : isPut ? 'PUT' : 'OPT';
   
   return (
-    <div className="flex items-center justify-between p-2 rounded-lg border border-border/50 bg-muted/30">
+    <div className="p-2 rounded-lg border border-border/50 bg-muted/30">
+    <div className="flex items-center justify-between">
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <Badge 
           variant="outline"
@@ -2876,6 +2928,8 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
           {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
         </span>
       </div>
+    </div>
+    {!isBought && <SoldOptionPnlStrip leg={option} spot={underlyingPrice} cur={getOptionCurrency(option)} />}
     </div>
   );
 }
@@ -3052,31 +3106,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </div>
         </div>
         <CollapsibleContent>
-          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground text-xs">Sottostante</p>
-                <p className="font-medium">{option.underlying || option.description}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Strike</p>
-                <p className="font-medium">{option.strike_price}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Scadenza</p>
-                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
-              </div>
-            </div>
-            {option.profit_loss_pct !== null && (
-              <div className="text-xs text-muted-foreground">
-                P/L: {formatPercentage(option.profit_loss_pct)}
-              </div>
-            )}
-          </div>
+          <LegsDetailList legs={[option]} underlyingPrices={underlyingPrices} />
         </CollapsibleContent>
       </Collapsible>
       
