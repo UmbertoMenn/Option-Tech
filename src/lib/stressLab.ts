@@ -41,6 +41,13 @@ export interface StressLeg {
   nm: string;
   /** Implied vol estratta dal prezzo di mercato (annualizzata, in decimali) */
   iv: number;
+  /**
+   * Contratti (firmati, ≤ 0) idonei al ROLLING in discesa: solo put vendute di naked put,
+   * put spread e diagonal put spread (classificazione canonica categorizeDerivatives).
+   * Assente/0 = gamba mai rollata. |rollQ| ≤ |q| (una posizione può essere solo in parte
+   * in una strategia idonea).
+   */
+  rollQ?: number;
 }
 
 export interface StressEquity {
@@ -100,6 +107,59 @@ export interface ScenarioParams extends SurfaceParams {
   fx: ForexRates;
   /** Modalità "intrinseco a scadenza" per Ex Covered Call e Naked Put */
   netting: boolean;
+  /**
+   * ROLLING in discesa delle put vendute idonee (StressLeg.rollQ). Assente/null = spento.
+   * Con il rolling lo shock NON è un salto: il mercato scende a step lungo il percorso
+   * (orizzonte e vol distribuiti sul percorso) e a ogni step si verifica il trigger.
+   */
+  roll?: RollParams | null;
+}
+
+/**
+ * Regole di roll in discesa (stessa semantica del backtest Short Put):
+ *  - trigger: spot ≤ strike × (1 + triggerPct/100);
+ *  - nuova scadenza: di mese in mese dopo la corrente, la più vicina che offre un candidato,
+ *    con cap a maxMonthsForward mesi dalla data del roll;
+ *  - nuovo strike: griglia a passi di strikeStepPct% sotto lo strike corrente (e sotto lo
+ *    spot); tra i candidati con credito netto ≥ minNetCreditPct% del nuovo nozionale si
+ *    sceglie lo strike PIÙ BASSO;
+ *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
+ */
+export interface RollParams {
+  triggerPct: number;
+  maxMonthsForward: number;
+  minNetCreditPct: number;
+  strikeStepPct: number;
+  maxRolls: number;
+  /** Granularità del percorso in punti % di mercato. Default 1. */
+  pathStepPct?: number;
+}
+
+export const DEFAULT_ROLL_PARAMS: RollParams = {
+  triggerPct: 2,
+  maxMonthsForward: 12,
+  minNetCreditPct: 0,
+  strikeStepPct: 2,
+  maxRolls: 4,
+  pathStepPct: 1,
+};
+
+/** Un roll eseguito lungo il percorso (prezzi per azione, valuta nativa). */
+export interface RollEvent {
+  /** Shock di mercato (%) allo step del roll */
+  d: number;
+  /** Spot allo step */
+  S: number;
+  fromK: number;
+  /** Scadenza (anni da oggi) della put ricomprata */
+  fromT: number;
+  toK: number;
+  /** Scadenza (anni da oggi) della put venduta */
+  toT: number;
+  /** Prezzo di riacquisto */
+  buy: number;
+  /** Premio incassato */
+  sell: number;
 }
 
 export interface LegResult {
@@ -123,6 +183,20 @@ export interface LegResult {
   netted: boolean;
   /** True se la gamba è valutata a intrinseco puro (fl=prezzo sotto intrinseco, oppure netting) */
   atIntrinsic: boolean;
+  /** Roll eseguiti lungo il percorso (solo put vendute idonee con rolling attivo) */
+  rolls?: RollEvent[];
+  /** Contratti rollati (firmati, ≤ 0) */
+  rollQ?: number;
+  /** Strike / scadenza (anni da oggi) della put in essere a fine scenario */
+  finalK?: number;
+  finalT?: number;
+  /** Valore a fine scenario della put rollata (MTM, o intrinseco con netting) */
+  pFinal?: number;
+  /** Σ (premio incassato − riacquisto) dei roll, per azione */
+  netCredit?: number;
+  /** IV della put finale: a stato base (per il margine) e nello scenario */
+  finalSig0?: number;
+  finalSig1?: number;
 }
 
 export interface EquityResult {
@@ -329,11 +403,14 @@ export function runScenario(
 
     const volScale = isFX ? 0.25 : 1; // la vol FX non segue il modello equity
 
-    const price = (dd: number, dv: number, dy: number) => {
-      const dL = dv * termFactor(l.T, pExp) * volScale;
+    // Prezzo di una put/call del sottostante (strike K, scadenza T in anni da oggi) allo
+    // stato (shock dd, vol dv, giorni trascorsi dy). Stessa superficie per le gambe
+    // originali e per le put nate dai roll (sATM0 del sottostante, smile sticky-delta).
+    const priceAt = (K: number, T: number, dd: number, dv: number, dy: number) => {
+      const dL = dv * termFactor(T, pExp) * volScale;
       const sATM = Math.max(0.04, sATM0 + dL / 100);
-      const sb = isFX ? skewB : skewB * skewMult(l.T, dv, kappa);
-      const Tx = Math.max(l.T - dy / 365, 0);
+      const sb = isFX ? skewB : skewB * skewMult(T, dv, kappa);
+      const Tx = Math.max(T - dy / 365, 0);
       const Sx = S0 * Math.max(0.02, 1 + (beta * dd) / 100);
       const Fx = Sx * Math.exp(r * Tx);
       let sig: number;
@@ -341,11 +418,12 @@ export function runScenario(
         sig = sATM;
       } else {
         // STICKY-DELTA: smile riletto alla nuova moneyness
-        const m = Math.log(l.K / Fx) / (sATM * Math.sqrt(Tx));
+        const m = Math.log(K / Fx) / (sATM * Math.sqrt(Tx));
         sig = Math.max(0.03, Math.min(4, sATM + sb * m));
       }
-      return { p: bsPrice(Fx, l.K, Tx, sig, isCall, r), sig };
+      return { p: bsPrice(Fx, K, Tx, sig, isCall, r), sig };
     };
+    const price = (dd: number, dv: number, dy: number) => priceAt(l.K, l.T, dd, dv, dy);
 
     const base = price(0, 0, 0);
     const str = price(d, dV1M, days);
@@ -375,7 +453,45 @@ export function runScenario(
     }
 
     // Tutti i derivati quotano in USD nel modello
-    const pnlEUR = (l.q * l.mult * (p1eff - p0eff)) / fx.USD;
+    let pnlEUR = (l.q * l.mult * (p1eff - p0eff)) / fx.USD;
+    let p1row = p1eff;
+    let rollOut: Partial<LegResult> = {};
+
+    // ROLLING IN DISCESA: solo put vendute idonee, shock negativo, rolling attivo.
+    const rq = l.rollQ ?? 0;
+    if (prm.roll && rq < 0 && !isCall && !isFX && l.q < 0 && d < 0) {
+      const sim = simulatePutRolls({
+        K0: l.K,
+        T0: l.T,
+        S0,
+        beta,
+        d,
+        dV1M,
+        days,
+        roll: prm.roll,
+        priceAt,
+      });
+      // Valore finale: MTM; con netting (hold to expiry) intrinseco allo spot finale
+      // sullo strike della put IN ESSERE a fine percorso (non quello originale).
+      const pFinal = netting ? Math.max(0, sim.K - S1) : sim.pFinal;
+      // Prezzo "effettivo" della parte rollata: put finale − crediti netti incassati.
+      // Così il P&L resta q·mult·(p1 − p0) come per le gambe statiche.
+      const p1roll = pFinal - sim.netCredit;
+      const qStatic = l.q - rq;
+      pnlEUR = (l.mult * (qStatic * (p1eff - p0eff) + rq * (p1roll - p0eff))) / fx.USD;
+      p1row = (qStatic * p1eff + rq * p1roll) / l.q;
+      const base1 = priceAt(sim.K, sim.T, 0, 0, 0);
+      rollOut = {
+        rolls: sim.rolls,
+        rollQ: rq,
+        finalK: sim.K,
+        finalT: sim.T,
+        pFinal,
+        netCredit: sim.netCredit,
+        finalSig0: base1.sig,
+        finalSig1: sim.sig,
+      };
+    }
     optEUR += pnlEUR;
 
     rows.push({
@@ -384,11 +500,12 @@ export function runScenario(
       sig0: base.sig,
       sig1: str.sig,
       p0: p0eff,
-      p1: p1eff,
+      p1: p1row,
       dIV: (str.sig - base.sig) * 100,
       T: l.T,
       netted,
       atIntrinsic,
+      ...rollOut,
     });
   }
 
@@ -411,6 +528,152 @@ export function runScenario(
   }
 
   return { rows, eqRows, optEUR, eqEUR, totEUR: optEUR + eqEUR };
+}
+
+/* ===========================================================================
+ * ROLLING IN DISCESA DELLE PUT VENDUTE
+ * ========================================================================= */
+
+export interface PutRollSimInput {
+  /** Strike e scadenza (anni da oggi) della put originale */
+  K0: number;
+  T0: number;
+  /** Spot iniziale e beta del sottostante */
+  S0: number;
+  beta: number;
+  /** Shock finale di mercato (%), vol ATM 1M finale (pt), orizzonte (gg) */
+  d: number;
+  dV1M: number;
+  days: number;
+  roll: RollParams;
+  /** Pricer della put del sottostante: (K, T da oggi, shock, vol, giorni trascorsi) */
+  priceAt: (K: number, T: number, dd: number, dv: number, dy: number) => { p: number; sig: number };
+}
+
+export interface PutRollSimResult {
+  rolls: RollEvent[];
+  /** Strike / scadenza (anni da oggi) della put in essere a fine percorso */
+  K: number;
+  T: number;
+  /** Σ (sell − buy) per azione */
+  netCredit: number;
+  /** MTM della put finale a fine scenario e sua IV */
+  pFinal: number;
+  sig: number;
+}
+
+/**
+ * Simula il percorso di discesa da 0 a d (step di pathStepPct punti di mercato):
+ * orizzonte distribuito linearmente, vol ATM 1M che segue la curva accoppiata
+ * scalata sul valore finale dV1M (in vol manuale: proporzionale). A ogni step, se
+ * spot ≤ K·(1+trigger) si rolla secondo RollParams. Il roll avviene a prezzi di
+ * modello (MTM-neutro nell'istante): il beneficio nasce dallo strike più basso e dal
+ * delta minore nel resto del percorso.
+ */
+export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
+  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt } = inp;
+  const pathStep = Math.max(0.1, roll.pathStepPct ?? 1);
+  const n = d < 0 ? Math.max(1, Math.ceil(Math.abs(d) / pathStep)) : 0;
+  const cFinal = coupledDV1M(d);
+  const dvAt = (dd: number, i: number) =>
+    Math.abs(cFinal) > 1e-9 ? (dV1M * coupledDV1M(dd)) / cFinal : n > 0 ? (dV1M * i) / n : 0;
+  const trig = 1 + roll.triggerPct / 100;
+  const step = Math.max(0.1, roll.strikeStepPct) / 100;
+  const capT = Math.max(1, roll.maxMonthsForward) / 12;
+  const maxRolls = Math.max(0, Math.floor(roll.maxRolls));
+
+  let K = K0;
+  let T = T0;
+  let netCredit = 0;
+  const rolls: RollEvent[] = [];
+
+  for (let i = 1; i <= n && rolls.length < maxRolls; i++) {
+    const dd = (d * i) / n;
+    const dy = (days * i) / n;
+    const rem = T - dy / 365;
+    if (rem <= 1e-6) break; // put già scaduta lungo il percorso: niente più roll
+    const S = S0 * Math.max(0.02, 1 + (beta * dd) / 100);
+    if (S > K * trig) continue;
+    const dv = dvAt(dd, i);
+    const buy = priceAt(K, T, dd, dv, dy).p;
+    let chosen: { K: number; T: number; sell: number } | null = null;
+    // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
+    for (let m = 1; m <= 240; m++) {
+      const Tn = T + m / 12;
+      if (Tn - dy / 365 > capT + 1e-9) break;
+      let best: { K: number; sell: number } | null = null;
+      for (let j = 1; j <= 200; j++) {
+        const Kj = K * (1 - step * j);
+        if (Kj <= S * 0.05) break;
+        if (Kj >= S) continue; // il nuovo strike deve stare sotto lo spot
+        const sell = priceAt(Kj, Tn, dd, dv, dy).p;
+        if (sell - buy >= (roll.minNetCreditPct / 100) * Kj) best = { K: Kj, sell };
+        else break; // strike più bassi → premio minore: nessun candidato ulteriore
+      }
+      if (best) {
+        chosen = { K: best.K, T: Tn, sell: best.sell };
+        break;
+      }
+    }
+    if (!chosen) continue; // nessun roll a credito: si riprova allo step successivo
+    rolls.push({ d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell });
+    netCredit += chosen.sell - buy;
+    K = chosen.K;
+    T = chosen.T;
+  }
+
+  const fin = priceAt(K, T, d, dV1M, days);
+  return { rolls, K, T, netCredit, pFinal: fin.p, sig: fin.sig };
+}
+
+/**
+ * Gambe "dopo i roll" per il margine a scenario: la parte rollata di ogni gamba è
+ * sostituita dalla put in essere a fine percorso (strike/scadenza nuovi, premio e IV di
+ * modello a stato base), la parte statica resta invariata. Restituisce anche le IV di
+ * scenario indicizzate sulle nuove gambe (input sigByLeg di occMargin).
+ */
+export function applyRolls(
+  legs: StressLeg[],
+  res: ScenarioResult,
+  unders: StressUnderlyingMap,
+  r: number,
+): { legs: StressLeg[]; sig: Record<number, number> } {
+  const out: StressLeg[] = [];
+  const sig: Record<number, number> = {};
+  for (const row of res.rows) {
+    const l = legs[row.i];
+    const rolled = row.rolls && row.rolls.length > 0 && row.rollQ && row.finalK != null && row.finalT != null;
+    if (!rolled) {
+      sig[out.length] = row.sig1;
+      out.push(l);
+      continue;
+    }
+    const rq = row.rollQ as number;
+    const qStatic = l.q - rq;
+    if (Math.abs(qStatic) > 1e-9) {
+      sig[out.length] = row.sig1;
+      out.push({ ...l, q: qStatic, rollQ: 0 });
+    }
+    const s0 = row.finalSig0 ?? row.sig0;
+    const T = row.finalT as number;
+    const K = row.finalK as number;
+    // Premio di modello a stato base della put finale (ancora di occMargin).
+    const S0 = unders[l.u]?.S ?? 0;
+    const px = S0 > 0 ? bsPrice(S0 * Math.exp(r * T), K, T, s0, false, r) : 0;
+    sig[out.length] = row.finalSig1 ?? row.sig1;
+    out.push({
+      ...l,
+      K,
+      T,
+      q: rq,
+      px,
+      iv: s0,
+      fl: false,
+      exp: `roll ${row.rolls!.length}×`,
+      rollQ: 0,
+    });
+  }
+  return { legs: out, sig };
 }
 
 /* ===========================================================================

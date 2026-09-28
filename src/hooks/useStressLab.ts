@@ -20,6 +20,8 @@ import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { Position } from '@/types/portfolio';
+import { categorizeDerivatives } from '@/lib/derivativeStrategies';
+import { rollableShortPutQty, rollQForLeg } from '@/lib/stressLabRollEligibility';
 import {
   StressLeg,
   StressEquity,
@@ -580,6 +582,23 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     return sd ? new Date(sd + 'T16:00:00Z') : new Date();
   }, [portfolio?.snapshot_date]);
 
+  // Idoneità al ROLLING (put vendute di naked put / put spread / diagonal put spread) dalla
+  // classificazione CANONICA (categorizeDerivatives con override, config e alias dinamici
+  // da underlying_mappings), su prezzi snapshot come il Risk Analyzer.
+  const rollableQty = useMemo(() => {
+    const snap = (positions || []).map((p) => ({
+      ...p,
+      current_price: p.snapshot_price ?? p.current_price,
+      market_value: p.snapshot_market_value ?? p.market_value,
+    }));
+    const derivs = snap.filter((p) => p.asset_type === 'derivative');
+    if (!derivs.length) return new Map<string, number>();
+    const cats = categorizeDerivatives(derivs, snap, overrides || [], strategyConfigs || [], {
+      dynamicAliases: buildDynamicAliasMap(mappingsQuery.data?.mappings ?? []),
+    });
+    return rollableShortPutQty(cats);
+  }, [positions, overrides, strategyConfigs, mappingsQuery.data]);
+
   const legs: StressLeg[] = useMemo(() => {
     const out: StressLeg[] = [];
     derivatives.forEach((d) => {
@@ -611,10 +630,11 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         mult: DEFAULT_OPT_MULT,
         nm: d.description || key,
         iv: isNaN(iv) ? 0.45 : iv,
+        rollQ: isCall ? 0 : rollQForLeg(d.quantity, rollableQty.get(d.id)),
       });
     });
     return out;
-  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey, snapshotRef]);
+  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey, snapshotRef, rollableQty]);
 
   const effIV = useMemo(() => effIVMap(legs), [legs]);
 

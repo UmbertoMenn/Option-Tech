@@ -26,6 +26,9 @@ import { useStressLab, StressLabInputs } from '@/hooks/useStressLab';
 import {
   runScenario,
   occMargin,
+  applyRolls,
+  DEFAULT_ROLL_PARAMS,
+  RollParams,
   coupledDV1M,
   termFactor,
   T0M,
@@ -335,6 +338,27 @@ function StressLabContent() {
   const [showAdv, setShowAdv] = useState(false);
   const [showUnd, setShowUnd] = useState(false);
   const [netting, setNetting] = useState(false);
+  /* ---------- Rolling in discesa delle put vendute (naked put / put spread / diagonal put spread) ---------- */
+  const [rollOn, setRollOn] = useState(false);
+  const [rollTrigger, setRollTrigger] = useState(DEFAULT_ROLL_PARAMS.triggerPct);
+  const [rollMaxMonths, setRollMaxMonths] = useState(DEFAULT_ROLL_PARAMS.maxMonthsForward);
+  const [rollMinCredit, setRollMinCredit] = useState(DEFAULT_ROLL_PARAMS.minNetCreditPct);
+  const [rollStrikeStep, setRollStrikeStep] = useState(DEFAULT_ROLL_PARAMS.strikeStepPct);
+  const [rollMaxRolls, setRollMaxRolls] = useState(DEFAULT_ROLL_PARAMS.maxRolls);
+  const rollPrm = useMemo<RollParams | null>(
+    () =>
+      rollOn
+        ? {
+            triggerPct: rollTrigger,
+            maxMonthsForward: rollMaxMonths,
+            minNetCreditPct: rollMinCredit,
+            strikeStepPct: rollStrikeStep,
+            maxRolls: rollMaxRolls,
+            pathStepPct: 1,
+          }
+        : null,
+    [rollOn, rollTrigger, rollMaxMonths, rollMinCredit, rollStrikeStep, rollMaxRolls],
+  );
   // Metodologia dello scenario: 'market' = shock di MERCATO (mossa trasmessa via beta
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
   // (beta=1 su ogni nome, l'EUR/USD resta fermo) → card "Delta di portafoglio".
@@ -369,9 +393,11 @@ function StressLabContent() {
 
   const undersActive = shockMode === 'titoli' ? undersDelta : unders;
   const prm = useMemo(
-    () => ({ r, skewB, kappa, pExp, days, fx, netting }),
-    [r, skewB, kappa, pExp, days, fx, netting],
+    () => ({ r, skewB, kappa, pExp, days, fx, netting, roll: rollPrm }),
+    [r, skewB, kappa, pExp, days, fx, netting, rollPrm],
   );
+  // Stessi parametri SENZA rolling: curva di confronto tratteggiata.
+  const prmNoRoll = useMemo(() => ({ ...prm, roll: null }), [prm]);
 
   const dV1M = volMode === 'auto' ? coupledDV1M(d) : dVman;
 
@@ -379,6 +405,23 @@ function StressLabContent() {
     () => runScenario(legs, eq, undersActive, effIV, d, dV1M, prm),
     [legs, eq, undersActive, effIV, d, dV1M, prm],
   );
+
+  // Riepilogo rolling per la card scenario: gambe idonee, rollate e effetto sul P&L totale.
+  const rollStats = useMemo(() => {
+    const eligible = legs.filter((l) => (l.rollQ ?? 0) < 0).length;
+    let rolledLegs = 0;
+    let nRolls = 0;
+    scen.rows.forEach((x) => {
+      if (x.rolls && x.rolls.length) {
+        rolledLegs += 1;
+        nRolls += x.rolls.length;
+      }
+    });
+    const effect = rollPrm
+      ? scen.totEUR - runScenario(legs, eq, undersActive, effIV, d, dV1M, prmNoRoll).totEUR
+      : 0;
+    return { eligible, rolledLegs, nRolls, effect };
+  }, [legs, eq, undersActive, effIV, d, dV1M, scen, rollPrm, prmNoRoll]);
 
   /* ---------- Esposizione di riferimento vs patrimonio stressato ----------
    * DENOMINATORE di P&L% / beta / delta = Esposizione Potenziale in Equity (esposizione
@@ -396,16 +439,16 @@ function StressLabContent() {
   /* ---------- Beta di riferimento ∓10% ---------- */
   const { betaDown, betaUp } = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return { betaDown: 0, betaUp: 0 };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
     const dn = runScenario(legs, eq, unders, effIV, -10, volAt(-10), bp).totEUR;
     const up = runScenario(legs, eq, unders, effIV, 10, volAt(10), bp).totEUR;
     return { betaDown: dn / ptfBase / -0.1, betaUp: up / ptfBase / 0.1 };
-  }, [legs, eq, unders, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+  }, [legs, eq, unders, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
 
   /* ---------- Beta a scenario corrente ---------- */
   const betaScen = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return 0;
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
     if (Math.abs(d) < 0.25) {
       const pu = runScenario(legs, eq, unders, effIV, 0.25, volAt(0.25), bp).totEUR;
       const pd = runScenario(legs, eq, unders, effIV, -0.25, volAt(-0.25), bp).totEUR;
@@ -413,7 +456,7 @@ function StressLabContent() {
     }
     const pl = runScenario(legs, eq, unders, effIV, d, volAt(d), bp).totEUR;
     return pl / ptfBase / (d / 100);
-  }, [legs, eq, unders, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+  }, [legs, eq, unders, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
 
   /* ---------- DELTA DI PORTAFOGLIO (beta sui titoli) ----------
    * Misura quanto si muove il portafoglio quando i SUOI sottostanti si muovono
@@ -422,15 +465,15 @@ function StressLabContent() {
    * (beta=1, EUR/USD fermo), definito sopra. Denominatore identico (patrimonio). */
   const { deltaDown, deltaUp } = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return { deltaDown: 0, deltaUp: 0 };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
     const dn = runScenario(legs, eq, undersDelta, effIV, -10, volAt(-10), bp).totEUR;
     const up = runScenario(legs, eq, undersDelta, effIV, 10, volAt(10), bp).totEUR;
     return { deltaDown: dn / ptfBase / -0.1, deltaUp: up / ptfBase / 0.1 };
-  }, [legs, eq, undersDelta, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+  }, [legs, eq, undersDelta, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
 
   const deltaScen = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return 0;
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
     if (Math.abs(d) < 0.25) {
       const pu = runScenario(legs, eq, undersDelta, effIV, 0.25, volAt(0.25), bp).totEUR;
       const pd = runScenario(legs, eq, undersDelta, effIV, -0.25, volAt(-0.25), bp).totEUR;
@@ -438,7 +481,7 @@ function StressLabContent() {
     }
     const pl = runScenario(legs, eq, undersDelta, effIV, d, volAt(d), bp).totEUR;
     return pl / ptfBase / (d / 100);
-  }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+  }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
 
   /* ---------- P&L VERO dello scenario di mercato (= card P&L Totale). ---------- */
   const scenMarketTot = scen.totEUR;
@@ -458,15 +501,26 @@ function StressLabContent() {
     const now = occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
     // Scan esteso fino a −95%: serve sia alla curva sia a trovare la margin call
     // anche quando scatta oltre il range di default −35%.
-    const all: { d: number; Margine: number }[] = [];
-    for (let x = -95; x <= 15.01; x += 2.5) {
-      const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days });
+    const all: { d: number; Margine: number; 'Senza roll'?: number }[] = [];
+    // Margine a scenario: con rolling attivo si margina il portafoglio DOPO i roll
+    // (put rollate su strike più bassi / scadenze più lunghe); senza roll come prima.
+    const marAt = (x: number, roll: RollParams | null): number => {
+      const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days, roll });
+      if (roll) {
+        const ar = applyRolls(legs, s, undersActive, r);
+        return occMargin(ar.legs, eq, undersActive, x, ar.sig, days, marPrm).total;
+      }
       const sgs: Record<number, number> = {};
       s.rows.forEach((row) => (sgs[row.i] = row.sig1));
-      all.push({
+      return occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total;
+    };
+    for (let x = -95; x <= 15.01; x += 2.5) {
+      const pt: { d: number; Margine: number; 'Senza roll'?: number } = {
         d: x,
-        Margine: Math.round(occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total),
-      });
+        Margine: Math.round(marAt(x, rollPrm)),
+      };
+      if (rollPrm) pt['Senza roll'] = Math.round(marAt(x, null));
+      all.push(pt);
     }
     // Margin call: margine richiesto > cash + bond·95%, scandendo da 0 verso il basso.
     const downside = all
@@ -478,7 +532,7 @@ function StressLabContent() {
     const chartMin =
       mcX != null ? Math.max(-95, Math.min(-35, Math.floor((mcX - 6) / 5) * 5)) : -35;
     return { marNow: now, marCurve: all.filter((p) => p.d >= chartMin - 0.01), marginCallX: mcX };
-  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover]);
+  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover, rollPrm]);
 
   /* ---------- Margine OCCSPH (strategy-based puro, gerarchia rigida) ----------
    * Calcolo statico a stato base (prezzi correnti, nessuno scenario): serve per
@@ -509,12 +563,19 @@ function StressLabContent() {
     const fxR = fxRange / 100;
     const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
     const bp = { r, skewB, kappa, pExp, days, fx, netting: false };
-    const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, bp);
-    const sigDs: Record<number, number> = {};
-    cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
-    const sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
+    const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, { ...bp, roll: rollPrm });
+    let sc;
+    if (rollPrm) {
+      // Margine sulle gambe DOPO i roll (strike/scadenze nuove).
+      const ar = applyRolls(legs, cur, undersActive, r);
+      sc = occMargin(ar.legs, eq, undersActive, d, ar.sig, days, marPrm);
+    } else {
+      const sigDs: Record<number, number> = {};
+      cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
+      sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
+    }
     return { marScen: sc, marPnlMTM: cur.totEUR };
-  }, [legs, eq, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct]);
+  }, [legs, eq, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, rollPrm]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -662,19 +723,21 @@ function StressLabContent() {
 
   const curve = useMemo(() => {
     // Shock di mercato trasmesso ai titoli via beta reale (unders).
-    const pts: { d: number; Totale: number; 'Azioni/ETF': number; Opzioni: number }[] = [];
+    const pts: { d: number; Totale: number; 'Azioni/ETF': number; Opzioni: number; 'Totale senza roll'?: number }[] = [];
     for (let x = curveMin; x <= 15.01; x += 2.5) {
       const dv = volMode === 'auto' ? coupledDV1M(x) : dVman;
       const s = runScenario(legs, eq, unders, effIV, x, dv, prm);
-      pts.push({
+      const pt: (typeof pts)[number] = {
         d: x,
         Totale: Math.round(s.totEUR),
         'Azioni/ETF': Math.round(s.eqEUR),
         Opzioni: Math.round(s.optEUR),
-      });
+      };
+      if (prm.roll) pt['Totale senza roll'] = Math.round(runScenario(legs, eq, unders, effIV, x, dv, prmNoRoll).totEUR);
+      pts.push(pt);
     }
     return pts;
-  }, [legs, eq, unders, effIV, volMode, dVman, prm, curveMin]);
+  }, [legs, eq, unders, effIV, volMode, dVman, prm, prmNoRoll, curveMin]);
 
   // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle Intrinseco A).
   const curvePct = useMemo(
@@ -684,6 +747,9 @@ function StressLabContent() {
         Totale: totalPatrimony ? (p.Totale / totalPatrimony) * 100 : 0,
         'Azioni/ETF': totalPatrimony ? (p['Azioni/ETF'] / totalPatrimony) * 100 : 0,
         Opzioni: totalPatrimony ? (p.Opzioni / totalPatrimony) * 100 : 0,
+        ...(p['Totale senza roll'] != null
+          ? { 'Totale senza roll': totalPatrimony ? (p['Totale senza roll'] / totalPatrimony) * 100 : 0 }
+          : {}),
       })),
     [curve, totalPatrimony],
   );
@@ -727,6 +793,7 @@ function StressLabContent() {
         case 'dIV': return rr.dIV;
         case 'p0': return rr.p0;
         case 'p1': return rr.p1;
+        case 'roll': return rr.rolls?.length ?? ((rr.leg.rollQ ?? 0) < 0 ? 0 : -1);
         default: return rr.pnlEUR;
       }
     };
@@ -1406,6 +1473,167 @@ function StressLabContent() {
               </Info>
             }
           />
+          {/* ROLLING PUT IN DISCESA */}
+          <div
+            style={{
+              marginTop: 2,
+              marginBottom: 12,
+              paddingTop: 10,
+              borderTop: `1px solid ${C.border}`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: rollOn ? C.up : C.mut,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.6,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                Rolling put in discesa
+                <Info title="Rolling delle put vendute sotto stress" w={400}>
+                  Simula la gestione attiva delle <b>put vendute</b> di <b>naked put</b>, <b>put spread</b> e{' '}
+                  <b>diagonal put spread</b> (la gamba comprata resta ferma). Covered call sintetiche, DR-CC,
+                  iron condor e double diagonal non vengono rollati.
+                  <br />
+                  <br />
+                  Con il rolling lo shock <b>non è un salto</b>: il mercato scende a step dell'1% fino allo shock
+                  impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
+                  il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende una su <b>strike più
+                  basso</b> (griglia a passo % dello strike corrente, sotto lo spot) e <b>scadenza più lunga</b>{' '}
+                  (di mese in mese, la più vicina che offre un candidato, fino al cap): tra i candidati con credito
+                  netto ≥ minimo si sceglie lo <b>strike più basso</b>.
+                  <br />
+                  <br />
+                  Il roll è neutro sul MTM nell'istante (si scambia a prezzi di mercato): il beneficio viene dallo
+                  strike più basso e dal delta minore nel resto della discesa, finanziati dal valore temporale della
+                  scadenza lunga con vol alta. Con <b>Netting Intrinseco (A)</b> la put finale vale il suo intrinseco
+                  sul nuovo strike. In un <b>gap</b> il rolling non protegge: non c'è tempo per rollare prima del
+                  danno.
+                  <br />
+                  <br />
+                  Il <b>margine a scenario</b> è calcolato sulle gambe dopo i roll. Le curve tratteggiate mostrano
+                  il confronto senza rolling.
+                </Info>
+              </span>
+              <button
+                onClick={() => setRollOn(!rollOn)}
+                style={{
+                  width: 42,
+                  height: 22,
+                  borderRadius: 11,
+                  border: `1px solid ${rollOn ? C.up : C.border2}`,
+                  background: rollOn ? 'rgba(38,166,154,.25)' : C.panel,
+                  cursor: 'pointer',
+                  position: 'relative',
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+                aria-label="Attiva rolling put"
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: rollOn ? 22 : 2,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    background: rollOn ? C.up : C.mut,
+                    transition: 'left .15s',
+                  }}
+                />
+              </button>
+            </div>
+            <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
+              {rollStats.eligible} put idonee
+              {rollOn
+                ? d < 0
+                  ? ` · ${rollStats.rolledLegs} rollate (${rollStats.nRolls} roll) · effetto ${sgn(rollStats.effect, 0)} €`
+                  : ' · nessun roll su shock al rialzo'
+                : ''}
+            </div>
+            {rollOn && (
+              <div style={{ marginTop: 10 }}>
+                <Slider
+                  label="Trigger (spot entro % dallo strike)"
+                  value={rollTrigger}
+                  set={setRollTrigger}
+                  min={0}
+                  max={15}
+                  step={0.5}
+                  fmt={(v) => fmtN(v, 1) + '%'}
+                  accent={C.up}
+                />
+                <Slider
+                  label="Scadenza max (mesi dal roll)"
+                  value={rollMaxMonths}
+                  set={setRollMaxMonths}
+                  min={1}
+                  max={24}
+                  step={1}
+                  fmt={(v) => '+' + v + ' m'}
+                  accent={C.up}
+                />
+                <Slider
+                  label="Passo strike"
+                  value={rollStrikeStep}
+                  set={setRollStrikeStep}
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                  fmt={(v) => fmtN(v, 1) + '%'}
+                  accent={C.up}
+                />
+                <Slider
+                  label="Credito netto min (% nozionale)"
+                  value={rollMinCredit}
+                  set={setRollMinCredit}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  fmt={(v) => '≥ ' + fmtN(v, 1) + '%'}
+                  accent={C.up}
+                />
+                <Slider
+                  label="Numero max roll"
+                  value={rollMaxRolls}
+                  set={setRollMaxRolls}
+                  min={1}
+                  max={12}
+                  step={1}
+                  fmt={(v) => String(v)}
+                  accent={C.up}
+                />
+                <button
+                  onClick={() => {
+                    setRollTrigger(DEFAULT_ROLL_PARAMS.triggerPct);
+                    setRollMaxMonths(DEFAULT_ROLL_PARAMS.maxMonthsForward);
+                    setRollStrikeStep(DEFAULT_ROLL_PARAMS.strikeStepPct);
+                    setRollMinCredit(DEFAULT_ROLL_PARAMS.minNetCreditPct);
+                    setRollMaxRolls(DEFAULT_ROLL_PARAMS.maxRolls);
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    fontSize: 11,
+                    fontFamily: SANS,
+                    fontWeight: 600,
+                    background: 'transparent',
+                    color: C.up,
+                    border: `1px solid ${C.up}`,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ↺ Ripristina default (trigger 2% · +12 m · passo 2% · credito ≥ 0 · 4 roll)
+                </button>
+              </div>
+            )}
+          </div>
           <div
             onClick={() => setShowAdv(!showAdv)}
             style={{ ...lbl, cursor: 'pointer', color: C.blue, marginTop: 4 }}
@@ -1861,6 +2089,17 @@ function StressLabContent() {
                 strokeDasharray="5 4"
               />
               <Line type="monotone" dataKey="Opzioni" stroke={C.amber} strokeWidth={1.5} dot={false} />
+              {rollOn && (
+                <Line
+                  type="monotone"
+                  dataKey="Totale senza roll"
+                  stroke={C.blue}
+                  strokeOpacity={0.55}
+                  strokeWidth={1.5}
+                  dot={false}
+                  strokeDasharray="3 3"
+                />
+              )}
               <ReferenceLine
                 x={0}
                 stroke={C.mut}
@@ -2263,6 +2502,17 @@ function StressLabContent() {
                 />
               )}
               <Line type="monotone" dataKey="Margine" stroke={C.dn} strokeWidth={2.5} dot={false} />
+              {rollOn && (
+                <Line
+                  type="monotone"
+                  dataKey="Senza roll"
+                  stroke={C.dn}
+                  strokeOpacity={0.5}
+                  strokeWidth={1.5}
+                  dot={false}
+                  strokeDasharray="3 3"
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -2477,7 +2727,7 @@ function StressLabContent() {
               fontFamily: MONO,
               fontSize: 11.5,
               width: '100%',
-              minWidth: 760,
+              minWidth: 830,
             }}
           >
             <thead>
@@ -2492,6 +2742,7 @@ function StressLabContent() {
                   { h: 'ΔIV', k: 'dIV' },
                   { h: 'Px base', k: 'p0' },
                   { h: 'Px scen.', k: 'p1' },
+                  { h: 'Roll', k: 'roll' },
                   { h: 'P&L €', k: 'pnl' },
                 ].map((c, i) => (
                   <th
@@ -2570,10 +2821,23 @@ function StressLabContent() {
                     `IV ${fmtN(rr.sig0 * 100, 1)}% → ${fmtN(rr.sig1 * 100, 1)}%   T ${fmtN(l.T, 3)} anni   r ${fmtN(r * 100, 2)}%\n` +
                     `Prezzo opzione Black-Scholes (USD): ${fmtN(rr.p0, 4)} → ${fmtN(rr.p1, 4)}`;
                 }
+                const rollLines =
+                  rr.rolls && rr.rolls.length
+                    ? `ROLLING (${-(rr.rollQ ?? 0)} di ${-l.q} contratti):\n` +
+                      rr.rolls
+                        .map(
+                          (e, k) =>
+                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (${fmtN(e.fromT * 12, 1)}m) a ${fmtN(e.buy, 2)} → vendo P${fmtN(e.toK, 2)} (${fmtN(e.toT * 12, 1)}m) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                        )
+                        .join('\n') +
+                      `\n  put finale P${fmtN(rr.finalK ?? 0, 2)} vale ${fmtN(rr.pFinal ?? 0, 2)}${rr.netted ? ' (intrinseco)' : ''}; crediti netti ${sgn(rr.netCredit ?? 0, 2)}\n` +
+                      `  Px scen. effettivo = put finale − crediti netti (media con la parte non rollata)\n`
+                    : '';
                 const tip =
                   `${header}\n` +
                   (spotLine ? `${spotLine}\n` : '') +
                   `${valBlock}\n` +
+                  rollLines +
                   `P&L = q(${l.q}) × ${l.mult} × (${pxLabel}_scen − ${pxLabel}_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
                   `    = ${l.q} × ${l.mult} × (${fmtN(rr.p1, 4)} − ${fmtN(rr.p0, 4)}) / ${fmtN(fx.USD, 4)} = ${sEUR(rr.pnlEUR)} €`;
                 return (
@@ -2639,6 +2903,13 @@ function StressLabContent() {
                     </td>
                     <td style={{ textAlign: 'right', color: C.mut }}>{fmtN(rr.p0, 2)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtN(rr.p1, 2)}</td>
+                    <td style={{ textAlign: 'right', color: rr.rolls && rr.rolls.length ? C.up : C.mut, whiteSpace: 'nowrap' }}>
+                      {rr.rolls && rr.rolls.length
+                        ? `${fmtN(l.K, 0)}→${fmtN(rr.finalK ?? l.K, 0)} ×${rr.rolls.length}`
+                        : rollOn && (l.rollQ ?? 0) < 0
+                          ? '—'
+                          : ''}
+                    </td>
                     <td style={{ textAlign: 'right', fontWeight: 800, color: pnlColor(rr.pnlEUR) }}>
                       {rr.pnlEUR > 0 ? '+' : ''}
                       {fmtEUR(rr.pnlEUR)}
