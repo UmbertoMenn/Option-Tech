@@ -1329,230 +1329,6 @@ function StressLabContent() {
         })()}
       </Panel>
 
-      {/* ROLLING PUT IN DISCESA — pannello orizzontale sopra lo scenario, per testare
-        * i parametri guardando subito P&L e curve senza scorrere. */}
-      <Panel
-        title="Rolling put in discesa"
-        info={
-          <Info title="Rolling delle put vendute sotto stress" w={400}>
-                  Simula la gestione attiva delle <b>put vendute</b> di <b>naked put</b>, <b>put spread</b> e{' '}
-                  <b>diagonal put spread</b> (la gamba comprata resta ferma). Covered call sintetiche, DR-CC,
-                  iron condor e double diagonal non vengono rollati.
-                  <br />
-                  <br />
-                  Con il rolling lo shock <b>non è un salto</b>: il mercato scende a step dell'1% fino allo shock
-                  impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
-                  il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
-                  <br />
-                  1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato;
-                  <br />
-                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente (e sotto lo spot); su
-                  quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
-                  <br />
-                  Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
-                  <br />
-                  <br />
-                  Il roll è neutro sul MTM nell'istante (si scambia a prezzi di mercato): il beneficio viene dallo
-                  strike più basso e dal delta minore nel resto della discesa, finanziati dal valore temporale della
-                  scadenza lunga con vol alta.
-                  <br />
-                  <br />
-                  <b>MTM vs Netting</b>: la put finale vale intrinseco + valore temporale. In <b>MTM</b> il valore
-                  temporale di una put lunga (vol alta) resta una passività: più si allunga la scadenza, più pesa, e
-                  può mangiarsi il guadagno di strike. Con <b>Netting Intrinseco (A)</b> conta solo l'intrinseco sul
-                  nuovo strike: il valore temporale incassato è dato per già guadagnato (hold to expiry), quindi
-                  strike più bassi migliorano sempre il risultato — ipotesi ottimistica su scadenze lunghe.
-                  <br />
-                  <br />
-                  In un <b>gap</b> il rolling non protegge: non c'è tempo per rollare prima del danno.
-                  <br />
-                  <br />
-                  Il <b>margine a scenario</b> è calcolato sulle gambe dopo i roll. Le curve tratteggiate mostrano
-                  il confronto senza rolling.
-                </Info>
-        }
-        headerRight={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, textTransform: 'none', letterSpacing: 0 }}>
-            <span style={{ fontSize: 11, fontFamily: MONO, color: C.mut, fontWeight: 500 }}>
-              {rollStats.eligible} put idonee
-              {rollOn
-                ? d < 0
-                  ? ` · ${rollStats.rolledLegs} rollate (${rollStats.nRolls} roll) · effetto ${sgn(rollStats.effect, 0)} €`
-                  : ' · nessun roll su shock al rialzo'
-                : ''}
-            </span>
-            <button
-                onClick={() => setRollOn(!rollOn)}
-                style={{
-                  width: 42,
-                  height: 22,
-                  borderRadius: 11,
-                  border: `1px solid ${rollOn ? C.up : C.border2}`,
-                  background: rollOn ? 'rgba(38,166,154,.25)' : C.panel,
-                  cursor: 'pointer',
-                  position: 'relative',
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-                aria-label="Attiva rolling put"
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: rollOn ? 22 : 2,
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: rollOn ? C.up : C.mut,
-                    transition: 'left .15s',
-                  }}
-                />
-              </button>
-          </span>
-        }
-        style={{ marginBottom: 14, borderColor: rollOn ? C.up : C.border }}
-      >
-        {rollOn ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : 'repeat(5, minmax(0, 1fr))',
-              columnGap: 18,
-              alignItems: 'end',
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <Slider
-                  label="Trigger (spot entro % dallo strike)"
-                  value={rollTrigger}
-                  set={setRollTrigger}
-                  min={0}
-                  max={15}
-                  step={0.5}
-                  fmt={(v) => fmtN(v, 1) + '%'}
-                  accent={C.up}
-                  info={
-                    <Info title="Trigger" w={300}>
-                      Il roll scatta quando lo spot scende a meno di questa % sopra lo strike: spot ≤ strike × (1 +
-                      trigger). 0% = rollo solo quando la put va ATM.
-                    </Info>
-                  }
-                />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <Slider
-                  label="Scadenza max (mesi dal roll)"
-                  value={rollMaxMonths}
-                  set={setRollMaxMonths}
-                  min={1}
-                  max={24}
-                  step={1}
-                  fmt={(v) => '+' + v + ' m'}
-                  accent={C.up}
-                  info={
-                    <Info title="Scadenza massima" w={300}>
-                      Le scadenze candidate si provano di mese in mese dopo la corrente, partendo dalla più vicina.
-                      Nessuna può superare questo numero di mesi dalla data del roll.
-                    </Info>
-                  }
-                />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <Slider
-                  label="Discesa minima strike per roll"
-                  value={rollStrikeStep}
-                  set={setRollStrikeStep}
-                  min={0.5}
-                  max={10}
-                  step={0.5}
-                  fmt={(v) => '−' + fmtN(v, 1) + '%'}
-                  accent={C.up}
-                  info={
-                    <Info title="Discesa minima strike" w={340}>
-                      Ogni roll deve portare lo strike almeno questa % sotto lo strike corrente (es. 90 con 4% →
-                      nuovo strike ≤ 86,4). Sulla scadenza più vicina che lo consente a credito si prende lo strike più
-                      basso possibile.
-                      <br />
-                      <br />
-                      Più è alta, più ogni roll compra strike ma deve andare più lungo di scadenza: in <b>MTM</b> il
-                      valore temporale della put lunga può annullare il vantaggio; col <b>Netting</b> il vantaggio
-                      resta intero.
-                    </Info>
-                  }
-                />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <Slider
-                  label="Credito netto min (% nozionale)"
-                  value={rollMinCredit}
-                  set={setRollMinCredit}
-                  min={0}
-                  max={3}
-                  step={0.1}
-                  fmt={(v) => '≥ ' + fmtN(v, 1) + '%'}
-                  accent={C.up}
-                  info={
-                    <Info title="Credito netto minimo" w={300}>
-                      Premio della nuova put − costo di riacquisto, in % del nuovo nozionale (strike nuovo × 100).
-                      0 = roll a credito o pari.
-                    </Info>
-                  }
-                />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <Slider
-                  label="Numero max roll"
-                  value={rollMaxRolls}
-                  set={setRollMaxRolls}
-                  min={1}
-                  max={12}
-                  step={1}
-                  fmt={(v) => String(v)}
-                  accent={C.up}
-                  info={
-                    <Info title="Numero massimo di roll" w={280}>
-                      Roll massimi per gamba lungo il percorso. Esauriti i roll, la put resta in essere fino a fine
-                      scenario.
-                    </Info>
-                  }
-                />
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 11.5, color: C.mut }}>
-            Attiva il toggle per simulare il roll delle put vendute (naked put, put spread, diagonal put spread)
-            lungo la discesa.
-          </div>
-        )}
-        {rollOn && (
-          <div style={{ marginTop: -4 }}>
-            <button
-                  onClick={() => {
-                    setRollTrigger(DEFAULT_ROLL_PARAMS.triggerPct);
-                    setRollMaxMonths(DEFAULT_ROLL_PARAMS.maxMonthsForward);
-                    setRollStrikeStep(DEFAULT_ROLL_PARAMS.strikeStepPct);
-                    setRollMinCredit(DEFAULT_ROLL_PARAMS.minNetCreditPct);
-                    setRollMaxRolls(DEFAULT_ROLL_PARAMS.maxRolls);
-                  }}
-                  style={{
-                    padding: '5px 10px',
-                    fontSize: 11,
-                    fontFamily: SANS,
-                    fontWeight: 600,
-                    background: 'transparent',
-                    color: C.up,
-                    border: `1px solid ${C.up}`,
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ↺ Ripristina default (trigger 2% · +12 m · discesa −2% · credito ≥ 0 · 4 roll)
-                </button>
-          </div>
-        )}
-      </Panel>
-
       {/* CONTROLS + KPI */}
       <div
         style={{
@@ -1697,6 +1473,215 @@ function StressLabContent() {
               </Info>
             }
           />
+          {/* ROLLING PUT IN DISCESA */}
+          <div
+            style={{
+              marginTop: 2,
+              marginBottom: 12,
+              paddingTop: 10,
+              borderTop: `1px solid ${C.border}`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: rollOn ? C.up : C.mut,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.6,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                Rolling put in discesa
+                <Info title="Rolling delle put vendute sotto stress" w={400}>
+                  Simula la gestione attiva delle <b>put vendute</b> di <b>naked put</b>, <b>put spread</b> e{' '}
+                  <b>diagonal put spread</b> (la gamba comprata resta ferma). Covered call sintetiche, DR-CC,
+                  iron condor e double diagonal non vengono rollati.
+                  <br />
+                  <br />
+                  Con il rolling lo shock <b>non è un salto</b>: il mercato scende a step dell'1% fino allo shock
+                  impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
+                  il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
+                  <br />
+                  1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato;
+                  <br />
+                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente (e sotto lo spot); su
+                  quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
+                  <br />
+                  Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
+                  <br />
+                  <br />
+                  Il roll è neutro sul MTM nell'istante (si scambia a prezzi di mercato): il beneficio viene dallo
+                  strike più basso e dal delta minore nel resto della discesa, finanziati dal valore temporale della
+                  scadenza lunga con vol alta.
+                  <br />
+                  <br />
+                  <b>MTM vs Netting</b>: la put finale vale intrinseco + valore temporale. In <b>MTM</b> il valore
+                  temporale di una put lunga (vol alta) resta una passività: più si allunga la scadenza, più pesa, e
+                  può mangiarsi il guadagno di strike. Con <b>Netting Intrinseco (A)</b> conta solo l'intrinseco sul
+                  nuovo strike: il valore temporale incassato è dato per già guadagnato (hold to expiry), quindi
+                  strike più bassi migliorano sempre il risultato — ipotesi ottimistica su scadenze lunghe.
+                  <br />
+                  <br />
+                  In un <b>gap</b> il rolling non protegge: non c'è tempo per rollare prima del danno.
+                  <br />
+                  <br />
+                  Il <b>margine a scenario</b> è calcolato sulle gambe dopo i roll. Le curve tratteggiate mostrano
+                  il confronto senza rolling.
+                </Info>
+              </span>
+              <button
+                onClick={() => setRollOn(!rollOn)}
+                style={{
+                  width: 42,
+                  height: 22,
+                  borderRadius: 11,
+                  border: `1px solid ${rollOn ? C.up : C.border2}`,
+                  background: rollOn ? 'rgba(38,166,154,.25)' : C.panel,
+                  cursor: 'pointer',
+                  position: 'relative',
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+                aria-label="Attiva rolling put"
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: rollOn ? 22 : 2,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    background: rollOn ? C.up : C.mut,
+                    transition: 'left .15s',
+                  }}
+                />
+              </button>
+            </div>
+            <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
+              {rollStats.eligible} put idonee
+              {rollOn
+                ? d < 0
+                  ? ` · ${rollStats.rolledLegs} rollate (${rollStats.nRolls} roll) · effetto ${sgn(rollStats.effect, 0)} €`
+                  : ' · nessun roll su shock al rialzo'
+                : ''}
+            </div>
+            {rollOn && (
+              <div style={{ marginTop: 10 }}>
+                <Slider
+                  label="Trigger (spot entro % dallo strike)"
+                  value={rollTrigger}
+                  set={setRollTrigger}
+                  min={0}
+                  max={15}
+                  step={0.5}
+                  fmt={(v) => fmtN(v, 1) + '%'}
+                  accent={C.up}
+                  info={
+                    <Info title="Trigger" w={300}>
+                      Il roll scatta quando lo spot scende a meno di questa % sopra lo strike: spot ≤ strike × (1 +
+                      trigger). 0% = rollo solo quando la put va ATM.
+                    </Info>
+                  }
+                />
+                <Slider
+                  label="Scadenza max (mesi dal roll)"
+                  value={rollMaxMonths}
+                  set={setRollMaxMonths}
+                  min={1}
+                  max={24}
+                  step={1}
+                  fmt={(v) => '+' + v + ' m'}
+                  accent={C.up}
+                  info={
+                    <Info title="Scadenza massima" w={300}>
+                      Le scadenze candidate si provano di mese in mese dopo la corrente, partendo dalla più vicina.
+                      Nessuna può superare questo numero di mesi dalla data del roll.
+                    </Info>
+                  }
+                />
+                <Slider
+                  label="Discesa minima strike per roll"
+                  value={rollStrikeStep}
+                  set={setRollStrikeStep}
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                  fmt={(v) => '−' + fmtN(v, 1) + '%'}
+                  accent={C.up}
+                  info={
+                    <Info title="Discesa minima strike" w={340}>
+                      Ogni roll deve portare lo strike almeno questa % sotto lo strike corrente (es. 90 con 4% →
+                      nuovo strike ≤ 86,4). Sulla scadenza più vicina che lo consente a credito si prende lo strike più
+                      basso possibile.
+                      <br />
+                      <br />
+                      Più è alta, più ogni roll compra strike ma deve andare più lungo di scadenza: in <b>MTM</b> il
+                      valore temporale della put lunga può annullare il vantaggio; col <b>Netting</b> il vantaggio
+                      resta intero.
+                    </Info>
+                  }
+                />
+                <Slider
+                  label="Credito netto min (% nozionale)"
+                  value={rollMinCredit}
+                  set={setRollMinCredit}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  fmt={(v) => '≥ ' + fmtN(v, 1) + '%'}
+                  accent={C.up}
+                  info={
+                    <Info title="Credito netto minimo" w={300}>
+                      Premio della nuova put − costo di riacquisto, in % del nuovo nozionale (strike nuovo × 100).
+                      0 = roll a credito o pari.
+                    </Info>
+                  }
+                />
+                <Slider
+                  label="Numero max roll"
+                  value={rollMaxRolls}
+                  set={setRollMaxRolls}
+                  min={1}
+                  max={12}
+                  step={1}
+                  fmt={(v) => String(v)}
+                  accent={C.up}
+                  info={
+                    <Info title="Numero massimo di roll" w={280}>
+                      Roll massimi per gamba lungo il percorso. Esauriti i roll, la put resta in essere fino a fine
+                      scenario.
+                    </Info>
+                  }
+                />
+                <button
+                  onClick={() => {
+                    setRollTrigger(DEFAULT_ROLL_PARAMS.triggerPct);
+                    setRollMaxMonths(DEFAULT_ROLL_PARAMS.maxMonthsForward);
+                    setRollStrikeStep(DEFAULT_ROLL_PARAMS.strikeStepPct);
+                    setRollMinCredit(DEFAULT_ROLL_PARAMS.minNetCreditPct);
+                    setRollMaxRolls(DEFAULT_ROLL_PARAMS.maxRolls);
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    fontSize: 11,
+                    fontFamily: SANS,
+                    fontWeight: 600,
+                    background: 'transparent',
+                    color: C.up,
+                    border: `1px solid ${C.up}`,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ↺ Ripristina default (trigger 2% · +12 m · discesa −2% · credito ≥ 0 · 4 roll)
+                </button>
+              </div>
+            )}
+          </div>
           <div
             onClick={() => setShowAdv(!showAdv)}
             style={{ ...lbl, cursor: 'pointer', color: C.blue, marginTop: 4 }}
