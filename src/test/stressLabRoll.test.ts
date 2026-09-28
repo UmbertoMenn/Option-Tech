@@ -41,7 +41,7 @@ describe('stressLab — rolling put in discesa', () => {
     expect(run(nonIdonea, -30, { ...base, roll: ROLL }).rows[0].rolls).toBeUndefined();
   });
 
-  it('shock -30%: roll su strike più bassi a griglia 2%, credito ≥ 0, max 4, cap 12 mesi', () => {
+  it('shock -30%: roll con discesa minima 2% (griglia fine 0,5%), credito ≥ 0, max 4, cap 12 mesi', () => {
     const res = run([putLeg(90, 35 / 365, -1, -1)], -30, { ...base, roll: ROLL });
     const row = res.rows[0];
     expect(row.rolls!.length).toBeGreaterThan(0);
@@ -51,7 +51,9 @@ describe('stressLab — rolling put in discesa', () => {
       expect(ev.S).toBeLessThanOrEqual(ev.fromK * 1.02 + 1e-9); // trigger 2%
       expect(ev.toK).toBeLessThan(ev.fromK);
       expect(ev.toK).toBeLessThan(ev.S);
-      const j = (1 - ev.toK / ev.fromK) / 0.02; // griglia 2% dello strike corrente
+      // discesa minima 2% dello strike corrente, poi griglia fine 0,5%
+      expect(ev.toK).toBeLessThanOrEqual(ev.fromK * 0.98 + 1e-9);
+      const j = (1 - ev.toK / ev.fromK - 0.02) / 0.005;
       expect(Math.abs(j - Math.round(j))).toBeLessThan(1e-9);
       expect(ev.sell - ev.buy).toBeGreaterThanOrEqual(-1e-12); // credito netto ≥ 0
       expect(ev.toT).toBeGreaterThan(ev.fromT);
@@ -60,7 +62,7 @@ describe('stressLab — rolling put in discesa', () => {
     }
   });
 
-  it('strike più basso tra i candidati a credito: lo step successivo della griglia è a debito', () => {
+  it('strike più basso tra i candidati a credito: il gradino successivo della griglia fine è a debito', () => {
     const leg = putLeg(90, 35 / 365, -1, -1);
     // Pricer semplice (vol piatta + shock): lo strike successivo (−2% ulteriore) sulla
     // stessa scadenza deve essere a debito, altrimenti il motore avrebbe scelto quello.
@@ -75,7 +77,7 @@ describe('stressLab — rolling put in discesa', () => {
       },
     });
     const e = sim.rolls[0];
-    const next = e.toK - e.fromK * 0.02;
+    const next = e.toK - e.fromK * 0.005;
     const Tx = e.toT - (30 * (e.d / -30)) / 365;
     const S = 100 * (1 + e.d / 100);
     const dv = coupledDV1M(e.d);
@@ -194,5 +196,34 @@ describe('stressLab — idoneità al rolling', () => {
     expect(rollQForLeg(-2, 3)).toBe(-2);
     expect(rollQForLeg(2, 3)).toBe(0);
     expect(rollQForLeg(-2, undefined)).toBe(0);
+  });
+});
+
+describe('stressLab — discesa minima strike per roll', () => {
+  const leg = () => putLeg(90, 35 / 365, -1, -1);
+  it('scadenza più vicina prima: con discesa minima piccola il primo roll va a +1 mese', () => {
+    const ev = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 1 } }).rows[0].rolls![0];
+    expect(Math.round((ev.toT - ev.fromT) * 12)).toBe(1);
+  });
+
+  it('discesa minima ampia: ogni roll scende almeno di quella % e deve allungare la scadenza', () => {
+    const small = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 1 } }).rows[0].rolls![0];
+    const big = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 10 } }).rows[0];
+    for (const ev of big.rolls!) expect(ev.toK).toBeLessThanOrEqual(ev.fromK * 0.9 + 1e-9);
+    expect(big.rolls![0].toT - big.rolls![0].fromT).toBeGreaterThan(small.toT - small.fromT);
+  });
+
+  it('MTM − netting = − valore temporale della put finale (stessi roll)', () => {
+    const prm = { ...base, roll: { ...ROLL, strikeStepPct: 6 } };
+    const mtm = run([leg()], -30, prm);
+    const net = run([leg()], -30, { ...prm, netting: true });
+    const row = mtm.rows[0];
+    expect(net.rows[0].rolls!.length).toBe(row.rolls!.length);
+    const intrF = Math.max(0, row.finalK! - 70);
+    const tvF = row.pFinal! - intrF;
+    expect(tvF).toBeGreaterThan(0);
+    // p0 MTM (premio originale) vs p0 netting (intrinseco 0): la differenza residua è il premio iniziale
+    const p0 = row.p0;
+    expect((mtm.totEUR - net.totEUR) * FX.USD / 100).toBeCloseTo(p0 - tvF, 6);
   });
 });

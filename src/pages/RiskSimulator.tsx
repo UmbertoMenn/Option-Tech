@@ -1503,17 +1503,29 @@ function StressLabContent() {
                   <br />
                   Con il rolling lo shock <b>non è un salto</b>: il mercato scende a step dell'1% fino allo shock
                   impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
-                  il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende una su <b>strike più
-                  basso</b> (griglia a passo % dello strike corrente, sotto lo spot) e <b>scadenza più lunga</b>{' '}
-                  (di mese in mese, la più vicina che offre un candidato, fino al cap): tra i candidati con credito
-                  netto ≥ minimo si sceglie lo <b>strike più basso</b>.
+                  il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
+                  <br />
+                  1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato;
+                  <br />
+                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente (e sotto lo spot); su
+                  quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
+                  <br />
+                  Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
                   <br />
                   <br />
                   Il roll è neutro sul MTM nell'istante (si scambia a prezzi di mercato): il beneficio viene dallo
                   strike più basso e dal delta minore nel resto della discesa, finanziati dal valore temporale della
-                  scadenza lunga con vol alta. Con <b>Netting Intrinseco (A)</b> la put finale vale il suo intrinseco
-                  sul nuovo strike. In un <b>gap</b> il rolling non protegge: non c'è tempo per rollare prima del
-                  danno.
+                  scadenza lunga con vol alta.
+                  <br />
+                  <br />
+                  <b>MTM vs Netting</b>: la put finale vale intrinseco + valore temporale. In <b>MTM</b> il valore
+                  temporale di una put lunga (vol alta) resta una passività: più si allunga la scadenza, più pesa, e
+                  può mangiarsi il guadagno di strike. Con <b>Netting Intrinseco (A)</b> conta solo l'intrinseco sul
+                  nuovo strike: il valore temporale incassato è dato per già guadagnato (hold to expiry), quindi
+                  strike più bassi migliorano sempre il risultato — ipotesi ottimistica su scadenze lunghe.
+                  <br />
+                  <br />
+                  In un <b>gap</b> il rolling non protegge: non c'è tempo per rollare prima del danno.
                   <br />
                   <br />
                   Il <b>margine a scenario</b> è calcolato sulle gambe dopo i roll. Le curve tratteggiate mostrano
@@ -1568,6 +1580,12 @@ function StressLabContent() {
                   step={0.5}
                   fmt={(v) => fmtN(v, 1) + '%'}
                   accent={C.up}
+                  info={
+                    <Info title="Trigger" w={300}>
+                      Il roll scatta quando lo spot scende a meno di questa % sopra lo strike: spot ≤ strike × (1 +
+                      trigger). 0% = rollo solo quando la put va ATM.
+                    </Info>
+                  }
                 />
                 <Slider
                   label="Scadenza max (mesi dal roll)"
@@ -1578,16 +1596,34 @@ function StressLabContent() {
                   step={1}
                   fmt={(v) => '+' + v + ' m'}
                   accent={C.up}
+                  info={
+                    <Info title="Scadenza massima" w={300}>
+                      Le scadenze candidate si provano di mese in mese dopo la corrente, partendo dalla più vicina.
+                      Nessuna può superare questo numero di mesi dalla data del roll.
+                    </Info>
+                  }
                 />
                 <Slider
-                  label="Passo strike"
+                  label="Discesa minima strike per roll"
                   value={rollStrikeStep}
                   set={setRollStrikeStep}
                   min={0.5}
                   max={10}
                   step={0.5}
-                  fmt={(v) => fmtN(v, 1) + '%'}
+                  fmt={(v) => '−' + fmtN(v, 1) + '%'}
                   accent={C.up}
+                  info={
+                    <Info title="Discesa minima strike" w={340}>
+                      Ogni roll deve portare lo strike almeno questa % sotto lo strike corrente (es. 90 con 4% →
+                      nuovo strike ≤ 86,4). Sulla scadenza più vicina che lo consente a credito si prende lo strike più
+                      basso possibile.
+                      <br />
+                      <br />
+                      Più è alta, più ogni roll compra strike ma deve andare più lungo di scadenza: in <b>MTM</b> il
+                      valore temporale della put lunga può annullare il vantaggio; col <b>Netting</b> il vantaggio
+                      resta intero.
+                    </Info>
+                  }
                 />
                 <Slider
                   label="Credito netto min (% nozionale)"
@@ -1598,6 +1634,12 @@ function StressLabContent() {
                   step={0.1}
                   fmt={(v) => '≥ ' + fmtN(v, 1) + '%'}
                   accent={C.up}
+                  info={
+                    <Info title="Credito netto minimo" w={300}>
+                      Premio della nuova put − costo di riacquisto, in % del nuovo nozionale (strike nuovo × 100).
+                      0 = roll a credito o pari.
+                    </Info>
+                  }
                 />
                 <Slider
                   label="Numero max roll"
@@ -1608,6 +1650,12 @@ function StressLabContent() {
                   step={1}
                   fmt={(v) => String(v)}
                   accent={C.up}
+                  info={
+                    <Info title="Numero massimo di roll" w={280}>
+                      Roll massimi per gamba lungo il percorso. Esauriti i roll, la put resta in essere fino a fine
+                      scenario.
+                    </Info>
+                  }
                 />
                 <button
                   onClick={() => {
@@ -1629,7 +1677,7 @@ function StressLabContent() {
                     cursor: 'pointer',
                   }}
                 >
-                  ↺ Ripristina default (trigger 2% · +12 m · passo 2% · credito ≥ 0 · 4 roll)
+                  ↺ Ripristina default (trigger 2% · +12 m · discesa −2% · credito ≥ 0 · 4 roll)
                 </button>
               </div>
             )}
@@ -2827,10 +2875,17 @@ function StressLabContent() {
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (${fmtN(e.fromT * 12, 1)}m) a ${fmtN(e.buy, 2)} → vendo P${fmtN(e.toK, 2)} (${fmtN(e.toT * 12, 1)}m) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtN(e.toK, 2)} (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
-                      `\n  put finale P${fmtN(rr.finalK ?? 0, 2)} vale ${fmtN(rr.pFinal ?? 0, 2)}${rr.netted ? ' (intrinseco)' : ''}; crediti netti ${sgn(rr.netCredit ?? 0, 2)}\n` +
+                      (() => {
+                        const intrF = S1 != null ? Math.max(0, (rr.finalK ?? 0) - (S1 as number)) : 0;
+                        const tvF = (rr.pFinal ?? 0) - intrF;
+                        return rr.netted
+                          ? `\n  put finale P${fmtN(rr.finalK ?? 0, 2)} a intrinseco = ${fmtN(rr.pFinal ?? 0, 2)} (Netting: valore temporale residuo ignorato)\n`
+                          : `\n  put finale P${fmtN(rr.finalK ?? 0, 2)} = ${fmtN(rr.pFinal ?? 0, 2)} = intrinseco ${fmtN(intrF, 2)} + valore temporale ${fmtN(tvF, 2)}\n`;
+                      })() +
+                      `  crediti netti dei roll ${sgn(rr.netCredit ?? 0, 2)}\n` +
                       `  Px scen. effettivo = put finale − crediti netti (media con la parte non rollata)\n`
                     : '';
                 const tip =

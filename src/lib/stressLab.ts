@@ -120,20 +120,25 @@ export interface ScenarioParams extends SurfaceParams {
  *  - trigger: spot ≤ strike × (1 + triggerPct/100);
  *  - nuova scadenza: di mese in mese dopo la corrente, la più vicina che offre un candidato,
  *    con cap a maxMonthsForward mesi dalla data del roll;
- *  - nuovo strike: griglia a passi di strikeStepPct% sotto lo strike corrente (e sotto lo
- *    spot); tra i candidati con credito netto ≥ minNetCreditPct% del nuovo nozionale si
- *    sceglie lo strike PIÙ BASSO;
+ *  - nuovo strike: almeno strikeStepPct% SOTTO lo strike corrente (discesa minima per
+ *    roll) e sotto lo spot, su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente);
+ *    sulla scadenza più vicina che ha almeno un candidato con credito netto ≥
+ *    minNetCreditPct% del nuovo nozionale si sceglie lo strike PIÙ BASSO;
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
  */
 export interface RollParams {
   triggerPct: number;
   maxMonthsForward: number;
   minNetCreditPct: number;
+  /** Discesa minima dello strike a ogni roll, in % dello strike corrente */
   strikeStepPct: number;
   maxRolls: number;
   /** Granularità del percorso in punti % di mercato. Default 1. */
   pathStepPct?: number;
 }
+
+/** Risoluzione della griglia strike dei candidati sotto la discesa minima (% dello strike corrente). */
+export const ROLL_STRIKE_GRID_PCT = 0.5;
 
 export const DEFAULT_ROLL_PARAMS: RollParams = {
   triggerPct: 2,
@@ -578,7 +583,8 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   const dvAt = (dd: number, i: number) =>
     Math.abs(cFinal) > 1e-9 ? (dV1M * coupledDV1M(dd)) / cFinal : n > 0 ? (dV1M * i) / n : 0;
   const trig = 1 + roll.triggerPct / 100;
-  const step = Math.max(0.1, roll.strikeStepPct) / 100;
+  const minDrop = Math.max(0, roll.strikeStepPct) / 100;
+  const grid = ROLL_STRIKE_GRID_PCT / 100;
   const capT = Math.max(1, roll.maxMonthsForward) / 12;
   const maxRolls = Math.max(0, Math.floor(roll.maxRolls));
 
@@ -602,8 +608,9 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
       const Tn = T + m / 12;
       if (Tn - dy / 365 > capT + 1e-9) break;
       let best: { K: number; sell: number } | null = null;
-      for (let j = 1; j <= 200; j++) {
-        const Kj = K * (1 - step * j);
+      // Candidati: K·(1 − discesa minima), poi più in basso a passi di griglia fine.
+      for (let j = minDrop > 0 ? 0 : 1; j <= 400; j++) {
+        const Kj = K * (1 - minDrop - grid * j);
         if (Kj <= S * 0.05) break;
         if (Kj >= S) continue; // il nuovo strike deve stare sotto lo spot
         const sell = priceAt(Kj, Tn, dd, dv, dy).p;
