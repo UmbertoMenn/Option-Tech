@@ -144,8 +144,8 @@ export const DEFAULT_ROLL_PARAMS: RollParams = {
   triggerPct: 2,
   maxMonthsForward: 12,
   minNetCreditPct: 0,
-  strikeStepPct: 2,
-  maxRolls: 4,
+  strikeStepPct: 5,
+  maxRolls: 11,
   pathStepPct: 1,
 };
 

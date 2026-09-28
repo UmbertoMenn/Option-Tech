@@ -934,22 +934,6 @@ function StressLabContent() {
           </span>
         </div>
       )}
-      {data.ivWarnings > 0 && (
-        <div
-          style={{
-            background: 'rgba(34,174,196,.08)',
-            border: `1px solid ${C.cyan}`,
-            borderRadius: 8,
-            padding: '8px 12px',
-            marginBottom: 12,
-            fontSize: 12,
-            color: C.cyan,
-          }}
-        >
-          ⚑ {data.ivWarnings} gambe con prezzo di riferimento sotto l'intrinseco: quotate a intrinseco
-          (delta 1), si muovono uno-a-uno con il sottostante.
-        </div>
-      )}
 
       {/* PATRIMONIO — AMBITO */}
       <Panel
@@ -1634,7 +1618,7 @@ function StressLabContent() {
                   value={rollMaxRolls}
                   set={setRollMaxRolls}
                   min={1}
-                  max={12}
+                  max={20}
                   step={1}
                   fmt={(v) => String(v)}
                   accent={C.up}
@@ -1665,7 +1649,7 @@ function StressLabContent() {
                     cursor: 'pointer',
                   }}
                 >
-                  ↺ Ripristina default (trigger 2% · +12 m · discesa −2% · credito ≥ 0 · 4 roll)
+                  ↺ Ripristina default (trigger 2% · +12 m · discesa −5% · credito ≥ 0 · 11 roll)
                 </button>
               </div>
             )}
@@ -2755,6 +2739,22 @@ function StressLabContent() {
           </Info>
         }
       >
+        {data.ivWarnings > 0 && (
+          <div
+            style={{
+              background: 'rgba(34,174,196,.08)',
+              border: `1px solid ${C.cyan}`,
+              borderRadius: 8,
+              padding: '6px 10px',
+              marginBottom: 10,
+              fontSize: 11.5,
+              color: C.cyan,
+            }}
+          >
+            ⚑ {data.ivWarnings} gambe con prezzo di riferimento sotto l'intrinseco: quotate a intrinseco
+            (delta 1), si muovono uno-a-uno con il sottostante.
+          </div>
+        )}
         <div style={{ overflowX: 'auto', maxHeight: 460, overflowY: 'auto' }}>
           <table
             style={{

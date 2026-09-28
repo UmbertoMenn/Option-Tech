@@ -19,7 +19,15 @@ import type { Position } from '@/types/portfolio';
 const FX = { USD: 1.16, HKD: 9.04 };
 const R = 0.04;
 const base: ScenarioParams = { skewB: -0.018, kappa: 0.6, pExp: 0.5, r: R, days: 30, fx: FX, netting: false };
-const ROLL: RollParams = { ...DEFAULT_ROLL_PARAMS };
+// Parametri espliciti (indipendenti dai default UI, che possono cambiare).
+const ROLL: RollParams = {
+  triggerPct: 2,
+  maxMonthsForward: 12,
+  minNetCreditPct: 0,
+  strikeStepPct: 2,
+  maxRolls: 4,
+  pathStepPct: 1,
+};
 const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
 
 function putLeg(K: number, T: number, q: number, rollQ?: number): StressLeg {
@@ -225,5 +233,17 @@ describe('stressLab — discesa minima strike per roll', () => {
     // p0 MTM (premio originale) vs p0 netting (intrinseco 0): la differenza residua è il premio iniziale
     const p0 = row.p0;
     expect((mtm.totEUR - net.totEUR) * FX.USD / 100).toBeCloseTo(p0 - tvF, 6);
+  });
+});
+
+describe('stressLab — default rolling', () => {
+  it('trigger 2%, scadenza max 12 mesi, discesa minima 5%, credito ≥ 0, 11 roll', () => {
+    expect(DEFAULT_ROLL_PARAMS).toMatchObject({
+      triggerPct: 2,
+      maxMonthsForward: 12,
+      strikeStepPct: 5,
+      minNetCreditPct: 0,
+      maxRolls: 11,
+    });
   });
 });
