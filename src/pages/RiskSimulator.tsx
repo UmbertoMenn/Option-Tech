@@ -965,9 +965,11 @@ function StressLabContent() {
             <b> patrimonio totale + P&L</b>: è il valore assoluto del tuo patrimonio dopo lo shock.
             <br />
             <br />
-            <b>Includi azioni GP</b>: aggiunge l'esposizione azionaria della Gestione Patrimoniale
-            (anche allo shock). <b>Includi ETF e Commodities</b>: se spento, esposizione e shock si
-            basano solo sui singoli titoli (+ opzioni), togliendo ETF/ETC/commodity.
+            I sotto-toggle sono nella card <b>Esposizione Potenziale in Equity</b>. <b>Includi azioni
+            GP</b>: aggiunge l'esposizione azionaria della Gestione Patrimoniale (anche allo shock).{' '}
+            <b>Includi ETF e Commodities</b>: se spento, esposizione e shock si basano solo sui singoli
+            titoli (+ opzioni), togliendo ETF/ETC/commodity. <b>Includi protezioni</b>: esposizione netta o
+            lorda delle protezioni (lo shock le include sempre).
             <br />
             <br />
             Il toggle <b>Netting Intrinseco (A)</b> qui a fianco sceglie la metrica del totale e la
@@ -1047,13 +1049,13 @@ function StressLabContent() {
       >
         {(() => {
           const pb = data.patrimonyBreakdown;
-          const tog = (on: boolean, onClick: () => void) => (
+          const tog = (on: boolean, onClick: () => void, small = false) => (
             <button
               onClick={onClick}
               style={{
-                width: 42,
-                height: 22,
-                borderRadius: 11,
+                width: small ? 30 : 42,
+                height: small ? 16 : 22,
+                borderRadius: small ? 8 : 11,
                 border: `1px solid ${on ? C.cyan : C.border2}`,
                 background: on ? 'rgba(0,200,255,.25)' : C.panel,
                 cursor: 'pointer',
@@ -1066,9 +1068,9 @@ function StressLabContent() {
                 style={{
                   position: 'absolute',
                   top: 2,
-                  left: on ? 22 : 2,
-                  width: 16,
-                  height: 16,
+                  left: on ? (small ? 15 : 22) : 2,
+                  width: small ? 11 : 16,
+                  height: small ? 11 : 16,
                   borderRadius: '50%',
                   background: on ? C.cyan : C.mut,
                   transition: 'left .15s',
@@ -1099,6 +1101,7 @@ function StressLabContent() {
                   accent: string,
                   info: React.ReactNode,
                   sub?: React.ReactNode,
+                  body?: React.ReactNode,
                 ) => (
                   <div
                     style={{
@@ -1132,6 +1135,28 @@ function StressLabContent() {
                         {sub}
                       </div>
                     )}
+                    {body}
+                  </div>
+                );
+                // Sotto-toggle dell'esposizione potenziale, compatti dentro la sua card.
+                const subTog = (on: boolean, onClick: () => void, label: string, info: React.ReactNode) => (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {tog(on, onClick, true)}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.4,
+                        color: on ? C.cyan : C.mut,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {label}
+                      {info}
+                    </span>
                   </div>
                 );
                 return (
@@ -1145,6 +1170,59 @@ function StressLabContent() {
                         <b> denominatore</b> di P&L%, beta e delta. Rappresenta il rischio se TUTTO si muovesse
                         a pieno (delta 1): è il "potenziale", non l'esposizione direzionale effettiva.
                       </Info>,
+                      <>
+                        Risk Analyzer {fmtN(data.equityGrandTotal / 1000, 0)}k
+                        {!includeProtections && data.equityProtectionSavings > 0
+                          ? ` + protezioni ${fmtN(data.equityProtectionSavings / 1000, 0)}k`
+                          : ''}
+                        {!includeEtfCommodity
+                          ? ` − ETF ${fmtN(data.equityEtfEUR / 1000, 0)}k − commodity ${fmtN(data.equityCommodityEUR / 1000, 0)}k`
+                          : ''}
+                        {gpEquity ? ` + azioni GP ${fmtN(pb.gpEquityEUR / 1000, 0)}k` : ''} = {fmtN(ptfBase / 1000, 0)}k
+                      </>,
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 7 }}>
+                        {subTog(
+                          includeEtfCommodity,
+                          () => setIncludeEtfCommodity((v) => !v),
+                          'Includi ETF e Commodities',
+                          <Info title="Includi ETF e Commodities" w={340}>
+                    Se <b>spento</b>, l'Esposizione Potenziale in Equity e lo shock (beta/delta, P&L, tabelle)
+                    <b> escludono ETF, ETC e commodity</b> e si basano <b>solo sui singoli titoli</b> (più le
+                    opzioni). Serve ad analizzare gli effetti dello shock solo sul portafoglio gestito in
+                    opzioni e singoli titoli. Il patrimonio stressato assoluto resta comunque totale + P&L.
+                  </Info>,
+                        )}
+                        {subTog(
+                          gpEquity,
+                          () => setGpEquity((v) => !v),
+                          `Includi azioni GP${pb.gpEquityEUR > 0 ? ` (+${fmtN(pb.gpEquityEUR / 1000, 0)}k)` : ''}`,
+                          <Info title="Includi azioni GP" w={320}>
+                    Aggiunge l'esposizione azionaria della <b>Gestione Patrimoniale</b> all'esposizione di
+                    riferimento e allo shock dello scenario (equivale al toggle GP del Risk Analyzer).
+                  </Info>,
+                        )}
+                        {subTog(
+                          includeProtections,
+                          () => setIncludeProtections((v) => !v),
+                          `Includi protezioni${
+                            data.equityProtectionSavings > 0
+                              ? ` (${includeProtections ? '−' : '+'}${fmtN(data.equityProtectionSavings / 1000, 0)}k)`
+                              : ''
+                          }`,
+                          <Info title="Includi protezioni" w={360}>
+                    Le protezioni (put protettive, gambe lunghe di spread) sono <b>sempre incluse nello
+                    shock</b>: il P&L dello scenario non cambia. Questo toggle agisce <b>solo sul valore
+                    dell'Esposizione Potenziale in Equity</b> presa come riferimento:
+                    <br />• <b>ON</b> (default): esposizione <b>netta</b> delle protezioni (rischio ridotto).
+                    <br />• <b>OFF</b>: esposizione <b>lorda</b>, come se le protezioni non riducessero il
+                    rischio.
+                    <br />
+                    <br />
+                    Cambiando il denominatore cambiano <b>beta e delta</b> a scenario (esposizione più grande →
+                    beta/delta più bassi, e viceversa).
+                  </Info>,
+                        )}
+                      </div>,
                     )}
                     {showReal &&
                       card(
@@ -1234,96 +1312,6 @@ function StressLabContent() {
                 </span>
               </div>
 
-              {/* Toggle: Includi ETF e Commodities */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                {tog(includeEtfCommodity, () => setIncludeEtfCommodity((v) => !v))}
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.5,
-                    color: includeEtfCommodity ? C.cyan : C.mut,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  Includi ETF e Commodities
-                  <Info title="Includi ETF e Commodities" w={340}>
-                    Se <b>spento</b>, l'Esposizione Potenziale in Equity e lo shock (beta/delta, P&L, tabelle)
-                    <b> escludono ETF, ETC e commodity</b> e si basano <b>solo sui singoli titoli</b> (più le
-                    opzioni). Serve ad analizzare gli effetti dello shock solo sul portafoglio gestito in
-                    opzioni e singoli titoli. Il patrimonio stressato assoluto resta comunque totale + P&L.
-                  </Info>
-                </span>
-              </div>
-
-              {/* Toggle: Includi azioni GP */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                {tog(gpEquity, () => setGpEquity((v) => !v))}
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.5,
-                    color: gpEquity ? C.cyan : C.mut,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  Includi azioni GP
-                  {pb.gpEquityEUR > 0 ? ` (+${fmtN(pb.gpEquityEUR / 1000, 0)}k)` : ''}
-                  <Info title="Includi azioni GP" w={320}>
-                    Aggiunge l'esposizione azionaria della <b>Gestione Patrimoniale</b> all'esposizione di
-                    riferimento e allo shock dello scenario (equivale al toggle GP del Risk Analyzer).
-                  </Info>
-                </span>
-              </div>
-
-              {/* Toggle: Includi protezioni */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                {tog(includeProtections, () => setIncludeProtections((v) => !v))}
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.5,
-                    color: includeProtections ? C.cyan : C.mut,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  Includi protezioni
-                  {data.equityProtectionSavings > 0
-                    ? ` (${includeProtections ? '−' : '+'}${fmtN(data.equityProtectionSavings / 1000, 0)}k)`
-                    : ''}
-                  <Info title="Includi protezioni" w={360}>
-                    Le protezioni (put protettive, gambe lunghe di spread) sono <b>sempre incluse nello
-                    shock</b>: il P&L dello scenario non cambia. Questo toggle agisce <b>solo sul valore
-                    dell'Esposizione Potenziale in Equity</b> presa come riferimento:
-                    <br />• <b>ON</b> (default): esposizione <b>netta</b> delle protezioni (rischio ridotto).
-                    <br />• <b>OFF</b>: esposizione <b>lorda</b>, come se le protezioni non riducessero il
-                    rischio.
-                    <br />
-                    <br />
-                    Cambiando il denominatore cambiano <b>beta e delta</b> a scenario (esposizione più grande →
-                    beta/delta più bassi, e viceversa).
-                  </Info>
-                </span>
-              </div>
-
-              <div style={{ marginTop: 9, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
-                Risk Analyzer {fmtN(data.equityGrandTotal / 1000, 0)}k
-                {!includeProtections && data.equityProtectionSavings > 0
-                  ? ` + protezioni ${fmtN(data.equityProtectionSavings / 1000, 0)}k`
-                  : ''}
-                {!includeEtfCommodity
-                  ? ` − ETF ${fmtN(data.equityEtfEUR / 1000, 0)}k − commodity ${fmtN(data.equityCommodityEUR / 1000, 0)}k`
-                  : ''}
-                {gpEquity ? ` + azioni GP ${fmtN(pb.gpEquityEUR / 1000, 0)}k` : ''} = {fmtN(ptfBase / 1000, 0)}k
-              </div>
             </>
           );
         })()}
