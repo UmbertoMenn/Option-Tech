@@ -37,6 +37,7 @@ import {
   StressUnderlyingMap,
 } from '@/lib/stressLab';
 import { occSphMargin } from '@/lib/occSphMargin';
+import { shortExpirySummary, rolledExpiryISO, ShortExpirySummary, AvgExpiry } from '@/lib/stressLabExpiry';
 
 /* ============================== THEME ==============================
  * Colori legati alle CSS vars tematiche (definite in src/index.css per
@@ -405,6 +406,10 @@ function StressLabContent() {
     () => runScenario(legs, eq, undersActive, effIV, d, dV1M, prm),
     [legs, eq, undersActive, effIV, d, dV1M, prm],
   );
+
+  // Scadenza media (pesata per nozionale) di put e call vendute; con rolling attivo le put
+  // rollate sono sostituite dalla put di arrivo dello scenario corrente.
+  const expirySummary = useMemo(() => shortExpirySummary(legs, rollPrm ? scen.rows : null), [legs, scen, rollPrm]);
 
   // Riepilogo rolling per la card scenario: gambe idonee, rollate e effetto sul P&L totale.
   const rollStats = useMemo(() => {
@@ -794,6 +799,7 @@ function StressLabContent() {
         case 'p0': return rr.p0;
         case 'p1': return rr.p1;
         case 'roll': return rr.rolls?.length ?? ((rr.leg.rollQ ?? 0) < 0 ? 0 : -1);
+        case 'arrivo': return rr.rolls && rr.rolls.length ? (rr.finalT ?? 0) : -1;
         default: return rr.pnlEUR;
       }
     };
@@ -1310,8 +1316,10 @@ function StressLabContent() {
           marginBottom: 14,
         }}
       >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
         <Panel
           title="Scenario shock di mercato"
+          style={rollOn || isMobile ? { flex: 1 } : undefined}
           info={
             <Info title="Come leggere i controlli" w={360}>
               Lo slider è lo <b>shock di mercato</b> (la variazione % dell'indice di riferimento). Viene
@@ -1717,6 +1725,10 @@ function StressLabContent() {
             </div>
           )}
         </Panel>
+        {!rollOn && (
+          <ExpiryCard s={expirySummary} rollOn={false} d={d} fxUSD={fx.USD} wide={false} style={{ flex: 1 }} />
+        )}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,minmax(0,1fr))', gap: 14 }}>
@@ -2011,6 +2023,9 @@ function StressLabContent() {
               ))}
             </div>
           </Panel>
+          {rollOn && (
+            <ExpiryCard s={expirySummary} rollOn d={d} fxUSD={fx.USD} wide={!isMobile} style={{ flex: 1 }} />
+          )}
         </div>
       </div>
 
@@ -2763,7 +2778,7 @@ function StressLabContent() {
               fontFamily: MONO,
               fontSize: 11.5,
               width: '100%',
-              minWidth: 830,
+              minWidth: 940,
             }}
           >
             <thead>
@@ -2779,6 +2794,7 @@ function StressLabContent() {
                   { h: 'Px base', k: 'p0' },
                   { h: 'Px scen.', k: 'p1' },
                   { h: 'Roll', k: 'roll' },
+                  { h: 'Put di arrivo', k: 'arrivo' },
                   { h: 'P&L €', k: 'pnl' },
                 ].map((c, i) => (
                   <th
@@ -2857,9 +2873,17 @@ function StressLabContent() {
                     `IV ${fmtN(rr.sig0 * 100, 1)}% → ${fmtN(rr.sig1 * 100, 1)}%   T ${fmtN(l.T, 3)} anni   r ${fmtN(r * 100, 2)}%\n` +
                     `Prezzo opzione Black-Scholes (USD): ${fmtN(rr.p0, 4)} → ${fmtN(rr.p1, 4)}`;
                 }
+                const arrExp =
+                  rr.rolls && rr.rolls.length && rr.finalT != null ? rolledExpiryISO(l.exp, l.T, rr.finalT) : null;
+                const arrExpS = arrExp ? arrExp.slice(2).split('-') : null;
+                const arrLbl =
+                  rr.rolls && rr.rolls.length
+                    ? `P ${fmtN(rr.finalK ?? l.K, (rr.finalK ?? l.K) < 5 ? 3 : 2)} · ${arrExpS ? `${arrExpS[2]}/${arrExpS[1]}/${arrExpS[0]}` : '—'}`
+                    : '';
                 const rollLines =
                   rr.rolls && rr.rolls.length
                     ? `ROLLING (${-(rr.rollQ ?? 0)} di ${-l.q} contratti):\n` +
+                      `  PUT DI ARRIVO: ${arrLbl} (${Math.round((rr.finalT ?? 0) * 365.25)} gg da oggi, era ${Math.round(l.T * 365.25)} gg)\n` +
                       rr.rolls
                         .map(
                           (e, k) =>
@@ -2952,6 +2976,18 @@ function StressLabContent() {
                         : rollOn && (l.rollQ ?? 0) < 0
                           ? '—'
                           : ''}
+                    </td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {arrLbl ? (
+                        <>
+                          <span style={{ color: C.amber, fontWeight: 700 }}>{arrLbl}</span>
+                          <span style={{ color: C.mut }}> · {Math.round((rr.finalT ?? 0) * 365.25)} gg</span>
+                        </>
+                      ) : rollOn && (l.rollQ ?? 0) < 0 ? (
+                        <span style={{ color: C.mut }}>—</span>
+                      ) : (
+                        ''
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 800, color: pnlColor(rr.pnlEUR) }}>
                       {rr.pnlEUR > 0 ? '+' : ''}
@@ -3088,6 +3124,166 @@ export function RiskSimulator() {
         </ErrorBoundary>
       </main>
     </div>
+  );
+}
+
+/* ============================== SCADENZA MEDIA ==============================
+ * Scadenza media (pesata per nozionale) di put e call vendute. Con il rolling attivo
+ * mostra prima → dopo per le put vendute (put di arrivo a fine percorso). */
+const fmtMonthYear = (days: number) =>
+  new Date(Date.now() + days * 86400000).toLocaleDateString('it-IT', { month: 'short', year: '2-digit' });
+const fmtNotEUR = (v: number) =>
+  v >= 1e6 ? `${fmtN(v / 1e6, 2)} M€` : v >= 1e3 ? `${fmtN(v / 1e3, 0)} k€` : `${fmtN(v, 0)} €`;
+
+function ExpiryTile({
+  label,
+  color,
+  before,
+  after,
+  fxUSD,
+  footer,
+}: {
+  label: string;
+  color: string;
+  before: AvgExpiry;
+  after?: AvgExpiry | null;
+  fxUSD: number;
+  footer?: React.ReactNode;
+}) {
+  const hasAfter = after != null && after.days != null && before.days != null;
+  const main = hasAfter ? (after as AvgExpiry) : before;
+  const delta = hasAfter ? (after!.days as number) - (before.days as number) : 0;
+  return (
+    <div
+      style={{
+        background: C.panel2,
+        border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${color}`,
+        borderRadius: 8,
+        padding: '10px 12px',
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          color,
+          textTransform: 'uppercase',
+          letterSpacing: 0.8,
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
+      {before.days == null ? (
+        <div style={{ fontFamily: MONO, fontSize: 13, color: C.mut }}>nessuna gamba venduta</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            {hasAfter && (
+              <span style={{ fontFamily: MONO, fontSize: 18, fontWeight: 700, color: C.mut }}>
+                {Math.round(before.days)} gg →
+              </span>
+            )}
+            <span style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: hasAfter && delta > 0.5 ? C.up : C.text }}>
+              {Math.round(main.days as number)} gg
+            </span>
+            {hasAfter && Math.abs(delta) >= 0.5 && (
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.up,
+                  border: `1px solid ${C.up}`,
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                }}
+              >
+                {sgn(delta, 0)} gg
+              </span>
+            )}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.mut, marginTop: 3 }}>
+            ≈ {fmtN((main.days as number) / 30.4375, 1)} mesi · {fmtMonthYear(main.days as number)}
+            {hasAfter && <> · prima {fmtMonthYear(before.days)}</>}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 2 }}>
+            {main.legs} gambe · {fmtN(main.contracts, 0)} contratti · nozionale {fmtNotEUR(main.notional / fxUSD)}
+          </div>
+          {footer}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ExpiryCard({
+  s,
+  rollOn,
+  d,
+  fxUSD,
+  wide,
+  style,
+}: {
+  s: ShortExpirySummary;
+  rollOn: boolean;
+  d: number;
+  fxUSD: number;
+  wide: boolean;
+  style?: React.CSSProperties;
+}) {
+  const rollNote = rollOn ? (
+    <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
+      {d >= 0 ? (
+        'nessun roll su shock al rialzo'
+      ) : s.eligible.days == null ? (
+        'nessuna put idonea al rolling'
+      ) : (
+        <>
+          idonee al rolling: {Math.round(s.eligible.days)} → {' '}
+          <b style={{ color: C.up }}>{Math.round(s.eligibleAfter.days ?? s.eligible.days)} gg</b> · {s.rolledLegs}{' '}
+          gambe rollate @ {sgn(d, 1)}%
+        </>
+      )}
+    </div>
+  ) : null;
+  return (
+    <Panel
+      title={rollOn ? `Scadenza media derivati venduti · dopo rolling @ ${sgn(d, 1)}%` : 'Scadenza media derivati venduti'}
+      style={style}
+      info={
+        <Info title="Scadenza media del portafoglio derivati" w={380}>
+          Media delle scadenze (giorni da <b>oggi</b>) delle opzioni <b>vendute</b>, pesata per il{' '}
+          <b>nozionale</b> di ogni gamba (contratti × moltiplicatore × strike). Put e call vendute separate;
+          le gambe comprate non entrano.
+          <br />
+          <br />
+          Con il <b>rolling in discesa</b> attivo, la parte rollata di ogni put è sostituita dalla{' '}
+          <b>put di arrivo</b> a fine percorso (strike più basso, scadenza più lunga): il valore dopo la freccia è
+          la nuova scadenza media delle put vendute allo shock impostato. Le call vendute non vengono rollate.
+        </Info>
+      }
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: wide ? 'minmax(0,1.5fr) minmax(0,1fr)' : '1fr',
+          gap: 10,
+        }}
+      >
+        <ExpiryTile
+          label="Put vendute"
+          color={C.amber}
+          before={s.puts}
+          after={rollOn ? s.putsAfter : null}
+          fxUSD={fxUSD}
+          footer={rollNote}
+        />
+        <ExpiryTile label="Call vendute" color={C.cyan} before={s.calls} fxUSD={fxUSD} />
+      </div>
+    </Panel>
   );
 }
 
