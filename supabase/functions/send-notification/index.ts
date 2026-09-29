@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "npm:resend@2.0.0";
 
 const corsHeaders = {
@@ -308,7 +308,7 @@ ${isAdmin && userName ? `\n*Utente:* ${userName}` : ''}
 }
 
 async function logNotification(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   alertId: string,
   userId: string,
   channel: "email" | "telegram",
