@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -137,6 +137,22 @@ interface BuybackTranche {
   market_price: number | null;
 }
 
+// Riga della tabella call_buyback_alerts usata dal motore di avvisi.
+interface CbAlertConfig {
+  id: string;
+  scope: string;
+  buyback_id: string | null;
+  alert_mode: string;
+  underlying: string;
+  strike: number;
+  expiry_date: string;
+  price_target: number;
+  price_direction: string;
+  cooldown_minutes: number;
+  gain_threshold_pct: number;
+  loss_threshold_pct: number;
+}
+
 function cbCallKey(t: { underlying: string; strike: number; expiry_date: string }): string {
   return `${String(t.underlying).toUpperCase()}|${t.strike}|${t.expiry_date}`;
 }
@@ -200,7 +216,7 @@ function cbTriggeredDirection(
  * Ritorna il numero di avvisi creati.
  */
 async function processCallBuybackAlerts(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   userId: string,
   portfolioId: string,
 ): Promise<number> {
