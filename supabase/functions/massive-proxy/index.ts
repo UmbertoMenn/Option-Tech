@@ -116,7 +116,7 @@ async function fetchWithPagination(
   let retries = 0;
 
   while (nextUrl) {
-    const res = await fetch(nextUrl);
+    const res: Response = await fetch(nextUrl);
 
     if (res.status === 429) {
       retries++;
@@ -130,7 +130,7 @@ async function fetchWithPagination(
       throw new Error(`Massive API error ${res.status}: ${body}`);
     }
 
-    const json = await res.json();
+    const json: any = await res.json();
     if (json.results) allResults = allResults.concat(json.results);
     nextUrl = json.next_url
       ? `${json.next_url}&apiKey=${apiKey}`

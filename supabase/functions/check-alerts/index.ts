@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -137,6 +137,22 @@ interface BuybackTranche {
   market_price: number | null;
 }
 
+// Riga della tabella call_buyback_alerts usata dal motore di avvisi.
+interface CbAlertConfig {
+  id: string;
+  scope: string;
+  buyback_id: string | null;
+  alert_mode: string;
+  underlying: string;
+  strike: number;
+  expiry_date: string;
+  price_target: number;
+  price_direction: string;
+  cooldown_minutes: number;
+  gain_threshold_pct: number;
+  loss_threshold_pct: number;
+}
+
 function cbCallKey(t: { underlying: string; strike: number; expiry_date: string }): string {
   return `${String(t.underlying).toUpperCase()}|${t.strike}|${t.expiry_date}`;
 }
@@ -200,7 +216,7 @@ function cbTriggeredDirection(
  * Ritorna il numero di avvisi creati.
  */
 async function processCallBuybackAlerts(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   userId: string,
   portfolioId: string,
 ): Promise<number> {
@@ -214,7 +230,8 @@ async function processCallBuybackAlerts(
     console.error(`Error fetching call buyback alerts for portfolio ${portfolioId}:`, cbAlertErr);
     return 0;
   }
-  if (!cbAlertConfigs || cbAlertConfigs.length === 0) return 0;
+  const cbConfigs = (cbAlertConfigs || []) as CbAlertConfig[];
+  if (cbConfigs.length === 0) return 0;
 
   const { data: cbRows, error: cbRowsErr } = await supabase
     .from('call_buybacks')
@@ -230,9 +247,9 @@ async function processCallBuybackAlerts(
   // Le configurazioni in modalità prezzo usano il sottostante, non il premio
   // dell'opzione. Si leggono tutti i ticker necessari in un'unica query.
   const priceTickers = [...new Set(
-    cbAlertConfigs
-      .filter((cfg: { alert_mode?: string }) => cfg.alert_mode === 'price')
-      .map((cfg: { underlying: string }) => String(cfg.underlying).toUpperCase()),
+    cbConfigs
+      .filter((cfg) => cfg.alert_mode === 'price')
+      .map((cfg) => String(cfg.underlying).toUpperCase()),
   )];
   const underlyingPriceMap = new Map<string, number>();
   if (priceTickers.length > 0) {
@@ -243,13 +260,13 @@ async function processCallBuybackAlerts(
     if (underlyingPricesErr) {
       console.error(`Error fetching call buyback underlying prices for portfolio ${portfolioId}:`, underlyingPricesErr);
     } else {
-      (underlyingPrices || []).forEach((row: { ticker: string; price: number }) => {
+      ((underlyingPrices || []) as Array<{ ticker: string; price: number }>).forEach((row) => {
         underlyingPriceMap.set(String(row.ticker).toUpperCase(), Number(row.price));
       });
     }
   }
 
-  const positionKeys = cbAlertConfigs.map((c: { id: string }) => `call_buyback_alert_${c.id}`);
+  const positionKeys = cbConfigs.map((c) => `call_buyback_alert_${c.id}`);
   const { data: cbStates } = await supabase
     .from('alert_states')
     .select('*')
@@ -258,7 +275,7 @@ async function processCallBuybackAlerts(
     .in('position_key', positionKeys);
 
   const statesMap = new Map<string, AlertState>();
-  (cbStates || []).forEach((st: AlertState) => {
+  ((cbStates || []) as AlertState[]).forEach((st) => {
     statesMap.set(`${st.position_key}:${st.alert_type}`, st);
   });
 
@@ -274,7 +291,7 @@ async function processCallBuybackAlerts(
 
   let created = 0;
 
-  for (const cfg of cbAlertConfigs) {
+  for (const cfg of cbConfigs) {
     const subject: BuybackTranche[] = cfg.scope === 'tranche'
       ? (cfg.buyback_id && byId.has(cfg.buyback_id) ? [byId.get(cfg.buyback_id)!] : [])
       : (byCall.get(cbCallKey(cfg)) || []);
@@ -631,8 +648,8 @@ serve(async (req) => {
       .from('call_buyback_alerts')
       .select('portfolios!inner(user_id)')
       .eq('enabled', true);
-    const cbUserIds = (cbAlertPortfolios || [])
-      .map((r: { portfolios?: { user_id?: string } }) => r.portfolios?.user_id)
+    const cbUserIds = ((cbAlertPortfolios || []) as Array<{ portfolios?: { user_id?: string } }>)
+      .map((r) => r.portfolios?.user_id)
       .filter((id): id is string => !!id);
 
     const uniqueUserIds = [...new Set([

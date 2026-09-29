@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, type ComponentType } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,18 +14,37 @@ import { HistoricalViewBanner } from "@/components/historical/HistoricalViewBann
 import { toast } from "sonner";
 import { ThemeProvider } from "next-themes";
 
-// Lazy load heavy components to improve FCP
-const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then(m => ({ default: m.Dashboard })));
-const AdminPanel = lazy(() => import("@/components/admin/AdminPanel").then(m => ({ default: m.AdminPanel })));
-const Derivatives = lazy(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
-const RiskAnalyzer = lazy(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
-const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ default: m.RiskSimulator })));
-const OptionAnalyzer = lazy(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
-const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
-const Simulator = lazy(() => import("@/pages/Simulator"));
-const Backtesting = lazy(() => import("@/pages/Backtesting"));
-const OAuthConsent = lazy(() => import("@/pages/OAuthConsent"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+// Lazy load heavy components to improve FCP.
+// Se un import dinamico fallisce (es. il browser ha in cache un index.html
+// che punta a chunk rimossi da un deploy più recente), ricarichiamo la pagina
+// una volta sola: il nuovo index.html porta i chunk corretti.
+type PageModule = { default: ComponentType<any> };
+
+function lazyWithReload(factory: () => Promise<PageModule>) {
+  return lazy<ComponentType<any>>(() =>
+    factory().catch((err) => {
+      const KEY = "app_chunk_reload_at";
+      const last = Number(sessionStorage.getItem(KEY) ?? 0);
+      if (Date.now() - last > 10_000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+      }
+      throw err;
+    })
+  );
+}
+
+const Dashboard = lazyWithReload(() => import("@/components/dashboard/Dashboard").then(m => ({ default: m.Dashboard })));
+const AdminPanel = lazyWithReload(() => import("@/components/admin/AdminPanel").then(m => ({ default: m.AdminPanel })));
+const Derivatives = lazyWithReload(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
+const RiskAnalyzer = lazyWithReload(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
+const RiskSimulator = lazyWithReload(() => import("@/pages/RiskSimulator").then(m => ({ default: m.RiskSimulator })));
+const OptionAnalyzer = lazyWithReload(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
+const ResetPassword = lazyWithReload(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
+const Simulator = lazyWithReload(() => import("@/pages/Simulator"));
+const Backtesting = lazyWithReload(() => import("@/pages/Backtesting"));
+const OAuthConsent = lazyWithReload(() => import("@/pages/OAuthConsent"));
+const NotFound = lazyWithReload(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
 const STRATEGY_WIZARD_ACTIVE_KEY = 'strategyConfigWizardActive';

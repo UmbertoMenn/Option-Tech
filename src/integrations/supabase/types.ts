@@ -1142,6 +1142,30 @@ export type Database = {
           },
         ]
       }
+      option_listed_strikes: {
+        Row: {
+          expiry: string
+          put_strikes: number[]
+          spot: number | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          expiry: string
+          put_strikes?: number[]
+          spot?: number | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          expiry?: string
+          put_strikes?: number[]
+          spot?: number | null
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       portfolio_full_snapshots: {
         Row: {
           cash_value: number
@@ -1149,10 +1173,10 @@ export type Database = {
           derivative_overrides: Json
           gp_holdings: Json
           gp_total_value: number | null
-          restricted_cash_value: number | null
           id: string
           portfolio_id: string
           positions: Json
+          restricted_cash_value: number | null
           snapshot_date: string
           strategy_configurations: Json
           updated_at: string | null
@@ -1163,10 +1187,10 @@ export type Database = {
           derivative_overrides?: Json
           gp_holdings?: Json
           gp_total_value?: number | null
-          restricted_cash_value?: number | null
           id?: string
           portfolio_id: string
           positions?: Json
+          restricted_cash_value?: number | null
           snapshot_date: string
           strategy_configurations?: Json
           updated_at?: string | null
@@ -1177,10 +1201,10 @@ export type Database = {
           derivative_overrides?: Json
           gp_holdings?: Json
           gp_total_value?: number | null
-          restricted_cash_value?: number | null
           id?: string
           portfolio_id?: string
           positions?: Json
+          restricted_cash_value?: number | null
           snapshot_date?: string
           strategy_configurations?: Json
           updated_at?: string | null
@@ -1231,6 +1255,196 @@ export type Database = {
             foreignKeyName: "portfolio_latest_values_portfolio_id_fkey"
             columns: ["portfolio_id"]
             isOneToOne: true
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolio_movement_uploads: {
+        Row: {
+          file_name: string | null
+          id: string
+          period_end: string
+          period_start: string
+          portfolio_id: string
+          rows_total: number
+          source: string
+          uploaded_at: string
+        }
+        Insert: {
+          file_name?: string | null
+          id?: string
+          period_end: string
+          period_start: string
+          portfolio_id: string
+          rows_total?: number
+          source: string
+          uploaded_at?: string
+        }
+        Update: {
+          file_name?: string | null
+          id?: string
+          period_end?: string
+          period_start?: string
+          portfolio_id?: string
+          rows_total?: number
+          source?: string
+          uploaded_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_movement_uploads_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolio_movements: {
+        Row: {
+          account_id: string
+          accrued_eur: number
+          attribution_price_source: string | null
+          bolli_eur: number
+          booking_date: string | null
+          causale: string | null
+          causale_description: string | null
+          commission_eur: number
+          created_at: string
+          currency: string | null
+          description: string | null
+          descriptor: string | null
+          effective_date: string
+          exchange_rate: number | null
+          expiry_date: string | null
+          fx_commission_eur: number
+          gross_eur: number
+          id: string
+          intrinsic_per_share: number | null
+          isin: string | null
+          kind: string
+          manual_time_value_per_share: number | null
+          net_eur: number
+          operation_date: string | null
+          operation_id: string | null
+          option_type: string | null
+          period_end: string | null
+          period_start: string | null
+          portfolio_id: string
+          position_side: string | null
+          price: number | null
+          quantity: number | null
+          row_key: string
+          scope: string
+          source: string
+          strike: number | null
+          tax_eur: number
+          time_value_per_share: number | null
+          underlying_key: string | null
+          underlying_price: number | null
+          underlying_ticker: string | null
+          unexplained_charge_eur: number
+          updated_at: string
+          value_date: string | null
+        }
+        Insert: {
+          account_id: string
+          accrued_eur?: number
+          attribution_price_source?: string | null
+          bolli_eur?: number
+          booking_date?: string | null
+          causale?: string | null
+          causale_description?: string | null
+          commission_eur?: number
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          descriptor?: string | null
+          effective_date: string
+          exchange_rate?: number | null
+          expiry_date?: string | null
+          fx_commission_eur?: number
+          gross_eur?: number
+          id?: string
+          intrinsic_per_share?: number | null
+          isin?: string | null
+          kind: string
+          manual_time_value_per_share?: number | null
+          net_eur?: number
+          operation_date?: string | null
+          operation_id?: string | null
+          option_type?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          portfolio_id: string
+          position_side?: string | null
+          price?: number | null
+          quantity?: number | null
+          row_key: string
+          scope?: string
+          source: string
+          strike?: number | null
+          tax_eur?: number
+          time_value_per_share?: number | null
+          underlying_key?: string | null
+          underlying_price?: number | null
+          underlying_ticker?: string | null
+          unexplained_charge_eur?: number
+          updated_at?: string
+          value_date?: string | null
+        }
+        Update: {
+          account_id?: string
+          accrued_eur?: number
+          attribution_price_source?: string | null
+          bolli_eur?: number
+          booking_date?: string | null
+          causale?: string | null
+          causale_description?: string | null
+          commission_eur?: number
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          descriptor?: string | null
+          effective_date?: string
+          exchange_rate?: number | null
+          expiry_date?: string | null
+          fx_commission_eur?: number
+          gross_eur?: number
+          id?: string
+          intrinsic_per_share?: number | null
+          isin?: string | null
+          kind?: string
+          manual_time_value_per_share?: number | null
+          net_eur?: number
+          operation_date?: string | null
+          operation_id?: string | null
+          option_type?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          portfolio_id?: string
+          position_side?: string | null
+          price?: number | null
+          quantity?: number | null
+          row_key?: string
+          scope?: string
+          source?: string
+          strike?: number | null
+          tax_eur?: number
+          time_value_per_share?: number | null
+          underlying_key?: string | null
+          underlying_price?: number | null
+          underlying_ticker?: string | null
+          unexplained_charge_eur?: number
+          updated_at?: string
+          value_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_movements_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
             referencedRelation: "portfolios"
             referencedColumns: ["id"]
           },
@@ -1962,6 +2176,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      restore_latest_portfolio_snapshot: {
+        Args: { p_portfolio_id: string }
+        Returns: string
       }
       verify_cron_secret: { Args: { p_secret: string }; Returns: boolean }
     }
