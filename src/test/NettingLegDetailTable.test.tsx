@@ -19,13 +19,13 @@ function leg(id: string, type: 'put' | 'call', intr: number, tv: number, exclude
 const rows = [leg('PUT-SHORT', 'put', -1000, -200), leg('PUT-LONG', 'put', 400, 50), leg('CALL', 'call', -2000, -300)];
 
 function expectTotals(intr: string, tv: string, total: string) {
-  const summary = screen.getByRole('region', { name: 'Riepilogo gambe selezionate' });
   // ICU versions differ on grouping four-digit Italian amounts.
   const normalize = (value: string) => value.replace(/\./g, '');
-  const values = within(summary).getAllByRole('definition').map((el) => normalize(el.textContent ?? ''));
-  expect(values.slice(0, 3)).toEqual([intr, tv, total].map(normalize));
-  const table = screen.getByRole('table');
-  expect(normalize(table.querySelector('tfoot')?.textContent ?? '')).toContain(normalize(total));
+  const footer = screen.getByRole('table').querySelector('tfoot')!;
+  const values = within(footer).getAllByRole('cell').slice(1).map((el) =>
+    normalize(el.childNodes[0]?.textContent ?? ''),
+  );
+  expect(values).toEqual([intr, tv, total].map(normalize));
 }
 
 describe('NettingLegDetailTable: subtotali per tipo', () => {
@@ -55,8 +55,8 @@ describe('NettingLegDetailTable: subtotali per tipo', () => {
     const { rerender } = render(<NettingLegDetailTable rows={intrinsicRows} viewMode={viewMode} />);
     fireEvent.click(screen.getByRole('button', { name: 'Solo PUT (1)' }));
     expectTotals('−1.000 €', '0 €', '−1.000 €');
-    const summary = screen.getByRole('region', { name: 'Riepilogo gambe selezionate' });
-    expect(within(summary).getAllByRole('definition')[3]).toHaveTextContent('−200 €');
+    const footer = screen.getByRole('table').querySelector('tfoot')!;
+    expect(within(footer).getByText('escl. −200 €')).toBeVisible();
 
     rerender(<NettingLegDetailTable rows={[rows[2]]} viewMode={viewMode} />);
     expect(screen.getByText('Nessuna gamba PUT presente')).toBeVisible();

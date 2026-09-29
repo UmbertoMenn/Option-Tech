@@ -171,30 +171,6 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
         ))}
       </div>
 
-      <section aria-label="Riepilogo gambe selezionate" aria-live="polite" style={{ marginBottom: 8 }}>
-        <p style={{ fontSize: 10, color: C.mut, margin: '0 0 4px' }}>
-          {totalLabel} · {filteredRows.length} gambe · EUR · importi con segno
-        </p>
-        <dl style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 24px', margin: 0, padding: '8px 10px', background: C.panel2, borderRadius: 6 }}>
-          {[
-            { label: 'Valore intrinseco', value: totals.intr },
-            { label: 'Valore temporale conteggiato', value: totals.tvCounted },
-            { label: totalLabel, value: totals.tot },
-          ].map(({ label, value }) => (
-            <div key={label}>
-              <dt style={{ fontSize: 10, color: C.mut }}>{label}</dt>
-              <dd style={{ margin: 0, fontSize: 13, fontWeight: 800, color: pnlColor(value) }}>{fmtEUR(value)}</dd>
-            </div>
-          ))}
-          {isEx && (
-            <div title="Valore temporale delle gambe valutate al solo intrinseco: non incluso nel subtotale.">
-              <dt style={{ fontSize: 10, color: C.mut }}>Valore temporale escluso dal totale</dt>
-              <dd style={{ margin: 0, fontSize: 13, color: C.mut }}>{fmtEUR(totals.tvExcluded)}</dd>
-            </div>
-          )}
-        </dl>
-      </section>
-
       <div
         onPointerDownCapture={(e) => e.stopPropagation()}
         style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6 }}
