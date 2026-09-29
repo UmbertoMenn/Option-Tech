@@ -422,7 +422,7 @@ serve(async (req) => {
       if (currency == null) currency = fh.currency;
     }
     name = name ?? cached?.name ?? null;
-    currency = currency ?? cached?.currency ?? "USD";
+    currency = String(currency ?? cached?.currency ?? "USD");
 
     // 2. Summary Yahoo (serve per beta e dividend yield)
     const sum = await yahooSummary(ticker, auth);

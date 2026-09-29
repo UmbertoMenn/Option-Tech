@@ -815,7 +815,7 @@ serve(async (req) => {
     
     const isins = body.isins || [];
     const descriptions = (body as any).descriptions || {};
-    const names = (body as any).names || []; // NEW: derivative underlying names
+    const names: string[] = (body as any).names || []; // NEW: derivative underlying names
     const results: Array<{ isin: string; ticker?: string; sector?: string | null; source: string; error?: string }> = [];
     const nameResults: Array<{ name: string; ticker?: string; sector?: string | null; industry?: string | null; source: string }> = [];
     
