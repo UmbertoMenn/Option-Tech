@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { LegDecompositionRow } from '@/hooks/useDerivativeNetting';
+import type { LegDecompositionRow } from '@/hooks/useDerivativeNetting';
 
 // Palette e font allineati allo Stress Lab (variabili --stress-* theme-aware)
 const C = {
@@ -33,6 +33,12 @@ function fmtExpiry(exp: string | null): string {
 }
 
 type SortKey = 'ticker' | 'gamba' | 'q' | 'spot' | 'px' | 'intr' | 'tv' | 'tot';
+type OptionFilter = 'all' | 'put' | 'call';
+const OPTION_FILTERS = [
+  { value: 'all', label: 'Tutte' },
+  { value: 'put', label: 'Solo PUT' },
+  { value: 'call', label: 'Solo CALL' },
+] as const;
 
 interface Props {
   rows: LegDecompositionRow[];
@@ -41,6 +47,11 @@ interface Props {
 
 export function NettingLegDetailTable({ rows, viewMode }: Props) {
   const [sort, setSort] = useState<{ col: SortKey; dir: 'asc' | 'desc' }>({ col: 'tot', dir: 'asc' });
+  const [optionFilter, setOptionFilter] = useState<OptionFilter>('all');
+  const filteredRows = useMemo(
+    () => optionFilter === 'all' ? rows : rows.filter((r) => r.optionType === optionFilter),
+    [rows, optionFilter],
+  );
 
   const sortedRows = useMemo(() => {
     const val = (r: LegDecompositionRow): number | string => {
@@ -55,7 +66,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
         case 'tot': return r.contribEUR;
       }
     };
-    const arr = [...rows];
+    const arr = [...filteredRows];
     arr.sort((a, b) => {
       const va = val(a);
       const vb = val(b);
@@ -65,18 +76,18 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
       return sort.dir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [rows, sort, viewMode]);
+  }, [filteredRows, sort, viewMode]);
 
   const totals = useMemo(() => {
     let intr = 0, tvCounted = 0, tvExcluded = 0, tot = 0;
-    for (const r of rows) {
+    for (const r of filteredRows) {
       intr += r.intrinsicCountedEUR;
       tvCounted += r.timeValueCountedEUR;
       tvExcluded += r.timeValueExcludedEUR;
       tot += r.contribEUR;
     }
     return { intr, tvCounted, tvExcluded, tot };
-  }, [rows]);
+  }, [filteredRows]);
 
   if (rows.length === 0) {
     return (
@@ -87,6 +98,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
   }
 
   const isEx = viewMode !== 'netting_total';
+  const totalLabel = optionFilter === 'all' ? 'Totale derivati' : `Subtotale ${optionFilter.toUpperCase()}`;
 
   const th = (label: string, key: SortKey, align: 'left' | 'right', title: string) => (
     <th
@@ -136,6 +148,54 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
       </p>
 
       <div
+        role="group"
+        aria-label="Filtra gambe per tipo di opzione"
+        onPointerDownCapture={(e) => e.stopPropagation()}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}
+      >
+        {OPTION_FILTERS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={optionFilter === value}
+            onClick={() => setOptionFilter(value)}
+            style={{
+              padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${optionFilter === value ? C.cyan : C.border}`,
+              background: optionFilter === value ? C.panel2 : C.panel,
+              color: optionFilter === value ? C.cyan : C.mut, cursor: 'pointer',
+            }}
+          >
+            {label} ({value === 'all' ? rows.length : rows.filter((r) => r.optionType === value).length})
+          </button>
+        ))}
+      </div>
+
+      <section aria-label="Riepilogo gambe selezionate" aria-live="polite" style={{ marginBottom: 8 }}>
+        <p style={{ fontSize: 10, color: C.mut, margin: '0 0 4px' }}>
+          {totalLabel} · {filteredRows.length} gambe · EUR · importi con segno
+        </p>
+        <dl style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 24px', margin: 0, padding: '8px 10px', background: C.panel2, borderRadius: 6 }}>
+          {[
+            { label: 'Valore intrinseco', value: totals.intr },
+            { label: 'Valore temporale conteggiato', value: totals.tvCounted },
+            { label: totalLabel, value: totals.tot },
+          ].map(({ label, value }) => (
+            <div key={label}>
+              <dt style={{ fontSize: 10, color: C.mut }}>{label}</dt>
+              <dd style={{ margin: 0, fontSize: 13, fontWeight: 800, color: pnlColor(value) }}>{fmtEUR(value)}</dd>
+            </div>
+          ))}
+          {isEx && (
+            <div title="Valore temporale delle gambe valutate al solo intrinseco: non incluso nel subtotale.">
+              <dt style={{ fontSize: 10, color: C.mut }}>Valore temporale escluso dal totale</dt>
+              <dd style={{ margin: 0, fontSize: 13, color: C.mut }}>{fmtEUR(totals.tvExcluded)}</dd>
+            </div>
+          )}
+        </dl>
+      </section>
+
+      <div
         onPointerDownCapture={(e) => e.stopPropagation()}
         style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 6 }}
       >
@@ -162,6 +222,13 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
             </tr>
           </thead>
           <tbody>
+            {sortedRows.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '20px 6px', color: C.mut }}>
+                  Nessuna gamba {optionFilter.toUpperCase()} presente
+                </td>
+              </tr>
+            )}
             {sortedRows.map((r) => {
               const isCall = r.optionType === 'call';
               const kDec = (r.strike ?? 0) < 5 ? 3 : 0;
@@ -243,7 +310,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
           <tfoot>
             <tr style={{ borderTop: `2px solid ${C.border2}`, background: C.panel2 }}>
               <td colSpan={5} style={{ color: C.text, fontWeight: 700, textTransform: 'uppercase', fontSize: 10, padding: '6px' }}>
-                Totale derivati
+                {totalLabel}
               </td>
               <td style={{ textAlign: 'right', color: pnlColor(totals.intr), fontWeight: 800, padding: '6px' }}>
                 {fmtEUR(totals.intr)}
