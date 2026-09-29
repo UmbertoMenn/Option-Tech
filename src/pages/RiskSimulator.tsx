@@ -18,11 +18,12 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Activity, AlertTriangle, Loader2, FlaskConical } from 'lucide-react';
+import { Activity, AlertTriangle, Loader2, FlaskConical, Save } from 'lucide-react';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useStressLab, StressLabInputs } from '@/hooks/useStressLab';
+import { useStressRollSettings } from '@/hooks/useStressRollSettings';
 import {
   runScenario,
   occMargin,
@@ -343,12 +344,17 @@ function StressLabContent() {
   const [showUnd, setShowUnd] = useState(false);
   const [netting, setNetting] = useState(false);
   /* ---------- Rolling in discesa delle put vendute (naked put / put spread / diagonal put spread) ---------- */
-  const [rollOn, setRollOn] = useState(false);
-  const [rollTrigger, setRollTrigger] = useState(DEFAULT_ROLL_PARAMS.triggerPct);
-  const [rollMaxMonths, setRollMaxMonths] = useState(DEFAULT_ROLL_PARAMS.maxMonthsForward);
-  const [rollMinCredit, setRollMinCredit] = useState(DEFAULT_ROLL_PARAMS.minNetCreditPct);
-  const [rollStrikeStep, setRollStrikeStep] = useState(DEFAULT_ROLL_PARAMS.strikeStepPct);
-  const [rollMaxRolls, setRollMaxRolls] = useState(DEFAULT_ROLL_PARAMS.maxRolls);
+  const {
+    settings: rollSettings, setSetting: setRollSetting, updateSettings: updateRollSettings,
+    save: saveRollSettings, canEdit: canEditRollSettings, isSaving: isSavingRollSettings,
+    loadError: rollSettingsLoadError, retry: retryRollSettings, selectedUserId: rollSettingsUserId,
+  } = useStressRollSettings();
+  const rollOn = rollSettings.enabled;
+  const rollTrigger = rollSettings.triggerPct;
+  const rollMaxMonths = rollSettings.maxMonthsForward;
+  const rollMinCredit = rollSettings.minNetCreditPct;
+  const rollStrikeStep = rollSettings.strikeStepPct;
+  const rollMaxRolls = rollSettings.maxRolls;
   const rollPrm = useMemo<RollParams | null>(
     () =>
       rollOn
@@ -1472,7 +1478,7 @@ function StressLabContent() {
               borderTop: `1px solid ${C.border}`,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <span
                 style={{
                   fontSize: 11,
@@ -1546,35 +1552,61 @@ function StressLabContent() {
                   il confronto senza rolling.
                 </Info>
               </span>
-              <button
-                onClick={() => setRollOn(!rollOn)}
-                style={{
-                  width: 42,
-                  height: 22,
-                  borderRadius: 11,
-                  border: `1px solid ${rollOn ? C.up : C.border2}`,
-                  background: rollOn ? 'rgba(38,166,154,.25)' : C.panel,
-                  cursor: 'pointer',
-                  position: 'relative',
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-                aria-label="Attiva rolling put"
-              >
-                <span
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={saveRollSettings}
+                  disabled={!canEditRollSettings || isSavingRollSettings}
+                  aria-label="Salva parametri rolling put"
+                  title={!rollSettingsUserId ? 'Seleziona un utente per salvare' : 'Salva i parametri per questo utente'}
                   style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: rollOn ? 22 : 2,
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: rollOn ? C.up : C.mut,
-                    transition: 'left .15s',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '4px 7px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                    color: C.up, background: C.panel, border: `1px solid ${C.up}`,
+                    cursor: canEditRollSettings && !isSavingRollSettings ? 'pointer' : 'not-allowed',
+                    opacity: canEditRollSettings && !isSavingRollSettings ? 1 : 0.5,
                   }}
-                />
-              </button>
+                >
+                  {isSavingRollSettings ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  Salva
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRollSetting('enabled', !rollOn)}
+                  disabled={!canEditRollSettings}
+                  style={{
+                    width: 42,
+                    height: 22,
+                    borderRadius: 11,
+                    border: `1px solid ${rollOn ? C.up : C.border2}`,
+                    background: rollOn ? 'rgba(38,166,154,.25)' : C.panel,
+                    cursor: canEditRollSettings ? 'pointer' : 'not-allowed',
+                    position: 'relative',
+                    padding: 0,
+                    flexShrink: 0,
+                  }}
+                  aria-label="Attiva rolling put"
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      left: rollOn ? 22 : 2,
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: rollOn ? C.up : C.mut,
+                      transition: 'left .15s',
+                    }}
+                  />
+                </button>
+              </div>
             </div>
+            {rollSettingsLoadError && rollSettingsUserId && (
+              <button type="button" onClick={() => void retryRollSettings()} style={{ color: C.amber, fontSize: 11 }}>
+                Parametri rolling non disponibili · Riprova
+              </button>
+            )}
             <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
               {rollStats.eligible} put idonee
               {rollStats.itm > 0 && (
@@ -1617,7 +1649,7 @@ function StressLabContent() {
                 <Slider
                   label="Trigger (spot entro % dallo strike)"
                   value={rollTrigger}
-                  set={setRollTrigger}
+                  set={(v) => setRollSetting('triggerPct', v)}
                   min={0}
                   max={15}
                   step={0.5}
@@ -1633,7 +1665,7 @@ function StressLabContent() {
                 <Slider
                   label="Scadenza max (mesi dal roll)"
                   value={rollMaxMonths}
-                  set={setRollMaxMonths}
+                  set={(v) => setRollSetting('maxMonthsForward', v)}
                   min={1}
                   max={24}
                   step={1}
@@ -1650,7 +1682,7 @@ function StressLabContent() {
                 <Slider
                   label="Discesa minima strike per roll"
                   value={rollStrikeStep}
-                  set={setRollStrikeStep}
+                  set={(v) => setRollSetting('strikeStepPct', v)}
                   min={0.5}
                   max={10}
                   step={0.5}
@@ -1676,7 +1708,7 @@ function StressLabContent() {
                 <Slider
                   label="Credito netto min (% nozionale)"
                   value={rollMinCredit}
-                  set={setRollMinCredit}
+                  set={(v) => setRollSetting('minNetCreditPct', v)}
                   min={0}
                   max={3}
                   step={0.1}
@@ -1692,7 +1724,7 @@ function StressLabContent() {
                 <Slider
                   label="Numero max roll"
                   value={rollMaxRolls}
-                  set={setRollMaxRolls}
+                  set={(v) => setRollSetting('maxRolls', v)}
                   min={1}
                   max={20}
                   step={1}
@@ -1706,12 +1738,15 @@ function StressLabContent() {
                   }
                 />
                 <button
+                  disabled={!canEditRollSettings}
                   onClick={() => {
-                    setRollTrigger(DEFAULT_ROLL_PARAMS.triggerPct);
-                    setRollMaxMonths(DEFAULT_ROLL_PARAMS.maxMonthsForward);
-                    setRollStrikeStep(DEFAULT_ROLL_PARAMS.strikeStepPct);
-                    setRollMinCredit(DEFAULT_ROLL_PARAMS.minNetCreditPct);
-                    setRollMaxRolls(DEFAULT_ROLL_PARAMS.maxRolls);
+                    updateRollSettings({
+                      triggerPct: DEFAULT_ROLL_PARAMS.triggerPct,
+                      maxMonthsForward: DEFAULT_ROLL_PARAMS.maxMonthsForward,
+                      strikeStepPct: DEFAULT_ROLL_PARAMS.strikeStepPct,
+                      minNetCreditPct: DEFAULT_ROLL_PARAMS.minNetCreditPct,
+                      maxRolls: DEFAULT_ROLL_PARAMS.maxRolls,
+                    });
                   }}
                   style={{
                     padding: '5px 10px',

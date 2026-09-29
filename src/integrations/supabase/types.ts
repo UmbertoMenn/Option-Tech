@@ -1751,6 +1751,39 @@ export type Database = {
           },
         ]
       }
+      stress_lab_roll_settings: {
+        Row: {
+          user_id: string
+          enabled: boolean
+          trigger_pct: number
+          max_months_forward: number
+          strike_step_pct: number
+          min_net_credit_pct: number
+          max_rolls: number
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          enabled?: boolean
+          trigger_pct?: number
+          max_months_forward?: number
+          strike_step_pct?: number
+          min_net_credit_pct?: number
+          max_rolls?: number
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          enabled?: boolean
+          trigger_pct?: number
+          max_months_forward?: number
+          strike_step_pct?: number
+          min_net_credit_pct?: number
+          max_rolls?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       put_roll_targets: {
         Row: {
           created_at: string | null
