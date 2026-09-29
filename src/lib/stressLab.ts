@@ -228,6 +228,23 @@ export function rollStrikeCandidates(
   chains?: StrikeChain[] | null,
   floorFrac = 0.05,
 ): StrikeCandidate[] {
+  return selectRollStrikeCandidates(K, S, minDropPct, Tn, chains, floorFrac);
+}
+
+interface RollChainCache {
+  exact: Map<StrikeChain, { ks: number[]; step: number | null }>;
+  near: Map<StrikeChain, Map<number, number | null>>;
+}
+
+function selectRollStrikeCandidates(
+  K: number,
+  S: number,
+  minDropPct: number,
+  Tn?: number,
+  chains?: StrikeChain[] | null,
+  floorFrac = 0.05,
+  cache?: RollChainCache,
+): StrikeCandidate[] {
   const upper = K * (1 - Math.max(0, minDropPct) / 100);
   const ok = (k: number) => k <= upper + 1e-9 && k < K - 1e-9 && k < S - 1e-9 && k > S * floorFrac;
   const grid = (inc: number, src: StrikeSrc): StrikeCandidate[] => {
@@ -245,10 +262,15 @@ export function rollStrikeCandidates(
       .filter((c) => Math.abs(c.T - Tn) <= 0.5 / 12)
       .sort((a, b) => Math.abs(a.T - Tn) - Math.abs(b.T - Tn))[0];
     if (exact) {
-      const ks = [...new Set(exact.strikes.map(r2))].sort((a, b) => b - a);
+      let prepared = cache?.exact.get(exact);
+      if (!prepared) {
+        const ks = [...new Set(exact.strikes.map(r2))].sort((a, b) => b - a);
+        prepared = { ks, step: chainStep(ks) };
+        cache?.exact.set(exact, prepared);
+      }
+      const { ks, step } = prepared;
       const out: StrikeCandidate[] = ks.filter(ok).map((k) => ({ k, src: 'reale' as const }));
       const minK = ks[ks.length - 1];
-      const step = chainStep(ks);
       if (step && step > 0) {
         for (let n = 1; n <= 400; n++) {
           const k = r2(minK - n * step);
@@ -259,7 +281,10 @@ export function rollStrikeCandidates(
       return out;
     }
     const near = [...valid].sort((a, b) => Math.abs(a.T - (Tn ?? 0)) - Math.abs(b.T - (Tn ?? 0)))[0];
-    const step = chainStep(near.strikes, K);
+    let steps = cache?.near.get(near);
+    if (!steps && cache) { steps = new Map(); cache.near.set(near, steps); }
+    const step = steps?.has(K) ? steps.get(K)! : chainStep(near.strikes, K);
+    steps?.set(K, step);
     if (step && step > 0) return grid(step, 'passo');
   }
   return grid(rollStrikeIncrement(S), 'regola');
@@ -731,6 +756,10 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   let T = T0;
   let netCredit = 0;
   const rolls: RollEvent[] = [];
+  // The chain is immutable during this simulation. Normalize/sort each expiry
+  // once, rather than at every path step and every attempted roll. Local cache:
+  // a refreshed chain or a later call never inherits stale strike data.
+  const chainCache: RollChainCache = { exact: new Map(), near: new Map() };
 
   // Solo put OTM: una put già ITM (spot ≤ strike) allo stato attuale non si rolla.
   if (S0 <= K0) {
@@ -755,7 +784,7 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
       // Cap: mesi dal roll (sempre) e, per i diagonal, scadenza della put comprata.
       if (Tn - dy / 365 > capT + 1e-9 || (capAbs != null && Tn > capAbs)) break;
       // Strike quotati per la scadenza di arrivo: ≤ K·(1 − discesa minima), sotto lo spot.
-      const cands = rollStrikeCandidates(K, S, roll.strikeStepPct, Tn, chains);
+      const cands = selectRollStrikeCandidates(K, S, roll.strikeStepPct, Tn, chains, 0.05, chainCache);
       let best: { K: number; sell: number; src: StrikeSrc } | null = null;
       for (const c of cands) {
         const sell = priceAt(c.k, Tn, dd, dv, dy).p;

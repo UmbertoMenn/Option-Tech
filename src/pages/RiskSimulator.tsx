@@ -6,7 +6,7 @@
  * Questa pagina è SOLO UI.
  */
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -24,6 +24,10 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useStressLab, StressLabInputs } from '@/hooks/useStressLab';
 import { useStressRollSettings } from '@/hooks/useStressRollSettings';
+import { useSliderCommit } from '@/hooks/useSliderCommit';
+import { useStressLabCharts } from '@/hooks/useStressLabCharts';
+import { HM_D, HM_V, StressLabChartInput } from '@/lib/stressLabCharts';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import {
   runScenario,
   occMargin,
@@ -33,7 +37,6 @@ import {
   coupledDV1M,
   termFactor,
   T0M,
-  marginCallShock,
   BOND_MARGIN_HAIRCUT,
   StressUnderlyingMap,
 } from '@/lib/stressLab';
@@ -152,6 +155,7 @@ function Slider({
   step,
   fmt,
   accent = C.blue,
+  commitOnRelease = false,
 }: {
   label: string;
   info?: React.ReactNode;
@@ -162,21 +166,11 @@ function Slider({
   step: number;
   fmt: (v: number) => string;
   accent?: string;
+  commitOnRelease?: boolean;
 }) {
-  // Il thumb e l'etichetta seguono uno stato LOCALE → si muovono istantaneamente a
-  // ogni tick di drag. Il valore vero viene propagato al genitore dentro una
-  // transition: il ricalcolo pesante (riprezzo di tutto il portafoglio) è a bassa
-  // priorità e NON blocca lo scorrimento dello slider.
-  const [local, setLocal] = useState(value);
-  const [, startTransition] = useTransition();
-  // sync se il valore cambia dall'esterno (es. reset dei parametri)
-  useEffect(() => {
-    setLocal(value);
-  }, [value]);
-  const handle = (v: number) => {
-    setLocal(v);
-    startTransition(() => set(v));
-  };
+  // Rolling: cursore/etichetta immediati, simulazione una sola volta al rilascio.
+  // Una transition da sola non interrompe i loop sincroni dentro useMemo.
+  const { local, inputProps } = useSliderCommit(value, set, commitOnRelease);
   return (
     <div style={{ marginBottom: 14 }}>
       <div
@@ -206,11 +200,12 @@ function Slider({
       </div>
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
         value={local}
-        onChange={(e) => handle(parseFloat(e.target.value))}
+        {...inputProps}
         style={{ width: '100%', accentColor: accent, height: 4 }}
       />
     </div>
@@ -454,6 +449,23 @@ function StressLabContent() {
   const ptfBase = equityExposure;
   const totalPatrimony = netting ? data.nettingIntrinsicARaw : data.nettingTotalRaw;
 
+  const { selectedPortfolioId, historicalViewDate } = usePortfolioContext();
+  const chartInput = useMemo<StressLabChartInput>(() => ({
+    legs, eq, unders, undersActive, effIV, prm, volMode, dVman, marginCover, totalPatrimony,
+    marPrm: { r, fxUSD: fx.USD, kScan, fxRange: fxRange / 100, skewB, kappa, pExp, ivScan, nakedPct },
+    includeHeat: !heatCollapsed,
+  }), [legs, eq, unders, undersActive, effIV, prm, volMode, dVman, marginCover, totalPatrimony,
+    r, fx.USD, kScan, fxRange, skewB, kappa, pExp, ivScan, nakedPct, heatCollapsed]);
+  const { result: chartResult, isPending: chartsPending, error: chartsError, retry: retryCharts } = useStressLabCharts(
+    chartInput, `${selectedPortfolioId ?? ''}:${historicalViewDate ?? ''}`,
+  );
+  const marCurve = chartResult?.marCurve ?? [];
+  const marginCallX = chartResult?.marginCallX ?? null;
+  const ruinX = chartResult?.ruinX ?? null;
+  const curveMin = chartResult?.curveMin ?? -35;
+  const curve = useMemo(() => chartResult?.curve ?? [], [chartResult]);
+  const chartStatus = chartsPending ? ' · aggiornamento…' : chartsError ? ' · non disponibile' : '';
+
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
 
 
@@ -507,53 +519,14 @@ function StressLabContent() {
   /* ---------- P&L VERO dello scenario di mercato (= card P&L Totale). ---------- */
   const scenMarketTot = scen.totEUR;
 
-  /* ---------- Margine cassa ----------
-   * Diviso in due memo per le performance dello slider:
-   *  - marNow (margine iniziale) e marCurve (curva margine vs shock) NON dipendono dallo
-   *    shock corrente d → si ricalcolano solo se cambiano portafoglio/override/orizzonte;
-   *  - marScen/marPnlMTM dipendono da d → poche chiamate per tick. */
-  const { marNow, marCurve, marginCallX } = useMemo(() => {
-    const fxR = fxRange / 100;
-    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false, strikes: strikeBook };
-    const base = runScenario(legs, eq, unders, effIV, 0, 0, bp);
+  // Il margine iniziale non dipende dal rolling; le scansioni sono nel worker.
+  const marNow = useMemo(() => {
+    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxRange / 100, skewB, kappa, pExp, ivScan, nakedPct };
+    const base = runScenario(legs, eq, unders, effIV, 0, 0, { r, skewB, kappa, pExp, days: 0, fx, netting: false });
     const sig0s: Record<number, number> = {};
     base.rows.forEach((x) => (sig0s[x.i] = x.sig0));
-    const now = occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
-    // Scan esteso fino a −95%: serve sia alla curva sia a trovare la margin call
-    // anche quando scatta oltre il range di default −35%.
-    const all: { d: number; Margine: number; 'Senza roll'?: number }[] = [];
-    // Margine a scenario: con rolling attivo si margina il portafoglio DOPO i roll
-    // (put rollate su strike più bassi / scadenze più lunghe); senza roll come prima.
-    const marAt = (x: number, roll: RollParams | null): number => {
-      const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days, roll });
-      if (roll) {
-        const ar = applyRolls(legs, s, undersActive, r);
-        return occMargin(ar.legs, eq, undersActive, x, ar.sig, days, marPrm).total;
-      }
-      const sgs: Record<number, number> = {};
-      s.rows.forEach((row) => (sgs[row.i] = row.sig1));
-      return occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total;
-    };
-    for (let x = -95; x <= 15.01; x += 2.5) {
-      const pt: { d: number; Margine: number; 'Senza roll'?: number } = {
-        d: x,
-        Margine: Math.round(marAt(x, rollPrm)),
-      };
-      if (rollPrm) pt['Senza roll'] = Math.round(marAt(x, null));
-      all.push(pt);
-    }
-    // Margin call: margine richiesto > cash + bond·95%, scandendo da 0 verso il basso.
-    const downside = all
-      .filter((p) => p.d <= 0.01)
-      .sort((a, b) => b.d - a.d)
-      .map((p) => ({ x: p.d, margin: p.Margine }));
-    const mcX = marginCallShock(downside, marginCover);
-    // La curva mostrata parte da −35%, o più a sinistra se serve a includere la margin call.
-    const chartMin =
-      mcX != null ? Math.max(-95, Math.min(-35, Math.floor((mcX - 6) / 5) * 5)) : -35;
-    return { marNow: now, marCurve: all.filter((p) => p.d >= chartMin - 0.01), marginCallX: mcX };
-  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover, rollPrm, strikeBook]);
+    return occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
+  }, [legs, eq, unders, effIV, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct]);
 
   /* ---------- Margine OCCSPH (strategy-based puro, gerarchia rigida) ----------
    * Calcolo statico a stato base (prezzi correnti, nessuno scenario): serve per
@@ -715,51 +688,6 @@ function StressLabContent() {
       ? betaScen / betaPort
       : 0;
 
-  /* ---------- Curva P&L vs mercato ---------- */
-  // Shock di mercato di "rovina": x in cui il P&L Totale = −patrimonio (−100%).
-  // Scan fine e indipendente dallo slider (0 → −95%), interpolazione lineare sul
-  // primo attraversamento. null se la rovina non si raggiunge entro −95%.
-  const ruinX = useMemo<number | null>(() => {
-    if (!totalPatrimony) return null;
-    const target = -totalPatrimony;
-    let prev: { x: number; tot: number } | null = null;
-    for (let x = 0; x >= -95.01; x -= 1.5) {
-      const dv = volMode === 'auto' ? coupledDV1M(x) : dVman;
-      const tot = runScenario(legs, eq, unders, effIV, x, dv, prm).totEUR;
-      if (prev && prev.tot > target && tot <= target) {
-        const t = (target - prev.tot) / (tot - prev.tot);
-        return prev.x + t * (x - prev.x);
-      }
-      prev = { x, tot };
-    }
-    return null;
-  }, [legs, eq, unders, effIV, volMode, dVman, prm, totalPatrimony]);
-
-  // Estremo sinistro della curva: abbastanza profondo da mostrare sia la riga di
-  // rovina sia quella di margin call.
-  const leftMost = Math.min(ruinX ?? Infinity, marginCallX ?? Infinity);
-  const curveMin = Number.isFinite(leftMost)
-    ? Math.max(-95, Math.min(-35, Math.floor((leftMost - 6) / 5) * 5))
-    : -35;
-
-  const curve = useMemo(() => {
-    // Shock di mercato trasmesso ai titoli via beta reale (unders).
-    const pts: { d: number; Totale: number; 'Azioni/ETF': number; Opzioni: number; 'Totale senza roll'?: number }[] = [];
-    for (let x = curveMin; x <= 15.01; x += 2.5) {
-      const dv = volMode === 'auto' ? coupledDV1M(x) : dVman;
-      const s = runScenario(legs, eq, unders, effIV, x, dv, prm);
-      const pt: (typeof pts)[number] = {
-        d: x,
-        Totale: Math.round(s.totEUR),
-        'Azioni/ETF': Math.round(s.eqEUR),
-        Opzioni: Math.round(s.optEUR),
-      };
-      if (prm.roll) pt['Totale senza roll'] = Math.round(runScenario(legs, eq, unders, effIV, x, dv, prmNoRoll).totEUR);
-      pts.push(pt);
-    }
-    return pts;
-  }, [legs, eq, unders, effIV, volMode, dVman, prm, prmNoRoll, curveMin]);
-
   // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle Intrinseco A).
   const curvePct = useMemo(
     () =>
@@ -775,14 +703,8 @@ function StressLabContent() {
     [curve, totalPatrimony],
   );
 
-  /* ---------- Heatmap ---------- */
-  const HM_D = [-30, -25, -20, -15, -10, -5, 0, 5, 10];
-  const HM_V = [40, 30, 20, 15, 10, 5, 0, -5, -10];
-  const heat = useMemo(
-    () => HM_V.map((v) => HM_D.map((x) => runScenario(legs, eq, undersActive, effIV, x, v, prm).totEUR)),
-    [legs, eq, undersActive, effIV, prm],
-  );
-  const hmMax = Math.max(...heat.flat().map(Math.abs), 1);
+  const heat = heatCollapsed ? null : chartResult?.heat;
+  const hmMax = heat ? Math.max(...heat.flat().map(Math.abs), 1) : 1;
 
   /* ---------- Term-structure ladder ---------- */
   const ladder = useMemo(
@@ -907,6 +829,17 @@ function StressLabContent() {
         table.grid td,table.grid th{padding:5px 8px;border-bottom:1px solid ${C.border};white-space:nowrap}
         ::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:${C.border2};border-radius:4px}
       `}</style>
+
+      {(chartsPending || chartsError) && (
+        <div role="status" style={{ fontSize: 12, color: chartsError ? C.amber : C.mut, marginBottom: 10 }}>
+          {chartsError ? <>{chartsError} <button type="button" onClick={retryCharts}>Riprova</button></> : (
+            <><Loader2 size={13} className="inline-block animate-spin mr-2" />
+              Aggiornamento grafici, soglie di rovina e margin call…
+              {chartResult && ' I grafici mostrano ancora il calcolo precedente.'}
+            </>
+          )}
+        </div>
+      )}
 
       {/* HEADER */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16 }}>
@@ -1279,7 +1212,7 @@ function StressLabContent() {
                               (β pond. {fmtN(betaW, 2)})
                             </div>
                           ) : (
-                            <div>rovina oltre −95% di mercato (book robusto)</div>
+                            <div>{!chartResult ? (chartsError ? 'soglia di rovina non disponibile' : 'calcolo soglia di rovina…') : 'rovina oltre −95% di mercato (book robusto)'}</div>
                           )}
                         </>,
                       )}
@@ -1645,9 +1578,14 @@ function StressLabContent() {
                 : ''}
             </div>
             {rollOn && (
-              <div style={{ marginTop: 10 }}>
+              <div key={rollSettingsUserId ?? 'unscoped'} style={{ marginTop: 10 }}>
+                <p style={{ fontSize: 10.5, color: C.mut, margin: '0 0 8px' }}>
+                  I calcoli si aggiornano al rilascio dello slider.
+                  {chartsPending && ' Aggiornamento grafici…'}
+                </p>
                 <Slider
                   label="Trigger (spot entro % dallo strike)"
+                  commitOnRelease
                   value={rollTrigger}
                   set={(v) => setRollSetting('triggerPct', v)}
                   min={0}
@@ -1664,6 +1602,7 @@ function StressLabContent() {
                 />
                 <Slider
                   label="Scadenza max (mesi dal roll)"
+                  commitOnRelease
                   value={rollMaxMonths}
                   set={(v) => setRollSetting('maxMonthsForward', v)}
                   min={1}
@@ -1681,6 +1620,7 @@ function StressLabContent() {
                 />
                 <Slider
                   label="Discesa minima strike per roll"
+                  commitOnRelease
                   value={rollStrikeStep}
                   set={(v) => setRollSetting('strikeStepPct', v)}
                   min={0.5}
@@ -1707,6 +1647,7 @@ function StressLabContent() {
                 />
                 <Slider
                   label="Credito netto min (% nozionale)"
+                  commitOnRelease
                   value={rollMinCredit}
                   set={(v) => setRollSetting('minNetCreditPct', v)}
                   min={0}
@@ -1723,6 +1664,7 @@ function StressLabContent() {
                 />
                 <Slider
                   label="Numero max roll"
+                  commitOnRelease
                   value={rollMaxRolls}
                   set={(v) => setRollSetting('maxRolls', v)}
                   min={1}
@@ -2051,7 +1993,7 @@ function StressLabContent() {
                 <div style={{ marginTop: 3 }}>
                   margin call (marg. &gt; cash+bond·95%){' '}
                   <span style={{ fontWeight: 800, color: marginCallX != null ? '#A855F7' : C.mut }}>
-                    {marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
+                    {!chartResult ? (chartsError ? 'non disponibile' : 'in calcolo…') : marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
                   </span>
                 </div>
               </div>
@@ -2134,7 +2076,7 @@ function StressLabContent() {
 
       {/* CHART */}
       <Panel
-        title={`${plPct ? 'P/L % su patrimonio' : 'P&L (€)'} vs shock mercato (β reale)`}
+        title={`${plPct ? 'P/L % su patrimonio' : 'P&L (€)'} vs shock mercato (β reale)${chartStatus}`}
         style={{ marginBottom: 14 }}
         info={
           <Info title="Perché la curva delle opzioni non è una retta" w={350}>
@@ -2306,7 +2248,7 @@ function StressLabContent() {
 
       {/* HEATMAP */}
       <Panel
-        title="Matrice P&L totale · mercato × Δvol ATM 1M"
+        title={`Matrice P&L totale · mercato × Δvol ATM 1M${chartStatus}`}
         collapsible
         collapsed={heatCollapsed}
         onToggle={() => setHeatCollapsed((v) => !v)}
@@ -2356,7 +2298,7 @@ function StressLabContent() {
               </tr>
             </thead>
             <tbody>
-              {HM_V.map((v, ri) => (
+              {heat && HM_V.map((v, ri) => (
                 <tr key={v}>
                   <td
                     style={{
@@ -2411,7 +2353,7 @@ function StressLabContent() {
 
       {/* MARGINE */}
       <Panel
-        title="Margine cassa · TIMS ibrido (strategy-based + scan sugli spread)"
+        title={`Margine cassa · TIMS ibrido (strategy-based + scan sugli spread)${chartStatus}`}
         collapsible
         collapsed={marginCollapsed}
         onToggle={() => setMarginCollapsed((v) => !v)}
@@ -2547,7 +2489,7 @@ function StressLabContent() {
           <span style={{ color: C.mut }}>
             margin call (marg. &gt; cash+bond·95%){' '}
             <span style={{ fontWeight: 700, color: marginCallX != null ? '#A855F7' : C.text }}>
-              {marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
+              {!chartResult ? (chartsError ? 'non disponibile' : 'in calcolo…') : marginCallX != null ? `@ mercato ${sgn(marginCallX, 1)}%` : 'non raggiunta entro −95%'}
             </span>
           </span>
           <span style={{ color: C.mut, display: 'inline-flex', alignItems: 'center' }}>
