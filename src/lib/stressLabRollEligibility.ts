@@ -50,6 +50,39 @@ export function rollableShortPutQty(
   return out;
 }
 
+/**
+ * Put vendute di SPREAD (diagonal put spread / put spread) → scadenza massima delle put di
+ * arrivo = scadenza della put COMPRATA del gruppo (la più lunga se più d'una). Le naked put
+ * non compaiono (usano il cap "mesi dal roll" della card). Per un put spread verticale la
+ * put comprata ha la stessa scadenza della venduta → nessun roll possibile.
+ * Se la stessa posizione è in più gruppi si tiene la scadenza più vicina (prudenziale).
+ */
+export function rollableShortPutMaxExpiry(
+  cats: Pick<DerivativeCategories, 'groupedOtherStrategies'>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const g of cats.groupedOtherStrategies) {
+    const eligible = g.configStrategyType
+      ? ELIGIBLE_CONFIG_TYPES.has(g.configStrategyType)
+      : !!g.strategyName && ELIGIBLE_AUTO_NAME.test(g.strategyName);
+    if (!eligible) continue;
+    const longExp = g.options
+      .map((o) => o.option)
+      .filter((p) => p.option_type === 'put' && (p.quantity ?? 0) > 0 && !!p.expiry_date)
+      .map((p) => p.expiry_date as string)
+      .sort()
+      .pop();
+    if (!longExp) continue;
+    for (const o of g.options) {
+      if (!isSoldPut(o.option)) continue;
+      const id = rawPositionId(o.option.id);
+      const prev = out.get(id);
+      if (!prev || longExp < prev) out.set(id, longExp);
+    }
+  }
+  return out;
+}
+
 /** rollQ firmato (≤ 0) per una gamba di quantità q, limitato a |q|. */
 export function rollQForLeg(q: number, eligibleQty: number | undefined): number {
   if (q >= 0 || !eligibleQty || eligibleQty <= 0) return 0;

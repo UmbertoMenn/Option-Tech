@@ -1491,10 +1491,15 @@ function StressLabContent() {
                   impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
                   il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
                   <br />
-                  1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato;
+                  1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato. Cap:{' '}
+                  <b>naked put</b> = scadenza max della card (mesi dal roll); <b>diagonal put spread</b> = scadenza
+                  della <b>put comprata</b> (un put spread verticale quindi non si rolla);
                   <br />
-                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente (e sotto lo spot); su
+                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente, anche se resta ITM; su
                   quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
+                  <br />
+                  Nel dettaglio per gamba: <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
+                  <b>no credito</b> = nessuna put a credito entro il cap.
                   <br />
                   Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
                   <br />
@@ -1608,7 +1613,8 @@ function StressLabContent() {
                   info={
                     <Info title="Scadenza massima" w={300}>
                       Le scadenze candidate si provano di mese in mese dopo la corrente, partendo dalla più vicina.
-                      Nessuna può superare questo numero di mesi dalla data del roll.
+                      Nessuna può superare questo numero di mesi dalla data del roll. Vale per le <b>naked put</b>: per
+                      le put vendute di un <b>diagonal put spread</b> il limite è la scadenza della put comprata.
                     </Info>
                   }
                 />
@@ -2935,6 +2941,11 @@ function StressLabContent() {
                   `${valBlock}\n` +
                   rollLines +
                   (l.rollWhy ? `ESCLUSA DAL ROLLING: ${l.rollWhy}\n` : '') +
+                  (rollOn && d < 0 && (l.rollQ ?? 0) < 0 && !(rr.rolls && rr.rolls.length)
+                    ? rr.rollMiss === 'credito'
+                      ? `NON ROLLATA: trigger raggiunto ma nessuna put a credito ≥ minimo entro la scadenza max${l.rollMaxT != null ? ` (put comprata, ${Math.round(l.rollMaxT * 365.25)} gg)` : ''}\n`
+                      : `NON ROLLATA: lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non arriva mai al trigger ${fmtN(l.K * (1 + rollTrigger / 100), 2)} = K × (1 + ${fmtN(rollTrigger, 1)}%)\n`
+                    : '') +
                   `P&L = q(${l.q}) × ${l.mult} × (${pxLabel}_scen − ${pxLabel}_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
                   `    = ${l.q} × ${l.mult} × (${fmtN(rr.p1, 4)} − ${fmtN(rr.p0, 4)}) / ${fmtN(fx.USD, 4)} = ${sEUR(rr.pnlEUR)} €`;
                 return (
@@ -3004,7 +3015,18 @@ function StressLabContent() {
                       {rr.rolls && rr.rolls.length
                         ? `${fmtN(l.K, 0)}→${fmtN(rr.finalK ?? l.K, 0)} ×${rr.rolls.length}`
                         : rollOn && (l.rollQ ?? 0) < 0
-                          ? '—'
+                          ? (
+                              <span
+                                style={{ color: C.mut, fontSize: 10 }}
+                                title={
+                                  rr.rollMiss === 'credito'
+                                    ? 'Trigger raggiunto ma nessuna put a credito netto ≥ minimo entro la scadenza massima'
+                                    : `Lo spot non arriva mai entro il trigger: spot scenario ${S1 != null ? fmtN(S1 as number, 2) : '—'} > strike × (1 + trigger) = ${fmtN(l.K * (1 + rollTrigger / 100), 2)}`
+                                }
+                              >
+                                {d >= 0 ? '—' : rr.rollMiss === 'credito' ? 'no credito' : 'no trigger'}
+                              </span>
+                            )
                           : rollOn && l.rollWhy
                             ? (
                                 <span

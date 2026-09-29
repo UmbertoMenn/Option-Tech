@@ -50,6 +50,11 @@ export interface StressLeg {
   rollQ?: number;
   /** Solo display: perché la put venduta (o parte di essa) non è idonea al rolling */
   rollWhy?: string;
+  /**
+   * Scadenza massima (anni da oggi) delle put di arrivo: per le put vendute di un DIAGONAL
+   * PUT SPREAD è la scadenza della put comprata (sostituisce il cap "mesi dal roll").
+   */
+  rollMaxT?: number;
 }
 
 export interface StressEquity {
@@ -121,13 +126,18 @@ export interface ScenarioParams extends SurfaceParams {
  * Regole di roll in discesa (stessa semantica del backtest Short Put):
  *  - trigger: spot ≤ strike × (1 + triggerPct/100);
  *  - nuova scadenza: di mese in mese dopo la corrente, la più vicina che offre un candidato,
- *    con cap a maxMonthsForward mesi dalla data del roll;
+ *    con cap a maxMonthsForward mesi dalla data del roll (diagonal put spread: cap = scadenza
+ *    della put comprata, StressLeg.rollMaxT);
  *  - nuovo strike: almeno strikeStepPct% SOTTO lo strike corrente (discesa minima per
- *    roll) e sotto lo spot, su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente);
+ *    roll), su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente); può restare ITM
+ *    (put già sotto lo strike: si scende comunque della discesa minima a credito);
  *    sulla scadenza più vicina che ha almeno un candidato con credito netto ≥
  *    minNetCreditPct% del nuovo nozionale si sceglie lo strike PIÙ BASSO;
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
  */
+/** Motivo per cui una put idonea non è stata rollata lungo il percorso. */
+export type RollMiss = 'trigger' | 'credito';
+
 export interface RollParams {
   triggerPct: number;
   maxMonthsForward: number;
@@ -201,6 +211,8 @@ export interface LegResult {
   pFinal?: number;
   /** Σ (premio incassato − riacquisto) dei roll, per azione */
   netCredit?: number;
+  /** Put idonea non rollata: perché (trigger mai raggiunto / nessun candidato a credito) */
+  rollMiss?: RollMiss;
   /** IV della put finale: a stato base (per il margine) e nello scenario */
   finalSig0?: number;
   finalSig1?: number;
@@ -470,6 +482,7 @@ export function runScenario(
       const sim = simulatePutRolls({
         K0: l.K,
         T0: l.T,
+        maxT: l.rollMaxT,
         S0,
         beta,
         d,
@@ -489,6 +502,7 @@ export function runScenario(
       p1row = (qStatic * p1eff + rq * p1roll) / l.q;
       const base1 = priceAt(sim.K, sim.T, 0, 0, 0);
       rollOut = {
+        rollMiss: sim.miss,
         rolls: sim.rolls,
         rollQ: rq,
         finalK: sim.K,
@@ -553,6 +567,8 @@ export interface PutRollSimInput {
   dV1M: number;
   days: number;
   roll: RollParams;
+  /** Cap assoluto di scadenza (anni da oggi) al posto di maxMonthsForward (diagonal put spread) */
+  maxT?: number;
   /** Pricer della put del sottostante: (K, T da oggi, shock, vol, giorni trascorsi) */
   priceAt: (K: number, T: number, dd: number, dv: number, dy: number) => { p: number; sig: number };
 }
@@ -567,6 +583,8 @@ export interface PutRollSimResult {
   /** MTM della put finale a fine scenario e sua IV */
   pFinal: number;
   sig: number;
+  /** Nessun roll: spot mai entro il trigger, oppure trigger raggiunto ma nessun candidato a credito */
+  miss?: RollMiss;
 }
 
 /**
@@ -578,7 +596,7 @@ export interface PutRollSimResult {
  * delta minore nel resto del percorso.
  */
 export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
-  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt } = inp;
+  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt, maxT } = inp;
   const pathStep = Math.max(0.1, roll.pathStepPct ?? 1);
   const n = d < 0 ? Math.max(1, Math.ceil(Math.abs(d) / pathStep)) : 0;
   const cFinal = coupledDV1M(d);
@@ -588,6 +606,9 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   const minDrop = Math.max(0, roll.strikeStepPct) / 100;
   const grid = ROLL_STRIKE_GRID_PCT / 100;
   const capT = Math.max(1, roll.maxMonthsForward) / 12;
+  // Diagonal: la scadenza T + m/12 cade nello stesso mese della put comprata entro ±mezzo mese.
+  const capAbs = maxT != null && Number.isFinite(maxT) ? maxT + 0.5 / 12 : null;
+  let triggered = false;
   const maxRolls = Math.max(0, Math.floor(roll.maxRolls));
 
   let K = K0;
@@ -602,19 +623,19 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     if (rem <= 1e-6) break; // put già scaduta lungo il percorso: niente più roll
     const S = S0 * Math.max(0.02, 1 + (beta * dd) / 100);
     if (S > K * trig) continue;
+    triggered = true;
     const dv = dvAt(dd, i);
     const buy = priceAt(K, T, dd, dv, dy).p;
     let chosen: { K: number; T: number; sell: number } | null = null;
     // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
     for (let m = 1; m <= 240; m++) {
       const Tn = T + m / 12;
-      if (Tn - dy / 365 > capT + 1e-9) break;
+      if (capAbs != null ? Tn > capAbs : Tn - dy / 365 > capT + 1e-9) break;
       let best: { K: number; sell: number } | null = null;
       // Candidati: K·(1 − discesa minima), poi più in basso a passi di griglia fine.
       for (let j = minDrop > 0 ? 0 : 1; j <= 400; j++) {
         const Kj = K * (1 - minDrop - grid * j);
         if (Kj <= S * 0.05) break;
-        if (Kj >= S) continue; // il nuovo strike deve stare sotto lo spot
         const sell = priceAt(Kj, Tn, dd, dv, dy).p;
         if (sell - buy >= (roll.minNetCreditPct / 100) * Kj) best = { K: Kj, sell };
         else break; // strike più bassi → premio minore: nessun candidato ulteriore
@@ -632,7 +653,8 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   }
 
   const fin = priceAt(K, T, d, dV1M, days);
-  return { rolls, K, T, netCredit, pFinal: fin.p, sig: fin.sig };
+  const miss: RollMiss | undefined = rolls.length ? undefined : triggered ? 'credito' : 'trigger';
+  return { rolls, K, T, netCredit, pFinal: fin.p, sig: fin.sig, miss };
 }
 
 /**

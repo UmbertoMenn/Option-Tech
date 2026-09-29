@@ -21,7 +21,12 @@ import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { Position } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
-import { rollableShortPutQty, rollQForLeg, rollExclusionReasons } from '@/lib/stressLabRollEligibility';
+import {
+  rollableShortPutQty,
+  rollQForLeg,
+  rollExclusionReasons,
+  rollableShortPutMaxExpiry,
+} from '@/lib/stressLabRollEligibility';
 import {
   StressLeg,
   StressEquity,
@@ -592,11 +597,12 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       market_value: p.snapshot_market_value ?? p.market_value,
     }));
     const derivs = snap.filter((p) => p.asset_type === 'derivative');
-    if (!derivs.length) return { qty: new Map<string, number>(), why: new Map<string, string>() };
+    if (!derivs.length)
+      return { qty: new Map<string, number>(), why: new Map<string, string>(), maxExp: new Map<string, string>() };
     const cats = categorizeDerivatives(derivs, snap, overrides || [], strategyConfigs || [], {
       dynamicAliases: buildDynamicAliasMap(mappingsQuery.data?.mappings ?? []),
     });
-    return { qty: rollableShortPutQty(cats), why: rollExclusionReasons(cats) };
+    return { qty: rollableShortPutQty(cats), why: rollExclusionReasons(cats), maxExp: rollableShortPutMaxExpiry(cats) };
   }, [positions, overrides, strategyConfigs, mappingsQuery.data]);
 
   const legs: StressLeg[] = useMemo(() => {
@@ -631,6 +637,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         nm: d.description || key,
         iv: isNaN(iv) ? 0.45 : iv,
         rollQ: isCall ? 0 : rollQForLeg(d.quantity, rollableQty.qty.get(d.id)),
+        rollMaxT: !isCall && rollableQty.maxExp.has(d.id)
+          ? yearsToExpiry(rollableQty.maxExp.get(d.id) as string, snapshotRef)
+          : undefined,
         rollWhy:
           !isCall && d.quantity < 0 && -rollQForLeg(d.quantity, rollableQty.qty.get(d.id)) < Math.abs(d.quantity)
             ? key === 'EURUSD'
