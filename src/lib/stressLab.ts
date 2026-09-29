@@ -48,6 +48,8 @@ export interface StressLeg {
    * in una strategia idonea).
    */
   rollQ?: number;
+  /** Solo display: perché la put venduta (o parte di essa) non è idonea al rolling */
+  rollWhy?: string;
 }
 
 export interface StressEquity {

@@ -55,3 +55,63 @@ export function rollQForLeg(q: number, eligibleQty: number | undefined): number 
   if (q >= 0 || !eligibleQty || eligibleQty <= 0) return 0;
   return -Math.min(Math.abs(q), eligibleQty);
 }
+
+const CONFIG_TYPE_LABEL: Record<string, string> = {
+  other: 'Altra strategia (config)',
+  iron_condor: 'Iron condor',
+  double_diagonal: 'Double diagonal',
+  covered_call: 'Covered call',
+  derisking_covered_call: 'DR-CC',
+  call_spread: 'Call spread',
+  diagonal_call_spread: 'Diagonal call spread',
+};
+
+/**
+ * Perché una put venduta NON è idonea al rolling: id raw → categoria canonica in cui è
+ * finita (covered call sintetica, DR-CC, iron condor, altre strategie, config incompleta…).
+ * Le put idonee (naked put / put spread) non compaiono. Serve alla UI per spiegare le
+ * esclusioni.
+ */
+export function rollExclusionReasons(
+  cats: Pick<
+    DerivativeCategories,
+    | 'coveredCalls'
+    | 'deRiskingCoveredCalls'
+    | 'ironCondors'
+    | 'doubleDiagonals'
+    | 'groupedOtherStrategies'
+    | 'incompleteStrategies'
+  >,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const set = (p: Position | undefined, why: string) => {
+    if (!p || !isSoldPut(p)) return;
+    const id = rawPositionId(p.id);
+    if (!out.has(id)) out.set(id, why);
+  };
+  for (const cc of cats.coveredCalls) set(cc.syntheticPut, 'Covered call sintetica');
+  for (const dr of cats.deRiskingCoveredCalls) set(dr.syntheticPut ?? dr.coveredCall.syntheticPut, 'DR-CC sintetica');
+  for (const ic of cats.ironCondors) set(ic.soldPut, 'Iron condor');
+  for (const dd of cats.doubleDiagonals) set(dd.soldPut, 'Double diagonal');
+  for (const g of cats.groupedOtherStrategies) {
+    const eligible = g.configStrategyType
+      ? ELIGIBLE_CONFIG_TYPES.has(g.configStrategyType)
+      : !!g.strategyName && ELIGIBLE_AUTO_NAME.test(g.strategyName);
+    if (eligible) continue;
+    let why: string;
+    if (g.configStrategyType) {
+      const t = CONFIG_TYPE_LABEL[g.configStrategyType] ?? `Config ${g.configStrategyType}`;
+      why = g.strategyName ? `${t}: ${g.strategyName}` : t;
+    } else if (g.strategyName) {
+      why = `Altre strategie: ${g.strategyName}`;
+    } else {
+      why = 'Altre strategie (non abbinata alla configurazione salvata)';
+    }
+    for (const o of g.options) set(o.option, why);
+  }
+  for (const inc of cats.incompleteStrategies) {
+    const t = CONFIG_TYPE_LABEL[inc.strategyType] ?? inc.strategyType;
+    for (const p of inc.presentLegs) set(p, `${t}${inc.isSynthetic ? ' sintetica' : ''} incompleta`);
+  }
+  return out;
+}

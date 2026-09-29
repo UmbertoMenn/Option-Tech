@@ -247,3 +247,28 @@ describe('stressLab — default rolling', () => {
     });
   });
 });
+
+describe('stressLab — motivo di esclusione dal rolling', () => {
+  const P = (id: string, q: number, type: 'put' | 'call' = 'put') =>
+    ({ id, option_type: type, quantity: q }) as unknown as Position;
+  it('etichetta la categoria canonica delle put vendute non idonee; ignora put idonee e gambe comprate', async () => {
+    const { rollExclusionReasons } = await import('@/lib/stressLabRollEligibility');
+    const m = rollExclusionReasons({
+      coveredCalls: [{ option: P('cc', -1, 'call'), underlying: P('s', 100), contractsCovered: 1, sharesCovered: 100, isFullyCovered: true, isSynthetic: true, syntheticPut: P('adbe__opt_slot_0', -1) }],
+      deRiskingCoveredCalls: [],
+      ironCondors: [],
+      doubleDiagonals: [],
+      groupedOtherStrategies: [
+        { underlying: 'ZS', options: [{ option: P('zs', -1), underlying: null }], totalPremium: 0, totalProfitLoss: 0, strategyName: null },
+        { underlying: 'F', options: [{ option: P('f', -1), underlying: null }, { option: P('fl', 1), underlying: null }], totalPremium: 0, totalProfitLoss: 0, strategyName: 'Bull Put Spread', configStrategyType: 'other' },
+        { underlying: 'OK', options: [{ option: P('ok', -1), underlying: null }], totalPremium: 0, totalProfitLoss: 0, strategyName: 'Put Spread', configStrategyType: 'put_spread' },
+      ],
+      incompleteStrategies: [],
+    });
+    expect(Object.fromEntries(m)).toEqual({
+      adbe: 'Covered call sintetica',
+      zs: 'Altre strategie (non abbinata alla configurazione salvata)',
+      f: 'Altra strategia (config): Bull Put Spread',
+    });
+  });
+});

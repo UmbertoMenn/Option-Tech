@@ -414,6 +414,12 @@ function StressLabContent() {
   // Riepilogo rolling per la card scenario: gambe idonee, rollate e effetto sul P&L totale.
   const rollStats = useMemo(() => {
     const eligible = legs.filter((l) => (l.rollQ ?? 0) < 0).length;
+    const excluded = legs
+      .filter((l) => l.rollWhy)
+      .map((l) => ({
+        lbl: `${l.u} P${fmtN(l.K, l.K < 5 ? 3 : 0)} ${l.exp.slice(5, 7)}/${l.exp.slice(2, 4)}${(l.rollQ ?? 0) < 0 ? ` (${-(l.q - (l.rollQ ?? 0))} di ${-l.q})` : ''}`,
+        why: l.rollWhy as string,
+      }));
     let rolledLegs = 0;
     let nRolls = 0;
     scen.rows.forEach((x) => {
@@ -425,7 +431,7 @@ function StressLabContent() {
     const effect = rollPrm
       ? scen.totEUR - runScenario(legs, eq, undersActive, effIV, d, dV1M, prmNoRoll).totEUR
       : 0;
-    return { eligible, rolledLegs, nRolls, effect };
+    return { eligible, excluded, rolledLegs, nRolls, effect };
   }, [legs, eq, undersActive, effIV, d, dV1M, scen, rollPrm, prmNoRoll]);
 
   /* ---------- Esposizione di riferimento vs patrimonio stressato ----------
@@ -1543,6 +1549,29 @@ function StressLabContent() {
             </div>
             <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
               {rollStats.eligible} put idonee
+              {rollStats.excluded.length > 0 && (
+                <>
+                  {' · '}
+                  <span style={{ color: C.amber }}>{rollStats.excluded.length} escluse</span>
+                  <Info title="Put vendute escluse dal rolling" w={420}>
+                    Si rollano solo le put vendute classificate come <b>naked put</b>, <b>put spread</b> o{' '}
+                    <b>diagonal put spread</b> (classificazione di Derivati: config, override, riconoscimento
+                    automatico). Queste sono finite in un'altra categoria:
+                    <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 11 }}>
+                      {rollStats.excluded.map((x, k) => (
+                        <div key={k}>
+                          <b style={{ color: C.text }}>{x.lbl}</b> — {x.why}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      «Non abbinata alla configurazione salvata» = sul sottostante c'è una strategia configurata ma
+                      strike/scadenza/quantità della put non corrispondono (es. put rollata nella realtà dopo aver
+                      salvato la config): aggiorna la config in Derivati.
+                    </div>
+                  </Info>
+                </>
+              )}
               {rollOn
                 ? d < 0
                   ? ` · ${rollStats.rolledLegs} rollate (${rollStats.nRolls} roll) · effetto ${sgn(rollStats.effect, 0)} €`
@@ -2905,6 +2934,7 @@ function StressLabContent() {
                   (spotLine ? `${spotLine}\n` : '') +
                   `${valBlock}\n` +
                   rollLines +
+                  (l.rollWhy ? `ESCLUSA DAL ROLLING: ${l.rollWhy}\n` : '') +
                   `P&L = q(${l.q}) × ${l.mult} × (${pxLabel}_scen − ${pxLabel}_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
                   `    = ${l.q} × ${l.mult} × (${fmtN(rr.p1, 4)} − ${fmtN(rr.p0, 4)}) / ${fmtN(fx.USD, 4)} = ${sEUR(rr.pnlEUR)} €`;
                 return (
@@ -2975,7 +3005,24 @@ function StressLabContent() {
                         ? `${fmtN(l.K, 0)}→${fmtN(rr.finalK ?? l.K, 0)} ×${rr.rolls.length}`
                         : rollOn && (l.rollQ ?? 0) < 0
                           ? '—'
-                          : ''}
+                          : rollOn && l.rollWhy
+                            ? (
+                                <span
+                                  title={`Esclusa dal rolling: ${l.rollWhy}`}
+                                  style={{
+                                    color: C.amber,
+                                    fontSize: 10,
+                                    display: 'inline-block',
+                                    maxWidth: 150,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    verticalAlign: 'bottom',
+                                  }}
+                                >
+                                  escl.: {l.rollWhy}
+                                </span>
+                              )
+                            : ''}
                     </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {arrLbl ? (
