@@ -52,7 +52,8 @@ export interface StressLeg {
   rollWhy?: string;
   /**
    * Scadenza massima (anni da oggi) delle put di arrivo: per le put vendute di un DIAGONAL
-   * PUT SPREAD è la scadenza della put comprata (sostituisce il cap "mesi dal roll").
+   * PUT SPREAD è la scadenza della put comprata; vale insieme al cap "mesi dal roll" (il più
+   * stretto dei due).
    */
   rollMaxT?: number;
 }
@@ -153,8 +154,8 @@ export interface StrikeCandidate {
  * Regole di roll in discesa (stessa semantica del backtest Short Put):
  *  - trigger: spot ≤ strike × (1 + triggerPct/100);
  *  - nuova scadenza: di mese in mese dopo la corrente, la più vicina che offre un candidato,
- *    con cap a maxMonthsForward mesi dalla data del roll (diagonal put spread: cap = scadenza
- *    della put comprata, StressLeg.rollMaxT);
+ *    con cap a maxMonthsForward mesi dalla data del roll; diagonal put spread: in più mai oltre
+ *    la scadenza della put comprata (StressLeg.rollMaxT) — vale il più stretto dei due;
  *  - si rollano SOLO put OTM: una put già ITM allo stato attuale (spot ≤ strike) non si
  *    rolla mai; la put di arrivo deve stare sotto lo spot (OTM);
  *  - nuovo strike: almeno strikeStepPct% SOTTO lo strike corrente (discesa minima per
@@ -682,7 +683,7 @@ export interface PutRollSimInput {
   dV1M: number;
   days: number;
   roll: RollParams;
-  /** Cap assoluto di scadenza (anni da oggi) al posto di maxMonthsForward (diagonal put spread) */
+  /** Cap assoluto di scadenza (anni da oggi), in aggiunta a maxMonthsForward (diagonal put spread) */
   maxT?: number;
   /** Catene di strike quotati del sottostante (vedi rollStrikeCandidates) */
   chains?: StrikeChain[] | null;
@@ -751,7 +752,8 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
     for (let m = 1; m <= 240; m++) {
       const Tn = T + m / 12;
-      if (capAbs != null ? Tn > capAbs : Tn - dy / 365 > capT + 1e-9) break;
+      // Cap: mesi dal roll (sempre) e, per i diagonal, scadenza della put comprata.
+      if (Tn - dy / 365 > capT + 1e-9 || (capAbs != null && Tn > capAbs)) break;
       // Strike quotati per la scadenza di arrivo: ≤ K·(1 − discesa minima), sotto lo spot.
       const cands = rollStrikeCandidates(K, S, roll.strikeStepPct, Tn, chains);
       let best: { K: number; sell: number; src: StrikeSrc } | null = null;

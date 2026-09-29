@@ -21,7 +21,7 @@ const rows = [leg('PUT-SHORT', 'put', -1000, -200), leg('PUT-LONG', 'put', 400, 
 function expectTotals(intr: string, tv: string, total: string) {
   const summary = screen.getByRole('region', { name: 'Riepilogo gambe selezionate' });
   // ICU versions differ on grouping four-digit Italian amounts.
-  const normalize = (value: string) => value.replaceAll('.', '');
+  const normalize = (value: string) => value.replace(/\./g, '');
   const values = within(summary).getAllByRole('definition').map((el) => normalize(el.textContent ?? ''));
   expect(values.slice(0, 3)).toEqual([intr, tv, total].map(normalize));
   const table = screen.getByRole('table');

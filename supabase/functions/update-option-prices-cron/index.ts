@@ -486,11 +486,11 @@ serve(async (req) => {
     // --- Archivio strike quotati (option_listed_strikes) per il rolling dello Stress Lab ---
     // Gli strike put di ogni catena già scaricata per i prezzi vengono salvati (nessuna
     // chiamata in più; riscrittura al massimo ogni ~20h). In coda, nel tempo residuo, si
-    // scaricano le mensili fino a +13 mesi dei sottostanti con put vendute (refresh
+    // scaricano le mensili fino a +24 mesi dei sottostanti con put vendute (refresh
     // settimanale, max EXTRA_CHAINS_PER_RUN catene per run, prima le più vecchie).
     const STRIKES_REFRESH_HELD_MS = 20 * 3600 * 1000;
     const STRIKES_REFRESH_EXTRA_MS = 7 * 24 * 3600 * 1000;
-    const EXTRA_CHAINS_PER_RUN = 40;
+    const EXTRA_CHAINS_PER_RUN = 60;
     const strikesAge = new Map<string, number>(); // `${ticker}|${expiry}` → updated_at ms
     {
       const { data: strikeRows, error: strikeErr } = await supabase
@@ -596,7 +596,7 @@ serve(async (req) => {
       const extra: { ticker: string; unix: number; age: number }[] = [];
       for (const ticker of shortPutTickers) {
         const listed = tickerExpirations.get(ticker);
-        for (let m = 0; m <= 13; m++) {
+        for (let m = 0; m <= 24; m++) {
           const y = now.getUTCFullYear() + Math.floor((now.getUTCMonth() + m) / 12);
           const mo = (now.getUTCMonth() + m) % 12;
           const tf = getThirdFriday(y, mo);

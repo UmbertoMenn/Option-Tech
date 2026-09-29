@@ -1499,8 +1499,9 @@ function StressLabContent() {
                   sempre sotto lo spot.
                   <br />
                   1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato. Cap:{' '}
-                  <b>naked put</b> = scadenza max della card (mesi dal roll); <b>diagonal put spread</b> = scadenza
-                  della <b>put comprata</b> (un put spread verticale quindi non si rolla);
+                  scadenza max della card (mesi dal roll); per le put vendute di un <b>diagonal put spread</b> anche
+                  mai oltre la scadenza della <b>put comprata</b> — vale il più stretto dei due (un put spread verticale
+                  quindi non si rolla);
                   <br />
                   2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente e sotto lo spot; su
                   quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo.
@@ -1508,7 +1509,7 @@ function StressLabContent() {
                   <b>Strike quotati</b>: la put di arrivo è scelta solo fra strike disponibili. Fonte, in ordine:
                   <br />
                   • <b>reale</b>: strike quotati oggi sulla scadenza di arrivo (catene Yahoo salvate dall'aggiornamento
-                  prezzi; le mensili fino a +13 mesi dei sottostanti con put vendute si aggiornano ogni settimana);
+                  prezzi; le mensili fino a +24 mesi dei sottostanti con put vendute si aggiornano ogni settimana);
                   <br />
                   • <b>estrapolato</b>: sotto lo strike più basso quotato oggi si prolunga il passo della parte bassa
                   della catena (dopo un crollo le borse listano nuovi strike con lo stesso schema);
@@ -1641,8 +1642,8 @@ function StressLabContent() {
                   info={
                     <Info title="Scadenza massima" w={300}>
                       Le scadenze candidate si provano di mese in mese dopo la corrente, partendo dalla più vicina.
-                      Nessuna può superare questo numero di mesi dalla data del roll. Vale per le <b>naked put</b>: per
-                      le put vendute di un <b>diagonal put spread</b> il limite è la scadenza della put comprata.
+                      Nessuna può superare questo numero di mesi dalla data del roll. Per le put vendute di un{' '}
+                      <b>diagonal put spread</b> vale anche la scadenza della put comprata: si usa il limite più vicino.
                     </Info>
                   }
                 />

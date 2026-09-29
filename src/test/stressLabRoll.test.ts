@@ -335,6 +335,21 @@ describe('stressLab — rolling: solo put OTM e cap diagonal', () => {
     expect(vert.rollMiss).toBe('credito');
   });
 
+  it('diagonal put spread: vale il più stretto fra scadenza put comprata e cap mesi dal roll', () => {
+    const farLong = T0 + 20 / 12; // put comprata a ~20 mesi: il cap della card (3 mesi) è più stretto
+    const R3: RollParams = { ...R2, maxMonthsForward: 3 };
+    const row = run([putAt(97, { rollMaxT: farLong })], -25, { ...P2, roll: R3 }).rows[0];
+    expect(row.rolls!.length).toBeGreaterThan(0);
+    for (const e of row.rolls!) {
+      const dyAtRoll = 0; // orizzonte 0 gg
+      expect(e.toT - dyAtRoll).toBeLessThanOrEqual(3 / 12 + 1e-9 + e.fromT);
+      expect(e.toT).toBeLessThanOrEqual(farLong + 0.5 / 12);
+    }
+    // stessa put senza put comprata (naked) con lo stesso cap: identica
+    const naked = run([putAt(97)], -25, { ...P2, roll: R3 }).rows[0];
+    expect(naked.finalT).toBeCloseTo(row.finalT!, 12);
+  });
+
   it('rollableShortPutMaxExpiry: cap = scadenza put comprata del gruppo; naked put senza cap', async () => {
     const { rollableShortPutMaxExpiry } = await import('@/lib/stressLabRollEligibility');
     const P = (id: string, q: number, exp: string) => ({ id, option_type: 'put', quantity: q, expiry_date: exp }) as unknown as Position;
