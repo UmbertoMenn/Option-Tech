@@ -1755,6 +1755,10 @@ export type Database = {
         Row: {
           user_id: string
           enabled: boolean
+          itm_min_time_pct: number
+          itm_selected: string[]
+          itm_strike_step_pct: number
+          itm_trigger_pct: number
           trigger_pct: number
           max_months_forward: number
           strike_step_pct: number
@@ -1765,6 +1769,10 @@ export type Database = {
         Insert: {
           user_id: string
           enabled?: boolean
+          itm_min_time_pct?: number
+          itm_selected?: string[]
+          itm_strike_step_pct?: number
+          itm_trigger_pct?: number
           trigger_pct?: number
           max_months_forward?: number
           strike_step_pct?: number
@@ -1775,6 +1783,10 @@ export type Database = {
         Update: {
           user_id?: string
           enabled?: boolean
+          itm_min_time_pct?: number
+          itm_selected?: string[]
+          itm_strike_step_pct?: number
+          itm_trigger_pct?: number
           trigger_pct?: number
           max_months_forward?: number
           strike_step_pct?: number

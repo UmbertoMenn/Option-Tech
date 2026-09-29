@@ -56,6 +56,8 @@ export interface StressLeg {
    * stretto dei due).
    */
   rollMaxT?: number;
+  /** Put ITM selezionata dall'utente per il rolling con le regole ITM (RollParams.itm*) */
+  rollItm?: boolean;
 }
 
 export interface StressEquity {
@@ -166,7 +168,11 @@ export interface StrikeCandidate {
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
  */
 /** Motivo per cui una put idonea non è stata rollata lungo il percorso. */
-export type RollMiss = 'trigger' | 'credito' | 'itm';
+/**
+ * trigger = spot mai entro il trigger; credito = nessuna put a credito (OTM); tempo = put ITM
+ * selezionata: nessuna put con valore temporale sufficiente; itm = put ITM non selezionata.
+ */
+export type RollMiss = 'trigger' | 'credito' | 'itm' | 'tempo';
 
 export interface RollParams {
   triggerPct: number;
@@ -177,6 +183,18 @@ export interface RollParams {
   maxRolls: number;
   /** Granularità del percorso in punti % di mercato. Default 1. */
   pathStepPct?: number;
+  /**
+   * PUT ITM selezionate (StressLeg.rollItm): regole dedicate, roll anche a debito.
+   *  - trigger: lo spot perde altri itmTriggerPct% rispetto allo spot di oggi (o all'ultimo roll);
+   *  - strike di arrivo: almeno itmStrikeStepPct% sotto lo strike corrente, anche ITM;
+   *  - si accetta il roll se il valore temporale netto incassato (TV nuova put − TV put
+   *    ricomprata) ≥ itmMinTimePct% dello strike recuperato (K − K'): equivalente a un
+   *    debito ≤ (1 − itmMinTimePct%) dello strike recuperato. Fra i candidati validi sulla
+   *    scadenza più vicina si prende lo strike più basso.
+   */
+  itmTriggerPct?: number;
+  itmStrikeStepPct?: number;
+  itmMinTimePct?: number;
 }
 
 /**
@@ -227,8 +245,9 @@ export function rollStrikeCandidates(
   Tn?: number,
   chains?: StrikeChain[] | null,
   floorFrac = 0.05,
+  allowItm = false,
 ): StrikeCandidate[] {
-  return selectRollStrikeCandidates(K, S, minDropPct, Tn, chains, floorFrac);
+  return selectRollStrikeCandidates(K, S, minDropPct, Tn, chains, floorFrac, undefined, allowItm);
 }
 
 interface RollChainCache {
@@ -244,12 +263,15 @@ function selectRollStrikeCandidates(
   chains?: StrikeChain[] | null,
   floorFrac = 0.05,
   cache?: RollChainCache,
+  allowItm = false,
 ): StrikeCandidate[] {
   const upper = K * (1 - Math.max(0, minDropPct) / 100);
-  const ok = (k: number) => k <= upper + 1e-9 && k < K - 1e-9 && k < S - 1e-9 && k > S * floorFrac;
+  // allowItm: put ITM selezionate, la put di arrivo può restare sopra lo spot.
+  const ok = (k: number) =>
+    k <= upper + 1e-9 && k < K - 1e-9 && (allowItm || k < S - 1e-9) && k > S * floorFrac;
   const grid = (inc: number, src: StrikeSrc): StrikeCandidate[] => {
     const out: StrikeCandidate[] = [];
-    for (let n = Math.floor(Math.min(upper, K, S) / inc + 1e-9); n > 0 && out.length < 400; n--) {
+    for (let n = Math.floor(Math.min(upper, K, allowItm ? Infinity : S) / inc + 1e-9); n > 0 && out.length < 400; n--) {
       const k = r2(n * inc);
       if (k <= S * floorFrac) break;
       if (ok(k)) out.push({ k, src });
@@ -297,6 +319,9 @@ export const DEFAULT_ROLL_PARAMS: RollParams = {
   strikeStepPct: 5,
   maxRolls: 11,
   pathStepPct: 1,
+  itmTriggerPct: 5,
+  itmStrikeStepPct: 5,
+  itmMinTimePct: 25,
 };
 
 /** Un roll eseguito lungo il percorso (prezzi per azione, valuta nativa). */
@@ -317,6 +342,8 @@ export interface RollEvent {
   sell: number;
   /** Origine dello strike di arrivo */
   kSrc?: StrikeSrc;
+  /** Roll eseguito con le regole ITM (put selezionata, anche a debito) */
+  itm?: boolean;
 }
 
 export interface LegResult {
@@ -624,6 +651,7 @@ export function runScenario(
         T0: l.T,
         maxT: l.rollMaxT,
         chains: prm.strikes?.[l.u] ?? null,
+        itm: !!l.rollItm,
         S0,
         beta,
         d,
@@ -712,6 +740,8 @@ export interface PutRollSimInput {
   maxT?: number;
   /** Catene di strike quotati del sottostante (vedi rollStrikeCandidates) */
   chains?: StrikeChain[] | null;
+  /** Put selezionata per il rolling ITM (regole RollParams.itm*) */
+  itm?: boolean;
   /** Pricer della put del sottostante: (K, T da oggi, shock, vol, giorni trascorsi) */
   priceAt: (K: number, T: number, dd: number, dv: number, dy: number) => { p: number; sig: number };
 }
@@ -739,7 +769,10 @@ export interface PutRollSimResult {
  * delta minore nel resto del percorso.
  */
 export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
-  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt, maxT, chains } = inp;
+  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt, maxT, chains, itm } = inp;
+  const itmTrig = 1 - Math.max(0, roll.itmTriggerPct ?? DEFAULT_ROLL_PARAMS.itmTriggerPct ?? 5) / 100;
+  const itmStep = Math.max(0, roll.itmStrikeStepPct ?? DEFAULT_ROLL_PARAMS.itmStrikeStepPct ?? 5);
+  const itmMinTime = Math.max(0, roll.itmMinTimePct ?? DEFAULT_ROLL_PARAMS.itmMinTimePct ?? 25) / 100;
   const pathStep = Math.max(0.1, roll.pathStepPct ?? 1);
   const n = d < 0 ? Math.max(1, Math.ceil(Math.abs(d) / pathStep)) : 0;
   const cFinal = coupledDV1M(d);
@@ -761,11 +794,14 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   // a refreshed chain or a later call never inherits stale strike data.
   const chainCache: RollChainCache = { exact: new Map(), near: new Map() };
 
-  // Solo put OTM: una put già ITM (spot ≤ strike) allo stato attuale non si rolla.
-  if (S0 <= K0) {
+  // Put già ITM (spot ≤ strike) allo stato attuale: si rolla solo se selezionata (regole ITM).
+  if (S0 <= K0 && !itm) {
     const fin0 = priceAt(K, T, d, dV1M, days);
     return { rolls, K, T, netCredit, pFinal: fin0.p, sig: fin0.sig, miss: 'itm' };
   }
+  // Riferimento del trigger ITM: spot di oggi, poi spot dell'ultimo roll.
+  let itmRef = S0;
+  let lastItmMode = false;
 
   for (let i = 1; i <= n && rolls.length < maxRolls; i++) {
     const dd = (d * i) / n;
@@ -773,11 +809,41 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     const rem = T - dy / 365;
     if (rem <= 1e-6) break; // put già scaduta lungo il percorso: niente più roll
     const S = S0 * Math.max(0.02, 1 + (beta * dd) / 100);
-    if (S > K * trig) continue;
+    // Regole ITM solo per put selezionate e attualmente ITM; altrimenti regole OTM.
+    const itmMode = !!itm && S <= K;
+    if (itmMode ? S > itmRef * itmTrig + 1e-12 : S > K * trig) continue;
     triggered = true;
+    lastItmMode = itmMode;
     const dv = dvAt(dd, i);
     const buy = priceAt(K, T, dd, dv, dy).p;
     let chosen: { K: number; T: number; sell: number; src: StrikeSrc } | null = null;
+    if (itmMode) {
+      // Valore temporale netto incassato ≥ itmMinTime × strike recuperato; strike più basso
+      // valido sulla scadenza più vicina (condizione non monotona: si scorrono tutti).
+      const tvBuy = buy - Math.max(0, K - S);
+      for (let m = 1; m <= 240; m++) {
+        const Tn = T + m / 12;
+        if (Tn - dy / 365 > capT + 1e-9 || (capAbs != null && Tn > capAbs)) break;
+        const cands = selectRollStrikeCandidates(K, S, itmStep, Tn, chains, 0.05, chainCache, true);
+        let best: { K: number; sell: number; src: StrikeSrc } | null = null;
+        for (const c of cands) {
+          const sell = priceAt(c.k, Tn, dd, dv, dy).p;
+          const tvNet = sell - Math.max(0, c.k - S) - tvBuy;
+          if (tvNet > 0 && tvNet >= itmMinTime * (K - c.k) - 1e-12) best = { K: c.k, sell, src: c.src };
+        }
+        if (best) {
+          chosen = { K: best.K, T: Tn, sell: best.sell, src: best.src };
+          break;
+        }
+      }
+      if (!chosen) continue;
+      rolls.push({ d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell, kSrc: chosen.src, itm: true });
+      netCredit += chosen.sell - buy;
+      K = chosen.K;
+      T = chosen.T;
+      itmRef = S;
+      continue;
+    }
     // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
     for (let m = 1; m <= 240; m++) {
       const Tn = T + m / 12;
@@ -801,10 +867,17 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     netCredit += chosen.sell - buy;
     K = chosen.K;
     T = chosen.T;
+    itmRef = S;
   }
 
   const fin = priceAt(K, T, d, dV1M, days);
-  const miss: RollMiss | undefined = rolls.length ? undefined : triggered ? 'credito' : 'trigger';
+  const miss: RollMiss | undefined = rolls.length
+    ? undefined
+    : triggered
+      ? lastItmMode
+        ? 'tempo'
+        : 'credito'
+      : 'trigger';
   return { rolls, K, T, netCredit, pFinal: fin.p, sig: fin.sig, miss };
 }
 

@@ -78,6 +78,8 @@ const sgn = (v: number, dec = 1) =>
 /** Strike: intero senza decimali, altrimenti i decimali necessari (57,5 · 1,125). */
 const fmtK = (v: number) =>
   Math.abs(v - Math.round(v)) < 1e-9 ? fmtN(v, 0) : fmtN(v, Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 ? 1 : v < 5 ? 3 : 2);
+/** Chiave stabile (tra upload) di una put per la selezione del rolling ITM. */
+const itmLegKey = (l: { u: string; K: number; exp: string }) => `${l.u}|${l.K}|${l.exp}`;
 const pnlColor = (v: number) => (v > 0 ? C.up : v < 0 ? C.dn : C.mut);
 
 import {
@@ -350,6 +352,10 @@ function StressLabContent() {
   const rollMinCredit = rollSettings.minNetCreditPct;
   const rollStrikeStep = rollSettings.strikeStepPct;
   const rollMaxRolls = rollSettings.maxRolls;
+  const rollItmTrigger = rollSettings.itmTriggerPct;
+  const rollItmStep = rollSettings.itmStrikeStepPct;
+  const rollItmMinTime = rollSettings.itmMinTimePct;
+  const rollItmSelected = rollSettings.itmSelected;
   const rollPrm = useMemo<RollParams | null>(
     () =>
       rollOn
@@ -360,9 +366,12 @@ function StressLabContent() {
             strikeStepPct: rollStrikeStep,
             maxRolls: rollMaxRolls,
             pathStepPct: 1,
+            itmTriggerPct: rollItmTrigger,
+            itmStrikeStepPct: rollItmStep,
+            itmMinTimePct: rollItmMinTime,
           }
         : null,
-    [rollOn, rollTrigger, rollMaxMonths, rollMinCredit, rollStrikeStep, rollMaxRolls],
+    [rollOn, rollTrigger, rollMaxMonths, rollMinCredit, rollStrikeStep, rollMaxRolls, rollItmTrigger, rollItmStep, rollItmMinTime],
   );
   // Metodologia dello scenario: 'market' = shock di MERCATO (mossa trasmessa via beta
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
@@ -375,7 +384,28 @@ function StressLabContent() {
   const [ivScan, setIvScan] = useState(0.4);
   const [nakedPct, setNakedPct] = useState(0.2);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown, strikeBook } = data;
+  const { legs: dataLegs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown, strikeBook } = data;
+  // Put ITM selezionate per il rolling (regole ITM): flag rollItm sulle gambe idonee e ITM oggi.
+  const itmSelSet = useMemo(() => new Set(rollItmSelected), [rollItmSelected]);
+  const legs = useMemo(
+    () =>
+      itmSelSet.size === 0
+        ? dataLegs
+        : dataLegs.map((l) =>
+            (l.rollQ ?? 0) < 0 && itmSelSet.has(itmLegKey(l)) ? { ...l, rollItm: true } : l,
+          ),
+    [dataLegs, itmSelSet],
+  );
+  const itmCandidates = useMemo(
+    () => dataLegs.filter((l) => (l.rollQ ?? 0) < 0 && (unders[l.u]?.S ?? Infinity) <= l.K).map(itmLegKey),
+    [dataLegs, unders],
+  );
+  const toggleItm = (key: string) => {
+    const next = new Set(rollItmSelected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setRollSetting('itmSelected', [...next]);
+  };
   /* Copertura del margine = cash + bond valorizzati al 95% (haircut prudenziale
    * banca; cash GP escluso). La margin call scatta quando il margine richiesto
    * supera questa soglia. */
@@ -419,6 +449,7 @@ function StressLabContent() {
   const rollStats = useMemo(() => {
     const eligible = legs.filter((l) => (l.rollQ ?? 0) < 0).length;
     const itm = legs.filter((l) => (l.rollQ ?? 0) < 0 && (undersActive[l.u]?.S ?? Infinity) <= l.K).length;
+    const itmSel = legs.filter((l) => l.rollItm && (undersActive[l.u]?.S ?? Infinity) <= l.K).length;
     const excluded = legs
       .filter((l) => l.rollWhy)
       .map((l) => ({
@@ -436,7 +467,7 @@ function StressLabContent() {
     const effect = rollPrm
       ? scen.totEUR - runScenario(legs, eq, undersActive, effIV, d, dV1M, prmNoRoll).totEUR
       : 0;
-    return { eligible, itm, excluded, rolledLegs, nRolls, effect };
+    return { eligible, itm, itmSel, excluded, rolledLegs, nRolls, effect };
   }, [legs, eq, undersActive, effIV, d, dV1M, scen, rollPrm, prmNoRoll]);
 
   /* ---------- Esposizione di riferimento vs patrimonio stressato ----------
@@ -1543,9 +1574,9 @@ function StressLabContent() {
             <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
               {rollStats.eligible} put idonee
               {rollStats.itm > 0 && (
-                <span title="Put idonee già ITM (spot ≤ strike): si rollano solo put OTM">
+                <span title="Put idonee già ITM (spot ≤ strike): si rollano solo quelle selezionate (regole ITM)">
                   {' '}
-                  (<span style={{ color: C.amber }}>{rollStats.itm} ITM</span> non rollabili)
+                  (<span style={{ color: C.amber }}>{rollStats.itm} ITM</span>, {rollStats.itmSel} selezionate)
                 </span>
               )}
               {rollStats.excluded.length > 0 && (
@@ -1679,6 +1710,131 @@ function StressLabContent() {
                     </Info>
                   }
                 />
+                {/* PUT ITM SELEZIONATE */}
+                <div style={{ margin: '4px 0 12px', paddingTop: 10, borderTop: `1px dashed ${C.border2}` }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: C.amber,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.6,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      Put ITM · {rollStats.itmSel}/{itmCandidates.length} selezionate
+                      <Info title="Rolling delle put già ITM" w={420}>
+                        Le put vendute idonee già <b>ITM</b> oggi (spot ≤ strike) si rollano solo se{' '}
+                        <b>selezionate</b> (casella nel dettaglio per gamba, o i pulsanti qui accanto), con regole
+                        dedicate e <b>anche a debito</b>:
+                        <br />
+                        1) <b>trigger</b>: lo spot perde almeno la % impostata rispetto allo spot di oggi (dopo un roll,
+                        rispetto allo spot di quel roll). 0% = roll al primo passo;
+                        <br />
+                        2) <b>strike di arrivo</b>: almeno la discesa minima ITM sotto lo strike corrente, anche se
+                        resta sopra lo spot (strike quotati come per le OTM);
+                        <br />
+                        3) <b>convenienza</b>: il valore temporale netto incassato (valore temporale della nuova put −
+                        quello della put ricomprata) deve essere ≥ la % impostata dello <b>strike recuperato</b>. Es.:
+                        265 → 250 recupera 15; con 25% servono ≥ 3,75 di valore temporale netto, cioè un debito ≤ 11,25.
+                        <br />
+                        Sulla scadenza più vicina che ha un candidato valido (fino alla scadenza max; per i diagonal
+                        non oltre la put comprata) si prende lo strike <b>più basso</b>. Se la put di arrivo torna OTM,
+                        da lì valgono le regole normali.
+                      </Info>
+                    </span>
+                    <span style={{ display: 'inline-flex', gap: 4 }}>
+                      {(
+                        [
+                          ['tutte', itmCandidates],
+                          ['nessuna', [] as string[]],
+                        ] as [string, string[]][]
+                      ).map(([t, v]) => (
+                        <button
+                          key={t}
+                          disabled={!canEditRollSettings || itmCandidates.length === 0}
+                          onClick={() =>
+                            setRollSetting(
+                              'itmSelected',
+                              t === 'tutte'
+                                ? [...new Set([...rollItmSelected, ...v])]
+                                : rollItmSelected.filter((k) => !itmCandidates.includes(k)),
+                            )
+                          }
+                          style={{
+                            padding: '2px 7px',
+                            fontSize: 10.5,
+                            fontFamily: SANS,
+                            fontWeight: 600,
+                            background: 'transparent',
+                            color: C.amber,
+                            border: `1px solid ${C.amber}`,
+                            borderRadius: 5,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                  <Slider
+                    label="Trigger ITM (calo spot)"
+                    commitOnRelease
+                    value={rollItmTrigger}
+                    set={(v) => setRollSetting('itmTriggerPct', v)}
+                    min={0}
+                    max={30}
+                    step={0.5}
+                    fmt={(v) => '−' + fmtN(v, 1) + '%'}
+                    accent={C.amber}
+                    info={
+                      <Info title="Trigger delle put ITM" w={300}>
+                        Il roll scatta quando lo spot scende di almeno questa % rispetto allo spot di oggi (o dello
+                        spot all'ultimo roll). 0% = roll immediato al primo passo del percorso.
+                      </Info>
+                    }
+                  />
+                  <Slider
+                    label="Discesa minima strike ITM"
+                    commitOnRelease
+                    value={rollItmStep}
+                    set={(v) => setRollSetting('itmStrikeStepPct', v)}
+                    min={0.5}
+                    max={20}
+                    step={0.5}
+                    fmt={(v) => '−' + fmtN(v, 1) + '%'}
+                    accent={C.amber}
+                  />
+                  <Slider
+                    label="Valore temporale min (% strike recuperato)"
+                    commitOnRelease
+                    value={rollItmMinTime}
+                    set={(v) => setRollSetting('itmMinTimePct', v)}
+                    min={0}
+                    max={100}
+                    step={5}
+                    fmt={(v) => '≥ ' + fmtN(v, 0) + '%'}
+                    accent={C.amber}
+                    info={
+                      <Info title="Convenienza del roll ITM" w={320}>
+                        Valore temporale netto incassato col roll ≥ questa % dello strike recuperato (K − K′).
+                        Equivale a un debito massimo = (1 − %) × strike recuperato. 0% = basta che il debito sia
+                        inferiore allo strike recuperato.
+                      </Info>
+                    }
+                  />
+                </div>
                 <button
                   disabled={!canEditRollSettings}
                   onClick={() => {
@@ -1688,6 +1844,9 @@ function StressLabContent() {
                       strikeStepPct: DEFAULT_ROLL_PARAMS.strikeStepPct,
                       minNetCreditPct: DEFAULT_ROLL_PARAMS.minNetCreditPct,
                       maxRolls: DEFAULT_ROLL_PARAMS.maxRolls,
+                      itmTriggerPct: DEFAULT_ROLL_PARAMS.itmTriggerPct ?? 5,
+                      itmStrikeStepPct: DEFAULT_ROLL_PARAMS.itmStrikeStepPct ?? 5,
+                      itmMinTimePct: DEFAULT_ROLL_PARAMS.itmMinTimePct ?? 25,
                     });
                   }}
                   style={{
@@ -1702,7 +1861,7 @@ function StressLabContent() {
                     cursor: 'pointer',
                   }}
                 >
-                  ↺ Ripristina default (trigger 2% · +12 m · discesa −5% · credito ≥ 0 · 11 roll)
+                  ↺ Ripristina default (trigger 2% · +12 m · discesa −5% · credito ≥ 0 · 11 roll · ITM −5% / −5% / 25%)
                 </button>
               </div>
             )}
@@ -2932,7 +3091,7 @@ function StressLabContent() {
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1})${e.itm ? ' [ITM]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
                       (() => {
@@ -2953,7 +3112,11 @@ function StressLabContent() {
                   (l.rollWhy ? `ESCLUSA DAL ROLLING: ${l.rollWhy}\n` : '') +
                   (rollOn && d < 0 && (l.rollQ ?? 0) < 0 && !(rr.rolls && rr.rolls.length)
                     ? rr.rollMiss === 'itm'
-                      ? `NON ROLLATA: put già ITM (spot ${S0 != null ? fmtN(S0, 2) : '—'} ≤ strike ${kFmt}); si rollano solo put OTM\n`
+                      ? `NON ROLLATA: put già ITM (spot ${S0 != null ? fmtN(S0, 2) : '—'} ≤ strike ${kFmt}), non selezionata per il rolling ITM\n`
+                      : rr.rollMiss === 'tempo'
+                      ? `NON ROLLATA (ITM): trigger −${fmtN(rollItmTrigger, 1)}% raggiunto ma nessuna put con valore temporale netto ≥ ${fmtN(rollItmMinTime, 0)}% dello strike recuperato entro la scadenza max\n`
+                      : l.rollItm && S0 != null && S0 <= l.K
+                      ? `NON ROLLATA (ITM): lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non scende del ${fmtN(rollItmTrigger, 1)}% sotto ${fmtN(S0, 2)}\n`
                       : rr.rollMiss === 'credito'
                       ? `NON ROLLATA: trigger raggiunto ma nessuna put a credito ≥ minimo entro la scadenza max${l.rollMaxT != null ? ` (put comprata, ${Math.round(l.rollMaxT * 365.25)} gg)` : ''}\n`
                       : `NON ROLLATA: lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non arriva mai al trigger ${fmtN(l.K * (1 + rollTrigger / 100), 2)} = K × (1 + ${fmtN(rollTrigger, 1)}%)\n`
@@ -3024,6 +3187,22 @@ function StressLabContent() {
                     <td style={{ textAlign: 'right', color: C.mut }}>{fmtN(rr.p0, 2)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtN(rr.p1, 2)}</td>
                     <td style={{ textAlign: 'right', color: rr.rolls && rr.rolls.length ? C.up : C.mut, whiteSpace: 'nowrap' }}>
+                      {rollOn && (l.rollQ ?? 0) < 0 && S0 != null && S0 <= l.K && (
+                        <label
+                          title="Put ITM: seleziona per rollarla con le regole ITM (anche a debito)"
+                          onClick={(ev) => ev.stopPropagation()}
+                          style={{ marginRight: 6, cursor: 'pointer', color: C.amber, fontSize: 10 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={itmSelSet.has(itmLegKey(l))}
+                            disabled={!canEditRollSettings}
+                            onChange={() => toggleItm(itmLegKey(l))}
+                            style={{ verticalAlign: 'middle', marginRight: 2, accentColor: C.amber }}
+                          />
+                          ITM
+                        </label>
+                      )}
                       {rr.rolls && rr.rolls.length
                         ? `${fmtK(l.K)}→${fmtK(rr.finalK ?? l.K)} ×${rr.rolls.length}`
                         : rollOn && (l.rollQ ?? 0) < 0
@@ -3032,13 +3211,23 @@ function StressLabContent() {
                                 style={{ color: C.mut, fontSize: 10 }}
                                 title={
                                   rr.rollMiss === 'itm'
-                                    ? 'Put già ITM allo stato attuale (spot ≤ strike): si rollano solo put OTM'
+                                    ? 'Put già ITM (spot ≤ strike): selezionala per rollarla con le regole ITM'
+                                    : rr.rollMiss === 'tempo'
+                                    ? 'Put ITM: nessuna put con valore temporale netto sufficiente entro la scadenza max'
                                     : rr.rollMiss === 'credito'
                                     ? 'Trigger raggiunto ma nessuna put a credito netto ≥ minimo entro la scadenza massima'
                                     : `Lo spot non arriva mai entro il trigger: spot scenario ${S1 != null ? fmtN(S1 as number, 2) : '—'} > strike × (1 + trigger) = ${fmtN(l.K * (1 + rollTrigger / 100), 2)}`
                                 }
                               >
-                                {d >= 0 ? '—' : rr.rollMiss === 'itm' ? 'ITM' : rr.rollMiss === 'credito' ? 'no credito' : 'no trigger'}
+                                {d >= 0
+                                  ? '—'
+                                  : rr.rollMiss === 'itm'
+                                    ? 'non sel.'
+                                    : rr.rollMiss === 'tempo'
+                                      ? 'no val. temp.'
+                                      : rr.rollMiss === 'credito'
+                                        ? 'no credito'
+                                        : 'no trigger'}
                               </span>
                             )
                           : rollOn && l.rollWhy

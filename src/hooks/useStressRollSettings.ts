@@ -18,6 +18,14 @@ export interface StressRollSettings {
   strikeStepPct: number;
   minNetCreditPct: number;
   maxRolls: number;
+  /** Put ITM: trigger = calo % dello spot da oggi / dall'ultimo roll */
+  itmTriggerPct: number;
+  /** Put ITM: discesa minima dello strike per roll (%) */
+  itmStrikeStepPct: number;
+  /** Put ITM: valore temporale netto minimo, in % dello strike recuperato */
+  itmMinTimePct: number;
+  /** Put ITM selezionate per il rolling: chiavi `${ticker}|${strike}|${scadenza}` */
+  itmSelected: string[];
 }
 
 const defaults: StressRollSettings = {
@@ -27,6 +35,10 @@ const defaults: StressRollSettings = {
   strikeStepPct: DEFAULT_ROLL_PARAMS.strikeStepPct,
   minNetCreditPct: DEFAULT_ROLL_PARAMS.minNetCreditPct,
   maxRolls: DEFAULT_ROLL_PARAMS.maxRolls,
+  itmTriggerPct: DEFAULT_ROLL_PARAMS.itmTriggerPct ?? 5,
+  itmStrikeStepPct: DEFAULT_ROLL_PARAMS.itmStrikeStepPct ?? 5,
+  itmMinTimePct: DEFAULT_ROLL_PARAMS.itmMinTimePct ?? 25,
+  itmSelected: [],
 };
 
 type SettingsRow = {
@@ -36,7 +48,14 @@ type SettingsRow = {
   strike_step_pct: number;
   min_net_credit_pct: number;
   max_rolls: number;
+  itm_trigger_pct?: number | null;
+  itm_strike_step_pct?: number | null;
+  itm_min_time_pct?: number | null;
+  itm_selected?: string[] | null;
 };
+
+const SETTINGS_COLUMNS =
+  'enabled, trigger_pct, max_months_forward, strike_step_pct, min_net_credit_pct, max_rolls, itm_trigger_pct, itm_strike_step_pct, itm_min_time_pct, itm_selected';
 
 const fromRow = (row: SettingsRow): StressRollSettings => ({
   enabled: row.enabled,
@@ -45,6 +64,10 @@ const fromRow = (row: SettingsRow): StressRollSettings => ({
   strikeStepPct: row.strike_step_pct,
   minNetCreditPct: row.min_net_credit_pct,
   maxRolls: row.max_rolls,
+  itmTriggerPct: row.itm_trigger_pct ?? defaults.itmTriggerPct,
+  itmStrikeStepPct: row.itm_strike_step_pct ?? defaults.itmStrikeStepPct,
+  itmMinTimePct: row.itm_min_time_pct ?? defaults.itmMinTimePct,
+  itmSelected: row.itm_selected ?? [],
 });
 
 function targetUserId(
@@ -76,7 +99,7 @@ export function useStressRollSettings() {
       if (!ownerId) return null;
       const { data, error } = await supabase
         .from('stress_lab_roll_settings')
-        .select('enabled, trigger_pct, max_months_forward, strike_step_pct, min_net_credit_pct, max_rolls')
+        .select(SETTINGS_COLUMNS)
         .eq('user_id', ownerId)
         .maybeSingle();
       if (error) throw error;
@@ -112,7 +135,11 @@ export function useStressRollSettings() {
         strike_step_pct: values.strikeStepPct,
         min_net_credit_pct: values.minNetCreditPct,
         max_rolls: values.maxRolls,
-      }, { onConflict: 'user_id' }).select('enabled, trigger_pct, max_months_forward, strike_step_pct, min_net_credit_pct, max_rolls').single();
+        itm_trigger_pct: values.itmTriggerPct,
+        itm_strike_step_pct: values.itmStrikeStepPct,
+        itm_min_time_pct: values.itmMinTimePct,
+        itm_selected: values.itmSelected,
+      }, { onConflict: 'user_id' }).select(SETTINGS_COLUMNS).single();
       if (error) throw error;
       return { id, values, saved: fromRow(data) };
     },

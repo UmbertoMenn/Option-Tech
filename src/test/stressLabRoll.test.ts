@@ -434,3 +434,53 @@ describe('stressLab — strike quotati per il roll', () => {
     }
   });
 });
+
+describe('stressLab — rolling put ITM selezionate', () => {
+  const T0 = 18 / 365.25;
+  const call: StressLeg = { u: 'XYZ', cp: 'C', K: 110, T: 0.3, exp: '2027-01-15', q: -1, px: bsPrice(100 * Math.exp(R * 0.3), 110, 0.3, 0.3, true, R), fl: false, mult: 100, nm: 'XYZ', iv: 0.3 };
+  const itmPut = (extra: Partial<StressLeg> = {}): StressLeg => ({
+    u: 'XYZ', cp: 'P', K: 112.5, T: T0, exp: '2026-10-16', q: -1, px: 12.5, fl: true, mult: 100, nm: 'XYZ', iv: 0.45, rollQ: -1, ...extra,
+  });
+  const P2: ScenarioParams = { ...base, days: 0 };
+  const R2: RollParams = { ...DEFAULT_ROLL_PARAMS, maxMonthsForward: 24 };
+
+  it('non selezionata → nessun roll (motivo itm); selezionata → roll con regole ITM', () => {
+    expect(run([itmPut(), call], -10, { ...P2, roll: R2 }).rows[0].rollMiss).toBe('itm');
+    const row = run([itmPut({ rollItm: true }), call], -10, { ...P2, roll: R2 }).rows[0];
+    expect(row.rolls!.length).toBeGreaterThan(0);
+    const e = row.rolls![0];
+    expect(e.itm).toBe(true);
+    // trigger: spot sceso almeno del 5% da oggi (100)
+    expect(e.S).toBeLessThanOrEqual(95 + 1e-9);
+    // discesa minima 5% dello strike, anche ITM (sopra lo spot)
+    expect(e.toK).toBeLessThanOrEqual(112.5 * 0.95 + 1e-9);
+    // valore temporale netto ≥ 25% dello strike recuperato
+    const tvNet = e.sell - Math.max(0, e.toK - e.S) - (e.buy - Math.max(0, e.fromK - e.S));
+    expect(tvNet).toBeGreaterThanOrEqual(0.25 * (e.fromK - e.toK) - 1e-9);
+  });
+
+  it('roll ITM anche a debito: accettato se il debito è < strike recuperato', () => {
+    const row = run([itmPut({ rollItm: true }), call], -10, { ...P2, roll: R2 }).rows[0];
+    const e = row.rolls![0];
+    const debit = e.buy - e.sell;
+    expect(debit).toBeLessThan(e.fromK - e.toK);
+  });
+
+  it('trigger ITM non raggiunto → motivo trigger; premio temporale insufficiente → motivo tempo', () => {
+    expect(run([itmPut({ rollItm: true }), call], -3, { ...P2, roll: R2 }).rows[0].rollMiss).toBe('trigger');
+    const row = run([itmPut({ rollItm: true }), call], -10, { ...P2, roll: { ...R2, itmMinTimePct: 500 } }).rows[0];
+    expect(row.rolls!.length).toBe(0);
+    expect(row.rollMiss).toBe('tempo');
+  });
+
+  it('trigger ITM a 0% = roll al primo passo del percorso', () => {
+    const row = run([itmPut({ rollItm: true }), call], -10, { ...P2, roll: { ...R2, itmTriggerPct: 0 } }).rows[0];
+    expect(row.rolls![0].d).toBeCloseTo(-1, 9);
+  });
+
+  it('candidati ITM: ammessi sopra lo spot', () => {
+    const c = rollStrikeCandidates(112.5, 100, 5, undefined, null, 0.05, true);
+    expect(c[0].k).toBe(105);
+    expect(rollStrikeCandidates(112.5, 100, 5)[0].k).toBe(95);
+  });
+});
