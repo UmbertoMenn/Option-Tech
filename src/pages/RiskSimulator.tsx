@@ -414,6 +414,7 @@ function StressLabContent() {
   // Riepilogo rolling per la card scenario: gambe idonee, rollate e effetto sul P&L totale.
   const rollStats = useMemo(() => {
     const eligible = legs.filter((l) => (l.rollQ ?? 0) < 0).length;
+    const itm = legs.filter((l) => (l.rollQ ?? 0) < 0 && (undersActive[l.u]?.S ?? Infinity) <= l.K).length;
     const excluded = legs
       .filter((l) => l.rollWhy)
       .map((l) => ({
@@ -431,7 +432,7 @@ function StressLabContent() {
     const effect = rollPrm
       ? scen.totEUR - runScenario(legs, eq, undersActive, effIV, d, dV1M, prmNoRoll).totEUR
       : 0;
-    return { eligible, excluded, rolledLegs, nRolls, effect };
+    return { eligible, itm, excluded, rolledLegs, nRolls, effect };
   }, [legs, eq, undersActive, effIV, d, dV1M, scen, rollPrm, prmNoRoll]);
 
   /* ---------- Esposizione di riferimento vs patrimonio stressato ----------
@@ -1491,14 +1492,17 @@ function StressLabContent() {
                   impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
                   il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
                   <br />
+                  Si rollano <b>solo put OTM</b>: una put già ITM oggi non viene rollata, e la put di arrivo è
+                  sempre sotto lo spot.
+                  <br />
                   1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato. Cap:{' '}
                   <b>naked put</b> = scadenza max della card (mesi dal roll); <b>diagonal put spread</b> = scadenza
                   della <b>put comprata</b> (un put spread verticale quindi non si rolla);
                   <br />
-                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente, anche se resta ITM; su
+                  2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente e sotto lo spot; su
                   quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
                   <br />
-                  Nel dettaglio per gamba: <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
+                  Nel dettaglio per gamba: <b>ITM</b> = put già ITM, non rollata; <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
                   <b>no credito</b> = nessuna put a credito entro il cap.
                   <br />
                   Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
@@ -1554,6 +1558,12 @@ function StressLabContent() {
             </div>
             <div style={{ fontSize: 11, fontFamily: MONO, color: C.mut, margin: '4px 0 0' }}>
               {rollStats.eligible} put idonee
+              {rollStats.itm > 0 && (
+                <span title="Put idonee già ITM (spot ≤ strike): si rollano solo put OTM">
+                  {' '}
+                  (<span style={{ color: C.amber }}>{rollStats.itm} ITM</span> non rollabili)
+                </span>
+              )}
               {rollStats.excluded.length > 0 && (
                 <>
                   {' · '}
@@ -2942,7 +2952,9 @@ function StressLabContent() {
                   rollLines +
                   (l.rollWhy ? `ESCLUSA DAL ROLLING: ${l.rollWhy}\n` : '') +
                   (rollOn && d < 0 && (l.rollQ ?? 0) < 0 && !(rr.rolls && rr.rolls.length)
-                    ? rr.rollMiss === 'credito'
+                    ? rr.rollMiss === 'itm'
+                      ? `NON ROLLATA: put già ITM (spot ${S0 != null ? fmtN(S0, 2) : '—'} ≤ strike ${kFmt}); si rollano solo put OTM\n`
+                      : rr.rollMiss === 'credito'
                       ? `NON ROLLATA: trigger raggiunto ma nessuna put a credito ≥ minimo entro la scadenza max${l.rollMaxT != null ? ` (put comprata, ${Math.round(l.rollMaxT * 365.25)} gg)` : ''}\n`
                       : `NON ROLLATA: lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non arriva mai al trigger ${fmtN(l.K * (1 + rollTrigger / 100), 2)} = K × (1 + ${fmtN(rollTrigger, 1)}%)\n`
                     : '') +
@@ -3019,12 +3031,14 @@ function StressLabContent() {
                               <span
                                 style={{ color: C.mut, fontSize: 10 }}
                                 title={
-                                  rr.rollMiss === 'credito'
+                                  rr.rollMiss === 'itm'
+                                    ? 'Put già ITM allo stato attuale (spot ≤ strike): si rollano solo put OTM'
+                                    : rr.rollMiss === 'credito'
                                     ? 'Trigger raggiunto ma nessuna put a credito netto ≥ minimo entro la scadenza massima'
                                     : `Lo spot non arriva mai entro il trigger: spot scenario ${S1 != null ? fmtN(S1 as number, 2) : '—'} > strike × (1 + trigger) = ${fmtN(l.K * (1 + rollTrigger / 100), 2)}`
                                 }
                               >
-                                {d >= 0 ? '—' : rr.rollMiss === 'credito' ? 'no credito' : 'no trigger'}
+                                {d >= 0 ? '—' : rr.rollMiss === 'itm' ? 'ITM' : rr.rollMiss === 'credito' ? 'no credito' : 'no trigger'}
                               </span>
                             )
                           : rollOn && l.rollWhy

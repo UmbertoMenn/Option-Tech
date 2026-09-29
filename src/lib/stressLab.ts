@@ -128,15 +128,16 @@ export interface ScenarioParams extends SurfaceParams {
  *  - nuova scadenza: di mese in mese dopo la corrente, la più vicina che offre un candidato,
  *    con cap a maxMonthsForward mesi dalla data del roll (diagonal put spread: cap = scadenza
  *    della put comprata, StressLeg.rollMaxT);
+ *  - si rollano SOLO put OTM: una put già ITM allo stato attuale (spot ≤ strike) non si
+ *    rolla mai; la put di arrivo deve stare sotto lo spot (OTM);
  *  - nuovo strike: almeno strikeStepPct% SOTTO lo strike corrente (discesa minima per
- *    roll), su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente); può restare ITM
- *    (put già sotto lo strike: si scende comunque della discesa minima a credito);
+ *    roll) e sotto lo spot, su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente);
  *    sulla scadenza più vicina che ha almeno un candidato con credito netto ≥
  *    minNetCreditPct% del nuovo nozionale si sceglie lo strike PIÙ BASSO;
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
  */
 /** Motivo per cui una put idonea non è stata rollata lungo il percorso. */
-export type RollMiss = 'trigger' | 'credito';
+export type RollMiss = 'trigger' | 'credito' | 'itm';
 
 export interface RollParams {
   triggerPct: number;
@@ -616,6 +617,12 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   let netCredit = 0;
   const rolls: RollEvent[] = [];
 
+  // Solo put OTM: una put già ITM (spot ≤ strike) allo stato attuale non si rolla.
+  if (S0 <= K0) {
+    const fin0 = priceAt(K, T, d, dV1M, days);
+    return { rolls, K, T, netCredit, pFinal: fin0.p, sig: fin0.sig, miss: 'itm' };
+  }
+
   for (let i = 1; i <= n && rolls.length < maxRolls; i++) {
     const dd = (d * i) / n;
     const dy = (days * i) / n;
@@ -636,6 +643,7 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
       for (let j = minDrop > 0 ? 0 : 1; j <= 400; j++) {
         const Kj = K * (1 - minDrop - grid * j);
         if (Kj <= S * 0.05) break;
+        if (Kj >= S) continue; // la put di arrivo deve essere OTM (sotto lo spot)
         const sell = priceAt(Kj, Tn, dd, dv, dy).p;
         if (sell - buy >= (roll.minNetCreditPct / 100) * Kj) best = { K: Kj, sell };
         else break; // strike più bassi → premio minore: nessun candidato ulteriore

@@ -273,44 +273,44 @@ describe('stressLab — motivo di esclusione dal rolling', () => {
   });
 });
 
-describe('stressLab — rolling: put già ITM e cap diagonal', () => {
+describe('stressLab — rolling: solo put OTM e cap diagonal', () => {
   const T0 = 18 / 365.25;
-  const itmLeg = (extra: Partial<StressLeg> = {}): StressLeg => ({
-    u: 'XYZ', cp: 'P', K: 112.5, T: T0, exp: '2026-10-16', q: -1, px: 12.5, fl: true, mult: 100, nm: 'XYZ', iv: 0.45, rollQ: -1, ...extra,
-  });
-  // IV di riferimento del sottostante 30% (gamba call non idonea), la put ITM usa la mediana.
-  const call: StressLeg = { u: 'XYZ', cp: 'C', K: 110, T: 0.3, exp: '2027-01-15', q: -1, px: bsPrice(100 * Math.exp(R * 0.3), 110, 0.3, 0.3, true, R), fl: false, mult: 100, nm: 'XYZ', iv: 0.3 };
+  const putAt = (K: number, extra: Partial<StressLeg> = {}): StressLeg => {
+    const px = bsPrice(100 * Math.exp(R * T0), K, T0, 0.45, false, R);
+    return { u: 'XYZ', cp: 'P', K, T: T0, exp: '2026-10-16', q: -1, px, fl: false, mult: 100, nm: 'XYZ', iv: 0.45, rollQ: -1, ...extra };
+  };
   const P2: ScenarioParams = { ...base, days: 0 };
   const R2: RollParams = { ...DEFAULT_ROLL_PARAMS };
 
-  it('proof-of-bug: put già ITM (spot sotto strike) si rolla scendendo della discesa minima anche restando ITM', () => {
-    const legs = [itmLeg(), call];
-    const row = run(legs, -10, { ...P2, roll: R2 }).rows[0];
+  it('put già ITM (spot ≤ strike) → mai rollata, motivo "itm"', () => {
+    const row = run([putAt(112.5, { px: 12.5, fl: true })], -10, { ...P2, roll: R2 }).rows[0];
+    expect(row.rolls!.length).toBe(0);
+    expect(row.rollMiss).toBe('itm');
+  });
+
+  it('put OTM: roll con put di arrivo sempre OTM (sotto lo spot)', () => {
+    const row = run([putAt(97)], -25, { ...P2, roll: R2 }).rows[0];
     expect(row.rolls!.length).toBeGreaterThan(0);
-    const e = row.rolls![0];
-    expect(e.toK).toBeLessThanOrEqual(e.fromK * 0.95 + 1e-9);
-    expect(e.toK).toBeGreaterThan(e.S); // strike di arrivo ancora ITM: ammesso
-    expect(e.sell - e.buy).toBeGreaterThanOrEqual(0);
-    expect(row.rollMiss).toBeUndefined();
+    for (const e of row.rolls!) {
+      expect(e.toK).toBeLessThan(e.S);
+      expect(e.toK).toBeLessThanOrEqual(e.fromK * 0.95 + 1e-9);
+    }
   });
 
   it('put OTM mai raggiunta dal trigger → nessun roll, motivo "trigger"', () => {
-    const legs = [itmLeg({ K: 60, px: 0.5, fl: false, iv: 0.5 }), call];
-    const row = run(legs, -10, { ...P2, roll: R2 }).rows[0];
+    const row = run([putAt(60)], -10, { ...P2, roll: R2 }).rows[0];
     expect(row.rolls!.length).toBe(0);
     expect(row.rollMiss).toBe('trigger');
   });
 
-  it('diagonal put spread: scadenza di arrivo mai oltre la put comprata (anche oltre il cap mesi)', () => {
+  it('diagonal put spread: scadenza di arrivo mai oltre la put comprata', () => {
     const maxT = T0 + 3 / 12 + 3 / 365; // put comprata ~3 mesi dopo la venduta
-    const legs = [itmLeg({ rollMaxT: maxT }), call];
-    const row = run(legs, -25, { ...P2, roll: R2 }).rows[0];
+    const row = run([putAt(97, { rollMaxT: maxT })], -25, { ...P2, roll: R2 }).rows[0];
     for (const e of row.rolls ?? []) expect(e.toT).toBeLessThanOrEqual(maxT + 0.5 / 12);
-    // senza cap diagonal la stessa put va più lunga
-    const free = run([itmLeg(), call], -25, { ...P2, roll: R2 }).rows[0];
+    const free = run([putAt(97)], -25, { ...P2, roll: R2 }).rows[0];
     expect(free.finalT!).toBeGreaterThan(row.finalT ?? T0);
     // put spread verticale: comprata stessa scadenza → nessun roll possibile
-    const vert = run([itmLeg({ rollMaxT: T0 }), call], -25, { ...P2, roll: R2 }).rows[0];
+    const vert = run([putAt(97, { rollMaxT: T0 })], -25, { ...P2, roll: R2 }).rows[0];
     expect(vert.rolls!.length).toBe(0);
     expect(vert.rollMiss).toBe('credito');
   });
