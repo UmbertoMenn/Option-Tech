@@ -29,6 +29,7 @@ import {
 } from '@/lib/stressLabRollEligibility';
 import {
   StressLeg,
+  StrikeBook,
   StressEquity,
   StressUnderlyingMap,
   ForexRates,
@@ -116,6 +117,8 @@ export interface StressLabData {
   isFetchingBeta: boolean;
   /** Override editabili dei sottostanti (spot e beta) — viene gestito dalla UI */
   baselineUnders: StressUnderlyingMap;
+  /** Strike put quotati reali per sottostante (rolling) */
+  strikeBook: StrikeBook;
   /** Breakdown patrimonio per debug/UI */
   patrimonyBreakdown: {
     derivativesEUR: number;
@@ -653,6 +656,42 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   const effIV = useMemo(() => effIVMap(legs), [legs]);
 
+  /* ---------- 9b. Strike quotati reali (option_listed_strikes) per il rolling ---------- */
+  // Catene di strike put salvate da update-option-prices-cron (Yahoo v7): usate dal rolling
+  // per scegliere la put di arrivo fra strike realmente quotati. Solo sottostanti con put
+  // vendute; nessun dato → il motore usa il passo convenzionale.
+  const strikeTickers = useMemo(
+    () => [...new Set(legs.filter((l) => l.cp === 'P' && l.q < 0 && l.u !== 'EURUSD').map((l) => l.u))].sort(),
+    [legs],
+  );
+  const strikesQuery = useQuery({
+    queryKey: ['option-listed-strikes', strikeTickers.join(',')],
+    enabled: strikeTickers.length > 0,
+    staleTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('option_listed_strikes' as any)
+        .select('ticker, expiry, put_strikes')
+        .in('ticker', strikeTickers);
+      if (error) {
+        console.warn('[StressLab] option_listed_strikes:', error.message);
+        return [] as { ticker: string; expiry: string; put_strikes: number[] }[];
+      }
+      return (data ?? []) as unknown as { ticker: string; expiry: string; put_strikes: number[] }[];
+    },
+  });
+  const strikeBook: StrikeBook = useMemo(() => {
+    const b: StrikeBook = {};
+    for (const row of strikesQuery.data ?? []) {
+      const ks = (row.put_strikes ?? []).map(Number).filter((k) => k > 0);
+      if (ks.length < 2) continue;
+      const T = yearsToExpiry(row.expiry, snapshotRef);
+      if (T <= 0) continue;
+      (b[row.ticker.toUpperCase()] = b[row.ticker.toUpperCase()] || []).push({ T, exp: row.expiry, strikes: ks });
+    }
+    return b;
+  }, [strikesQuery.data, snapshotRef]);
+
   /* ---------- 10. Costruzione eq (stocks, ETF, commodity) ---------- */
 
   const eq: StressEquity[] = useMemo(() => {
@@ -867,5 +906,6 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     isFetchingBeta: fetchedBetasQuery.isFetching || isFetchingMissing,
     baselineUnders,
     patrimonyBreakdown,
+    strikeBook,
   };
 }

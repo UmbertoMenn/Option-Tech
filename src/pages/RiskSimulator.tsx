@@ -374,7 +374,7 @@ function StressLabContent() {
   const [ivScan, setIvScan] = useState(0.4);
   const [nakedPct, setNakedPct] = useState(0.2);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown } = data;
+  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown, strikeBook } = data;
   /* Copertura del margine = cash + bond valorizzati al 95% (haircut prudenziale
    * banca; cash GP escluso). La margin call scatta quando il margine richiesto
    * supera questa soglia. */
@@ -397,8 +397,8 @@ function StressLabContent() {
 
   const undersActive = shockMode === 'titoli' ? undersDelta : unders;
   const prm = useMemo(
-    () => ({ r, skewB, kappa, pExp, days, fx, netting, roll: rollPrm }),
-    [r, skewB, kappa, pExp, days, fx, netting, rollPrm],
+    () => ({ r, skewB, kappa, pExp, days, fx, netting, roll: rollPrm, strikes: strikeBook }),
+    [r, skewB, kappa, pExp, days, fx, netting, rollPrm, strikeBook],
   );
   // Stessi parametri SENZA rolling: curva di confronto tratteggiata.
   const prmNoRoll = useMemo(() => ({ ...prm, roll: null }), [prm]);
@@ -454,16 +454,16 @@ function StressLabContent() {
   /* ---------- Beta di riferimento ∓10% ---------- */
   const { betaDown, betaUp } = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return { betaDown: 0, betaUp: 0 };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm, strikes: strikeBook };
     const dn = runScenario(legs, eq, unders, effIV, -10, volAt(-10), bp).totEUR;
     const up = runScenario(legs, eq, unders, effIV, 10, volAt(10), bp).totEUR;
     return { betaDown: dn / ptfBase / -0.1, betaUp: up / ptfBase / 0.1 };
-  }, [legs, eq, unders, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
+  }, [legs, eq, unders, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, strikeBook, volMode, dVman]);
 
   /* ---------- Beta a scenario corrente ---------- */
   const betaScen = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return 0;
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm, strikes: strikeBook };
     if (Math.abs(d) < 0.25) {
       const pu = runScenario(legs, eq, unders, effIV, 0.25, volAt(0.25), bp).totEUR;
       const pd = runScenario(legs, eq, unders, effIV, -0.25, volAt(-0.25), bp).totEUR;
@@ -471,7 +471,7 @@ function StressLabContent() {
     }
     const pl = runScenario(legs, eq, unders, effIV, d, volAt(d), bp).totEUR;
     return pl / ptfBase / (d / 100);
-  }, [legs, eq, unders, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
+  }, [legs, eq, unders, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, strikeBook, volMode, dVman]);
 
   /* ---------- DELTA DI PORTAFOGLIO (beta sui titoli) ----------
    * Misura quanto si muove il portafoglio quando i SUOI sottostanti si muovono
@@ -480,15 +480,15 @@ function StressLabContent() {
    * (beta=1, EUR/USD fermo), definito sopra. Denominatore identico (patrimonio). */
   const { deltaDown, deltaUp } = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return { deltaDown: 0, deltaUp: 0 };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm, strikes: strikeBook };
     const dn = runScenario(legs, eq, undersDelta, effIV, -10, volAt(-10), bp).totEUR;
     const up = runScenario(legs, eq, undersDelta, effIV, 10, volAt(10), bp).totEUR;
     return { deltaDown: dn / ptfBase / -0.1, deltaUp: up / ptfBase / 0.1 };
-  }, [legs, eq, undersDelta, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
+  }, [legs, eq, undersDelta, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, strikeBook, volMode, dVman]);
 
   const deltaScen = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return 0;
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting, roll: rollPrm, strikes: strikeBook };
     if (Math.abs(d) < 0.25) {
       const pu = runScenario(legs, eq, undersDelta, effIV, 0.25, volAt(0.25), bp).totEUR;
       const pd = runScenario(legs, eq, undersDelta, effIV, -0.25, volAt(-0.25), bp).totEUR;
@@ -496,7 +496,7 @@ function StressLabContent() {
     }
     const pl = runScenario(legs, eq, undersDelta, effIV, d, volAt(d), bp).totEUR;
     return pl / ptfBase / (d / 100);
-  }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, volMode, dVman]);
+  }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, rollPrm, strikeBook, volMode, dVman]);
 
   /* ---------- P&L VERO dello scenario di mercato (= card P&L Totale). ---------- */
   const scenMarketTot = scen.totEUR;
@@ -509,7 +509,7 @@ function StressLabContent() {
   const { marNow, marCurve, marginCallX } = useMemo(() => {
     const fxR = fxRange / 100;
     const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false, strikes: strikeBook };
     const base = runScenario(legs, eq, unders, effIV, 0, 0, bp);
     const sig0s: Record<number, number> = {};
     base.rows.forEach((x) => (sig0s[x.i] = x.sig0));
@@ -547,7 +547,7 @@ function StressLabContent() {
     const chartMin =
       mcX != null ? Math.max(-95, Math.min(-35, Math.floor((mcX - 6) / 5) * 5)) : -35;
     return { marNow: now, marCurve: all.filter((p) => p.d >= chartMin - 0.01), marginCallX: mcX };
-  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover, rollPrm]);
+  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, marginCover, rollPrm, strikeBook]);
 
   /* ---------- Margine OCCSPH (strategy-based puro, gerarchia rigida) ----------
    * Calcolo statico a stato base (prezzi correnti, nessuno scenario): serve per
@@ -577,7 +577,7 @@ function StressLabContent() {
   const { marScen, marPnlMTM } = useMemo(() => {
     const fxR = fxRange / 100;
     const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
-    const bp = { r, skewB, kappa, pExp, days, fx, netting: false };
+    const bp = { r, skewB, kappa, pExp, days, fx, netting: false, strikes: strikeBook };
     const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, { ...bp, roll: rollPrm });
     let sc;
     if (rollPrm) {
@@ -590,7 +590,7 @@ function StressLabContent() {
       sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
     }
     return { marScen: sc, marPnlMTM: cur.totEUR };
-  }, [legs, eq, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, rollPrm]);
+  }, [legs, eq, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, rollPrm, strikeBook]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -1505,11 +1505,20 @@ function StressLabContent() {
                   2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente e sotto lo spot; su
                   quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo.
                   <br />
-                  <b>Strike quotati (assunzione)</b>: la put di arrivo è scelta solo fra strike realmente
-                  disponibili, con passo in funzione dello spot al momento del roll: spot <b>&lt; 70</b> → strike ogni{' '}
-                  <b>2,5</b>; spot <b>70–300</b> → ogni <b>5</b>; spot <b>&gt; 300</b> → ogni <b>10</b>. È la convenzione
-                  tipica delle mensili USA; i nomi con strike più fitti (o più radi) reali possono dare roll
-                  leggermente diversi.
+                  <b>Strike quotati</b>: la put di arrivo è scelta solo fra strike disponibili. Fonte, in ordine:
+                  <br />
+                  • <b>reale</b>: strike quotati oggi sulla scadenza di arrivo (catene Yahoo salvate dall'aggiornamento
+                  prezzi; le mensili fino a +13 mesi dei sottostanti con put vendute si aggiornano ogni settimana);
+                  <br />
+                  • <b>estrapolato</b>: sotto lo strike più basso quotato oggi si prolunga il passo della parte bassa
+                  della catena (dopo un crollo le borse listano nuovi strike con lo stesso schema);
+                  <br />
+                  • <b>passo</b>: scadenza di arrivo non in archivio → passo misurato sulla catena più vicina del titolo;
+                  <br />
+                  • <b>regola</b> (nessun dato): spot <b>&lt; 70</b> → ogni <b>2,5</b>; <b>70–300</b> → ogni <b>5</b>;{' '}
+                  <b>&gt; 300</b> → ogni <b>10</b>.
+                  <br />
+                  La fonte di ogni roll è indicata nel tooltip della riga del dettaglio per gamba.
                   <br />
                   Nel dettaglio per gamba: <b>ITM</b> = put già ITM, non rollata; <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
                   <b>no credito</b> = nessuna put a credito entro il cap.
@@ -1653,8 +1662,8 @@ function StressLabContent() {
                       credito si prende lo strike più basso possibile.
                       <br />
                       <br />
-                      Strike quotati assunti in base allo spot al roll: sotto 70 ogni 2,5 · 70–300 ogni 5 · sopra 300
-                      ogni 10.
+                      Si usano gli strike realmente quotati sulla scadenza di arrivo (o il passo della catena del
+                      titolo); senza dati, passo convenzionale: sotto 70 ogni 2,5 · 70–300 ogni 5 · sopra 300 ogni 10.
                       <br />
                       <br />
                       Più è alta, più ogni roll compra strike ma deve andare più lungo di scadenza: in <b>MTM</b> il
@@ -2945,7 +2954,7 @@ function StressLabContent() {
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtN(e.toK, 2)} (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1}) mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
                       (() => {

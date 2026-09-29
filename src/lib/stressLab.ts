@@ -120,6 +120,33 @@ export interface ScenarioParams extends SurfaceParams {
    * (orizzonte e vol distribuiti sul percorso) e a ogni step si verifica il trigger.
    */
   roll?: RollParams | null;
+  /**
+   * Strike quotati per sottostante (catene reali salvate da update-option-prices-cron in
+   * option_listed_strikes). Assente → passo da regola (rollStrikeIncrement).
+   */
+  strikes?: StrikeBook | null;
+}
+
+/** Catena di strike put quotati di una scadenza (T = anni dalla data di riferimento). */
+export interface StrikeChain {
+  T: number;
+  exp: string;
+  strikes: number[];
+}
+export type StrikeBook = Record<string, StrikeChain[]>;
+/**
+ * Origine dello strike di arrivo di un roll:
+ *  - reale: strike quotato oggi sulla scadenza di arrivo;
+ *  - estrapolato: sotto lo strike più basso quotato oggi, prolungando il passo della parte
+ *    bassa della catena (dopo un crollo le borse listano nuovi strike con lo stesso schema);
+ *  - passo: scadenza di arrivo non in archivio, passo misurato sulla catena più vicina del
+ *    sottostante;
+ *  - regola: nessun dato, passo convenzionale 2,5 / 5 / 10.
+ */
+export type StrikeSrc = 'reale' | 'estrapolato' | 'passo' | 'regola';
+export interface StrikeCandidate {
+  k: number;
+  src: StrikeSrc;
 }
 
 /**
@@ -162,23 +189,79 @@ export function rollStrikeIncrement(spot: number): number {
   return 5;
 }
 
+const r2 = (x: number) => Math.round(x * 100) / 100;
+
 /**
- * Strike quotati candidati per il roll, dal più alto al più basso: sul passo di
- * rollStrikeIncrement(S), ≤ K·(1 − discesa minima), strettamente sotto lo strike corrente
- * e sotto lo spot (put di arrivo OTM), > 0.
+ * Passo tipico di una catena: moda delle differenze fra strike consecutivi nella regione
+ * rilevante (strike ≤ ref; se troppo pochi, i 6 più bassi). A parità, il passo più ampio
+ * (prudenziale: le code della catena sono più rade).
  */
-export function rollStrikeCandidates(K: number, S: number, minDropPct: number, floorFrac = 0.05): number[] {
-  const inc = rollStrikeIncrement(S);
-  const upper = K * (1 - Math.max(0, minDropPct) / 100);
-  const out: number[] = [];
-  let n = Math.floor(Math.min(upper, K, S) / inc + 1e-9);
-  for (; n > 0 && out.length < 400; n--) {
-    const k = Math.round(n * inc * 100) / 100;
-    if (k > upper + 1e-9 || k >= K - 1e-9 || k >= S - 1e-9) continue;
-    if (k <= S * floorFrac) break;
-    out.push(k);
+export function chainStep(strikes: number[], ref?: number): number | null {
+  const s = [...new Set(strikes.filter((k) => k > 0).map(r2))].sort((a, b) => a - b);
+  if (s.length < 2) return null;
+  let reg = ref != null ? s.filter((k) => k <= ref + 1e-9) : s;
+  if (reg.length < 3) reg = s.slice(0, Math.min(6, s.length));
+  const cnt = new Map<number, number>();
+  for (let i = 1; i < reg.length; i++) {
+    const dlt = r2(reg[i] - reg[i - 1]);
+    if (dlt > 0) cnt.set(dlt, (cnt.get(dlt) ?? 0) + 1);
   }
-  return out;
+  let best: number | null = null;
+  let bc = 0;
+  for (const [dlt, c] of cnt) if (c > bc || (c === bc && best != null && dlt > best)) { best = dlt; bc = c; }
+  return best;
+}
+
+/**
+ * Strike candidati per il roll, dal più alto al più basso: ≤ K·(1 − discesa minima),
+ * strettamente sotto lo strike corrente e sotto lo spot (put di arrivo OTM), > floor·S.
+ * Fonte, in ordine: strike reali della scadenza di arrivo (Tn entro ±½ mese) + estrapolazione
+ * sotto il minimo quotato col passo della parte bassa; passo della catena più vicina del
+ * sottostante; regola 2,5 / 5 / 10.
+ */
+export function rollStrikeCandidates(
+  K: number,
+  S: number,
+  minDropPct: number,
+  Tn?: number,
+  chains?: StrikeChain[] | null,
+  floorFrac = 0.05,
+): StrikeCandidate[] {
+  const upper = K * (1 - Math.max(0, minDropPct) / 100);
+  const ok = (k: number) => k <= upper + 1e-9 && k < K - 1e-9 && k < S - 1e-9 && k > S * floorFrac;
+  const grid = (inc: number, src: StrikeSrc): StrikeCandidate[] => {
+    const out: StrikeCandidate[] = [];
+    for (let n = Math.floor(Math.min(upper, K, S) / inc + 1e-9); n > 0 && out.length < 400; n--) {
+      const k = r2(n * inc);
+      if (k <= S * floorFrac) break;
+      if (ok(k)) out.push({ k, src });
+    }
+    return out;
+  };
+  const valid = (chains ?? []).filter((c) => c.strikes && c.strikes.length >= 2);
+  if (Tn != null && valid.length) {
+    const exact = valid
+      .filter((c) => Math.abs(c.T - Tn) <= 0.5 / 12)
+      .sort((a, b) => Math.abs(a.T - Tn) - Math.abs(b.T - Tn))[0];
+    if (exact) {
+      const ks = [...new Set(exact.strikes.map(r2))].sort((a, b) => b - a);
+      const out: StrikeCandidate[] = ks.filter(ok).map((k) => ({ k, src: 'reale' as const }));
+      const minK = ks[ks.length - 1];
+      const step = chainStep(ks);
+      if (step && step > 0) {
+        for (let n = 1; n <= 400; n++) {
+          const k = r2(minK - n * step);
+          if (k <= S * floorFrac || k <= 0) break;
+          if (ok(k)) out.push({ k, src: 'estrapolato' });
+        }
+      }
+      return out;
+    }
+    const near = [...valid].sort((a, b) => Math.abs(a.T - (Tn ?? 0)) - Math.abs(b.T - (Tn ?? 0)))[0];
+    const step = chainStep(near.strikes, K);
+    if (step && step > 0) return grid(step, 'passo');
+  }
+  return grid(rollStrikeIncrement(S), 'regola');
 }
 
 export const DEFAULT_ROLL_PARAMS: RollParams = {
@@ -206,6 +289,8 @@ export interface RollEvent {
   buy: number;
   /** Premio incassato */
   sell: number;
+  /** Origine dello strike di arrivo */
+  kSrc?: StrikeSrc;
 }
 
 export interface LegResult {
@@ -512,6 +597,7 @@ export function runScenario(
         K0: l.K,
         T0: l.T,
         maxT: l.rollMaxT,
+        chains: prm.strikes?.[l.u] ?? null,
         S0,
         beta,
         d,
@@ -598,6 +684,8 @@ export interface PutRollSimInput {
   roll: RollParams;
   /** Cap assoluto di scadenza (anni da oggi) al posto di maxMonthsForward (diagonal put spread) */
   maxT?: number;
+  /** Catene di strike quotati del sottostante (vedi rollStrikeCandidates) */
+  chains?: StrikeChain[] | null;
   /** Pricer della put del sottostante: (K, T da oggi, shock, vol, giorni trascorsi) */
   priceAt: (K: number, T: number, dd: number, dv: number, dy: number) => { p: number; sig: number };
 }
@@ -625,7 +713,7 @@ export interface PutRollSimResult {
  * delta minore nel resto del percorso.
  */
 export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
-  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt, maxT } = inp;
+  const { K0, T0, S0, beta, d, dV1M, days, roll, priceAt, maxT, chains } = inp;
   const pathStep = Math.max(0.1, roll.pathStepPct ?? 1);
   const n = d < 0 ? Math.max(1, Math.ceil(Math.abs(d) / pathStep)) : 0;
   const cFinal = coupledDV1M(d);
@@ -659,26 +747,26 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     triggered = true;
     const dv = dvAt(dd, i);
     const buy = priceAt(K, T, dd, dv, dy).p;
-    let chosen: { K: number; T: number; sell: number } | null = null;
-    // Strike quotati: ≤ K·(1 − discesa minima), sotto lo spot, sul passo dello spot corrente.
-    const cands = rollStrikeCandidates(K, S, roll.strikeStepPct);
+    let chosen: { K: number; T: number; sell: number; src: StrikeSrc } | null = null;
     // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
-    for (let m = 1; m <= 240 && cands.length; m++) {
+    for (let m = 1; m <= 240; m++) {
       const Tn = T + m / 12;
       if (capAbs != null ? Tn > capAbs : Tn - dy / 365 > capT + 1e-9) break;
-      let best: { K: number; sell: number } | null = null;
-      for (const Kj of cands) {
-        const sell = priceAt(Kj, Tn, dd, dv, dy).p;
-        if (sell - buy >= (roll.minNetCreditPct / 100) * Kj) best = { K: Kj, sell };
+      // Strike quotati per la scadenza di arrivo: ≤ K·(1 − discesa minima), sotto lo spot.
+      const cands = rollStrikeCandidates(K, S, roll.strikeStepPct, Tn, chains);
+      let best: { K: number; sell: number; src: StrikeSrc } | null = null;
+      for (const c of cands) {
+        const sell = priceAt(c.k, Tn, dd, dv, dy).p;
+        if (sell - buy >= (roll.minNetCreditPct / 100) * c.k) best = { K: c.k, sell, src: c.src };
         else break; // strike più bassi → premio minore: nessun candidato ulteriore
       }
       if (best) {
-        chosen = { K: best.K, T: Tn, sell: best.sell };
+        chosen = { K: best.K, T: Tn, sell: best.sell, src: best.src };
         break;
       }
     }
     if (!chosen) continue; // nessun roll a credito: si riprova allo step successivo
-    rolls.push({ d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell });
+    rolls.push({ d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell, kSrc: chosen.src });
     netCredit += chosen.sell - buy;
     K = chosen.K;
     T = chosen.T;

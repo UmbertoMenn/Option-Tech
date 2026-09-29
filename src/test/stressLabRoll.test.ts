@@ -10,6 +10,7 @@ import {
   DEFAULT_ROLL_PARAMS,
   rollStrikeIncrement,
   rollStrikeCandidates,
+  chainStep,
   StressLeg,
   StressUnderlyingMap,
   ScenarioParams,
@@ -227,7 +228,7 @@ describe('stressLab — discesa minima strike per roll', () => {
     expect(m).toBeGreaterThanOrEqual(1);
     const dy = (30 * e.d) / -30;
     const dv = coupledDV1M(e.d);
-    const top = rollStrikeCandidates(e.fromK, e.S, 1)[0];
+    const top = rollStrikeCandidates(e.fromK, e.S, 1)[0].k;
     for (let k = 1; k < m; k++) {
       expect(priceAt(top, e.fromT + k / 12, e.d, dv, dy).p - e.buy).toBeLessThan(0);
     }
@@ -358,16 +359,54 @@ describe('stressLab — strike quotati per il roll', () => {
 
   it('candidati: sul passo, ≤ K·(1−discesa), sotto lo spot, decrescenti', () => {
     // K 90, spot 88, discesa 5% → ≤ 85,5 → 85, 80, 75…
-    expect(rollStrikeCandidates(90, 88, 5).slice(0, 3)).toEqual([85, 80, 75]);
+    expect(rollStrikeCandidates(90, 88, 5).slice(0, 3).map((c) => c.k)).toEqual([85, 80, 75]);
     // spot 64 → passo 2,5; K 65, discesa 5% → ≤ 61,75 → 60, 57,5, 55
-    expect(rollStrikeCandidates(65, 64, 5).slice(0, 3)).toEqual([60, 57.5, 55]);
+    expect(rollStrikeCandidates(65, 64, 5).slice(0, 3).map((c) => c.k)).toEqual([60, 57.5, 55]);
     // spot 320 → passo 10; K 330, discesa 5% → ≤ 313,5 → 310, 300
-    expect(rollStrikeCandidates(330, 320, 5).slice(0, 2)).toEqual([310, 300]);
+    expect(rollStrikeCandidates(330, 320, 5).slice(0, 2).map((c) => c.k)).toEqual([310, 300]);
     // il vincolo spot prevale: K 100, spot 81 (passo 5), discesa 2% → ≤ 98 ma < 81 → 80
-    expect(rollStrikeCandidates(100, 81, 2)[0]).toBe(80);
+    expect(rollStrikeCandidates(100, 81, 2)[0]).toEqual({ k: 80, src: 'regola' });
     // discesa 0: strettamente sotto lo strike corrente
-    expect(rollStrikeCandidates(100, 120, 0)[0]).toBe(95);
-    for (const k of rollStrikeCandidates(90, 88, 5)) expect(k).toBeGreaterThan(88 * 0.05);
+    expect(rollStrikeCandidates(100, 120, 0)[0].k).toBe(95);
+    for (const c of rollStrikeCandidates(90, 88, 5)) expect(c.k).toBeGreaterThan(88 * 0.05);
+  });
+
+  it('catena reale della scadenza di arrivo: strike reali, poi estrapolati sotto il minimo col passo basso', () => {
+    // scadenza T=0,5: strike 60..100 passo 5 nella parte bassa, 1 vicino ai soldi
+    const chain = { T: 0.5, exp: '2027-03-19', strikes: [60, 65, 70, 75, 80, 85, 90, 95, 96, 97, 98, 99, 100] };
+    const c = rollStrikeCandidates(100, 98, 2, 0.5 + 0.02, [chain]);
+    expect(c.slice(0, 3)).toEqual([{ k: 97, src: 'reale' }, { k: 96, src: 'reale' }, { k: 95, src: 'reale' }]);
+    const low = c.filter((x) => x.src === 'estrapolato').map((x) => x.k);
+    expect(low.slice(0, 3)).toEqual([55, 50, 45]);
+    // scadenza di arrivo NON in archivio: passo misurato sulla catena più vicina (≤ K)
+    const p = rollStrikeCandidates(100, 98, 2, 1.5, [{ T: 0.5, exp: '2027-03-19', strikes: [80, 82.5, 85, 87.5, 90, 92.5, 95] }]);
+    expect(p[0]).toEqual({ k: 97.5, src: 'passo' });
+    expect(p[1].k).toBe(95);
+    // nessuna catena → regola
+    expect(rollStrikeCandidates(100, 98, 2, 0.5, [])[0].src).toBe('regola');
+  });
+
+  it('chainStep: moda delle differenze nella regione ≤ ref, pareggio → passo più ampio', () => {
+    expect(chainStep([60, 65, 70, 75, 80, 81, 82, 83], 80)).toBe(5);
+    expect(chainStep([10, 12.5, 15, 17.5, 20])).toBe(2.5);
+    expect(chainStep([100])).toBeNull();
+  });
+
+  it('il motore usa gli strike reali della scadenza di arrivo (fonte registrata sul roll)', () => {
+    const leg = putLeg(97, 35 / 365, -1, -1);
+    // catene mensili fittizie a passo 3 (non ottenibile dalla regola) per tutte le scadenze
+    const chains = Array.from({ length: 14 }, (_, m) => ({
+      T: 35 / 365 + (m + 1) / 12,
+      exp: 'x',
+      strikes: Array.from({ length: 30 }, (_, i) => 30 + 3 * i),
+    }));
+    const res = run([leg], -30, { ...base, roll: { ...ROLL, strikeStepPct: 5 }, strikes: { XYZ: chains } });
+    const rolls = res.rows[0].rolls!;
+    expect(rolls.length).toBeGreaterThan(0);
+    for (const e of rolls) {
+      expect(e.kSrc).toBe('reale');
+      expect(((e.toK - 30) / 3) % 1).toBeCloseTo(0, 9);
+    }
   });
 
   it('i roll del motore scelgono solo strike quotati', () => {

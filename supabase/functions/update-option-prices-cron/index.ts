@@ -188,6 +188,13 @@ async function fetchOptionChain(
 ): Promise<{
   calls: Record<string, { bid: number; ask: number; lastPrice: number }>;
   puts: Record<string, { bid: number; ask: number; lastPrice: number }>;
+  /** Strike put quotati per questa scadenza (per il rolling dello Stress Lab) */
+  putStrikes: number[];
+  /** Scadenze disponibili del ticker (unix, 00:00 UTC) */
+  expirationDates: number[];
+  /** Scadenza effettiva della catena restituita (unix) */
+  expiryUnix: number | null;
+  spot: number | null;
 } | null> {
   try {
     const url = `https://query2.finance.yahoo.com/v7/finance/options/${encodeURIComponent(ticker)}?date=${expiryUnix}&crumb=${encodeURIComponent(crumb)}`;
@@ -218,12 +225,18 @@ async function fetchOptionChain(
     for (const c of (options.calls || [])) {
       calls[c.contractSymbol] = { bid: c.bid ?? 0, ask: c.ask ?? 0, lastPrice: c.lastPrice ?? 0 };
     }
+    const putStrikes: number[] = [];
     for (const p of (options.puts || [])) {
       puts[p.contractSymbol] = { bid: p.bid ?? 0, ask: p.ask ?? 0, lastPrice: p.lastPrice ?? 0 };
+      if (typeof p.strike === 'number' && p.strike > 0) putStrikes.push(p.strike);
     }
+    putStrikes.sort((a, b) => a - b);
+    const expirationDates: number[] = Array.isArray(result.expirationDates) ? result.expirationDates : [];
+    const chainExpiryUnix: number | null = typeof options.expirationDate === 'number' ? options.expirationDate : null;
+    const spot: number | null = typeof result.quote?.regularMarketPrice === 'number' ? result.quote.regularMarketPrice : null;
 
     console.log(`[Yahoo v7] ${ticker} exp=${expiryUnix}: ${Object.keys(calls).length} calls, ${Object.keys(puts).length} puts`);
-    return { calls, puts };
+    return { calls, puts, putStrikes, expirationDates, expiryUnix: chainExpiryUnix, spot };
   } catch (error) {
     console.error(`Error fetching chain for ${ticker}:`, error);
     return null;
@@ -299,7 +312,7 @@ serve(async (req) => {
     const today = new Date().toISOString().split('T')[0];
     const { data: allDerivatives, error: derivError } = await supabase
       .from('positions')
-      .select('id, underlying, option_type, strike_price, expiry_date, description')
+      .select('id, underlying, option_type, strike_price, expiry_date, description, quantity')
       .eq('asset_type', 'derivative')
       .not('underlying', 'is', null)
       .not('option_type', 'is', null)
@@ -470,6 +483,35 @@ serve(async (req) => {
     // Contratti la cui catena non espone un bid/ask utilizzabile.
     const noQuote: PositionToUpdate[] = [];
 
+    // --- Archivio strike quotati (option_listed_strikes) per il rolling dello Stress Lab ---
+    // Gli strike put di ogni catena già scaricata per i prezzi vengono salvati (nessuna
+    // chiamata in più; riscrittura al massimo ogni ~20h). In coda, nel tempo residuo, si
+    // scaricano le mensili fino a +13 mesi dei sottostanti con put vendute (refresh
+    // settimanale, max EXTRA_CHAINS_PER_RUN catene per run, prima le più vecchie).
+    const STRIKES_REFRESH_HELD_MS = 20 * 3600 * 1000;
+    const STRIKES_REFRESH_EXTRA_MS = 7 * 24 * 3600 * 1000;
+    const EXTRA_CHAINS_PER_RUN = 40;
+    const strikesAge = new Map<string, number>(); // `${ticker}|${expiry}` → updated_at ms
+    {
+      const { data: strikeRows, error: strikeErr } = await supabase
+        .from('option_listed_strikes')
+        .select('ticker, expiry, updated_at');
+      if (strikeErr) console.error('option_listed_strikes read:', strikeErr.message);
+      for (const r of strikeRows || []) strikesAge.set(`${r.ticker}|${r.expiry}`, new Date(r.updated_at).getTime());
+    }
+    const strikeUpserts = new Map<string, { ticker: string; expiry: string; put_strikes: number[]; spot: number | null; updated_at: string }>();
+    const tickerExpirations = new Map<string, number[]>();
+    const isoFromUnix = (u: number) => new Date(u * 1000).toISOString().slice(0, 10);
+    function recordStrikes(ticker: string, chain: { putStrikes: number[]; expirationDates: number[]; expiryUnix: number | null; spot: number | null }, maxAgeMs = STRIKES_REFRESH_HELD_MS): void {
+      if (chain.expirationDates.length) tickerExpirations.set(ticker, chain.expirationDates);
+      if (!chain.expiryUnix || chain.putStrikes.length < 2) return;
+      const expiry = isoFromUnix(chain.expiryUnix);
+      const key = `${ticker}|${expiry}`;
+      const age = strikesAge.get(key);
+      if (age != null && Date.now() - age < maxAgeMs) return;
+      strikeUpserts.set(key, { ticker, expiry, put_strikes: chain.putStrikes, spot: chain.spot, updated_at: new Date().toISOString() });
+    }
+
     async function writePrice(pos: PositionToUpdate, price: number): Promise<void> {
       const isBuyback = pos.table === 'call_buybacks';
       const { error: updateError } = isBuyback
@@ -512,6 +554,8 @@ serve(async (req) => {
             return;
           }
 
+          recordStrikes(group.ticker, chain);
+
           for (const pos of group.positions) {
             const isCall = pos.optionType.toLowerCase() === 'call';
             const contractMap = isCall ? chain.calls : chain.puts;
@@ -539,6 +583,65 @@ serve(async (req) => {
       console.log(`Time budget reached: skipped ${groupsSkipped}/${groupEntries.length} groups, will retry next run`);
     }
 
+    // Step 5: mensili future dei sottostanti con put vendute (solo archivio strike).
+    let extraFetched = 0;
+    if (!isTimeUp()) {
+      const shortPutTickers = new Set<string>();
+      for (const d of derivatives) {
+        if ((d.option_type || '').toLowerCase() !== 'put' || !(Number(d.quantity) < 0)) continue;
+        const t = underlyingToTicker[d.underlying];
+        if (t) shortPutTickers.add(t);
+      }
+      const now = new Date();
+      const extra: { ticker: string; unix: number; age: number }[] = [];
+      for (const ticker of shortPutTickers) {
+        const listed = tickerExpirations.get(ticker);
+        for (let m = 0; m <= 13; m++) {
+          const y = now.getUTCFullYear() + Math.floor((now.getUTCMonth() + m) / 12);
+          const mo = (now.getUTCMonth() + m) % 12;
+          const tf = getThirdFriday(y, mo);
+          const tfUnix = Math.floor(Date.UTC(y, mo, tf.getDate()) / 1000);
+          if (tfUnix * 1000 < Date.now()) continue;
+          // Con la lista reale delle scadenze: la mensile quotata entro ±2 giorni dal terzo
+          // venerdì (festivi); se il mese non è quotato (LEAPS radi) si salta.
+          let unix = tfUnix;
+          if (listed && listed.length) {
+            const hit = listed.find((u) => Math.abs(u - tfUnix) <= 2 * 86400);
+            if (hit == null) continue;
+            unix = hit;
+          }
+          const key = `${ticker}|${isoFromUnix(unix)}`;
+          if (strikeUpserts.has(key)) continue;
+          const age = strikesAge.get(key);
+          if (age != null && Date.now() - age < STRIKES_REFRESH_EXTRA_MS) continue;
+          extra.push({ ticker, unix, age: age ?? 0 });
+        }
+      }
+      extra.sort((a, b) => a.age - b.age);
+      const batch = extra.slice(0, EXTRA_CHAINS_PER_RUN);
+      if (batch.length) {
+        console.log(`[Strikes] ${extra.length} catene mensili da aggiornare, ${batch.length} in questo run`);
+        await processWithConcurrency(batch, CONCURRENCY, PACING_DELAY_MS, isTimeUp, async (it) => {
+          const chain = await fetchOptionChain(it.ticker, it.unix, auth.crumb, auth.cookie);
+          if (chain) {
+            extraFetched++;
+            recordStrikes(it.ticker, chain, STRIKES_REFRESH_EXTRA_MS);
+          }
+        });
+      }
+    }
+
+    // Scrittura archivio strike (upsert a blocchi).
+    let strikesSaved = 0;
+    const strikeRowsOut = [...strikeUpserts.values()];
+    for (let i = 0; i < strikeRowsOut.length; i += 200) {
+      const chunk = strikeRowsOut.slice(i, i + 200);
+      const { error: upErr } = await supabase.from('option_listed_strikes').upsert(chunk, { onConflict: 'ticker,expiry' });
+      if (upErr) console.error('option_listed_strikes upsert:', upErr.message);
+      else strikesSaved += chunk.length;
+    }
+    if (strikeRowsOut.length) console.log(`[Strikes] salvate ${strikesSaved} catene (${extraFetched} mensili extra)`);
+
     // Nessuna Phase B: i contratti senza bid/ask non vengono aggiornati.
     // Contarli serve a distinguere "Yahoo non risponde" da "il book è vuoto".
     if (noQuote.length > 0) {
@@ -565,6 +668,8 @@ serve(async (req) => {
         duration_ms: durationMs,
         time_budget_exceeded: timeBudgetExceeded,
         groups_skipped_time_budget: groupsSkipped,
+        strike_chains_saved: strikesSaved,
+        strike_chains_extra_fetched: extraFetched,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
