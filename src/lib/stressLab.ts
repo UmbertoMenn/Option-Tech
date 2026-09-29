@@ -131,7 +131,8 @@ export interface ScenarioParams extends SurfaceParams {
  *  - si rollano SOLO put OTM: una put già ITM allo stato attuale (spot ≤ strike) non si
  *    rolla mai; la put di arrivo deve stare sotto lo spot (OTM);
  *  - nuovo strike: almeno strikeStepPct% SOTTO lo strike corrente (discesa minima per
- *    roll) e sotto lo spot, su griglia fine (ROLL_STRIKE_GRID_PCT% dello strike corrente);
+ *    roll) e sotto lo spot, sugli strike QUOTATI (rollStrikeIncrement: 2,5 sotto 70 di spot,
+ *    5 fino a 300, 10 sopra);
  *    sulla scadenza più vicina che ha almeno un candidato con credito netto ≥
  *    minNetCreditPct% del nuovo nozionale si sceglie lo strike PIÙ BASSO;
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
@@ -150,8 +151,35 @@ export interface RollParams {
   pathStepPct?: number;
 }
 
-/** Risoluzione della griglia strike dei candidati sotto la discesa minima (% dello strike corrente). */
-export const ROLL_STRIKE_GRID_PCT = 0.5;
+/**
+ * Passo degli strike quotati assunto per le put di arrivo, in funzione dello spot al
+ * momento del roll (convenzione tipica delle opzioni USA mensili):
+ *   spot < 70 → 2,5 · 70 ≤ spot ≤ 300 → 5 · spot > 300 → 10.
+ */
+export function rollStrikeIncrement(spot: number): number {
+  if (spot < 70) return 2.5;
+  if (spot > 300) return 10;
+  return 5;
+}
+
+/**
+ * Strike quotati candidati per il roll, dal più alto al più basso: sul passo di
+ * rollStrikeIncrement(S), ≤ K·(1 − discesa minima), strettamente sotto lo strike corrente
+ * e sotto lo spot (put di arrivo OTM), > 0.
+ */
+export function rollStrikeCandidates(K: number, S: number, minDropPct: number, floorFrac = 0.05): number[] {
+  const inc = rollStrikeIncrement(S);
+  const upper = K * (1 - Math.max(0, minDropPct) / 100);
+  const out: number[] = [];
+  let n = Math.floor(Math.min(upper, K, S) / inc + 1e-9);
+  for (; n > 0 && out.length < 400; n--) {
+    const k = Math.round(n * inc * 100) / 100;
+    if (k > upper + 1e-9 || k >= K - 1e-9 || k >= S - 1e-9) continue;
+    if (k <= S * floorFrac) break;
+    out.push(k);
+  }
+  return out;
+}
 
 export const DEFAULT_ROLL_PARAMS: RollParams = {
   triggerPct: 2,
@@ -604,8 +632,6 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   const dvAt = (dd: number, i: number) =>
     Math.abs(cFinal) > 1e-9 ? (dV1M * coupledDV1M(dd)) / cFinal : n > 0 ? (dV1M * i) / n : 0;
   const trig = 1 + roll.triggerPct / 100;
-  const minDrop = Math.max(0, roll.strikeStepPct) / 100;
-  const grid = ROLL_STRIKE_GRID_PCT / 100;
   const capT = Math.max(1, roll.maxMonthsForward) / 12;
   // Diagonal: la scadenza T + m/12 cade nello stesso mese della put comprata entro ±mezzo mese.
   const capAbs = maxT != null && Number.isFinite(maxT) ? maxT + 0.5 / 12 : null;
@@ -634,16 +660,14 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
     const dv = dvAt(dd, i);
     const buy = priceAt(K, T, dd, dv, dy).p;
     let chosen: { K: number; T: number; sell: number } | null = null;
+    // Strike quotati: ≤ K·(1 − discesa minima), sotto lo spot, sul passo dello spot corrente.
+    const cands = rollStrikeCandidates(K, S, roll.strikeStepPct);
     // Scadenze di mese in mese dopo la corrente, cap a capT dalla data del roll.
-    for (let m = 1; m <= 240; m++) {
+    for (let m = 1; m <= 240 && cands.length; m++) {
       const Tn = T + m / 12;
       if (capAbs != null ? Tn > capAbs : Tn - dy / 365 > capT + 1e-9) break;
       let best: { K: number; sell: number } | null = null;
-      // Candidati: K·(1 − discesa minima), poi più in basso a passi di griglia fine.
-      for (let j = minDrop > 0 ? 0 : 1; j <= 400; j++) {
-        const Kj = K * (1 - minDrop - grid * j);
-        if (Kj <= S * 0.05) break;
-        if (Kj >= S) continue; // la put di arrivo deve essere OTM (sotto lo spot)
+      for (const Kj of cands) {
         const sell = priceAt(Kj, Tn, dd, dv, dy).p;
         if (sell - buy >= (roll.minNetCreditPct / 100) * Kj) best = { K: Kj, sell };
         else break; // strike più bassi → premio minore: nessun candidato ulteriore

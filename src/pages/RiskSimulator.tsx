@@ -71,6 +71,9 @@ const fmtN = (v: number, dec = 2) =>
   v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 const sgn = (v: number, dec = 1) =>
   (v > 0 ? '+' : v < 0 ? '−' : '') + fmtN(Math.abs(v), dec);
+/** Strike: intero senza decimali, altrimenti i decimali necessari (57,5 · 1,125). */
+const fmtK = (v: number) =>
+  Math.abs(v - Math.round(v)) < 1e-9 ? fmtN(v, 0) : fmtN(v, Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 ? 1 : v < 5 ? 3 : 2);
 const pnlColor = (v: number) => (v > 0 ? C.up : v < 0 ? C.dn : C.mut);
 
 import {
@@ -1500,7 +1503,13 @@ function StressLabContent() {
                   della <b>put comprata</b> (un put spread verticale quindi non si rolla);
                   <br />
                   2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente e sotto lo spot; su
-                  quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo (griglia fine 0,5%).
+                  quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo.
+                  <br />
+                  <b>Strike quotati (assunzione)</b>: la put di arrivo è scelta solo fra strike realmente
+                  disponibili, con passo in funzione dello spot al momento del roll: spot <b>&lt; 70</b> → strike ogni{' '}
+                  <b>2,5</b>; spot <b>70–300</b> → ogni <b>5</b>; spot <b>&gt; 300</b> → ogni <b>10</b>. È la convenzione
+                  tipica delle mensili USA; i nomi con strike più fitti (o più radi) reali possono dare roll
+                  leggermente diversi.
                   <br />
                   Nel dettaglio per gamba: <b>ITM</b> = put già ITM, non rollata; <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
                   <b>no credito</b> = nessuna put a credito entro il cap.
@@ -1640,8 +1649,12 @@ function StressLabContent() {
                   info={
                     <Info title="Discesa minima strike" w={340}>
                       Ogni roll deve portare lo strike almeno questa % sotto lo strike corrente (es. 90 con 4% →
-                      nuovo strike ≤ 86,4). Sulla scadenza più vicina che lo consente a credito si prende lo strike più
-                      basso possibile.
+                      nuovo strike ≤ 86,4 → primo strike quotato 85). Sulla scadenza più vicina che lo consente a
+                      credito si prende lo strike più basso possibile.
+                      <br />
+                      <br />
+                      Strike quotati assunti in base allo spot al roll: sotto 70 ogni 2,5 · 70–300 ogni 5 · sopra 300
+                      ogni 10.
                       <br />
                       <br />
                       Più è alta, più ogni roll compra strike ma deve andare più lungo di scadenza: in <b>MTM</b> il
@@ -2923,7 +2936,7 @@ function StressLabContent() {
                 const arrExpS = arrExp ? arrExp.slice(2).split('-') : null;
                 const arrLbl =
                   rr.rolls && rr.rolls.length
-                    ? `P ${fmtN(rr.finalK ?? l.K, (rr.finalK ?? l.K) < 5 ? 3 : 2)} · ${arrExpS ? `${arrExpS[2]}/${arrExpS[1]}/${arrExpS[0]}` : '—'}`
+                    ? `P ${fmtK(rr.finalK ?? l.K)} · ${arrExpS ? `${arrExpS[2]}/${arrExpS[1]}/${arrExpS[0]}` : '—'}`
                     : '';
                 const rollLines =
                   rr.rolls && rr.rolls.length
@@ -3025,7 +3038,7 @@ function StressLabContent() {
                     <td style={{ textAlign: 'right' }}>{fmtN(rr.p1, 2)}</td>
                     <td style={{ textAlign: 'right', color: rr.rolls && rr.rolls.length ? C.up : C.mut, whiteSpace: 'nowrap' }}>
                       {rr.rolls && rr.rolls.length
-                        ? `${fmtN(l.K, 0)}→${fmtN(rr.finalK ?? l.K, 0)} ×${rr.rolls.length}`
+                        ? `${fmtK(l.K)}→${fmtK(rr.finalK ?? l.K)} ×${rr.rolls.length}`
                         : rollOn && (l.rollQ ?? 0) < 0
                           ? (
                               <span

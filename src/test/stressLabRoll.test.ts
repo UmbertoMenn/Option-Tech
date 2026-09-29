@@ -8,6 +8,8 @@ import {
   applyRolls,
   simulatePutRolls,
   DEFAULT_ROLL_PARAMS,
+  rollStrikeIncrement,
+  rollStrikeCandidates,
   StressLeg,
   StressUnderlyingMap,
   ScenarioParams,
@@ -49,7 +51,7 @@ describe('stressLab — rolling put in discesa', () => {
     expect(run(nonIdonea, -30, { ...base, roll: ROLL }).rows[0].rolls).toBeUndefined();
   });
 
-  it('shock -30%: roll con discesa minima 2% (griglia fine 0,5%), credito ≥ 0, max 4, cap 12 mesi', () => {
+  it('shock -30%: roll con discesa minima 2% su strike quotati, credito ≥ 0, max 4, cap 12 mesi', () => {
     const res = run([putLeg(90, 35 / 365, -1, -1)], -30, { ...base, roll: ROLL });
     const row = res.rows[0];
     expect(row.rolls!.length).toBeGreaterThan(0);
@@ -59,10 +61,10 @@ describe('stressLab — rolling put in discesa', () => {
       expect(ev.S).toBeLessThanOrEqual(ev.fromK * 1.02 + 1e-9); // trigger 2%
       expect(ev.toK).toBeLessThan(ev.fromK);
       expect(ev.toK).toBeLessThan(ev.S);
-      // discesa minima 2% dello strike corrente, poi griglia fine 0,5%
+      // discesa minima 2% dello strike corrente, su strike quotati (passo per spot al roll)
       expect(ev.toK).toBeLessThanOrEqual(ev.fromK * 0.98 + 1e-9);
-      const j = (1 - ev.toK / ev.fromK - 0.02) / 0.005;
-      expect(Math.abs(j - Math.round(j))).toBeLessThan(1e-9);
+      const inc = rollStrikeIncrement(ev.S);
+      expect(Math.abs(ev.toK / inc - Math.round(ev.toK / inc))).toBeLessThan(1e-9);
       expect(ev.sell - ev.buy).toBeGreaterThanOrEqual(-1e-12); // credito netto ≥ 0
       expect(ev.toT).toBeGreaterThan(ev.fromT);
       const m = (ev.toT - ev.fromT) * 12; // scadenze di mese in mese
@@ -70,7 +72,7 @@ describe('stressLab — rolling put in discesa', () => {
     }
   });
 
-  it('strike più basso tra i candidati a credito: il gradino successivo della griglia fine è a debito', () => {
+  it('strike più basso tra i candidati a credito: lo strike quotato successivo è a debito', () => {
     const leg = putLeg(90, 35 / 365, -1, -1);
     // Pricer semplice (vol piatta + shock): lo strike successivo (−2% ulteriore) sulla
     // stessa scadenza deve essere a debito, altrimenti il motore avrebbe scelto quello.
@@ -85,7 +87,7 @@ describe('stressLab — rolling put in discesa', () => {
       },
     });
     const e = sim.rolls[0];
-    const next = e.toK - e.fromK * 0.005;
+    const next = e.toK - rollStrikeIncrement(e.S);
     const Tx = e.toT - (30 * (e.d / -30)) / 365;
     const S = 100 * (1 + e.d / 100);
     const dv = coupledDV1M(e.d);
@@ -209,9 +211,26 @@ describe('stressLab — idoneità al rolling', () => {
 
 describe('stressLab — discesa minima strike per roll', () => {
   const leg = () => putLeg(90, 35 / 365, -1, -1);
-  it('scadenza più vicina prima: con discesa minima piccola il primo roll va a +1 mese', () => {
-    const ev = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 1 } }).rows[0].rolls![0];
-    expect(Math.round((ev.toT - ev.fromT) * 12)).toBe(1);
+  it('scadenza più vicina prima: nessuna scadenza precedente offre uno strike quotato a credito', () => {
+    const priceAt = (K: number, T: number, dd: number, dv: number, dy: number) => {
+      const Tx = Math.max(T - dy / 365, 0);
+      const S = 100 * (1 + dd / 100);
+      const sig = 0.4 + (dv * Math.min(1.45, Math.pow(1 / 12 / Math.max(T, 0.01), 0.5))) / 100;
+      return { p: bsPrice(S * Math.exp(R * Tx), K, Tx, sig, false, R), sig };
+    };
+    const sim = simulatePutRolls({
+      K0: 90, T0: 35 / 365, S0: 100, beta: 1, d: -30, dV1M: coupledDV1M(-30), days: 30,
+      roll: { ...ROLL, strikeStepPct: 1, maxRolls: 1 }, priceAt,
+    });
+    const e = sim.rolls[0];
+    const m = Math.round((e.toT - e.fromT) * 12);
+    expect(m).toBeGreaterThanOrEqual(1);
+    const dy = (30 * e.d) / -30;
+    const dv = coupledDV1M(e.d);
+    const top = rollStrikeCandidates(e.fromK, e.S, 1)[0];
+    for (let k = 1; k < m; k++) {
+      expect(priceAt(top, e.fromT + k / 12, e.d, dv, dy).p - e.buy).toBeLessThan(0);
+    }
   });
 
   it('discesa minima ampia: ogni roll scende almeno di quella % e deve allungare la scadenza', () => {
@@ -325,5 +344,39 @@ describe('stressLab — rolling: solo put OTM e cap diagonal', () => {
       ],
     });
     expect(Object.fromEntries(m)).toEqual({ s: '2027-12-17' });
+  });
+});
+
+describe('stressLab — strike quotati per il roll', () => {
+  it('passo: < 70 → 2,5; 70–300 → 5; > 300 → 10', () => {
+    expect(rollStrikeIncrement(45)).toBe(2.5);
+    expect(rollStrikeIncrement(69.99)).toBe(2.5);
+    expect(rollStrikeIncrement(70)).toBe(5);
+    expect(rollStrikeIncrement(300)).toBe(5);
+    expect(rollStrikeIncrement(300.01)).toBe(10);
+  });
+
+  it('candidati: sul passo, ≤ K·(1−discesa), sotto lo spot, decrescenti', () => {
+    // K 90, spot 88, discesa 5% → ≤ 85,5 → 85, 80, 75…
+    expect(rollStrikeCandidates(90, 88, 5).slice(0, 3)).toEqual([85, 80, 75]);
+    // spot 64 → passo 2,5; K 65, discesa 5% → ≤ 61,75 → 60, 57,5, 55
+    expect(rollStrikeCandidates(65, 64, 5).slice(0, 3)).toEqual([60, 57.5, 55]);
+    // spot 320 → passo 10; K 330, discesa 5% → ≤ 313,5 → 310, 300
+    expect(rollStrikeCandidates(330, 320, 5).slice(0, 2)).toEqual([310, 300]);
+    // il vincolo spot prevale: K 100, spot 81 (passo 5), discesa 2% → ≤ 98 ma < 81 → 80
+    expect(rollStrikeCandidates(100, 81, 2)[0]).toBe(80);
+    // discesa 0: strettamente sotto lo strike corrente
+    expect(rollStrikeCandidates(100, 120, 0)[0]).toBe(95);
+    for (const k of rollStrikeCandidates(90, 88, 5)) expect(k).toBeGreaterThan(88 * 0.05);
+  });
+
+  it('i roll del motore scelgono solo strike quotati', () => {
+    const res = run([putLeg(97, 35 / 365, -1, -1)], -30, { ...base, roll: { ...ROLL, strikeStepPct: 5 } });
+    const rolls = res.rows[0].rolls!;
+    expect(rolls.length).toBeGreaterThan(0);
+    for (const e of rolls) {
+      const inc = rollStrikeIncrement(e.S);
+      expect(Math.abs(e.toK / inc - Math.round(e.toK / inc))).toBeLessThan(1e-9);
+    }
   });
 });
