@@ -21,7 +21,7 @@ import { ThemeProvider } from "next-themes";
 type PageModule = { default: ComponentType<any> };
 
 function lazyWithReload(factory: () => Promise<PageModule>) {
-  return lazy<PageModule>(() =>
+  return lazy<ComponentType<any>>(() =>
     factory().catch((err) => {
       const KEY = "app_chunk_reload_at";
       const last = Number(sessionStorage.getItem(KEY) ?? 0);
