@@ -3225,6 +3225,8 @@ function ExpiryTile({
   after,
   fxUSD,
   footer,
+  emptyText = 'nessuna gamba venduta',
+  highlight = false,
 }: {
   label: string;
   color: string;
@@ -3232,6 +3234,8 @@ function ExpiryTile({
   after?: AvgExpiry | null;
   fxUSD: number;
   footer?: React.ReactNode;
+  emptyText?: string;
+  highlight?: boolean;
 }) {
   const hasAfter = after != null && after.days != null && before.days != null;
   const main = hasAfter ? (after as AvgExpiry) : before;
@@ -3239,8 +3243,8 @@ function ExpiryTile({
   return (
     <div
       style={{
-        background: C.panel2,
-        border: `1px solid ${C.border}`,
+        background: highlight ? 'rgba(8,153,129,.10)' : C.panel2,
+        border: `1px solid ${highlight ? color : C.border}`,
         borderLeft: `3px solid ${color}`,
         borderRadius: 8,
         padding: '10px 12px',
@@ -3260,7 +3264,10 @@ function ExpiryTile({
         {label}
       </div>
       {before.days == null ? (
-        <div style={{ fontFamily: MONO, fontSize: 13, color: C.mut }}>nessuna gamba venduta</div>
+        <>
+          <div style={{ fontFamily: MONO, fontSize: 13, color: C.mut }}>{emptyText}</div>
+          {footer}
+        </>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -3317,20 +3324,28 @@ function ExpiryCard({
   wide: boolean;
   style?: React.CSSProperties;
 }) {
-  const rollNote = rollOn ? (
-    <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
-      {d >= 0 ? (
-        'nessun roll su shock al rialzo'
-      ) : s.eligible.days == null ? (
-        'nessuna put idonea al rolling'
-      ) : (
-        <>
-          idonee al rolling: {Math.round(s.eligible.days)} → {' '}
-          <b style={{ color: C.up }}>{Math.round(s.eligibleAfter.days ?? s.eligible.days)} gg</b> · {s.rolledLegs}{' '}
-          gambe rollate @ {sgn(d, 1)}%
-        </>
-      )}
+  const noteStyle: React.CSSProperties = {
+    fontFamily: MONO,
+    fontSize: 11,
+    color: C.mut,
+    marginTop: 6,
+    paddingTop: 6,
+    borderTop: `1px solid ${C.border}`,
+  };
+  const rolledEmpty =
+    d >= 0
+      ? 'nessun roll su shock al rialzo'
+      : s.eligible.days == null
+        ? 'nessuna put idonea al rolling'
+        : `nessuna put rollata @ ${sgn(d, 1)}%`;
+  const rolledNote = rollOn ? (
+    <div style={noteStyle}>
+      {s.rolledLegs} gambe rollate su {s.eligible.legs} idonee @ {sgn(d, 1)}% · scadenza media delle sole put rollate,
+      prima e dopo il roll
     </div>
+  ) : null;
+  const totNote = rollOn ? (
+    <div style={noteStyle}>tutte le put vendute (rollate + non rollate)</div>
   ) : null;
   return (
     <Panel
@@ -3344,25 +3359,45 @@ function ExpiryCard({
           <br />
           <br />
           Con il <b>rolling in discesa</b> attivo, la parte rollata di ogni put è sostituita dalla{' '}
-          <b>put di arrivo</b> a fine percorso (strike più basso, scadenza più lunga): il valore dopo la freccia è
-          la nuova scadenza media delle put vendute allo shock impostato. Le call vendute non vengono rollate.
+          <b>put di arrivo</b> a fine percorso (strike più basso, scadenza più lunga).
+          <br />
+          <b>Put rollate</b>: solo i contratti effettivamente rollati allo shock impostato — scadenza media delle put
+          di partenza → delle put di arrivo (pesata sul nozionale di arrivo).
+          <br />
+          <b>Put vendute · totale</b>: tutte le put vendute, rollate e non. Le call vendute non vengono rollate.
         </Info>
       }
     >
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: wide ? 'minmax(0,1.5fr) minmax(0,1fr)' : '1fr',
+          gridTemplateColumns: wide
+            ? rollOn
+              ? 'minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1fr)'
+              : 'minmax(0,1.5fr) minmax(0,1fr)'
+            : '1fr',
           gap: 10,
         }}
       >
+        {rollOn && (
+          <ExpiryTile
+            label="Put rollate · scadenza media aggiornata"
+            color={C.up}
+            before={s.rolled}
+            after={s.rolledAfter}
+            fxUSD={fxUSD}
+            footer={rolledNote}
+            emptyText={rolledEmpty}
+            highlight
+          />
+        )}
         <ExpiryTile
-          label="Put vendute"
+          label={rollOn ? 'Put vendute · totale' : 'Put vendute'}
           color={C.amber}
           before={s.puts}
           after={rollOn ? s.putsAfter : null}
           fxUSD={fxUSD}
-          footer={rollNote}
+          footer={totNote}
         />
         <ExpiryTile label="Call vendute" color={C.cyan} before={s.calls} fxUSD={fxUSD} />
       </div>

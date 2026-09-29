@@ -66,6 +66,12 @@ export interface ShortExpirySummary {
   eligibleAfter: AvgExpiry;
   /** Gambe effettivamente rollate nello scenario */
   rolledLegs: number;
+  /**
+   * Solo le put EFFETTIVAMENTE rollate nello scenario (contratti rollati): scadenza media
+   * delle put di partenza e delle put di arrivo (strike/nozionale di arrivo).
+   */
+  rolled: AvgExpiry;
+  rolledAfter: AvgExpiry;
 }
 
 /**
@@ -78,6 +84,8 @@ export function shortExpirySummary(legs: StressLeg[], rows?: LegResult[] | null)
   const putsAfter: Piece[] = [];
   const elig: Piece[] = [];
   const eligAfter: Piece[] = [];
+  const rolledBefore: Piece[] = [];
+  const rolledAfter: Piece[] = [];
   const byIdx = new Map<number, LegResult>();
   (rows ?? []).forEach((r) => byIdx.set(r.i, r));
   let rolledLegs = 0;
@@ -107,6 +115,8 @@ export function shortExpirySummary(legs: StressLeg[], rows?: LegResult[] | null)
     const arrival: Piece = { T: row!.finalT as number, K: row!.finalK as number, q: rqRow, mult: l.mult };
     putsAfter.push(arrival);
     eligAfter.push(arrival);
+    rolledBefore.push({ ...base, q: rqRow });
+    rolledAfter.push(arrival);
   });
 
   return {
@@ -116,6 +126,8 @@ export function shortExpirySummary(legs: StressLeg[], rows?: LegResult[] | null)
     eligible: weightedAvgExpiry(elig),
     eligibleAfter: weightedAvgExpiry(eligAfter),
     rolledLegs,
+    rolled: weightedAvgExpiry(rolledBefore),
+    rolledAfter: weightedAvgExpiry(rolledAfter),
   };
 }
 

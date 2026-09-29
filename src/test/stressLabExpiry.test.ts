@@ -61,6 +61,10 @@ describe('stressLab — scadenza media portafoglio derivati', () => {
     expect(s.rolledLegs).toBe(1);
     expect(s.putsAfter.days!).toBeGreaterThan(s.puts.days!);
     expect(s.eligibleAfter.days!).toBeCloseTo(row.finalT! * DAYS_PER_YEAR, 9);
+    // solo put rollate: partenza 35 gg → arrivo finalT
+    expect(s.rolled.days!).toBeCloseTo(35 / 365 * DAYS_PER_YEAR, 9);
+    expect(s.rolledAfter.days!).toBeCloseTo(row.finalT! * DAYS_PER_YEAR, 9);
+    expect(s.rolled.contracts).toBe(2);
     expect(s.calls.days!).toBeCloseTo(0.2 * DAYS_PER_YEAR, 9);
     // media dopo i roll = pesata fra put di arrivo (strike nuovo) e put non idonea
     const wA = 2 * 100 * row.finalK!;
@@ -77,12 +81,16 @@ describe('stressLab — scadenza media portafoglio derivati', () => {
     const wR = 1 * 100 * row.finalK!;
     expect(s.putsAfter.days!).toBeCloseTo(((wS * (35 / 365) + wR * row.finalT!) / (wS + wR)) * DAYS_PER_YEAR, 9);
     expect(s.putsAfter.contracts).toBe(4);
+    // rollate: solo il contratto rollato
+    expect(s.rolled.contracts).toBe(1);
+    expect(s.rolledAfter.days!).toBeCloseTo(row.finalT! * DAYS_PER_YEAR, 9);
   });
 
   it('shock al rialzo o rolling spento → dopo = prima', () => {
     const legs = [leg('P', 90, 35 / 365, -2, -2)];
     const up = runScenario(legs, [], unders, effIVMap(legs), 10, coupledDV1M(10), { ...base, roll: ROLL });
     expect(shortExpirySummary(legs, up.rows).putsAfter.days).toBeCloseTo(shortExpirySummary(legs).puts.days!, 9);
+    expect(shortExpirySummary(legs, up.rows).rolled.days).toBeNull();
     const off = runScenario(legs, [], unders, effIVMap(legs), -30, coupledDV1M(-30), { ...base, roll: null });
     expect(shortExpirySummary(legs, off.rows).putsAfter.days).toBeCloseTo(shortExpirySummary(legs).puts.days!, 9);
   });
