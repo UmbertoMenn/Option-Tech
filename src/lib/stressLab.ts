@@ -165,6 +165,10 @@ export interface StrikeCandidate {
  *    5 fino a 300, 10 sopra);
  *    sulla scadenza più vicina che ha almeno un candidato con credito netto ≥
  *    minNetCreditPct% del nuovo nozionale si sceglie lo strike PIÙ BASSO;
+ *  - RIPIEGO (poco spazio di scadenze): se nessuna scadenza entro il cap offre la discesa
+ *    minima a credito, sull'ULTIMA scadenza ammessa si prende lo strike più basso sotto lo
+ *    strike corrente (e sotto lo spot) con credito netto ≥ minimo — discesa < minima
+ *    (RollEvent.reducedDrop). Solo se nemmeno così c'è credito la put non si rolla;
  *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
  */
 /** Motivo per cui una put idonea non è stata rollata lungo il percorso. */
@@ -344,8 +348,12 @@ export interface RollEvent {
   kSrc?: StrikeSrc;
   /** Roll eseguito con le regole ITM (put selezionata, anche a debito) */
   itm?: boolean;
+  /**
+   * Ripiego: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza
+   * ammessa, strike più basso con credito netto ≥ minimo (discesa inferiore alla minima).
+   */
+  reducedDrop?: boolean;
 }
-
 export interface LegResult {
   /** Indice della gamba originale */
   i: number;
@@ -862,8 +870,36 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
         break;
       }
     }
+    // RIPIEGO (Umberto, 30/09/2026): nessuna scadenza entro il cap offre la discesa minima a
+    // credito → sull'ULTIMA scadenza ammessa si prende lo strike più basso (sotto lo strike
+    // corrente e sotto lo spot, discesa anche < minima) con credito netto ≥ minimo.
+    let reduced = false;
+    if (!chosen) {
+      let lastTn: number | null = null;
+      for (let m = 1; m <= 240; m++) {
+        const Tn = T + m / 12;
+        if (Tn - dy / 365 > capT + 1e-9 || (capAbs != null && Tn > capAbs)) break;
+        lastTn = Tn;
+      }
+      if (lastTn != null) {
+        const cands = selectRollStrikeCandidates(K, S, 0, lastTn, chains, 0.05, chainCache);
+        let best: { K: number; sell: number; src: StrikeSrc } | null = null;
+        for (const c of cands) {
+          const sell = priceAt(c.k, lastTn, dd, dv, dy).p;
+          if (sell - buy >= (roll.minNetCreditPct / 100) * c.k) best = { K: c.k, sell, src: c.src };
+          else break;
+        }
+        if (best) {
+          chosen = { K: best.K, T: lastTn, sell: best.sell, src: best.src };
+          reduced = true;
+        }
+      }
+    }
     if (!chosen) continue; // nessun roll a credito: si riprova allo step successivo
-    rolls.push({ d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell, kSrc: chosen.src });
+    rolls.push({
+      d: dd, S, fromK: K, fromT: T, toK: chosen.K, toT: chosen.T, buy, sell: chosen.sell, kSrc: chosen.src,
+      ...(reduced ? { reducedDrop: true } : {}),
+    });
     netCredit += chosen.sell - buy;
     K = chosen.K;
     T = chosen.T;

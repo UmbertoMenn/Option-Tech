@@ -234,10 +234,22 @@ describe('stressLab — discesa minima strike per roll', () => {
     }
   });
 
-  it('discesa minima ampia: ogni roll scende almeno di quella % e deve allungare la scadenza', () => {
+  it('discesa minima ampia: ogni roll scende almeno di quella % (salvo ripiego) e deve allungare la scadenza', () => {
     const small = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 1 } }).rows[0].rolls![0];
     const big = run([leg()], -30, { ...base, roll: { ...ROLL, strikeStepPct: 10 } }).rows[0];
-    for (const ev of big.rolls!) expect(ev.toK).toBeLessThanOrEqual(ev.fromK * 0.9 + 1e-9);
+    for (const ev of big.rolls!) {
+      if (ev.reducedDrop) {
+        // ripiego: scende meno della minima, ma sull'ultima scadenza entro il cap (12 mesi dal roll)
+        expect(ev.toK).toBeLessThan(ev.fromK);
+        expect(ev.toK).toBeGreaterThan(ev.fromK * 0.9 - 1e-9);
+        expect(ev.sell - ev.buy).toBeGreaterThanOrEqual(-1e-12);
+        const dy = (30 * ev.d) / -30 / 365; // orizzonte 30 gg distribuito lungo il percorso
+        expect(ev.toT - dy).toBeLessThanOrEqual(1 + 1e-9);
+        expect(ev.toT + 1 / 12 - dy).toBeGreaterThan(1);
+      } else {
+        expect(ev.toK).toBeLessThanOrEqual(ev.fromK * 0.9 + 1e-9);
+      }
+    }
     expect(big.rolls![0].toT - big.rolls![0].fromT).toBeGreaterThan(small.toT - small.fromT);
   });
 
@@ -482,5 +494,68 @@ describe('stressLab — rolling put ITM selezionate', () => {
     const c = rollStrikeCandidates(112.5, 100, 5, undefined, null, 0.05, true);
     expect(c[0].k).toBe(105);
     expect(rollStrikeCandidates(112.5, 100, 5)[0].k).toBe(95);
+  });
+});
+
+describe('stressLab — ripiego discesa ridotta (AVGO andreaz, 30/09/2026)', () => {
+  // Caso reale: put AVGO 350 Mar/27 venduta, spot 355,1, prezzo 35,225; card: trigger 0%,
+  // discesa minima 10%, cap 12 mesi dal roll → scadenza max ~Set/27. Nessuna put ≤ 315 a
+  // credito entro Set/27: prima "no credito", ora ripiego sull'ultima scadenza ammessa.
+  const ref = new Date('2026-09-30T00:00:00Z');
+  const yrs = (e: string) => (new Date(`${e}T00:00:00Z`).getTime() - ref.getTime()) / (365.25 * 86400000);
+  const std = (lo: number, hi: number, step: number) => {
+    const o: number[] = [];
+    for (let k = lo; k <= hi + 1e-9; k += step) o.push(k);
+    return o;
+  };
+  const avgoStrikes = [...std(155, 200, 5), ...std(210, 500, 10)];
+  const chains = ['2026-10-16', '2026-11-20', '2026-12-18', '2027-01-15', '2027-02-19', '2027-03-19', '2027-04-16', '2027-06-17', '2027-09-17', '2027-12-17', '2028-01-21', '2028-06-16']
+    .map((e) => ({ exp: e, T: yrs(e), strikes: avgoStrikes }));
+  const T0 = yrs('2027-03-19');
+  const S0 = 355.1;
+  const avgoU: StressUnderlyingMap = { AVGO: { S: S0, beta: 1.2 } };
+  const leg = (extra: Partial<StressLeg> = {}): StressLeg => ({
+    u: 'AVGO', cp: 'P', K: 350, T: T0, exp: '2027-03-19', q: -1, px: 35.225, fl: false, mult: 100, nm: 'AVGO', iv: 0.43, rollQ: -1, ...extra,
+  });
+  const card: RollParams = { ...DEFAULT_ROLL_PARAMS, triggerPct: 0, strikeStepPct: 10, maxMonthsForward: 12, minNetCreditPct: 0, maxRolls: 11 };
+  const prm: ScenarioParams = { ...base, days: 0, roll: card, strikes: { AVGO: chains } };
+  const runA = (legs: StressLeg[], d: number, p: ScenarioParams) =>
+    runScenario(legs, [], avgoU, effIVMap(legs), d, coupledDV1M(d), p);
+
+  it('proof-of-bug: con la sola discesa minima 10% nessuna scadenza ≤ cap è a credito', () => {
+    // Stesso pricer del motore, primo passo del percorso: la migliore put ≤ 315 entro il cap è a debito.
+    const res = runA([leg()], -1, { ...prm, roll: { ...card, maxRolls: 0 } });
+    expect(res.rows[0].rolls!.length).toBe(0);
+  });
+
+  it('ripiego: roll sull\'ultima scadenza ammessa, strike più basso a credito, discesa < minima', () => {
+    const row = runA([leg()], -30, prm).rows[0];
+    expect(row.rollMiss).toBeUndefined();
+    expect(row.rolls!.length).toBeGreaterThan(0);
+    const e = row.rolls![0];
+    expect(e.reducedDrop).toBe(true);
+    expect(e.toK).toBeLessThan(e.fromK);
+    expect(e.toK).toBeGreaterThan(e.fromK * 0.9); // discesa inferiore alla minima 10%
+    expect(e.toK).toBeLessThan(e.S);
+    expect(e.sell - e.buy).toBeGreaterThanOrEqual(-1e-12);
+    // ultima scadenza ammessa: entro 12 mesi dal roll, e il mese successivo sarebbe oltre
+    expect(e.toT).toBeLessThanOrEqual(1 + 1e-9);
+    expect(e.toT + 1 / 12).toBeGreaterThan(1);
+    // fonte: strike reale della catena Set/27
+    expect(e.kSrc).toBe('reale');
+  });
+
+  it('con spazio di scadenze (cap ampio) si usa la discesa minima piena, niente ripiego', () => {
+    const row = runA([leg()], -30, { ...prm, roll: { ...card, maxMonthsForward: 24 } }).rows[0];
+    const e = row.rolls![0];
+    expect(e.reducedDrop).toBeUndefined();
+    expect(e.toK).toBeLessThanOrEqual(e.fromK * 0.9 + 1e-9);
+    expect(e.sell - e.buy).toBeGreaterThanOrEqual(-1e-12);
+  });
+
+  it('put spread verticale (nessuna scadenza ammessa) → ancora nessun roll, motivo credito', () => {
+    const row = runA([leg({ rollMaxT: T0 })], -30, prm).rows[0];
+    expect(row.rolls!.length).toBe(0);
+    expect(row.rollMiss).toBe('credito');
   });
 });

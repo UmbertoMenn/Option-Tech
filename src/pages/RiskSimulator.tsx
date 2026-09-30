@@ -1476,6 +1476,11 @@ function StressLabContent() {
                   2) <b>strike</b>: almeno la <b>discesa minima</b> sotto lo strike corrente e sotto lo spot; su
                   quella scadenza si prende lo strike <b>più basso</b> con credito netto ≥ minimo.
                   <br />
+                  3) <b>ripiego</b> (poco spazio di scadenze): se nessuna scadenza entro il cap consente la discesa
+                  minima a credito, si vende l'<b>ultima scadenza ammessa</b> sullo strike <b>più basso</b> (sotto lo
+                  strike corrente e sotto lo spot) con credito netto ≥ minimo, anche se scende meno della discesa
+                  minima. Nel dettaglio il roll è marcato <b>discesa ridotta</b> (↓*).
+                  <br />
                   <b>Strike quotati</b>: la put di arrivo è scelta solo fra strike disponibili. Fonte, in ordine:
                   <br />
                   • <b>reale</b>: strike quotati oggi sulla scadenza di arrivo (catene Yahoo salvate dall'aggiornamento
@@ -1492,9 +1497,12 @@ function StressLabContent() {
                   La fonte di ogni roll è indicata nel tooltip della riga del dettaglio per gamba.
                   <br />
                   Nel dettaglio per gamba: <b>ITM</b> = put già ITM, non rollata; <b>no trigger</b> = lo spot non arriva mai entro il trigger dallo strike;{' '}
-                  <b>no credito</b> = nessuna put a credito entro il cap.
+                  <b>no credito</b> = nessuna put più bassa a credito entro il cap, nemmeno col ripiego (es. put
+                  spread verticale: nessuna scadenza ammessa oltre la corrente).
                   <br />
-                  Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito.
+                  Una discesa minima ampia costringe ad andare più lunghi di scadenza per restare a credito; se il
+                  cap non lo consente scatta il ripiego. Il cap si conta dalla data del roll: una put che scade fra 6
+                  mesi, con cap 12, può andare al massimo 6 mesi più in là.
                   <br />
                   <br />
                   Il roll è neutro sul MTM nell'istante (si scambia a prezzi di mercato): il beneficio viene dallo
@@ -1664,6 +1672,11 @@ function StressLabContent() {
                       Ogni roll deve portare lo strike almeno questa % sotto lo strike corrente (es. 90 con 4% →
                       nuovo strike ≤ 86,4 → primo strike quotato 85). Sulla scadenza più vicina che lo consente a
                       credito si prende lo strike più basso possibile.
+                      <br />
+                      <br />
+                      <b>Ripiego</b>: se nessuna scadenza entro il cap consente questa discesa a credito, si vende
+                      l'ultima scadenza ammessa sullo strike più basso con credito netto ≥ minimo (discesa inferiore
+                      alla minima, marcata ↓* nel dettaglio per gamba). Non si rolla solo se nemmeno così c'è credito.
                       <br />
                       <br />
                       Si usano gli strike realmente quotati sulla scadenza di arrivo (o il passo della catena del
@@ -3091,7 +3104,7 @@ function StressLabContent() {
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1})${e.itm ? ' [ITM]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1})${e.itm ? ' [ITM]' : ''}${e.reducedDrop ? ' [DISCESA RIDOTTA: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza ammessa, strike più basso a credito]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
                       (() => {
@@ -3118,7 +3131,7 @@ function StressLabContent() {
                       : l.rollItm && S0 != null && S0 <= l.K
                       ? `NON ROLLATA (ITM): lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non scende del ${fmtN(rollItmTrigger, 1)}% sotto ${fmtN(S0, 2)}\n`
                       : rr.rollMiss === 'credito'
-                      ? `NON ROLLATA: trigger raggiunto ma nessuna put a credito ≥ minimo entro la scadenza max${l.rollMaxT != null ? ` (put comprata, ${Math.round(l.rollMaxT * 365.25)} gg)` : ''}\n`
+                      ? `NON ROLLATA: trigger raggiunto ma nessuna put più bassa a credito ≥ minimo entro la scadenza max${l.rollMaxT != null ? ` (put comprata, ${Math.round(l.rollMaxT * 365.25)} gg)` : ''}, nemmeno col ripiego (ultima scadenza ammessa, discesa anche < minima)\n`
                       : `NON ROLLATA: lo spot (min ${S1 != null ? fmtN(S1 as number, 2) : '—'}) non arriva mai al trigger ${fmtN(l.K * (1 + rollTrigger / 100), 2)} = K × (1 + ${fmtN(rollTrigger, 1)}%)\n`
                     : '') +
                   `P&L = q(${l.q}) × ${l.mult} × (${pxLabel}_scen − ${pxLabel}_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
@@ -3204,7 +3217,7 @@ function StressLabContent() {
                         </label>
                       )}
                       {rr.rolls && rr.rolls.length
-                        ? `${fmtK(l.K)}→${fmtK(rr.finalK ?? l.K)} ×${rr.rolls.length}`
+                        ? `${fmtK(l.K)}→${fmtK(rr.finalK ?? l.K)} ×${rr.rolls.length}${rr.rolls.some((e) => e.reducedDrop) ? ' ↓*' : ''}`
                         : rollOn && (l.rollQ ?? 0) < 0
                           ? (
                               <span
@@ -3215,7 +3228,7 @@ function StressLabContent() {
                                     : rr.rollMiss === 'tempo'
                                     ? 'Put ITM: nessuna put con valore temporale netto sufficiente entro la scadenza max'
                                     : rr.rollMiss === 'credito'
-                                    ? 'Trigger raggiunto ma nessuna put a credito netto ≥ minimo entro la scadenza massima'
+                                    ? 'Trigger raggiunto ma nessuna put più bassa a credito netto ≥ minimo entro la scadenza massima, nemmeno col ripiego (ultima scadenza ammessa, discesa anche inferiore alla minima)'
                                     : `Lo spot non arriva mai entro il trigger: spot scenario ${S1 != null ? fmtN(S1 as number, 2) : '—'} > strike × (1 + trigger) = ${fmtN(l.K * (1 + rollTrigger / 100), 2)}`
                                 }
                               >
