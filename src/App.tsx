@@ -39,6 +39,7 @@ const AdminPanel = lazyWithReload(() => import("@/components/admin/AdminPanel").
 const Derivatives = lazyWithReload(() => import("@/pages/Derivatives").then(m => ({ default: m.Derivatives })));
 const RiskAnalyzer = lazyWithReload(() => import("@/pages/RiskAnalyzer").then(m => ({ default: m.RiskAnalyzer })));
 const RiskSimulator = lazyWithReload(() => import("@/pages/RiskSimulator").then(m => ({ default: m.RiskSimulator })));
+const VirtualPortfolio = lazyWithReload(() => import("@/pages/VirtualPortfolio").then(m => ({ default: m.VirtualPortfolio })));
 const OptionAnalyzer = lazyWithReload(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
 const ResetPassword = lazyWithReload(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazyWithReload(() => import("@/pages/Simulator"));
@@ -184,6 +185,11 @@ function AppRoutes() {
           <Route path="/risk-simulator" element={
             <ErrorBoundary title="Errore nel caricamento dello Stress Lab">
               <RiskSimulator />
+            </ErrorBoundary>
+          } />
+          <Route path="/virtual-portfolio" element={
+            <ErrorBoundary title="Errore nel caricamento del portafoglio virtuale">
+              <VirtualPortfolio />
             </ErrorBoundary>
           } />
           <Route path="/option-analyzer" element={

@@ -18,7 +18,9 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Activity, AlertTriangle, Loader2, FlaskConical, Save } from 'lucide-react';
+import { Activity, AlertTriangle, Loader2, FlaskConical, Save, Layers } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -284,7 +286,7 @@ function Panel({
 
 /* ============================== STRESS LAB CONTENT ============================== */
 
-function StressLabContent() {
+export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}) {
   const isMobile = useIsMobile();
   /* ---------- Ambito del patrimonio di riferimento ----------
    * total  = patrimonio totale (netting completo della dashboard, GP inclusa)
@@ -489,7 +491,7 @@ function StressLabContent() {
   }), [legs, eq, unders, undersActive, effIV, prm, volMode, dVman, marginCover, totalPatrimony,
     r, fx.USD, kScan, fxRange, skewB, kappa, pExp, ivScan, nakedPct, heatCollapsed]);
   const { result: chartResult, isPending: chartsPending, error: chartsError, retry: retryCharts } = useStressLabCharts(
-    chartInput, `${selectedPortfolioId ?? ''}:${historicalViewDate ?? ''}`,
+    chartInput, `${virtual ? 'virtual:' : ''}${selectedPortfolioId ?? ''}:${historicalViewDate ?? ''}`,
   );
   const marCurve = chartResult?.marCurve ?? [];
   const marginCallX = chartResult?.marginCallX ?? null;
@@ -837,9 +839,11 @@ function StressLabContent() {
         }}
       >
         <Activity style={{ width: 48, height: 48, margin: '0 auto 16px', opacity: 0.5 }} />
-        <p>Nessuna posizione nel portafoglio selezionato.</p>
+        <p>{virtual ? 'Nessuna posizione valorizzabile nel portafoglio virtuale.' : 'Nessuna posizione nel portafoglio selezionato.'}</p>
         <p style={{ fontSize: 12, marginTop: 8 }}>
-          Carica un file di portafoglio dalla Dashboard per iniziare l'analisi di stress.
+          {virtual
+            ? 'Aggiungi posizioni dal pannello qui sopra (o ripristina il portafoglio reale) per avviare l\'analisi di stress.'
+            : 'Carica un file di portafoglio dalla Dashboard per iniziare l\'analisi di stress.'}
         </p>
       </div>
     );
@@ -3394,6 +3398,7 @@ function StressLabContent() {
 /* ============================== PAGE WRAPPER ============================== */
 
 export function RiskSimulator() {
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
@@ -3404,7 +3409,18 @@ export function RiskSimulator() {
             </div>
             <h1 className="text-lg font-bold">Stress Lab</h1>
           </div>
-          <AppHeaderMenu />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/virtual-portfolio')}
+              title="Stress Lab su un portafoglio virtuale: parti dal reale, aggiungi o rimuovi posizioni"
+            >
+              <Layers className="w-4 h-4 mr-1.5" />
+              Portafoglio virtuale
+            </Button>
+            <AppHeaderMenu />
+          </div>
         </div>
       </header>
       <main className="container mx-auto px-4 py-4">

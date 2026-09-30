@@ -7,6 +7,7 @@ import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfo
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { remapOverridesAfterUpload, remapStrategyConfigLinkedStocks } from '@/lib/overrideMatching';
 import { useFullSnapshot } from '@/hooks/useFullSnapshot';
+import { useVirtualPositionsOverride } from '@/contexts/VirtualPositionsContext';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
@@ -14,6 +15,9 @@ export function usePortfolio() {
   const { isAdmin, user } = useAuth();
   const queryClient = useQueryClient();
   const { snapshot: fullSnapshot, isLoading: isSnapshotLoading, isHistoricalActive } = useFullSnapshot();
+  // Portafoglio virtuale: dentro VirtualPositionsContext le posizioni sono sostituite
+  // (reali − rimosse + aggiunte). Fuori dal provider è null → comportamento invariato.
+  const virtualOverride = useVirtualPositionsOverride();
 
   const portfolio = selectedPortfolio;
   const selectedId = selectedPortfolioId;
@@ -163,9 +167,10 @@ export function usePortfolio() {
     ? (historicalPortfolio ?? portfolio)
     : (isAggregatedView ? aggregatedPortfolio : portfolio);
 
-  const effectivePositions: Position[] = isHistoricalActive
+  const basePositions: Position[] = isHistoricalActive
     ? (fullSnapshot?.positions ?? [])
     : (positionsQuery.data || []);
+  const effectivePositions: Position[] = virtualOverride ? virtualOverride.positions : basePositions;
 
   // Liquidità vincolata: valorizzata solo nella vista live del singolo
   // portafoglio (gli snapshot storici e le viste aggregate non la tracciano).
@@ -284,7 +289,8 @@ export function usePortfolio() {
     positions: effectivePositions,
     summary,
     isLoading: isHistoricalActive ? isSnapshotLoading : positionsQuery.isLoading,
-    isReadOnly: isAggregatedView || isHistoricalActive,
+    isReadOnly: isAggregatedView || isHistoricalActive || !!virtualOverride,
+    isVirtual: !!virtualOverride,
     isHistoricalView: isHistoricalActive,
     historicalViewDate: isHistoricalActive ? historicalViewDate : null,
     updatePositions: (args: { 
