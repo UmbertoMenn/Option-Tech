@@ -330,6 +330,7 @@ function StressLabContent() {
   const [d, setD] = useState(-10);
   const [heatCollapsed, setHeatCollapsed] = useState(true); // matrice shock/vol ridotta di default
   const [marginCollapsed, setMarginCollapsed] = useState(true); // margine cassa ridotto di default
+  const [undDetailCollapsed, setUndDetailCollapsed] = useState(false); // dettaglio per sottostante
   const [plPct, setPlPct] = useState(true); // card P&L vs shock: default in % sul patrimonio
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
@@ -2820,6 +2821,9 @@ function StressLabContent() {
       {/* DETTAGLIO PER SOTTOSTANTE */}
       <Panel
         title={`Dettaglio per sottostante · scenario corrente (${sgn(d, 1)}% / ${sgn(dV1M, 1)} pt)`}
+        collapsible
+        collapsed={undDetailCollapsed}
+        onToggle={() => setUndDetailCollapsed((v) => !v)}
         style={{ marginBottom: 14 }}
         info={
           <Info title="La vista che riconcilia tutto" w={400}>
