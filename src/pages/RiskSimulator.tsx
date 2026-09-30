@@ -330,7 +330,7 @@ function StressLabContent() {
   const [d, setD] = useState(-10);
   const [heatCollapsed, setHeatCollapsed] = useState(true); // matrice shock/vol ridotta di default
   const [marginCollapsed, setMarginCollapsed] = useState(true); // margine cassa ridotto di default
-  const [undDetailCollapsed, setUndDetailCollapsed] = useState(false); // dettaglio per sottostante
+  const [undDetailCollapsed, setUndDetailCollapsed] = useState(true); // dettaglio per sottostante ridotto di default
   const [plPct, setPlPct] = useState(true); // card P&L vs shock: default in % sul patrimonio
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
