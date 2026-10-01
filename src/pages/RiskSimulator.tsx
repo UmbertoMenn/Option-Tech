@@ -1948,7 +1948,15 @@ export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}
           )}
         </Panel>
         {!rollOn && (
-          <ExpiryCard s={expirySummary} rollOn={false} d={d} fxUSD={fx.USD} wide={false} style={{ flex: 1 }} />
+          <ExpiryCard
+            s={expirySummary}
+            rollOn={false}
+            d={d}
+            fxUSD={fx.USD}
+            wide={false}
+            compact={!isMobile}
+            style={{ flex: 1 }}
+          />
         )}
         </div>
 
@@ -2180,6 +2188,7 @@ export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}
           {/* Term-structure ladder */}
           <Panel
             title="Shock di vol applicato per scadenza"
+            style={!rollOn && !isMobile ? { flex: 1, display: 'flex', flexDirection: 'column' } : undefined}
             info={
               <Info title="La superficie non si muove in parallelo" w={350}>
                 Questa scaletta mostra quanti punti di vol vengono aggiunti all'ATM di ogni scadenza nello
@@ -2189,7 +2198,14 @@ export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}
               </Info>
             }
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                ...(!rollOn && !isMobile ? { flex: 1, justifyContent: 'space-around' } : null),
+              }}
+            >
               {ladder.map((b) => (
                 <div key={b.l} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span
@@ -3449,6 +3465,7 @@ function ExpiryTile({
   footer,
   emptyText = 'nessuna gamba venduta',
   highlight = false,
+  compact = false,
 }: {
   label: string;
   color: string;
@@ -3458,6 +3475,7 @@ function ExpiryTile({
   footer?: React.ReactNode;
   emptyText?: string;
   highlight?: boolean;
+  compact?: boolean;
 }) {
   const hasAfter = after != null && after.days != null && before.days != null;
   const main = hasAfter ? (after as AvgExpiry) : before;
@@ -3498,7 +3516,14 @@ function ExpiryTile({
                 {Math.round(before.days)} gg →
               </span>
             )}
-            <span style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: hasAfter && delta > 0.5 ? C.up : C.text }}>
+            <span
+              style={{
+                fontFamily: MONO,
+                fontSize: compact ? 24 : 28,
+                fontWeight: 800,
+                color: hasAfter && delta > 0.5 ? C.up : C.text,
+              }}
+            >
               {Math.round(main.days as number)} gg
             </span>
             {hasAfter && Math.abs(delta) >= 0.5 && (
@@ -3517,13 +3542,22 @@ function ExpiryTile({
               </span>
             )}
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.mut, marginTop: 3 }}>
+          <div style={{ fontFamily: MONO, fontSize: compact ? 11 : 11.5, color: C.mut, marginTop: 3 }}>
             ≈ {fmtN((main.days as number) / 30.4375, 1)} mesi · {fmtMonthYear(main.days as number)}
             {hasAfter && <> · prima {fmtMonthYear(before.days)}</>}
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 2 }}>
-            {main.legs} gambe · {fmtN(main.contracts, 0)} contratti · nozionale {fmtNotEUR(main.notional / fxUSD)}
-          </div>
+          {compact ? (
+            <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 2, lineHeight: 1.45 }}>
+              <div>
+                {main.legs} gambe · {fmtN(main.contracts, 0)} ctr
+              </div>
+              <div>nozionale {fmtNotEUR(main.notional / fxUSD)}</div>
+            </div>
+          ) : (
+            <div style={{ fontFamily: MONO, fontSize: 11, color: C.mut, marginTop: 2 }}>
+              {main.legs} gambe · {fmtN(main.contracts, 0)} contratti · nozionale {fmtNotEUR(main.notional / fxUSD)}
+            </div>
+          )}
           {footer}
         </>
       )}
@@ -3537,6 +3571,7 @@ function ExpiryCard({
   d,
   fxUSD,
   wide,
+  compact = false,
   style,
 }: {
   s: ShortExpirySummary;
@@ -3544,6 +3579,8 @@ function ExpiryCard({
   d: number;
   fxUSD: number;
   wide: boolean;
+  /** colonna stretta (desktop, senza rolling): put e call affiancate, testo su più righe */
+  compact?: boolean;
   style?: React.CSSProperties;
 }) {
   const noteStyle: React.CSSProperties = {
@@ -3572,7 +3609,7 @@ function ExpiryCard({
   return (
     <Panel
       title={rollOn ? `Scadenza media derivati venduti · dopo rolling @ ${sgn(d, 1)}%` : 'Scadenza media derivati venduti'}
-      style={style}
+      style={{ display: 'flex', flexDirection: 'column', ...style }}
       info={
         <Info title="Scadenza media del portafoglio derivati" w={380}>
           Media delle scadenze (giorni da <b>oggi</b>) delle opzioni <b>vendute</b>, pesata per il{' '}
@@ -3597,8 +3634,12 @@ function ExpiryCard({
             ? rollOn
               ? 'minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1fr)'
               : 'minmax(0,1.5fr) minmax(0,1fr)'
-            : '1fr',
+            : compact && !rollOn
+              ? 'minmax(0,1fr) minmax(0,1fr)'
+              : '1fr',
           gap: 10,
+          flex: 1,
+          alignContent: compact ? 'stretch' : 'start',
         }}
       >
         {rollOn && (
@@ -3620,8 +3661,9 @@ function ExpiryCard({
           after={rollOn ? s.putsAfter : null}
           fxUSD={fxUSD}
           footer={totNote}
+          compact={compact && !rollOn}
         />
-        <ExpiryTile label="Call vendute" color={C.cyan} before={s.calls} fxUSD={fxUSD} />
+        <ExpiryTile label="Call vendute" color={C.cyan} before={s.calls} fxUSD={fxUSD} compact={compact && !rollOn} />
       </div>
     </Panel>
   );
