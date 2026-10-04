@@ -13,6 +13,10 @@
  *     Tempo = premio nuova − premio vecchia.
  *  3. Roll su strike diverso: stesso spot implicito.
  *     Put: tempo = (premio nuova + (strike vecchio − strike nuovo)) − premio vecchia.
+ *     Le regole 2–3 valgono se la gamba ricomprata è vicina alla scadenza
+ *     (≤ 7 giorni). Con vita residua (covered call rollate appena ITM) il suo
+ *     premio è in gran parte tempo: spot = chiusura, limitata dallo spot
+ *     implicito (call ≤ strike + premio, put ≥ strike − premio).
  *  4. Operazione sulle azioni dello stesso sottostante entro un giorno (es.
  *     vendita delle azioni e vendita della put ITM): spot = prezzo delle azioni.
  *  5. De-risking di covered call sintetica, riconosciuto dalla put comprata
@@ -112,6 +116,35 @@ function splitFromSpot(leg: OptionLegInput, spot: number): { intrinsic: number; 
   const premium = Math.max(0, Number(leg.price || 0));
   const intrinsic = Math.min(premium, intrinsicAt(leg.optionType as 'call' | 'put', Number(leg.strike), spot));
   return { intrinsic, time: Math.max(0, premium - intrinsic) };
+}
+
+/**
+ * Entro questi giorni dalla scadenza la gamba ricomprata in un roll ITM ha
+ * valore temporale trascurabile: il suo premio è tutto intrinseco e lo spot
+ * implicito (strike ± premio) è più fedele della chiusura giornaliera.
+ */
+export const ROLL_IMPLIED_SPOT_MAX_DTE = 7;
+
+/**
+ * Spot di riferimento di un roll ITM, dalla gamba ricomprata.
+ *
+ * Il premio pagato è un limite per lo spot (valore temporale ≥ 0):
+ * call → spot ≤ strike + premio, put → spot ≥ strike − premio.
+ *  - Gamba vicina alla scadenza (≤ ROLL_IMPLIED_SPOT_MAX_DTE): tutto intrinseco,
+ *    spot = limite implicito.
+ *  - Gamba con vita residua (tipico delle covered call rollate appena toccato
+ *    lo strike): il premio contiene molto tempo, lo spot implicito sarebbe
+ *    gonfiato e attribuirebbe intrinseco fittizio alla nuova call. Si usa la
+ *    chiusura, limitata dallo spot implicito.
+ */
+function rollReferenceSpot(buy: OptionLegInput, close: number): number {
+  const premium = Math.max(0, Number(buy.price || 0));
+  const strike = Number(buy.strike);
+  const isCall = buy.optionType === 'call';
+  const implied = Math.max(0, isCall ? strike + premium : strike - premium);
+  const dte = buy.expiryDate ? dayDiff(buy.expiryDate, legDate(buy)) : 0;
+  if (dte <= ROLL_IMPLIED_SPOT_MAX_DTE) return implied;
+  return isCall ? Math.min(close, implied) : Math.max(close, implied);
 }
 
 export interface SnapshotShortOption {
@@ -289,14 +322,10 @@ export function resolveOptionPremiumSplits(
     pairedSells.add(sell.rowKey);
     resolvedLegs.add(buy.rowKey);
     resolvedLegs.add(sell.rowKey);
-    // Vecchia gamba tutta intrinseco → spot implicito.
-    const impliedSpot = buy.optionType === 'call' ? buyStrike + buyPremium : buyStrike - buyPremium;
+    const spot = rollReferenceSpot(buy, buyClose);
     const method: TimeValueMethod = Number(sell.strike) === buyStrike ? 'roll_same_strike' : 'roll_new_strike';
-    result.set(buy.rowKey, {
-      rowKey: buy.rowKey, intrinsicPerShare: buyPremium, timeValuePerShare: 0,
-      method, referenceSpot: impliedSpot, reference: sell.descriptor, automaticTimeValuePerShare: 0,
-    });
-    assign(sell, Math.max(0, impliedSpot), method, buy.descriptor as string);
+    assign(buy, spot, method, sell.descriptor as string);
+    assign(sell, spot, method, buy.descriptor as string);
   }
 
   // ---- Operazione sulle azioni dello stesso sottostante entro un giorno ----

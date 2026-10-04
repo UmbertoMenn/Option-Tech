@@ -120,7 +120,7 @@ export function OptionPremiumReviewDialog({ open, onOpenChange, portfolioId, row
           <DialogTitle>Premi temporali opzioni — {periodLabel}</DialogTitle>
           <DialogDescription className="text-xs">
             La colonna Premio è il prezzo totale dell’opzione; Premio temporale è la sua componente di valore temporale.
-            Nel roll ITM la gamba ricomprata è tutta intrinseco; dopo un’assegnazione o con un’operazione sulle azioni lo spot è il prezzo delle azioni; le opzioni OTM sono tutto premio temporale; il de-risking si riconosce dalla put comprata.
+            Nel roll ITM la gamba ricomprata è tutta intrinseco se scade entro 7 giorni; con vita residua (es. covered call rollata appena ITM) lo spot è la chiusura, limitata dal premio ricomprato; dopo un’assegnazione o con un’operazione sulle azioni lo spot è il prezzo delle azioni; le opzioni OTM sono tutto premio temporale; il de-risking si riconosce dalla put comprata.
             Il triangolo segnala solo le put ITM vendute come covered call sintetica su titoli non posseduti ({flagged} nel periodo): lì il calcolo usa la chiusura del sottostante.
             Ogni riga è modificabile. Valori per azione nella divisa dell’opzione, tranne Premio temporale €.
           </DialogDescription>

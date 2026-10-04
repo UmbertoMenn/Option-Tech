@@ -106,6 +106,45 @@ describe('resolveOptionPremiumSplits — premio temporale dagli eseguiti', () =>
     expect(split.timeValuePerShare).toBeCloseTo((21.1 + (240 - 230)) - 12, 6);
   });
 
+  it('bug: covered call rollata appena ITM con vita residua non è tutta intrinseco (MRVL 22/09)', () => {
+    const call = { optionType: 'call' as const, underlyingTicker: 'MRVL', underlyingKey: 'MRVL', effectiveDate: '2026-09-22' };
+    const old = option('buy', 'MRVLX6C260', 260, 30.4, 262.36, { ...call, expiryDate: '2026-11-20' });
+    const fresh = option('sell', 'MRVLZ6C270', 270, 33.4, 262.36, { ...call, expiryDate: '2026-12-18' });
+    const splits = resolveOptionPremiumSplits([old, fresh]);
+    // Prima: spot implicito 290,4 → intrinseco fittizio 20,4 sulla nuova call.
+    expect(splits.get(fresh.rowKey)).toMatchObject({ method: 'roll_new_strike', referenceSpot: 262.36, intrinsicPerShare: 0, timeValuePerShare: 33.4 });
+    expect(splits.get(old.rowKey)!.intrinsicPerShare).toBeCloseTo(2.36, 6);
+    expect(splits.get(old.rowKey)!.timeValuePerShare).toBeCloseTo(28.04, 6);
+  });
+
+  it('bug: roll stesso strike con vita residua (ADBE 10/08): tempo ricomprato e venduto separati dalla chiusura', () => {
+    const call = { optionType: 'call' as const, underlyingTicker: 'ADBE', underlyingKey: 'ADBE', effectiveDate: '2026-08-10' };
+    const old = option('buy', 'ADBEX6C270', 270, 31, 272.96, { ...call, expiryDate: '2026-11-20' });
+    const fresh = option('sell', 'ADBEZ6C270', 270, 34.5, 272.96, { ...call, expiryDate: '2026-12-18' });
+    const splits = resolveOptionPremiumSplits([old, fresh]);
+    expect(splits.get(old.rowKey)!.timeValuePerShare).toBeCloseTo(28.04, 6);
+    expect(splits.get(fresh.rowKey)!.intrinsicPerShare).toBeCloseTo(2.96, 6);
+    expect(splits.get(fresh.rowKey)!.timeValuePerShare).toBeCloseTo(31.54, 6);
+  });
+
+  it('roll con vita residua: la chiusura oltre lo spot implicito è limitata dal premio ricomprato (CRM 27/08)', () => {
+    const call = { optionType: 'call' as const, underlyingTicker: 'CRM', underlyingKey: 'CRM', effectiveDate: '2026-08-27' };
+    const old = option('buy', 'CRMX6C200', 200, 44.4, 252.05, { ...call, expiryDate: '2026-11-20' });
+    const fresh = option('sell', 'CRMZ6C200', 200, 47.4, 252.05, { ...call, expiryDate: '2026-12-18' });
+    const splits = resolveOptionPremiumSplits([old, fresh]);
+    expect(splits.get(old.rowKey)).toMatchObject({ intrinsicPerShare: 44.4, timeValuePerShare: 0 });
+    expect(splits.get(fresh.rowKey)!.referenceSpot).toBeCloseTo(244.4, 6);
+    expect(splits.get(fresh.rowKey)!.timeValuePerShare).toBeCloseTo(3, 6);
+  });
+
+  it('put con vita residua: spot = chiusura, mai sotto strike − premio', () => {
+    const old = option('buy', 'CRWVV6P90', 90, 7.4, 86.76, { underlyingTicker: 'CRWV', underlyingKey: 'CRWV', effectiveDate: '2026-09-22', expiryDate: '2026-10-16' });
+    const fresh = option('sell', 'CRWVZ6P100', 100, 20.25, 86.76, { underlyingTicker: 'CRWV', underlyingKey: 'CRWV', effectiveDate: '2026-09-22', expiryDate: '2026-12-18' });
+    const split = resolveOptionPremiumSplits([old, fresh]).get(fresh.rowKey)!;
+    expect(split.referenceSpot).toBeCloseTo(86.76, 6);
+    expect(split.timeValuePerShare).toBeCloseTo(20.25 - (100 - 86.76), 6);
+  });
+
   it('4. put ITM venduta da nuova (covered call sintetica): stima da chiusura, segnalata e correggibile', () => {
     const fresh = option('sell', 'WDCU6P550', 550, 60, 500, { underlyingTicker: 'WDC', underlyingKey: 'WDC' });
     const estimated = resolveOptionPremiumSplits([fresh]).get(fresh.rowKey)!;
