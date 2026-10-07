@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
+import { explainLateAttributionStart, resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
 import { needsTimeValueReview } from '@/lib/optionPremiumSplit';
 import { AttributionHelp } from './AttributionHelp';
 
@@ -206,14 +206,25 @@ export function PerformanceAttributionChart({
     [data],
   );
 
-  const coveredPeriod = useMemo(() => {
+  // Date con SIA snapshot completo SIA Netting storico.
+  const snapshotDates = useMemo(() => {
     const historicalDates = new Set(historicalData.map(entry => entry.snapshot_date));
-    return resolveCoveredAttributionPeriod(
-      (data?.snapshots ?? []).map(s => s.snapshot_date).filter(date => historicalDates.has(date)),
+    return (data?.snapshots ?? []).map(s => s.snapshot_date).filter(date => historicalDates.has(date));
+  }, [data, historicalData]);
+
+  const coveredPeriod = useMemo(
+    () => resolveCoveredAttributionPeriod(
+      snapshotDates,
       movementInputs?.titoliWindows ?? [], movementInputs?.cashWindows ?? [],
       selectedStart, selectedEnd,
-    );
-  }, [data, historicalData, movementInputs, selectedStart, selectedEnd]);
+    ),
+    [snapshotDates, movementInputs, selectedStart, selectedEnd],
+  );
+
+  const lateStart = useMemo(
+    () => explainLateAttributionStart(snapshotDates, coveredPeriod.windows, coveredPeriod.dates[0]),
+    [snapshotDates, coveredPeriod],
+  );
 
   const handleMovementFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList ?? []).filter(file => /\.csv$/i.test(file.name));
@@ -417,7 +428,7 @@ export function PerformanceAttributionChart({
                   <p className="mt-1">
                     Base delle percentuali: patrimonio medio {formatEUR(result.averageBalance)}. Prezzi opzioni verificati: {result.coverage.optionMarks - result.coverage.optionMarksWithoutSpot}/{result.coverage.optionMarks}.
                   </p>
-                  {earliestHistoricalDate && earliestHistoricalDate < result.startDate && (
+                  {!lateStart && earliestHistoricalDate && earliestHistoricalDate < result.startDate && (
                     <p className="mt-1 text-warning">
                       L'attribuzione parte dal {formatDate(result.startDate)}: le date precedenti non soddisfano tutti i requisiti di snapshot completo e copertura dei movimenti.
                     </p>
@@ -464,6 +475,12 @@ export function PerformanceAttributionChart({
               <Switch checked={hideInactive} onCheckedChange={setHideInactive} className="scale-75" />
               Nascondi classi inattive
             </label>
+            {lateStart && (
+              <p className="basis-full text-warning">
+                Primo T0 disponibile {formatDate(lateStart.firstStart)}: nessuno snapshot completo tra il {formatDate(lateStart.baseline)} e il {formatDate(lateStart.firstStart)}.
+                {' '}Per partire dal {formatDate(lateStart.previousDate)} carica i movimenti cash e titoli dal {formatDate(lateStart.missingFrom)} al {formatDate(lateStart.missingTo)}.
+              </p>
+            )}
           </div>
         ) : <div />}
         <div className="flex items-center gap-3">

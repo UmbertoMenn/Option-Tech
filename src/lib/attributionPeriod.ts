@@ -44,6 +44,46 @@ export function resolveCoveredAttributionPeriod(
   };
 }
 
+function shiftDay(date: string, days: number): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface LateStartExplanation {
+  /** Primo T0 disponibile nella finestra coperta. */
+  firstStart: string;
+  /** T0 più precoce ammesso dalla copertura (giorno prima dell'inizio movimenti). */
+  baseline: string;
+  /** Ultimo snapshot completo precedente alla copertura. */
+  previousDate: string;
+  /** Movimenti da caricare per poter usare `previousDate` come T0: (previousDate, baseline]. */
+  missingFrom: string;
+  missingTo: string;
+}
+
+/**
+ * Spiega perché il primo T0 cade dopo l'inizio della copertura movimenti:
+ * nessuno snapshot completo tra il giorno precedente la copertura e il primo
+ * T0 disponibile, mentre uno snapshot precedente esiste e diventerebbe T0
+ * caricando i movimenti mancanti. Null se il T0 coincide già con la baseline
+ * o se non c'è alcuno snapshot precedente (niente da suggerire).
+ */
+export function explainLateAttributionStart(
+  attributableDates: string[],
+  windows: DateWindow[],
+  firstStart: string | null | undefined,
+): LateStartExplanation | null {
+  if (!firstStart) return null;
+  const window = windows.find(w => shiftDay(w.start, -1) <= firstStart && firstStart <= w.end);
+  if (!window) return null;
+  const baseline = shiftDay(window.start, -1);
+  if (firstStart <= baseline) return null;
+  const previousDate = [...new Set(attributableDates)].sort().filter(date => date < baseline).at(-1);
+  if (!previousDate) return null;
+  return { firstStart, baseline, previousDate, missingFrom: shiftDay(previousDate, 1), missingTo: baseline };
+}
+
 /**
  * Risolve il periodo di attribuzione a partire dalle date effettivamente
  * attribuibili (quelle con SIA snapshot completo SIA Netting storico).

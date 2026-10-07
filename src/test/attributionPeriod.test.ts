@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAttributionPeriod, resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
+import { explainLateAttributionStart, resolveAttributionPeriod, resolveCoveredAttributionPeriod } from '@/lib/attributionPeriod';
 
 const DATES = [
   '2024-01-31', '2024-03-31', '2024-06-30', '2024-09-30', '2024-12-31', '2025-06-30',
@@ -91,5 +91,38 @@ describe('periodo coperto da cash e titoli', () => {
       .toEqual({ startDate: '2026-09-09', endDate: '2026-09-21' });
     expect(resolveCoveredAttributionPeriod(dates, gap, gap, '2026-09-09', '2026-08-27').period)
       .toEqual({ startDate: '2026-07-31', endDate: '2026-08-27' });
+  });
+});
+
+describe('explainLateAttributionStart', () => {
+  // Caso andreaz: settembre caricato, poi agosto; snapshot 22/07 e 07/09, nessuno ad agosto.
+  const snaps = ['2026-07-07', '2026-07-18', '2026-07-22', '2026-09-07', '2026-09-28', '2026-10-07'];
+  const sep = { start: '2026-09-01', end: '2026-09-30' };
+  const aug = { start: '2026-08-01', end: '2026-08-31' };
+
+  it('aggiungere agosto non anticipa T0 senza snapshot ad agosto, e lo spiega', () => {
+    const covered = resolveCoveredAttributionPeriod(snaps, [sep, aug], [aug, sep]);
+    expect(covered.windows).toEqual([{ start: '2026-08-01', end: '2026-09-30' }]);
+    expect(covered.dates).toEqual(['2026-09-07', '2026-09-28']);
+    expect(explainLateAttributionStart(snaps, covered.windows, covered.dates[0])).toEqual({
+      firstStart: '2026-09-07',
+      baseline: '2026-07-31',
+      previousDate: '2026-07-22',
+      missingFrom: '2026-07-23',
+      missingTo: '2026-07-31',
+    });
+  });
+
+  it('caricando luglio il 22/07 diventa T0 e la spiegazione sparisce', () => {
+    const jul = { start: '2026-07-01', end: '2026-07-31' };
+    const covered = resolveCoveredAttributionPeriod(snaps, [jul, aug, sep], [jul, aug, sep]);
+    expect(covered.dates[0]).toBe('2026-07-07');
+    expect(explainLateAttributionStart(snaps, covered.windows, covered.dates[0])).toBeNull();
+  });
+
+  it('null se il primo T0 è la baseline o se non esiste uno snapshot precedente', () => {
+    expect(explainLateAttributionStart(['2026-07-22', '2026-08-31', '2026-09-15'], [sep], '2026-08-31')).toBeNull();
+    expect(explainLateAttributionStart(['2026-09-07', '2026-09-28'], [sep], '2026-09-07')).toBeNull();
+    expect(explainLateAttributionStart([], [], null)).toBeNull();
   });
 });
