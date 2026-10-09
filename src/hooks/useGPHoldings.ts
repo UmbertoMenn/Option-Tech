@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUserIdFromAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFullSnapshot } from '@/hooks/useFullSnapshot';
+import { useVirtualPositionsOverride } from '@/contexts/VirtualPositionsContext';
 
 export interface GPHoldingRow {
   id: string;
@@ -29,6 +30,8 @@ export interface GPSummary {
   bondValue: number;
   holdings: GPHoldingRow[];
 }
+
+const NO_GP: GPHoldingRow[] = [];
 
 export function useGPHoldings() {
   const { selectedPortfolio, selectedPortfolioId, isAggregatedView } = usePortfolioContext();
@@ -69,10 +72,15 @@ export function useGPHoldings() {
     enabled: !isHistoricalActive && (!!selectedPortfolio?.id || (isGlobalAgg && isAdmin) || !!targetUserId),
   });
 
+  // Portafoglio virtuale con "Escludi GP": nessuna holding GP nel sottoalbero.
+  const virtualOverride = useVirtualPositionsOverride();
+  const excludeGP = !!virtualOverride?.excludeGP;
+
   // Visualizzazione storica: holdings GP congelati dallo snapshot completo
-  const effectiveHoldings = isHistoricalActive
-    ? (fullSnapshot?.gp_holdings ?? [])
-    : (query.data || []);
+  const effectiveHoldings = useMemo(
+    () => (excludeGP ? NO_GP : isHistoricalActive ? (fullSnapshot?.gp_holdings ?? NO_GP) : (query.data || NO_GP)),
+    [excludeGP, isHistoricalActive, fullSnapshot?.gp_holdings, query.data],
+  );
 
   const gpSummary: GPSummary = useMemo(() => {
     const holdings = effectiveHoldings;

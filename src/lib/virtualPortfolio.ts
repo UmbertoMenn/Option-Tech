@@ -33,16 +33,40 @@ export interface VirtualPositionSpec {
   strike?: number;
   /** Scadenza ISO 'YYYY-MM-DD'. */
   expiry?: string;
+  /** 'random' = generata dalla simulazione casuale (sostituibile in blocco); assente = manuale. */
+  origin?: 'random';
 }
+
+/** Parametri di simulazione del portafoglio virtuale (persistiti con lo stato). */
+export interface VirtualSimSettings {
+  /** Patrimonio simulato (EUR): la liquidità viene impostata per ottenerlo. null = reale. */
+  patrimony: number | null;
+  /** Esposizione potenziale obiettivo (EUR). null = nessun obiettivo. */
+  exposure: number | null;
+  /** Esclude la Gestione Patrimoniale reale dal portafoglio virtuale. */
+  excludeGP: boolean;
+}
+
+export const DEFAULT_SIM: VirtualSimSettings = { patrimony: null, exposure: null, excludeGP: false };
 
 export interface VirtualPortfolioState {
   version: 1;
   /** Chiavi stabili (positionKey) delle posizioni reali escluse. */
   removedKeys: string[];
   added: VirtualPositionSpec[];
+  sim?: VirtualSimSettings;
 }
 
 export const EMPTY_VIRTUAL_STATE: VirtualPortfolioState = { version: 1, removedKeys: [], added: [] };
+
+/**
+ * Liquidità da applicare per ottenere il patrimonio simulato. Il patrimonio (netting totale)
+ * è lineare nella liquidità con pendenza 1, quindi patrimonio − liquidità attuale è
+ * indipendente dalla liquidità: nessun ciclo di retroazione. Arrotondata al centesimo.
+ */
+export function cashForTargetPatrimony(target: number, currentPatrimony: number, currentCash: number): number {
+  return Math.round((target - (currentPatrimony - currentCash)) * 100) / 100;
+}
 
 export const VIRTUAL_ID_PREFIX = 'virtual:';
 export const OPT_MULT = 100;
@@ -389,10 +413,16 @@ export function parseStoredState(raw: string | null): VirtualPortfolioState {
             ['stock', 'etf', 'option'].includes(s.kind),
         )
       : [];
-    return { version: 1, removedKeys, added };
+    const sim = o.sim && typeof o.sim === 'object' ? parseSim(o.sim) : undefined;
+    return { version: 1, removedKeys, added, ...(sim ? { sim } : {}) };
   } catch {
     return EMPTY_VIRTUAL_STATE;
   }
+}
+
+const posOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+function parseSim(o: any): VirtualSimSettings {
+  return { patrimony: posOrNull(o.patrimony), exposure: posOrNull(o.exposure), excludeGP: o.excludeGP === true };
 }
 
 /* =============================== VALIDAZIONE (form singolo) =============================== */

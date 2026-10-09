@@ -163,9 +163,15 @@ export function usePortfolio() {
     gp_total_value: fullSnapshot.gp_total_value ?? (portfolio as Portfolio & { gp_total_value?: number | null }).gp_total_value ?? null,
   } as Portfolio : null;
 
-  const effectivePortfolio = isHistoricalActive
+  const basePortfolio = isHistoricalActive
     ? (historicalPortfolio ?? portfolio)
     : (isAggregatedView ? aggregatedPortfolio : portfolio);
+  // Portafoglio virtuale con patrimonio simulato: la liquidità è sostituita.
+  const virtualCash = virtualOverride?.cashValue;
+  const hasVirtualCash = typeof virtualCash === 'number' && Number.isFinite(virtualCash);
+  const effectivePortfolio = hasVirtualCash && basePortfolio
+    ? ({ ...basePortfolio, cash_value: virtualCash, restricted_cash_value: 0 } as Portfolio)
+    : basePortfolio;
 
   const basePositions: Position[] = isHistoricalActive
     ? (fullSnapshot?.positions ?? [])
@@ -174,7 +180,7 @@ export function usePortfolio() {
 
   // Liquidità vincolata: valorizzata solo nella vista live del singolo
   // portafoglio (gli snapshot storici e le viste aggregate non la tracciano).
-  const restrictedCashValue = (!isHistoricalActive && !isAggregatedView)
+  const restrictedCashValue = (!isHistoricalActive && !isAggregatedView && !hasVirtualCash)
     ? Number((portfolio as (Portfolio & { restricted_cash_value?: number | null }) | null)?.restricted_cash_value ?? 0)
     : 0;
 

@@ -286,7 +286,21 @@ function Panel({
 
 /* ============================== STRESS LAB CONTENT ============================== */
 
-export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}) {
+/** Metriche del portafoglio esposte al Portafoglio virtuale (patrimonio simulato / esposizione). */
+export interface StressLabMetrics {
+  /** Patrimonio totale (netting totale della dashboard, GP inclusa). */
+  patrimony: number;
+  /** Liquidità inclusa nel patrimonio. */
+  cash: number;
+  /** Esposizione Potenziale in Equity coi sotto-toggle correnti dello Stress Lab. */
+  equityExposure: number;
+  isLoading: boolean;
+}
+
+export function StressLabContent({
+  virtual = false,
+  onMetrics,
+}: { virtual?: boolean; onMetrics?: (m: StressLabMetrics) => void } = {}) {
   const isMobile = useIsMobile();
   /* ---------- Ambito del patrimonio di riferimento ----------
    * total  = patrimonio totale (netting completo della dashboard, GP inclusa)
@@ -482,6 +496,16 @@ export function StressLabContent({ virtual = false }: { virtual?: boolean } = {}
    */
   const ptfBase = equityExposure;
   const totalPatrimony = netting ? data.nettingIntrinsicARaw : data.nettingTotalRaw;
+
+  // Portafoglio virtuale: pubblica patrimonio / liquidità / esposizione alla pagina ospite.
+  useEffect(() => {
+    onMetrics?.({
+      patrimony: data.nettingTotalRaw,
+      cash: patrimonyBreakdown.cashEUR,
+      equityExposure,
+      isLoading: data.isLoading,
+    });
+  }, [onMetrics, data.nettingTotalRaw, patrimonyBreakdown.cashEUR, equityExposure, data.isLoading]);
 
   const { selectedPortfolioId, historicalViewDate } = usePortfolioContext();
   const chartInput = useMemo<StressLabChartInput>(() => ({

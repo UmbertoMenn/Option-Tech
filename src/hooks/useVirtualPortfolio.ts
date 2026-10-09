@@ -11,6 +11,8 @@ import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { Position } from '@/types/portfolio';
 import {
+  DEFAULT_SIM,
+  VirtualSimSettings,
   EMPTY_VIRTUAL_STATE,
   VirtualPortfolioState,
   VirtualPositionSpec,
@@ -36,6 +38,8 @@ export interface UseVirtualPortfolio {
   isLoading: boolean;
   /** Posizioni reali del portafoglio selezionato (base). */
   realPositions: Position[];
+  /** Liquidità reale del portafoglio selezionato (EUR). */
+  realCash: number;
   /** Posizioni del portafoglio virtuale (reali non rimosse + aggiunte risolte). */
   positions: Position[];
   /** Aggiunte non ancora valorizzabili (prezzo live in caricamento / non disponibile). */
@@ -44,7 +48,12 @@ export interface UseVirtualPortfolio {
   removedKeys: Set<string>;
   fx: FxRates;
   isFetchingPrices: boolean;
+  /** Parametri di simulazione (patrimonio / esposizione obiettivo / esclusione GP). */
+  sim: VirtualSimSettings;
+  setSim: (patch: Partial<VirtualSimSettings>) => void;
   addSpecs: (specs: VirtualPositionSpec[]) => void;
+  /** Sostituisce le posizioni generate dalla simulazione casuale con `specs` (le manuali restano). */
+  replaceRandom: (specs: VirtualPositionSpec[]) => void;
   /** Rimuove posizioni reali (chiavi stabili) e/o aggiunte (id spec). */
   remove: (realKeys: string[], addedIds: string[]) => void;
   restoreReal: (realKeys: string[]) => void;
@@ -55,7 +64,7 @@ export interface UseVirtualPortfolio {
 }
 
 export function useVirtualPortfolio(): UseVirtualPortfolio {
-  const { positions: realPositions, isLoading } = usePortfolio();
+  const { positions: realPositions, isLoading, portfolio } = usePortfolio();
   const { selectedPortfolioId } = usePortfolioContext();
   const portfolioId = selectedPortfolioId ?? null;
 
@@ -126,23 +135,42 @@ export function useVirtualPortfolio(): UseVirtualPortfolio {
     setState((s) => ({ ...s, removedKeys: s.removedKeys.filter((k) => !ks.has(k)) }));
   }, []);
 
-  const resetToReal = useCallback(() => setState(EMPTY_VIRTUAL_STATE), []);
+  const replaceRandom = useCallback((specs: VirtualPositionSpec[]) => {
+    setState((s) => ({ ...s, added: [...s.added.filter((a) => a.origin !== 'random'), ...specs] }));
+  }, []);
+
+  const sim = useMemo<VirtualSimSettings>(() => ({ ...DEFAULT_SIM, ...(state.sim ?? {}) }), [state.sim]);
+  const setSim = useCallback((patch: Partial<VirtualSimSettings>) => {
+    setState((s) => ({ ...s, sim: { ...DEFAULT_SIM, ...(s.sim ?? {}), ...patch } }));
+  }, []);
+
+  // Ripristina/Svuota toccano solo la composizione: i parametri di simulazione restano.
+  const resetToReal = useCallback(() => setState((s) => ({ ...EMPTY_VIRTUAL_STATE, ...(s.sim ? { sim: s.sim } : {}) })), []);
 
   const clearAll = useCallback(() => {
-    setState({ version: 1, removedKeys: [...new Set((realPositions || []).map(positionKey))], added: [] });
+    setState((s) => ({
+      version: 1,
+      removedKeys: [...new Set((realPositions || []).map(positionKey))],
+      added: [],
+      ...(s.sim ? { sim: s.sim } : {}),
+    }));
   }, [realPositions]);
 
   return {
     portfolioId,
     isLoading,
     realPositions: realPositions || [],
+    realCash: portfolio?.cash_value ?? 0,
     positions,
     pending,
     state,
     removedKeys,
     fx,
     isFetchingPrices: isFetchingMissing || (tickersNeedingPrice.length > 0 && isLoadingPrices),
+    sim,
+    setSim,
     addSpecs,
+    replaceRandom,
     remove,
     restoreReal,
     resetToReal,

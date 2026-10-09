@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { normalizeUnderlying } from '@/lib/underlyingTickerResolve';
 
 export interface UnderlyingMapping {
   id: string;
@@ -11,18 +12,8 @@ export interface UnderlyingMapping {
   updated_at: string | null;
 }
 
-/**
- * Normalizzazione canonica per il confronto degli underlying con i mapping in DB.
- * Rimuove punteggiatura, spazi, suffissi societari (INC/CORP/LTD/LLC/PLC/CO/THE)
- * e ogni carattere non alfanumerico. Da usare ovunque si confronti un underlying
- * con la tabella `underlying_mappings`.
- */
-export const normalizeUnderlying = (s: string): string =>
-  s.toUpperCase()
-    .replace(/[.,]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\b(INC|CORP|LTD|LLC|PLC|CO|THE)\b/g, '')
-    .replace(/[^A-Z0-9]/g, '');
+/** Normalizzazione canonica degli underlying (definita in lib/underlyingTickerResolve). */
+export { normalizeUnderlying };
 
 export function useUnderlyingMappings() {
   const queryClient = useQueryClient();
