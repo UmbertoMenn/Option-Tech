@@ -2,6 +2,16 @@ import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
+import { VIRTUAL_ID_PREFIX } from '@/lib/virtualPortfolio';
+
+/**
+ * Posizione aggiunta/generata nel Portafoglio virtuale: è un trade nuovo, non fa parte di
+ * nessuna configurazione salvata (che descrive le posizioni REALI). Non entra quindi nei
+ * pool delle configurazioni né subisce il vincolo "strict config" (che manderebbe in
+ * "Altre strategie" ogni gamba non abbinata su un sottostante configurato): si classifica
+ * con le regole automatiche (es. put venduta sola → naked put).
+ */
+const isVirtualLeg = (d: Position) => d.id.startsWith(VIRTUAL_ID_PREFIX);
 
 /**
  * Mappe dinamiche da `underlying_mappings` (backend), passate opzionalmente
@@ -290,6 +300,7 @@ function categorizeDerivativesImpl(
     const stockSlotIdsForPrecompute = (config.linked_stock_slot_ids as unknown as string[]) || [];
     if (sigsForPrecompute.length === 0 && stockSlotIdsForPrecompute.length === 0 && !config.linked_stock_id) continue;
     const candidates = filteredDerivatives.filter(d => {
+      if (isVirtualLeg(d)) return false;
       const posKey = resolveUnderlyingKey(d.underlying || d.description);
       return posKey === configKey;
     });
@@ -464,6 +475,7 @@ function categorizeDerivativesImpl(
     // Pool: derivatives for this underlying not fully consumed by overrides
     const pool = filteredDerivatives.filter(d => {
       if (usedDerivatives.has(d.id)) return false;
+      if (isVirtualLeg(d)) return false;
       const posKey = resolveUnderlyingKey(d.underlying || d.description);
       return posKey === configKey;
     });
@@ -548,7 +560,7 @@ function categorizeDerivativesImpl(
     ) {
       const stockKey = resolveUnderlyingKey(linkedStock.description || '', linkedStock);
       for (const d of filteredDerivatives) {
-        if (usedDerivatives.has(d.id)) continue;
+        if (usedDerivatives.has(d.id) || isVirtualLeg(d)) continue;
         if ((d.option_type || '').toLowerCase() !== 'call' || d.quantity >= 0) continue;
         if (resolveUnderlyingKey(d.underlying || d.description || '') !== stockKey) continue;
         const alreadyUsed = configUsedQty.get(d.id) || 0;
@@ -1002,6 +1014,7 @@ function categorizeDerivativesImpl(
   );
   const isConfiguredUnderlying = (d: Position) => {
     if (!hasStrictConfigs) return false;
+    if (isVirtualLeg(d)) return false;
     const k = resolveUnderlyingKey(d.underlying || d.description);
     return configuredUnderlyingKeys.has(k);
   };
@@ -1406,7 +1419,7 @@ function categorizeDerivativesImpl(
   // ============ STEP 6.5: Orphans on configured underlyings → Altre Strategie ============
   if (hasStrictConfigs) {
     const orphans = filteredDerivatives.filter(d => 
-      !usedDerivatives.has(d.id) && 
+      !usedDerivatives.has(d.id) && !isVirtualLeg(d) &&
       configuredUnderlyingKeys.has(resolveUnderlyingKey(d.underlying || d.description))
     );
     for (const opt of orphans) {
