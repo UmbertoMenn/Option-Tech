@@ -27,6 +27,14 @@ import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { computeMonitoring, buildSnapshotSections, MonitoringResult } from '@/lib/monitoringEngine';
 import { canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
 import { ResellCallCalculatorButton } from './ResellCallCalculatorButton';
+import { OptionLegFilterBar } from './OptionLegFilterBar';
+import {
+  EMPTY_OPTION_LEG_FILTER,
+  filterByLegs,
+  isOptionLegFilterActive,
+  type FilterableLeg,
+  type OptionLegFilter,
+} from '@/lib/optionLegFilter';
 
 interface DerivativesSummaryCardProps {
   categories: DerivativeCategories;
@@ -53,6 +61,9 @@ const BADGE_TOOLTIPS: Record<string, string> = {
   'OOR/OOB': 'Out of Range o Out of Breakeven',
 };
 
+/** Gambe opzioni di un elemento del monitoraggio (assenti → nessuna gamba). */
+const monitoringLegs = (item: { legs?: FilterableLeg[] }): FilterableLeg[] => item.legs ?? [];
+
 // Compact section component - collapsible with count
 function CompactSection({
   title, 
@@ -61,6 +72,7 @@ function CompactSection({
   statusBadge,
   items, 
   renderItem,
+  filterable = false,
 }: { 
   title: string;
   icon: React.ElementType;
@@ -68,8 +80,17 @@ function CompactSection({
   statusBadge?: { label: string; colorClass: string };
   items: any[];
   renderItem: (item: any, idx: number) => React.ReactNode;
+  /** Mostra, a tendina aperta, i filtri PUT/CALL ITM/OTM e scadenza sulle gambe dell'elemento. */
+  filterable?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [legFilter, setLegFilter] = useState<OptionLegFilter>(EMPTY_OPTION_LEG_FILTER);
+  const itemsLegs = useMemo(() => (filterable ? items.map(monitoringLegs) : []), [filterable, items]);
+  const visibleItems = useMemo(
+    () => (filterable ? filterByLegs(items, monitoringLegs, legFilter) : items),
+    [filterable, items, legFilter],
+  );
+  const filterActive = filterable && isOptionLegFilterActive(legFilter);
 
   if (items.length === 0) return null;
 
@@ -102,16 +123,28 @@ function CompactSection({
         )}
         
         <span className="text-xs text-muted-foreground">
-          ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
+          ({filterActive ? `${visibleItems.length}/` : ''}{items.length} {items.length === 1 ? 'elemento' : 'elementi'})
         </span>
         <span className="text-xs text-muted-foreground ml-auto">
           {isExpanded ? '▲' : '▼'}
         </span>
       </div>
       
+      {isExpanded && filterable && (
+        <OptionLegFilterBar
+          value={legFilter}
+          onChange={setLegFilter}
+          itemsLegs={itemsLegs}
+          className="mt-2 pl-6"
+          ariaLabel={`Filtri opzioni ${title}`}
+        />
+      )}
       {isExpanded && (
         <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6">
-          {items.map((item, idx) => renderItem(item, idx))}
+          {visibleItems.map((item, idx) => renderItem(item, idx))}
+          {visibleItems.length === 0 && (
+            <span className="text-xs text-muted-foreground">Nessun elemento per il filtro selezionato.</span>
+          )}
         </div>
       )}
     </div>
@@ -995,6 +1028,7 @@ export function DerivativesSummaryCard({
           {/* 1. Call non coperte */}
           <CompactSection
             title="Call non coperte"
+            filterable
             icon={ShieldAlert}
             iconColor="text-red-500"
             items={monitoring.uncoveredCalls}
@@ -1012,6 +1046,7 @@ export function DerivativesSummaryCard({
           {/* 2. Covered Call */}
           <CompactSection
             title="Covered Call"
+            filterable
             icon={ShieldAlert}
             iconColor="text-amber-500"
             statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
@@ -1031,6 +1066,7 @@ export function DerivativesSummaryCard({
           {/* 3. Double Diagonal */}
           <CompactSection
             title="Double Diagonal"
+            filterable
             icon={Layers}
             iconColor="text-purple-500"
             statusBadge={{ label: 'OOR', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
@@ -1049,6 +1085,7 @@ export function DerivativesSummaryCard({
           {/* 4. Iron Condor */}
           <CompactSection
             title="Iron Condor"
+            filterable
             icon={Target}
             iconColor="text-amber-500"
             statusBadge={{ label: 'OOR', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
@@ -1067,6 +1104,7 @@ export function DerivativesSummaryCard({
           {/* 5. Naked Put */}
           <CompactSection
             title="Naked Put"
+            filterable
             icon={CircleDollarSign}
             iconColor="text-orange-500"
             statusBadge={{ label: 'ITM', colorClass: 'bg-amber-500/20 border-amber-500/50 text-amber-400' }}
@@ -1085,6 +1123,7 @@ export function DerivativesSummaryCard({
           {/* 6. Leap Call */}
           <CompactSection
             title="Leap Call"
+            filterable
             icon={Rocket}
             iconColor="text-blue-500"
             statusBadge={{ label: 'G', colorClass: 'bg-green-500/20 border-green-500/50 text-green-400' }}
@@ -1103,6 +1142,7 @@ export function DerivativesSummaryCard({
           {/* 7. Altre Strategie OOR/OOB */}
           <CompactSection
             title="Altre Strategie"
+            filterable
             icon={Puzzle}
             iconColor="text-cyan-500"
             statusBadge={{ label: 'OOR/OOB', colorClass: 'bg-red-500/20 border-red-500/50 text-red-400' }}
@@ -1121,6 +1161,7 @@ export function DerivativesSummaryCard({
           {/* 8. Strategie multi-gamba incomplete */}
           <CompactSection
             title="Strategie incomplete"
+            filterable
             icon={AlertCircle}
             iconColor="text-orange-500"
             statusBadge={{ label: 'MANCA GAMBA', colorClass: 'bg-orange-500/20 border-orange-500/50 text-orange-400' }}

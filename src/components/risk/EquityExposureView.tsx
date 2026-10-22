@@ -35,6 +35,18 @@ import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
 import { GPHoldingRow } from '@/hooks/useGPHoldings';
 import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
 import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
+import { OptionLegFilterBar } from '@/components/derivatives/OptionLegFilterBar';
+import {
+  EMPTY_OPTION_LEG_FILTER,
+  describeOptionLegFilter,
+  isOptionLegFilterActive,
+  type OptionLegFilter,
+} from '@/lib/optionLegFilter';
+import {
+  derivativeExposureTotal,
+  filterRiskAnalysisByOptionLegs,
+  riskAnalysisOptionItemsLegs,
+} from '@/lib/equityExposureFilter';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
@@ -306,6 +318,15 @@ export function EquityExposureView({
   const includeSynthCcDrcc = true;
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  // Filtro derivati (PUT/CALL ITM/OTM, scadenza): ricalcola Naked PUT, Leap Call,
+  // Strategie e Sintetiche; azioni/ETF/commodities/GP invariati.
+  const [derivFilter, setDerivFilter] = useState<OptionLegFilter>(EMPTY_OPTION_LEG_FILTER);
+  const derivFilterActive = isOptionLegFilterActive(derivFilter);
+  const filteredAnalysis = useMemo(
+    () => filterRiskAnalysisByOptionLegs(analysis, derivFilter),
+    [analysis, derivFilter],
+  );
+  const derivItemsLegs = useMemo(() => riskAnalysisOptionItemsLegs(analysis), [analysis]);
   // Toggle GP dedicato alle Holdings Consolidate: segue il toggle GP del riepilogo
   // (ogni cambio lì si propaga qui), ma può essere cambiato solo per questa card
   // senza toccare il Rischio Totale.
@@ -331,7 +352,7 @@ export function EquityExposureView({
     nakedPutDetails,
     leapCallDetails,
     strategyDetails
-  } = analysis;
+  } = filteredAnalysis;
   
   // Backend underlying_mappings → dynamic alias map (CEG, APP, RDDT, CLS, ...)
   const { allMappings } = useUnderlyingMappings();
@@ -342,14 +363,19 @@ export function EquityExposureView({
 
   // Calculate all consolidated holdings (no limit) - GP stocks secondo il toggle della card
   const consolidatedHoldings = useMemo(() => {
-    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
+    return calculateConsolidatedTopHoldings(filteredAnalysis, etfAllocations, { 
       includeProtections,
       includeNakedPut,
       includeStrategies,
       includeLeapCall,
       includeSynthCcDrcc,
     }, 100, holdingsIncludeGP ? gpStockHoldings : [], dynamicAliases);
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, holdingsIncludeGP, gpStockHoldings, dynamicAliases]);
+  }, [filteredAnalysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeSynthCcDrcc, holdingsIncludeGP, gpStockHoldings, dynamicAliases]);
+
+  // Totale delle sole categorie derivate (filtrato e non), con i toggle della card.
+  const derivToggles = { includeNakedPut, includeLeapCall, includeStrategies, includeProtections };
+  const derivTotalFiltered = derivativeExposureTotal(filteredAnalysis, derivToggles);
+  const derivTotalAll = derivativeExposureTotal(analysis, derivToggles);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
@@ -621,7 +647,11 @@ export function EquityExposureView({
                   </TooltipProvider>
                 </div>
                 <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
-                <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {derivFilterActive
+                    ? `Azioni/ETF/commodities + derivati filtrati (${describeOptionLegFilter(derivFilter)})`
+                    : 'Somma di tutte le categorie di rischio'}
+                </div>
                 {portfolioNettingTotal && portfolioNettingTotal > 0 && (
                   <div className="text-xs text-muted-foreground mt-0.5">
                     ({((dynamicGrandTotal / portfolioNettingTotal) * 100).toFixed(1)}% del Patrimonio Netting Totale)
@@ -685,6 +715,34 @@ export function EquityExposureView({
                 )}
               </div>
             </div>
+            {derivItemsLegs.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-border/50 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  Filtro derivati
+                  <CalcInfo>{`Filtra le categorie fatte di opzioni: Naked PUT, Leap Call, Strategie e CC/DR-CC sintetiche.
+Una voce resta se ALMENO UNA sua gamba soddisfa il filtro (tipo/moneyness e scadenza sulla stessa gamba); le strategie contano per intero (Max Loss non divisibile per gamba).
+ITM/OTM con lo spot del sottostante: CALL ITM se spot > strike, PUT ITM se spot < strike (ATM = OTM). Gambe senza spot escluse dal filtro ITM/OTM.
+Azioni, ETF, commodities e GP non sono derivati: restano invariati (protezioni PUT sulle azioni comprese).`}</CalcInfo>
+                </div>
+                <OptionLegFilterBar
+                  value={derivFilter}
+                  onChange={setDerivFilter}
+                  itemsLegs={derivItemsLegs}
+                  ariaLabel="Filtri derivati esposizione equity"
+                />
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+                  <span className="text-muted-foreground">
+                    {derivFilterActive ? `Derivati (${describeOptionLegFilter(derivFilter)}):` : 'Totale derivati:'}
+                  </span>
+                  <span className="font-semibold text-primary">{formatEUR(derivTotalFiltered)}</span>
+                  {derivFilterActive && (
+                    <span className="text-muted-foreground">
+                      su {formatEUR(derivTotalAll)} ({derivTotalAll > 0 ? ((derivTotalFiltered / derivTotalAll) * 100).toFixed(1) : '0.0'}%)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

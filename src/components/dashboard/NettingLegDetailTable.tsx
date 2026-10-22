@@ -1,5 +1,14 @@
 import { useMemo, useState } from 'react';
 import type { LegDecompositionRow } from '@/hooks/useDerivativeNetting';
+import { OptionLegFilterBar } from '@/components/derivatives/OptionLegFilterBar';
+import {
+  EMPTY_OPTION_LEG_FILTER,
+  describeOptionLegFilter,
+  filterByLegs,
+  isOptionLegFilterActive,
+  type FilterableLeg,
+  type OptionLegFilter,
+} from '@/lib/optionLegFilter';
 
 // Palette e font allineati allo Stress Lab (variabili --stress-* theme-aware)
 const C = {
@@ -33,12 +42,9 @@ function fmtExpiry(exp: string | null): string {
 }
 
 type SortKey = 'ticker' | 'gamba' | 'q' | 'spot' | 'px' | 'intr' | 'tv' | 'tot';
-type OptionFilter = 'all' | 'put' | 'call';
-const OPTION_FILTERS = [
-  { value: 'all', label: 'Tutte' },
-  { value: 'put', label: 'Solo PUT' },
-  { value: 'call', label: 'Solo CALL' },
-] as const;
+const rowLegs = (r: LegDecompositionRow): FilterableLeg[] => [
+  { optionType: r.optionType, strike: r.strike, expiry: r.expiry, spot: r.spot },
+];
 
 interface Props {
   rows: LegDecompositionRow[];
@@ -47,11 +53,9 @@ interface Props {
 
 export function NettingLegDetailTable({ rows, viewMode }: Props) {
   const [sort, setSort] = useState<{ col: SortKey; dir: 'asc' | 'desc' }>({ col: 'tot', dir: 'asc' });
-  const [optionFilter, setOptionFilter] = useState<OptionFilter>('all');
-  const filteredRows = useMemo(
-    () => optionFilter === 'all' ? rows : rows.filter((r) => r.optionType === optionFilter),
-    [rows, optionFilter],
-  );
+  const [optionFilter, setOptionFilter] = useState<OptionLegFilter>(EMPTY_OPTION_LEG_FILTER);
+  const filteredRows = useMemo(() => filterByLegs(rows, rowLegs, optionFilter), [rows, optionFilter]);
+  const itemsLegs = useMemo(() => rows.map(rowLegs), [rows]);
 
   const sortedRows = useMemo(() => {
     const val = (r: LegDecompositionRow): number | string => {
@@ -98,7 +102,8 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
   }
 
   const isEx = viewMode !== 'netting_total';
-  const totalLabel = optionFilter === 'all' ? 'Totale derivati' : `Subtotale ${optionFilter.toUpperCase()}`;
+  const filterActive = isOptionLegFilterActive(optionFilter);
+  const totalLabel = filterActive ? `Subtotale ${describeOptionLegFilter(optionFilter)}` : 'Totale derivati';
 
   const th = (label: string, key: SortKey, align: 'left' | 'right', title: string) => (
     <th
@@ -147,29 +152,19 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
         )}
       </p>
 
-      <div
-        role="group"
-        aria-label="Filtra gambe per tipo di opzione"
-        onPointerDownCapture={(e) => e.stopPropagation()}
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}
-      >
-        {OPTION_FILTERS.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={optionFilter === value}
-            onClick={() => setOptionFilter(value)}
-            style={{
-              padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-              border: `1px solid ${optionFilter === value ? C.cyan : C.border}`,
-              background: optionFilter === value ? C.panel2 : C.panel,
-              color: optionFilter === value ? C.cyan : C.mut, cursor: 'pointer',
-            }}
-          >
-            {label} ({value === 'all' ? rows.length : rows.filter((r) => r.optionType === value).length})
-          </button>
-        ))}
-      </div>
+      <OptionLegFilterBar
+        variant="stress"
+        value={optionFilter}
+        onChange={setOptionFilter}
+        itemsLegs={itemsLegs}
+        ariaLabel="Filtra gambe per tipo, moneyness e scadenza"
+        className="mb-2"
+      />
+      {filterActive && (
+        <p style={{ fontSize: 10, color: C.mut, margin: '0 0 6px' }}>
+          {filteredRows.length} di {rows.length} gambe · ITM/OTM con lo spot della riga (gambe senza spot escluse dal filtro ITM/OTM).
+        </p>
+      )}
 
       <div
         onPointerDownCapture={(e) => e.stopPropagation()}
@@ -201,7 +196,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
             {sortedRows.length === 0 && (
               <tr>
                 <td colSpan={8} style={{ textAlign: 'center', padding: '20px 6px', color: C.mut }}>
-                  Nessuna gamba {optionFilter.toUpperCase()} presente
+                  Nessuna gamba per il filtro {describeOptionLegFilter(optionFilter)}
                 </td>
               </tr>
             )}

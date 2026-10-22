@@ -20,6 +20,7 @@ import {
 } from './universalMaxLoss';
 import { resolveTickerKey } from './sectorExposure';
 import { resolveUnderlyingIdentity } from './tickerIdentity';
+import { optionPositionsToLegs, type FilterableLeg } from './optionLegFilter';
 
 export interface StockRiskDetail {
   underlying: string;
@@ -74,6 +75,8 @@ export interface StockRiskDetail {
     contracts?: number;
     perShare?: number;
   };
+  /** Gambe opzioni della sintetica (filtri PUT/CALL ITM/OTM e scadenza in Equity Exposure). */
+  legs?: FilterableLeg[];
 }
 
 
@@ -87,6 +90,8 @@ export interface NakedPutRiskDetail {
   riskEUR: number;
   currency: string;
   exchangeRate: number;
+  /** Gamba opzione (filtri PUT/CALL ITM/OTM e scadenza). */
+  legs?: FilterableLeg[];
 }
 
 export interface LeapCallRiskDetail {
@@ -101,6 +106,8 @@ export interface LeapCallRiskDetail {
   riskEUR: number;
   currency: string;
   exchangeRate: number;
+  /** Gamba opzione (filtri PUT/CALL ITM/OTM e scadenza). */
+  legs?: FilterableLeg[];
 }
 
 export interface StrategyRiskDetail {
@@ -114,6 +121,8 @@ export interface StrategyRiskDetail {
   calculation: string;          // Descrizione calcolo per tooltip
   hasUnlimitedRisk: boolean;    // Flag per strategie con rischio illimitato (es. Short Strangle)
   pmcMissing?: boolean;         // true se almeno una gamba ha PMC mancante -> max loss non affidabile
+  /** Gambe della strategia (filtri PUT/CALL ITM/OTM e scadenza: la strategia passa se almeno una gamba soddisfa). */
+  legs?: FilterableLeg[];
 }
 
 export interface CommodityRiskDetail {
@@ -401,8 +410,19 @@ export function calculateStockRisk(
  * Calculate naked put risk.
  * Formula: Strike × Contratti × 100 / Cambio
  */
+/** Spot per le gambe filtrabili; null senza resolver o spot ignoto. */
+function legSpot(spotResolver: SpotResolver | undefined, underlyingName: string, optionTicker?: string | null): number | null {
+  if (!spotResolver) return null;
+  try {
+    return spotResolver(underlyingName, optionTicker ?? null).spot;
+  } catch {
+    return null;
+  }
+}
+
 export function calculateNakedPutRisk(
-  nakedPuts: NakedPutPosition[]
+  nakedPuts: NakedPutPosition[],
+  spotResolver?: SpotResolver
 ): NakedPutRiskDetail[] {
   return nakedPuts.map(np => {
     const strike = np.option.strike_price || 0;
@@ -427,7 +447,8 @@ export function calculateNakedPutRisk(
       riskOriginal,
       riskEUR: riskOriginal / exchangeRate,
       currency: np.option.currency || 'USD',
-      exchangeRate
+      exchangeRate,
+      legs: optionPositionsToLegs([np.option], legSpot(spotResolver, underlying, np.option.ticker)),
     };
   });
 }
@@ -437,7 +458,8 @@ export function calculateNakedPutRisk(
  * Formula: Prezzo mercato × Contratti × 100 / Cambio (valore di mercato)
  */
 export function calculateLeapCallRisk(
-  leapCalls: LeapCallPosition[]
+  leapCalls: LeapCallPosition[],
+  spotResolver?: SpotResolver
 ): LeapCallRiskDetail[] {
   return leapCalls.map(lc => {
     const contracts = lc.contracts;
@@ -465,7 +487,8 @@ export function calculateLeapCallRisk(
       marketValue,
       riskEUR: marketValue / exchangeRate,
       currency: lc.option.currency || 'USD',
-      exchangeRate
+      exchangeRate,
+      legs: optionPositionsToLegs([lc.option], legSpot(spotResolver, underlying, lc.option.ticker)),
     };
   });
 }
@@ -555,7 +578,7 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): {
 /**
  * Calculate strategy risk for all complex strategies.
  */
-export function calculateStrategyRisk(categories: DerivativeCategories): StrategyRiskDetail[] {
+export function calculateStrategyRisk(categories: DerivativeCategories, spotResolver?: SpotResolver): StrategyRiskDetail[] {
   const result: StrategyRiskDetail[] = [];
 
   // Build a quick index: normalized underlying -> linkedStock from resolved configs.
@@ -598,7 +621,11 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       exchangeRate,
       calculation,
       hasUnlimitedRisk: false,
-      pmcMissing
+      pmcMissing,
+      legs: optionPositionsToLegs(
+        [ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall],
+        legSpot(spotResolver, ic.underlying, ic.soldPut.ticker),
+      ),
     });
   }
   
@@ -625,7 +652,11 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       exchangeRate,
       calculation,
       hasUnlimitedRisk: false,
-      pmcMissing
+      pmcMissing,
+      legs: optionPositionsToLegs(
+        [dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall],
+        legSpot(spotResolver, dd.underlying, dd.soldPut.ticker),
+      ),
     });
   }
   
@@ -684,7 +715,11 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       exchangeRate,
       calculation,
       hasUnlimitedRisk: isUnlimited,
-      pmcMissing
+      pmcMissing,
+      legs: optionPositionsToLegs(
+        effectiveGroup.options.map(o => o.option),
+        legSpot(spotResolver, effectiveGroup.underlying, firstOption.ticker),
+      ),
     });
   }
   
@@ -849,18 +884,22 @@ export function calculateSyntheticCcDrccRisk(
     const shortStrike = shortCall.strike_price || 0;
     const underlyingName = shortCall.underlying || shortCall.description || '';
 
+    const ccLegs = (): FilterableLeg[] => optionPositionsToLegs(
+      [shortCall, cc.syntheticCall, cc.syntheticPut],
+      legSpot(spotResolver, underlyingName, cc.syntheticCall?.ticker ?? cc.syntheticPut?.ticker ?? shortCall.ticker),
+    );
     if (cc.syntheticCall) {
-      result.push(buildCallBasedEntry(cc.syntheticCall, shortStrike, underlyingName, shortCall.ticker ?? null, null));
+      result.push({ ...buildCallBasedEntry(cc.syntheticCall, shortStrike, underlyingName, shortCall.ticker ?? null, null), legs: ccLegs() });
     } else if (cc.syntheticPut) {
       const qty = Math.abs(cc.syntheticPut.quantity || 0);
       const strike = cc.syntheticPut.strike_price || 0;
       const riskOriginal = strike * qty * 100;
       const composition = `Short PUT ${strike} ITM + Short CALL ${shortStrike}`;
-      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition, {
+      result.push({ ...buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition, {
         putStrike: strike,
         putQty: qty,
         shortStrike,
-      }));
+      }), legs: ccLegs() });
     }
   }
 
@@ -873,30 +912,34 @@ export function calculateSyntheticCcDrccRisk(
     const contracts = dr.coveredCall.contractsCovered || 0;
     const underlyingName = shortCall.underlying || shortCall.description || '';
     const protStrike = dr.protectionPut?.strike_price || 0;
+    const drLegs = (): FilterableLeg[] => optionPositionsToLegs(
+      [shortCall, dr.protectionPut, dr.syntheticCall, dr.syntheticPut],
+      legSpot(spotResolver, underlyingName, dr.syntheticCall?.ticker ?? dr.syntheticPut?.ticker ?? shortCall.ticker),
+    );
 
     if (dr.syntheticCall) {
       // Per spec: Long CALL ITM + Short CALL è SEMPRE trattata come CC sintetica,
       // anche se in DB esiste una protection PUT (irrilevante in questa configurazione).
-      result.push(buildCallBasedEntry(
+      result.push({ ...buildCallBasedEntry(
         dr.syntheticCall,
         shortStrike,
         underlyingName,
         shortCall.ticker ?? null,
         protStrike > 0 ? protStrike : null
-      ));
+      ), legs: drLegs() });
     } else if (dr.syntheticPut) {
       const synStrike = dr.syntheticPut.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
       const riskOriginalWithoutProtection = synStrike * contracts * 100;
       const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
-      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition, {
+      result.push({ ...buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition, {
         synPutStrike: synStrike,
         protPutStrike: protStrike,
         shortStrike,
         contracts,
         perShare,
-      }, riskOriginalWithoutProtection, protStrike, contracts));
+      }, riskOriginalWithoutProtection, protStrike, contracts), legs: drLegs() });
     }
   }
 
@@ -941,12 +984,12 @@ export function analyzePortfolioRisk(
   const filteredNakedPuts = categories.nakedPuts.filter(
     np => !isEuroforexInstrument(np.option.underlying || np.option.description)
   );
-  const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
+  const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts, resolver);
   const filteredLeapCalls = categories.leapCalls.filter(
     lc => !isEuroforexInstrument(lc.option.underlying || lc.option.description)
   );
-  const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
-  const strategyDetails = calculateStrategyRisk(categories);
+  const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls, resolver);
+  const strategyDetails = calculateStrategyRisk(categories, resolver);
 
   // Totali: stockDetails contiene SOLO stock/ETF reali. Sintetiche separate.
   const totalETFRisk = stockDetails.filter(s => s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);

@@ -18,6 +18,16 @@ import {
 } from './derivativeStrategies';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
 import { canonicalKeyForPosition, canonicalKeyForText, getDisplayTickerForKey, DynamicAliases } from '@/lib/tickerIdentity';
+import { optionPositionsToLegs, type FilterableLeg } from '@/lib/optionLegFilter';
+import {
+  coveredCallLegs,
+  deRiskingCoveredCallLegs,
+  doubleDiagonalLegs,
+  groupedStrategyLegs,
+  ironCondorLegs,
+  singleOptionLegs,
+  spotFromPrices,
+} from '@/lib/strategyFilterLegs';
 
 // ============ Types ============
 
@@ -25,6 +35,8 @@ export interface MonitoringUncoveredCall {
   ticker: string;
   uncoveredContracts: number;
   strategies: string[];
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringCoveredCallITM {
@@ -32,33 +44,45 @@ export interface MonitoringCoveredCallITM {
   strike: number;
   contracts: number;
   isDeRisking: boolean;
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringDDOOR {
   ticker: string;
   isAlternative: boolean;
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringICOOR {
   ticker: string;
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringNakedPutITM {
   ticker: string;
   strike: number;
   contracts: number;
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringLeapGain {
   ticker: string;
   strike: number;
   contracts: number;
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringOtherOOROOB {
   ticker: string;
   strategyName: string;
   status: 'OOR' | 'OOB';
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringAvailableCalls {
@@ -70,6 +94,8 @@ export interface MonitoringIncompleteStrategy {
   ticker: string;
   strategyName: string;        // "Iron Condor", "Double Diagonal", "Covered Call", ...
   missingLegs: string[];
+  /** Gambe opzioni dell'elemento, per i filtri PUT/CALL ITM/OTM e scadenza (UI). */
+  legs?: FilterableLeg[];
 }
 
 export interface MonitoringResult {
@@ -193,7 +219,7 @@ export function computeMonitoring(
   dynamicAliases?: DynamicAliases,
 ): MonitoringResult {
   return {
-    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, categories, dynamicAliases),
+    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, categories, dynamicAliases, underlyingPrices),
     coveredCallsITM: computeCoveredCallsITM(categories, underlyingPrices),
     doubleDiagonalOOR: computeDDOOR(categories, underlyingPrices),
     ironCondorOOR: computeICOOR(categories, underlyingPrices),
@@ -214,12 +240,13 @@ function computeUncoveredCalls(
   stockPositions: Position[],
   categories: DerivativeCategories,
   dynamicAliases?: DynamicAliases,
+  underlyingPrices: Record<string, UnderlyingPrice> = {},
 ): MonitoringUncoveredCall[] {
-  const balance = new Map<string, { owned: number; netSoldCalls: number; syntheticCovered: number; displayTicker: string }>();
+  const balance = new Map<string, { owned: number; netSoldCalls: number; syntheticCovered: number; displayTicker: string; soldCallLegs: FilterableLeg[] }>();
 
   const ensure = (key: string, displayTicker?: string) => {
     if (!balance.has(key)) {
-      balance.set(key, { owned: 0, netSoldCalls: 0, syntheticCovered: 0, displayTicker: displayTicker || key });
+      balance.set(key, { owned: 0, netSoldCalls: 0, syntheticCovered: 0, displayTicker: displayTicker || key, soldCallLegs: [] });
     }
   };
 
@@ -249,6 +276,7 @@ function computeUncoveredCalls(
     ensure(key, getDisplayTickerForKey(key) || undefined);
     if (d.quantity < 0) {
       balance.get(key)!.netSoldCalls += Math.abs(d.quantity);
+      balance.get(key)!.soldCallLegs.push(...optionPositionsToLegs([d], spotFromPrices(underlyingPrices, d.underlying)));
     } else if (!syntheticCallIds.has(d.id)) {
       balance.get(key)!.netSoldCalls -= d.quantity; // bought calls offset (skip synthetic)
     }
@@ -279,6 +307,7 @@ function computeUncoveredCalls(
         ticker: data.displayTicker,
         uncoveredContracts: net - coveredContracts,
         strategies: [],
+        legs: data.soldCallLegs,
       });
     }
   }
@@ -305,6 +334,7 @@ function computeCoveredCallsITM(
         strike,
         contracts: cc.contractsCovered,
         isDeRisking: false,
+        legs: coveredCallLegs(cc, underlyingPrices),
       });
     }
   });
@@ -320,6 +350,7 @@ function computeCoveredCallsITM(
         strike,
         contracts: cc.contractsCovered,
         isDeRisking: true,
+        legs: deRiskingCoveredCallLegs(dr, underlyingPrices),
       });
     }
   });
@@ -342,7 +373,7 @@ function computeDDOOR(
       const sp = dd.soldPut.strike_price || 0;
       const sc = dd.soldCall.strike_price || 0;
       if (!(price >= sp && price <= sc)) {
-        result.push({ ticker: getDisplayTicker(dd.underlying, underlyingPrices), isAlternative: false });
+        result.push({ ticker: getDisplayTicker(dd.underlying, underlyingPrices), isAlternative: false, legs: doubleDiagonalLegs(dd, underlyingPrices) });
       }
     }
   });
@@ -358,7 +389,7 @@ function computeDDOOR(
           const sp = soldPut.option.strike_price || 0;
           const sc = soldCall.option.strike_price || 0;
           if (!(price >= sp && price <= sc)) {
-            result.push({ ticker: getDisplayTicker(group.underlying, underlyingPrices), isAlternative: true });
+            result.push({ ticker: getDisplayTicker(group.underlying, underlyingPrices), isAlternative: true, legs: groupedStrategyLegs(group, underlyingPrices) });
           }
         }
       }
@@ -381,7 +412,7 @@ function computeICOOR(
       const sp = ic.soldPut.strike_price || 0;
       const sc = ic.soldCall.strike_price || 0;
       if (!(price >= sp && price <= sc)) {
-        result.push({ ticker: getDisplayTicker(ic.underlying, underlyingPrices) });
+        result.push({ ticker: getDisplayTicker(ic.underlying, underlyingPrices), legs: ironCondorLegs(ic, underlyingPrices) });
       }
     }
   });
@@ -405,6 +436,7 @@ function computeNakedPutsITM(
         ticker: getDisplayTicker(underlyingKey, underlyingPrices, np.option.ticker),
         strike,
         contracts: np.contracts,
+        legs: singleOptionLegs(np, underlyingPrices),
       });
     }
   });
@@ -428,6 +460,7 @@ function computeLeapGain(
         ticker: getDisplayTicker(underlyingKey, underlyingPrices, lc.option.ticker),
         strike: lc.option.strike_price || 0,
         contracts: lc.contracts,
+        legs: singleOptionLegs(lc, underlyingPrices),
       });
     }
   });
@@ -483,6 +516,7 @@ function computeOtherOOROOB(
           ticker: getDisplayTicker(group.underlying, underlyingPrices),
           strategyName: strategyName.replace('Alternative ', '').replace('Diagonal ', 'Diag. '),
           status,
+          legs: groupedStrategyLegs(group, underlyingPrices),
         });
       }
     });
@@ -670,9 +704,22 @@ function computeIncompleteMultiLeg(
       ticker: getDisplayTicker(inc.underlying, underlyingPrices),
       strategyName: STRATEGY_LABELS[inc.strategyType] || inc.strategyType,
       missingLegs: inc.missingLegs,
+      legs: optionPositionsToLegs(inc.presentLegs, incompleteSpot(inc, underlyingPrices)),
     });
   }
   return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
+}
+
+/** Spot di una strategia incompleta: prezzo sottostante, poi azione collegata. */
+function incompleteSpot(
+  inc: DerivativeCategories['incompleteStrategies'][number],
+  underlyingPrices: Record<string, UnderlyingPrice>,
+): number | null {
+  const fromPrices = spotFromPrices(underlyingPrices, inc.underlying);
+  if (fromPrices != null) return fromPrices;
+  const ls = inc.linkedStock as (Position & { snapshot_price?: number | null }) | null;
+  const px = Number(ls?.snapshot_price ?? ls?.current_price ?? 0);
+  return Number.isFinite(px) && px > 0 ? px : null;
 }
 
 // ============ Snapshot builder (for monitoring_snapshot table) ============

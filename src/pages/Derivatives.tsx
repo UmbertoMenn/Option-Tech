@@ -36,6 +36,23 @@ function shouldShowOptionStaleIndicator(option: Position, ticker?: string): bool
   return false;
 }
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
+import { OptionLegFilterBar } from '@/components/derivatives/OptionLegFilterBar';
+import {
+  EMPTY_OPTION_LEG_FILTER,
+  filterByLegs,
+  isOptionLegFilterActive,
+  type FilterableLeg,
+  type OptionLegFilter,
+} from '@/lib/optionLegFilter';
+import {
+  coveredCallLegs,
+  deRiskingCoveredCallLegs,
+  doubleDiagonalLegs,
+  groupedStrategyLegs,
+  incompleteStrategyLegs,
+  ironCondorLegs,
+  singleOptionLegs,
+} from '@/lib/strategyFilterLegs';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
@@ -359,6 +376,42 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
 }
 
 
+/** Elemento di sezione con indice ORIGINALE (chiave stabile anche filtrando) e gambe filtrabili. */
+interface IndexedItem<T> { x: T; i: number; legs: FilterableLeg[] }
+
+function indexLegs<T>(arr: T[], legsOf: (x: T) => FilterableLeg[]): IndexedItem<T>[] {
+  return arr.map((x, i) => ({ x, i, legs: legsOf(x) }));
+}
+
+const legsOfIndexed = (e: { legs: FilterableLeg[] }) => e.legs;
+
+/** Vista filtrata di una sezione: righe complete (a) + incomplete (b), conteggi e gambe per i pulsanti. */
+function sectionView<A, B>(sec: { a: IndexedItem<A>[]; b: IndexedItem<B>[] }, f: OptionLegFilter) {
+  const a = filterByLegs<IndexedItem<A>>(sec.a, legsOfIndexed, f);
+  const b = filterByLegs<IndexedItem<B>>(sec.b, legsOfIndexed, f);
+  return {
+    a,
+    b,
+    shown: a.length + b.length,
+    total: sec.a.length + sec.b.length,
+    active: isOptionLegFilterActive(f),
+    itemsLegs: [...sec.a.map(legsOfIndexed), ...sec.b.map(legsOfIndexed)],
+  };
+}
+
+/** Badge conteggio della sezione: "filtrati/totale" quando un filtro è attivo. */
+function SectionCount({ view }: { view: { shown: number; total: number; active: boolean } }) {
+  return (
+    <Badge variant="secondary" className="text-xs">
+      {view.active ? `${view.shown}/${view.total}` : view.total}
+    </Badge>
+  );
+}
+
+const SECTION_EMPTY_FILTER_MSG = (
+  <div className="px-3 py-4 text-xs text-muted-foreground">Nessuna strategia per il filtro selezionato.</div>
+);
+
 export function Derivatives() {
   const { portfolio, positions, isLoading, isHistoricalView } = usePortfolio();
   const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
@@ -400,6 +453,10 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Filtri PUT/CALL ITM/OTM e scadenza per sezione (visibili a tendina aperta).
+  const [sectionFilters, setSectionFilters] = useState<Record<string, OptionLegFilter>>({});
+  const sectionFilter = (id: string) => sectionFilters[id] ?? EMPTY_OPTION_LEG_FILTER;
+  const setSectionFilter = (id: string) => (f: OptionLegFilter) => setSectionFilters(prev => ({ ...prev, [id]: f }));
 
   // Chiave del wizard: scoped per portafoglio, come il draft.
   const wizardPortfolioKey = portfolio?.id ?? selectedPortfolioId ?? null;
@@ -699,6 +756,42 @@ export function Derivatives() {
   const { prices: underlyingPrices, isLoading: isPricesLoading, missingCount, isFetchingMissing } = useUnderlyingPrices(allUnderlyingNames);
   
   // nakedPutPremiumsByUnderlying removed — PUT premiums now handled inside CallPremiumCalculatorDialog
+
+  // Gambe filtrabili di ogni sezione strategie (spot = stessa chiave del badge ITM/OTM della riga).
+  const sectionData = useMemo(() => {
+    const P = underlyingPrices;
+    const incLegs = (inc: IncompleteStrategyPosition) =>
+      incompleteStrategyLegs(inc, resolveIncompleteHeader(inc, P)?.price ?? null);
+    const none: IndexedItem<never>[] = [];
+    return {
+      cc: { a: indexLegs(categories.coveredCalls, x => coveredCallLegs(x, P)), b: indexLegs(incCovered, incLegs) },
+      drcc: { a: indexLegs(completeDrcc, x => deRiskingCoveredCallLegs(x, P)), b: indexLegs(incDrcc, incLegs) },
+      ic: { a: indexLegs(categories.ironCondors, x => ironCondorLegs(x, P)), b: indexLegs(incIronCondor, incLegs) },
+      dd: { a: indexLegs(categories.doubleDiagonals, x => doubleDiagonalLegs(x, P)), b: indexLegs(incDoubleDiagonal, incLegs) },
+      np: { a: indexLegs(categories.nakedPuts, x => singleOptionLegs(x, P)), b: none },
+      ps: { a: indexLegs(putSpreads, x => groupedStrategyLegs(x, P)), b: none },
+      dps: { a: indexLegs(diagonalPutSpreads, x => groupedStrategyLegs(x, P)), b: none },
+      lc: { a: indexLegs(categories.leapCalls, x => singleOptionLegs(x, P)), b: none },
+      lp: { a: indexLegs(categories.longPuts, x => singleOptionLegs(x, P)), b: none },
+      other: { a: indexLegs(remainingOtherStrategies, x => groupedStrategyLegs(x, P)), b: none },
+    };
+  }, [underlyingPrices, categories, incCovered, completeDrcc, incDrcc, incIronCondor, incDoubleDiagonal, putSpreads, diagonalPutSpreads, remainingOtherStrategies]);
+
+  const sv = useMemo(() => {
+    const f = (id: string) => sectionFilters[id] ?? EMPTY_OPTION_LEG_FILTER;
+    return {
+      cc: sectionView(sectionData.cc, f('cc')),
+      drcc: sectionView(sectionData.drcc, f('drcc')),
+      ic: sectionView(sectionData.ic, f('ic')),
+      dd: sectionView(sectionData.dd, f('dd')),
+      np: sectionView(sectionData.np, f('np')),
+      ps: sectionView(sectionData.ps, f('ps')),
+      dps: sectionView(sectionData.dps, f('dps')),
+      lc: sectionView(sectionData.lc, f('lc')),
+      lp: sectionView(sectionData.lp, f('lp')),
+      other: sectionView(sectionData.other, f('other')),
+    };
+  }, [sectionData, sectionFilters]);
 
   // Track if we've saved the cache for the current portfolio + categories
   const lastSavedRef = useRef<string>('');
@@ -1044,7 +1137,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
                     <CardTitle className="text-xl">Covered Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length + incCovered.length}</Badge>
+                    <SectionCount view={sv.cc} />
                   </div>
                   {coveredCallOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1052,6 +1145,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {coveredCallOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('cc')}
+                    onChange={setSectionFilter('cc')}
+                    itemsLegs={sv.cc.itemsLegs}
+                    ariaLabel="Filtri opzioni Covered Call"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1068,7 +1170,8 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {categories.coveredCalls.map((cc, index) => (
+                  {sv.cc.active && sv.cc.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.cc.a.map(({ x: cc, i: index }) => (
                     <CoveredCallRow 
                       key={index} 
                       coveredCall={cc} 
@@ -1083,7 +1186,7 @@ export function Derivatives() {
                       getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                     />
                   ))}
-                  {incCovered.map((inc, i) => (
+                  {sv.cc.b.map(({ x: inc, i }) => (
                     <IncompleteStrategyRow key={`inc-cc-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1106,7 +1209,7 @@ export function Derivatives() {
                       <Umbrella className="w-3 h-3 text-emerald-500 absolute -bottom-0.5 -right-0.5" />
                     </div>
                     <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{completeDrcc.length + incDrcc.length}</Badge>
+                    <SectionCount view={sv.drcc} />
                   </div>
                   {deRiskingOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1114,6 +1217,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {deRiskingOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('drcc')}
+                    onChange={setSectionFilter('drcc')}
+                    itemsLegs={sv.drcc.itemsLegs}
+                    ariaLabel="Filtri opzioni De-Risking Covered Call"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1130,7 +1242,8 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {completeDrcc.map((dr, index) => (
+                  {sv.drcc.active && sv.drcc.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.drcc.a.map(({ x: dr, i: index }) => (
                     <DeRiskingCoveredCallRow 
                       key={index} 
                       deRiskingCC={dr} 
@@ -1140,7 +1253,7 @@ export function Derivatives() {
                       getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                     />
                   ))}
-                  {incDrcc.map((inc, i) => (
+                  {sv.drcc.b.map(({ x: inc, i }) => (
                     <IncompleteStrategyRow key={`inc-drcc-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1160,7 +1273,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Target className="w-5 h-5 text-amber-500" />
                     <CardTitle className="text-xl">Iron Condor</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.ironCondors.length + incIronCondor.length}</Badge>
+                    <SectionCount view={sv.ic} />
                   </div>
                   {ironCondorOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1168,6 +1281,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {ironCondorOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('ic')}
+                    onChange={setSectionFilter('ic')}
+                    itemsLegs={sv.ic.itemsLegs}
+                    ariaLabel="Filtri opzioni Iron Condor"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1182,10 +1304,11 @@ export function Derivatives() {
                     <span className="text-center">CALL spread</span>
                     <span className="text-right">Contratti</span>
                   </div>
-                  {categories.ironCondors.map((ic, index) => (
+                  {sv.ic.active && sv.ic.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.ic.a.map(({ x: ic, i: index }) => (
                     <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
-                  {incIronCondor.map((inc, i) => (
+                  {sv.ic.b.map(({ x: inc, i }) => (
                     <IncompleteStrategyRow key={`inc-ic-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1205,7 +1328,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Layers className="w-5 h-5 text-purple-500" />
                     <CardTitle className="text-xl">Double Diagonal</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.doubleDiagonals.length + incDoubleDiagonal.length}</Badge>
+                    <SectionCount view={sv.dd} />
                   </div>
                   {doubleDiagonalOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1213,6 +1336,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {doubleDiagonalOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('dd')}
+                    onChange={setSectionFilter('dd')}
+                    itemsLegs={sv.dd.itemsLegs}
+                    ariaLabel="Filtri opzioni Double Diagonal"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1227,10 +1359,11 @@ export function Derivatives() {
                     <span className="text-center">CALL spread</span>
                     <span className="text-right">Contratti</span>
                   </div>
-                  {categories.doubleDiagonals.map((dd, index) => (
+                  {sv.dd.active && sv.dd.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.dd.a.map(({ x: dd, i: index }) => (
                     <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
-                  {incDoubleDiagonal.map((inc, i) => (
+                  {sv.dd.b.map(({ x: inc, i }) => (
                     <IncompleteStrategyRow key={`inc-dd-${i}`} inc={inc} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1250,7 +1383,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <CircleDollarSign className="w-5 h-5 text-red-500" />
                     <CardTitle className="text-xl">Naked Put</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.nakedPuts.length}</Badge>
+                    <SectionCount view={sv.np} />
                   </div>
                   {nakedPutsOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1258,6 +1391,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {nakedPutsOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('np')}
+                    onChange={setSectionFilter('np')}
+                    itemsLegs={sv.np.itemsLegs}
+                    ariaLabel="Filtri opzioni Naked Put"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1277,7 +1419,8 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {categories.nakedPuts.map((np, index) => (
+                  {sv.np.active && sv.np.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.np.a.map(({ x: np, i: index }) => (
                     <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                 </div>
@@ -1297,7 +1440,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <ArrowDownUp className="w-5 h-5 text-teal-500" />
                     <CardTitle className="text-xl">Put Spread</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{putSpreads.length}</Badge>
+                    <SectionCount view={sv.ps} />
                   </div>
                   {putSpreadOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1305,6 +1448,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {putSpreadOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('ps')}
+                    onChange={setSectionFilter('ps')}
+                    itemsLegs={sv.ps.itemsLegs}
+                    ariaLabel="Filtri opzioni Put Spread"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1321,7 +1473,8 @@ export function Derivatives() {
                     <span className="text-center">Call/Put</span>
                     <span className="text-right">P/L</span>
                   </div>
-                  {putSpreads.map((group, index) => (
+                  {sv.ps.active && sv.ps.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.ps.a.map(({ x: group, i: index }) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                 </div>
@@ -1341,7 +1494,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <ArrowDownUp className="w-5 h-5 text-indigo-500" />
                     <CardTitle className="text-xl">Diagonal Put Spread</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{diagonalPutSpreads.length}</Badge>
+                    <SectionCount view={sv.dps} />
                   </div>
                   {diagonalPutSpreadOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1349,6 +1502,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {diagonalPutSpreadOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('dps')}
+                    onChange={setSectionFilter('dps')}
+                    itemsLegs={sv.dps.itemsLegs}
+                    ariaLabel="Filtri opzioni Diagonal Put Spread"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1365,7 +1527,8 @@ export function Derivatives() {
                     <span className="text-center">Call/Put</span>
                     <span className="text-right">P/L</span>
                   </div>
-                  {diagonalPutSpreads.map((group, index) => (
+                  {sv.dps.active && sv.dps.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.dps.a.map(({ x: group, i: index }) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                 </div>
@@ -1385,7 +1548,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Rocket className="w-5 h-5 text-blue-500" />
                     <CardTitle className="text-xl">Leap Call</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.leapCalls.length}</Badge>
+                    <SectionCount view={sv.lc} />
                   </div>
                   {leapCallsOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1393,6 +1556,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {leapCallsOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('lc')}
+                    onChange={setSectionFilter('lc')}
+                    itemsLegs={sv.lc.itemsLegs}
+                    ariaLabel="Filtri opzioni Leap Call"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1406,7 +1578,8 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {categories.leapCalls.map((lc, index) => (
+                  {sv.lc.active && sv.lc.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.lc.a.map(({ x: lc, i: index }) => (
                     <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1426,7 +1599,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Umbrella className="w-5 h-5 text-emerald-500" />
                     <CardTitle className="text-xl">Protezioni - Long Put</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.longPuts.length}</Badge>
+                    <SectionCount view={sv.lp} />
                   </div>
                   {protectionsOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1434,6 +1607,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {protectionsOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('lp')}
+                    onChange={setSectionFilter('lp')}
+                    itemsLegs={sv.lp.itemsLegs}
+                    ariaLabel="Filtri opzioni Protezioni - Long Put"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1447,7 +1629,8 @@ export function Derivatives() {
                     <span className="text-right">PMC</span>
                     <span className="text-right">Prezzo</span>
                   </div>
-                  {categories.longPuts.map((lp, index) => (
+                  {sv.lp.active && sv.lp.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.lp.a.map(({ x: lp, i: index }) => (
                     <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
                   ))}
                 </div>
@@ -1467,7 +1650,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Puzzle className="w-5 h-5 text-cyan-500" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{remainingOtherStrategies.length}</Badge>
+                    <SectionCount view={sv.other} />
                   </div>
                   {otherStrategiesOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -1475,6 +1658,15 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                {otherStrategiesOpen && (
+                  <OptionLegFilterBar
+                    className="pt-3 cursor-default"
+                    value={sectionFilter('other')}
+                    onChange={setSectionFilter('other')}
+                    itemsLegs={sv.other.itemsLegs}
+                    ariaLabel="Filtri opzioni Altre Strategie"
+                  />
+                )}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1491,7 +1683,8 @@ export function Derivatives() {
                     <span className="text-center">Call/Put</span>
                     <span className="text-right">P/L</span>
                   </div>
-                  {remainingOtherStrategies.map((group, index) => (
+                  {sv.other.active && sv.other.shown === 0 && SECTION_EMPTY_FILTER_MSG}
+                  {sv.other.a.map(({ x: group, i: index }) => (
                     <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
                 </div>
