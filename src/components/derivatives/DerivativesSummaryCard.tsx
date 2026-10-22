@@ -80,7 +80,7 @@ function CompactSection({
   statusBadge?: { label: string; colorClass: string };
   items: any[];
   renderItem: (item: any, idx: number) => React.ReactNode;
-  /** Mostra, a tendina aperta, i filtri PUT/CALL ITM/OTM e scadenza sulle gambe dell'elemento. */
+  /** Mostra, a tendina aperta, il filtro per scadenza sulle gambe dell'elemento (le sezioni sono già ITM/OTM/OOR per costruzione). */
   filterable?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -136,7 +136,8 @@ function CompactSection({
           onChange={setLegFilter}
           itemsLegs={itemsLegs}
           className="mt-2 pl-6"
-          ariaLabel={`Filtri opzioni ${title}`}
+          showMoneyness={false}
+          ariaLabel={`Filtro scadenza ${title}`}
         />
       )}
       {isExpanded && (

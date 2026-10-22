@@ -31,6 +31,8 @@ interface Props {
   /** Nasconde la riga scadenze se non c'è nessuna scadenza nota. */
   hideEmptyExpiries?: boolean;
   ariaLabel?: string;
+  /** false = solo filtro scadenza (es. Posizioni da monitorare, già ITM/OTM per costruzione). */
+  showMoneyness?: boolean;
 }
 
 const S = {
@@ -56,6 +58,7 @@ export function OptionLegFilterBar({
   className,
   hideEmptyExpiries = true,
   ariaLabel = 'Filtri opzioni',
+  showMoneyness = true,
 }: Props) {
   const facets = useMemo(() => computeFilterFacets(itemsLegs, value), [itemsLegs, value]);
   const stress = variant === 'stress';
@@ -124,6 +127,7 @@ export function OptionLegFilterBar({
   const rowClass = stress ? undefined : 'flex flex-wrap items-center gap-1.5';
 
   const showExpiries = !hideEmptyExpiries || facets.expiries.length > 0;
+  if (!showMoneyness && !showExpiries) return null;
 
   return (
     <div
@@ -133,6 +137,7 @@ export function OptionLegFilterBar({
       className={cn(!stress && 'space-y-1.5', className)}
       style={stress ? { display: 'flex', flexDirection: 'column', gap: 6 } : undefined}
     >
+      {showMoneyness && (
       <div className={rowClass} style={rowStyle}>
         <span className={labelClass} style={labelStyle}>Opzioni</span>
         {chip('all-b', 'Tutte', value.buckets.length === 0, () => onChange({ ...value, buckets: [] }), {
@@ -151,6 +156,7 @@ export function OptionLegFilterBar({
           });
         })}
       </div>
+      )}
       {showExpiries && (
         <div className={rowClass} style={rowStyle}>
           <span className={labelClass} style={labelStyle}>Scadenza</span>
