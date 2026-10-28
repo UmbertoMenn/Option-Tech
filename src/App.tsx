@@ -44,6 +44,7 @@ const OptionAnalyzer = lazyWithReload(() => import("@/pages/OptionAnalyzer").the
 const ResetPassword = lazyWithReload(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazyWithReload(() => import("@/pages/Simulator"));
 const Backtesting = lazyWithReload(() => import("@/pages/Backtesting"));
+const TradableSecurities = lazyWithReload(() => import("@/pages/TradableSecurities").then(m => ({ default: m.TradableSecurities })));
 const OAuthConsent = lazyWithReload(() => import("@/pages/OAuthConsent"));
 const NotFound = lazyWithReload(() => import("./pages/NotFound"));
 
@@ -210,6 +211,11 @@ function AppRoutes() {
           <Route path="/backtesting" element={
             <ErrorBoundary title="Errore nel caricamento del Backtesting">
               <Backtesting />
+            </ErrorBoundary>
+          } />
+          <Route path="/titoli-tradabili" element={
+            <ErrorBoundary title="Errore nel caricamento dei Titoli Tradabili">
+              <TradableSecurities />
             </ErrorBoundary>
           } />
           <Route path="*" element={<NotFound />} />

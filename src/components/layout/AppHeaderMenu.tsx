@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard, FlaskConical, History, BarChart3 } from 'lucide-react';
+import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard, FlaskConical, History, BarChart3, ListChecks } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
@@ -77,6 +77,10 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
           <DropdownMenuItem onClick={() => navigate('/option-analyzer')}>
             <LineChart className="w-4 h-4 mr-2" />
             Option Analyzer
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate('/titoli-tradabili')}>
+            <ListChecks className="w-4 h-4 mr-2" />
+            Titoli Tradabili
           </DropdownMenuItem>
           {isAdmin && (
             <DropdownMenuItem onClick={() => navigate('/backtesting')}>
