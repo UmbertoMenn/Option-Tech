@@ -17,7 +17,6 @@ export interface StressRollSettings {
   maxMonthsForward: number;
   strikeStepPct: number;
   minNetCreditPct: number;
-  maxRolls: number;
   /** Put ITM: trigger = calo % dello spot da oggi / dall'ultimo roll */
   itmTriggerPct: number;
   /** Put ITM: discesa minima dello strike per roll (%) */
@@ -34,7 +33,6 @@ const defaults: StressRollSettings = {
   maxMonthsForward: DEFAULT_ROLL_PARAMS.maxMonthsForward,
   strikeStepPct: DEFAULT_ROLL_PARAMS.strikeStepPct,
   minNetCreditPct: DEFAULT_ROLL_PARAMS.minNetCreditPct,
-  maxRolls: DEFAULT_ROLL_PARAMS.maxRolls,
   itmTriggerPct: DEFAULT_ROLL_PARAMS.itmTriggerPct ?? 5,
   itmStrikeStepPct: DEFAULT_ROLL_PARAMS.itmStrikeStepPct ?? 5,
   itmMinTimePct: DEFAULT_ROLL_PARAMS.itmMinTimePct ?? 25,
@@ -47,7 +45,6 @@ type SettingsRow = {
   max_months_forward: number;
   strike_step_pct: number;
   min_net_credit_pct: number;
-  max_rolls: number;
   itm_trigger_pct?: number | null;
   itm_strike_step_pct?: number | null;
   itm_min_time_pct?: number | null;
@@ -55,7 +52,7 @@ type SettingsRow = {
 };
 
 const SETTINGS_COLUMNS =
-  'enabled, trigger_pct, max_months_forward, strike_step_pct, min_net_credit_pct, max_rolls, itm_trigger_pct, itm_strike_step_pct, itm_min_time_pct, itm_selected';
+  'enabled, trigger_pct, max_months_forward, strike_step_pct, min_net_credit_pct, itm_trigger_pct, itm_strike_step_pct, itm_min_time_pct, itm_selected';
 
 const fromRow = (row: SettingsRow): StressRollSettings => ({
   enabled: row.enabled,
@@ -63,7 +60,6 @@ const fromRow = (row: SettingsRow): StressRollSettings => ({
   maxMonthsForward: row.max_months_forward,
   strikeStepPct: row.strike_step_pct,
   minNetCreditPct: row.min_net_credit_pct,
-  maxRolls: row.max_rolls,
   itmTriggerPct: row.itm_trigger_pct ?? defaults.itmTriggerPct,
   itmStrikeStepPct: row.itm_strike_step_pct ?? defaults.itmStrikeStepPct,
   itmMinTimePct: row.itm_min_time_pct ?? defaults.itmMinTimePct,
@@ -134,7 +130,6 @@ export function useStressRollSettings() {
         max_months_forward: values.maxMonthsForward,
         strike_step_pct: values.strikeStepPct,
         min_net_credit_pct: values.minNetCreditPct,
-        max_rolls: values.maxRolls,
         itm_trigger_pct: values.itmTriggerPct,
         itm_strike_step_pct: values.itmStrikeStepPct,
         itm_min_time_pct: values.itmMinTimePct,

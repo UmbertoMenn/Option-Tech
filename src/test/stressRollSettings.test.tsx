@@ -53,11 +53,12 @@ describe('rolling persistito per utente', () => {
     const { result, rerender, unmount } = renderHook(() => useStressRollSettings(), { wrapper });
     await waitFor(() => expect(result.current.canEdit).toBe(true));
 
-    act(() => result.current.updateSettings({ enabled: true, triggerPct: 4.5, maxRolls: 8 }));
+    act(() => result.current.updateSettings({ enabled: true, triggerPct: 4.5, strikeStepPct: 8 }));
     act(() => result.current.save());
     await waitFor(() => expect(mock.rows.get('user-a')?.trigger_pct).toBe(4.5));
     expect(mock.rows.get('user-a')?.enabled).toBe(true);
-    expect(mock.rows.get('user-a')?.max_rolls).toBe(8);
+    expect(mock.rows.get('user-a')?.strike_step_pct).toBe(8);
+    expect(mock.rows.get('user-a')).not.toHaveProperty('max_rolls');
 
     mock.scope = { ...mock.scope, id: 'portfolio-b', owner: 'user-b' };
     rerender();

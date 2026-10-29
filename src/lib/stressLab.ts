@@ -169,7 +169,8 @@ export interface StrikeCandidate {
  *    minima a credito, sull'ULTIMA scadenza ammessa si prende lo strike più basso sotto lo
  *    strike corrente (e sotto lo spot) con credito netto ≥ minimo — discesa < minima
  *    (RollEvent.reducedDrop). Solo se nemmeno così c'è credito la put non si rolla;
- *  - massimo maxRolls roll per gamba; se nessun candidato, si riprova allo step successivo.
+ *  - nessun limite al numero di roll per gamba (Umberto, 29/10/2026); se nessun candidato,
+ *    si riprova allo step successivo.
  */
 /** Motivo per cui una put idonea non è stata rollata lungo il percorso. */
 /**
@@ -184,7 +185,6 @@ export interface RollParams {
   minNetCreditPct: number;
   /** Discesa minima dello strike a ogni roll, in % dello strike corrente */
   strikeStepPct: number;
-  maxRolls: number;
   /** Granularità del percorso in punti % di mercato. Default 1. */
   pathStepPct?: number;
   /**
@@ -321,7 +321,6 @@ export const DEFAULT_ROLL_PARAMS: RollParams = {
   maxMonthsForward: 12,
   minNetCreditPct: 0,
   strikeStepPct: 5,
-  maxRolls: 11,
   pathStepPct: 1,
   itmTriggerPct: 5,
   itmStrikeStepPct: 5,
@@ -791,7 +790,6 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   // Diagonal: la scadenza T + m/12 cade nello stesso mese della put comprata entro ±mezzo mese.
   const capAbs = maxT != null && Number.isFinite(maxT) ? maxT + 0.5 / 12 : null;
   let triggered = false;
-  const maxRolls = Math.max(0, Math.floor(roll.maxRolls));
 
   let K = K0;
   let T = T0;
@@ -811,7 +809,7 @@ export function simulatePutRolls(inp: PutRollSimInput): PutRollSimResult {
   let itmRef = S0;
   let lastItmMode = false;
 
-  for (let i = 1; i <= n && rolls.length < maxRolls; i++) {
+  for (let i = 1; i <= n; i++) {
     const dd = (d * i) / n;
     const dy = (days * i) / n;
     const rem = T - dy / 365;

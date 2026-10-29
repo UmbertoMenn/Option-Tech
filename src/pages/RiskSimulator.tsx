@@ -368,7 +368,6 @@ export function StressLabContent({
   const rollMaxMonths = rollSettings.maxMonthsForward;
   const rollMinCredit = rollSettings.minNetCreditPct;
   const rollStrikeStep = rollSettings.strikeStepPct;
-  const rollMaxRolls = rollSettings.maxRolls;
   const rollItmTrigger = rollSettings.itmTriggerPct;
   const rollItmStep = rollSettings.itmStrikeStepPct;
   const rollItmMinTime = rollSettings.itmMinTimePct;
@@ -381,14 +380,13 @@ export function StressLabContent({
             maxMonthsForward: rollMaxMonths,
             minNetCreditPct: rollMinCredit,
             strikeStepPct: rollStrikeStep,
-            maxRolls: rollMaxRolls,
             pathStepPct: 1,
             itmTriggerPct: rollItmTrigger,
             itmStrikeStepPct: rollItmStep,
             itmMinTimePct: rollItmMinTime,
           }
         : null,
-    [rollOn, rollTrigger, rollMaxMonths, rollMinCredit, rollStrikeStep, rollMaxRolls, rollItmTrigger, rollItmStep, rollItmMinTime],
+    [rollOn, rollTrigger, rollMaxMonths, rollMinCredit, rollStrikeStep, rollItmTrigger, rollItmStep, rollItmMinTime],
   );
   // Metodologia dello scenario: 'market' = shock di MERCATO (mossa trasmessa via beta
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
@@ -1735,23 +1733,6 @@ export function StressLabContent({
                     </Info>
                   }
                 />
-                <Slider
-                  label="Numero max roll"
-                  commitOnRelease
-                  value={rollMaxRolls}
-                  set={(v) => setRollSetting('maxRolls', v)}
-                  min={1}
-                  max={20}
-                  step={1}
-                  fmt={(v) => String(v)}
-                  accent={C.up}
-                  info={
-                    <Info title="Numero massimo di roll" w={280}>
-                      Roll massimi per gamba lungo il percorso. Esauriti i roll, la put resta in essere fino a fine
-                      scenario.
-                    </Info>
-                  }
-                />
                 {/* PUT ITM SELEZIONATE */}
                 <div style={{ margin: '4px 0 12px', paddingTop: 10, borderTop: `1px dashed ${C.border2}` }}>
                   <div
@@ -1885,7 +1866,6 @@ export function StressLabContent({
                       maxMonthsForward: DEFAULT_ROLL_PARAMS.maxMonthsForward,
                       strikeStepPct: DEFAULT_ROLL_PARAMS.strikeStepPct,
                       minNetCreditPct: DEFAULT_ROLL_PARAMS.minNetCreditPct,
-                      maxRolls: DEFAULT_ROLL_PARAMS.maxRolls,
                       itmTriggerPct: DEFAULT_ROLL_PARAMS.itmTriggerPct ?? 5,
                       itmStrikeStepPct: DEFAULT_ROLL_PARAMS.itmStrikeStepPct ?? 5,
                       itmMinTimePct: DEFAULT_ROLL_PARAMS.itmMinTimePct ?? 25,

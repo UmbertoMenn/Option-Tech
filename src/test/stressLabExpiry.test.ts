@@ -14,7 +14,7 @@ import { weightedAvgExpiry, shortExpirySummary, rolledExpiryISO, DAYS_PER_YEAR }
 const R = 0.04;
 const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
 const base: ScenarioParams = { skewB: -0.018, kappa: 0.6, pExp: 0.5, r: R, days: 30, fx: { USD: 1.16, HKD: 9.04 }, netting: false };
-const ROLL: RollParams = { triggerPct: 2, maxMonthsForward: 12, minNetCreditPct: 0, strikeStepPct: 2, maxRolls: 4, pathStepPct: 1 };
+const ROLL: RollParams = { triggerPct: 2, maxMonthsForward: 12, minNetCreditPct: 0, strikeStepPct: 2, pathStepPct: 1 };
 
 function leg(cp: 'C' | 'P', K: number, T: number, q: number, rollQ?: number): StressLeg {
   const iv = 0.4;

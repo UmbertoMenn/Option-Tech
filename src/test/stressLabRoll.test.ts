@@ -28,7 +28,6 @@ const ROLL: RollParams = {
   maxMonthsForward: 12,
   minNetCreditPct: 0,
   strikeStepPct: 2,
-  maxRolls: 4,
   pathStepPct: 1,
 };
 const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
@@ -52,11 +51,10 @@ describe('stressLab — rolling put in discesa', () => {
     expect(run(nonIdonea, -30, { ...base, roll: ROLL }).rows[0].rolls).toBeUndefined();
   });
 
-  it('shock -30%: roll con discesa minima 2% su strike quotati, credito ≥ 0, max 4, cap 12 mesi', () => {
+  it('shock -30%: roll con discesa minima 2% su strike quotati, credito ≥ 0, cap 12 mesi', () => {
     const res = run([putLeg(90, 35 / 365, -1, -1)], -30, { ...base, roll: ROLL });
     const row = res.rows[0];
     expect(row.rolls!.length).toBeGreaterThan(0);
-    expect(row.rolls!.length).toBeLessThanOrEqual(4);
     expect(row.finalK!).toBeLessThan(90);
     for (const ev of row.rolls!) {
       expect(ev.S).toBeLessThanOrEqual(ev.fromK * 1.02 + 1e-9); // trigger 2%
@@ -73,13 +71,32 @@ describe('stressLab — rolling put in discesa', () => {
     }
   });
 
+  it('nessun limite al numero di roll (29/10/2026): si rolla finché trigger, credito e scadenza lo consentono', () => {
+    const priceAt = (K: number, T: number, dd: number, _dv: number, dy: number) => {
+      const Tx = Math.max(T - dy / 365, 0);
+      const S = 100 * (1 + dd / 100);
+      return { p: bsPrice(S * Math.exp(R * Tx), K, Tx, 0.6, false, R), sig: 0.6 };
+    };
+    const sim = simulatePutRolls({
+      K0: 95, T0: 35 / 365, S0: 100, beta: 1, d: -50, dV1M: 0, days: 5,
+      roll: { ...ROLL, maxMonthsForward: 36 }, priceAt,
+    });
+    // Proof-of-bug: col vecchio vincolo (es. 4 roll) la gamba si fermava a 4.
+    expect(sim.rolls.length).toBeGreaterThan(4);
+    expect('maxRolls' in ROLL).toBe(false);
+    for (let i = 1; i < sim.rolls.length; i++) {
+      expect(sim.rolls[i].fromK).toBe(sim.rolls[i - 1].toK);
+      expect(sim.rolls[i].toK).toBeLessThan(sim.rolls[i].fromK);
+    }
+  });
+
   it('strike più basso tra i candidati a credito: lo strike quotato successivo è a debito', () => {
     const leg = putLeg(90, 35 / 365, -1, -1);
     // Pricer semplice (vol piatta + shock): lo strike successivo (−2% ulteriore) sulla
     // stessa scadenza deve essere a debito, altrimenti il motore avrebbe scelto quello.
     const sim = simulatePutRolls({
       K0: 90, T0: leg.T, S0: 100, beta: 1, d: -30, dV1M: coupledDV1M(-30), days: 30,
-      roll: { ...ROLL, maxRolls: 1 },
+      roll: ROLL,
       priceAt: (K, T, dd, dv, dy) => {
         const Tx = Math.max(T - dy / 365, 0);
         const S = 100 * (1 + dd / 100);
@@ -221,7 +238,7 @@ describe('stressLab — discesa minima strike per roll', () => {
     };
     const sim = simulatePutRolls({
       K0: 90, T0: 35 / 365, S0: 100, beta: 1, d: -30, dV1M: coupledDV1M(-30), days: 30,
-      roll: { ...ROLL, strikeStepPct: 1, maxRolls: 1 }, priceAt,
+      roll: { ...ROLL, strikeStepPct: 1 }, priceAt,
     });
     const e = sim.rolls[0];
     const m = Math.round((e.toT - e.fromT) * 12);
@@ -269,14 +286,14 @@ describe('stressLab — discesa minima strike per roll', () => {
 });
 
 describe('stressLab — default rolling', () => {
-  it('trigger 2%, scadenza max 12 mesi, discesa minima 5%, credito ≥ 0, 11 roll', () => {
+  it('trigger 2%, scadenza max 12 mesi, discesa minima 5%, credito ≥ 0, nessun limite al numero di roll', () => {
     expect(DEFAULT_ROLL_PARAMS).toMatchObject({
       triggerPct: 2,
       maxMonthsForward: 12,
       strikeStepPct: 5,
       minNetCreditPct: 0,
-      maxRolls: 11,
     });
+    expect('maxRolls' in DEFAULT_ROLL_PARAMS).toBe(false);
   });
 });
 
@@ -517,14 +534,14 @@ describe('stressLab — ripiego discesa ridotta (AVGO andreaz, 30/09/2026)', () 
   const leg = (extra: Partial<StressLeg> = {}): StressLeg => ({
     u: 'AVGO', cp: 'P', K: 350, T: T0, exp: '2027-03-19', q: -1, px: 35.225, fl: false, mult: 100, nm: 'AVGO', iv: 0.43, rollQ: -1, ...extra,
   });
-  const card: RollParams = { ...DEFAULT_ROLL_PARAMS, triggerPct: 0, strikeStepPct: 10, maxMonthsForward: 12, minNetCreditPct: 0, maxRolls: 11 };
+  const card: RollParams = { ...DEFAULT_ROLL_PARAMS, triggerPct: 0, strikeStepPct: 10, maxMonthsForward: 12, minNetCreditPct: 0 };
   const prm: ScenarioParams = { ...base, days: 0, roll: card, strikes: { AVGO: chains } };
   const runA = (legs: StressLeg[], d: number, p: ScenarioParams) =>
     runScenario(legs, [], avgoU, effIVMap(legs), d, coupledDV1M(d), p);
 
   it('proof-of-bug: con la sola discesa minima 10% nessuna scadenza ≤ cap è a credito', () => {
     // Stesso pricer del motore, primo passo del percorso: la migliore put ≤ 315 entro il cap è a debito.
-    const res = runA([leg()], -1, { ...prm, roll: { ...card, maxRolls: 0 } });
+    const res = runA([leg()], -1, prm);
     expect(res.rows[0].rolls!.length).toBe(0);
   });
 
