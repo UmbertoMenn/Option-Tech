@@ -229,7 +229,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
                   `Totale gamba = ${fmtEUR(r.contribEUR)}`;
 
               return (
-                <tr key={r.positionId} title={tip} style={{ cursor: 'help', borderTop: `1px solid ${C.border}` }}>
+                <tr key={r.legKey} title={tip} style={{ cursor: 'help', borderTop: `1px solid ${C.border}` }}>
                   <td style={{ color: C.text, fontWeight: 700, padding: '4px 6px', whiteSpace: 'nowrap' }}>
                     {r.ticker}
                     {excluded && (

@@ -241,4 +241,37 @@ describe('breakdown istogrammi — identità canonica e isolamento portfolio', (
     expect(rows[0].category).toBe('orphans');
     expect(rows[0].contribEUR).toBeCloseTo(-800, 6);
   });
+  it('posizione ripartita fra più strategie: gambe con legKey univoco e quantità totale invariata', () => {
+    const EXP = '2026-11-20';
+    const LONG_EXP = '2027-01-15';
+    const shortPut = pos({ id: 'p360', option_type: 'put', quantity: -2, strike_price: 360, expiry_date: EXP, underlying: 'ALAB', ticker: 'ALAB', snapshot_price: 177.6 });
+    const longPut = pos({ id: 'p135', option_type: 'put', quantity: 1, strike_price: 135, expiry_date: LONG_EXP, underlying: 'ALAB', ticker: 'ALAB', snapshot_price: 8.3 });
+    const shortSig = sig({ option_type: 'put', strike: 360, expiry: EXP, quantity_sign: -1 });
+    const configs = [
+      cfg({ underlying: 'ALAB', strategy_type: 'diagonal_put_spread', position_signatures: [shortSig, sig({ option_type: 'put', strike: 135, expiry: LONG_EXP, quantity_sign: 1 })] }),
+      cfg({ underlying: 'ALAB', strategy_type: 'naked_put', position_signatures: [shortSig] }),
+    ];
+
+    const rows = computeLegDecomposition('netting_total', [shortPut, longPut], [], { ALAB: up(182) }, configs);
+    const shortLegs = rows.filter(r => r.positionId === 'p360');
+
+    expect(shortLegs.map(r => r.quantity)).toEqual([-1, -1]);
+    expect(shortLegs.map(r => r.category).sort()).toEqual(['diagonal_put_spread', 'naked_put']);
+    expect(new Set(rows.map(r => r.legKey)).size).toBe(rows.length);
+  });
+
+  it('due config della stessa categoria sulla stessa posizione restano righe distinte', () => {
+    const EXP = '2026-12-18';
+    const shortPut = pos({ id: 'np', option_type: 'put', quantity: -2, strike_price: 100, expiry_date: EXP, underlying: 'ALAB', ticker: 'ALAB', snapshot_price: 5 });
+    const shortSig = sig({ option_type: 'put', strike: 100, expiry: EXP, quantity_sign: -1 });
+    const configs = [
+      cfg({ underlying: 'ALAB', strategy_type: 'naked_put', position_signatures: [shortSig] }),
+      cfg({ underlying: 'ALAB', strategy_type: 'naked_put', position_signatures: [shortSig] }),
+    ];
+
+    const rows = computeLegDecomposition('netting_total', [shortPut], [], { ALAB: up(120) }, configs);
+
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map(r => r.legKey)).size).toBe(2);
+  });
 });

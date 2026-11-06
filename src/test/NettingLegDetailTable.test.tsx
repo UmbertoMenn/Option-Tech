@@ -7,7 +7,7 @@ afterEach(cleanup);
 
 function leg(id: string, type: 'put' | 'call', intr: number, tv: number, excluded = 0): LegDecompositionRow {
   return {
-    positionId: id, category: 'other', ticker: id, optionType: type,
+    legKey: id, positionId: id, category: 'other', ticker: id, optionType: type,
     strike: 100, expiry: '2026-12-18', quantity: intr < 0 ? -1 : 1,
     spot: 110, optionPrice: 12, exchangeRate: 1,
     intrinsicCountedEUR: intr, timeValueCountedEUR: tv, timeValueExcludedEUR: excluded,
@@ -87,5 +87,33 @@ describe('NettingLegDetailTable: subtotali per moneyness e scadenza', () => {
     expectTotals('0 €', '0 €', '0 €');
     fireEvent.click(screen.getAllByRole('button', { name: 'Tutte' })[0]);
     expectTotals('−2.000 €', '−300 €', '−2.300 €');
+  });
+});
+
+describe('NettingLegDetailTable: posizione ripartita fra più strategie', () => {
+  // Caso MauroG/ALAB: put 360 −2 = diagonal −1 + naked −1, stesso positionId.
+  const splitRows: LegDecompositionRow[] = [
+    { ...leg('p360', 'put', -1000, -200), legKey: 'p360|diagonal_put_spread|0', category: 'diagonal_put_spread' },
+    { ...leg('p360', 'put', -1000, -200), legKey: 'p360|naked_put|0', category: 'naked_put' },
+    { ...leg('c180', 'call', 400, 50), legKey: 'c180|leap_call|0', category: 'leap_call' },
+  ];
+  const putRows = () =>
+    screen.getAllByRole('row').filter((r) => r.closest('tbody') && r.textContent?.startsWith('p360'));
+
+  it('riordinando non lascia righe fantasma: restano 2 put e non 3', () => {
+    render(<NettingLegDetailTable rows={splitRows} viewMode="netting_total" />);
+    expect(putRows()).toHaveLength(2);
+
+    for (const col of [/^Totale/, /^Perdita intr\./, /^Qtà/, /^Sott\./]) {
+      fireEvent.click(screen.getByRole('columnheader', { name: col }));
+      expect(putRows()).toHaveLength(2);
+    }
+  });
+
+  it('cambiando vista non lascia righe fantasma', () => {
+    const { rerender } = render(<NettingLegDetailTable rows={splitRows} viewMode="netting_total" />);
+    fireEvent.click(screen.getByRole('columnheader', { name: /^Qtà/ }));
+    rerender(<NettingLegDetailTable rows={[...splitRows].reverse()} viewMode="netting_intrinsic_b" />);
+    expect(putRows()).toHaveLength(2);
   });
 });

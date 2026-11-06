@@ -707,6 +707,12 @@ export function getBreakdownForViewMode(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface LegDecompositionRow {
+  /**
+   * Identità univoca della riga. `positionId` NON basta: una posizione raw
+   * ripartita fra più strategie (es. put −2 → diagonal −1 + naked −1) genera
+   * più gambe con lo stesso id.
+   */
+  legKey: string;
   positionId: string;
   category: StrategySectionCategory;
   ticker: string;
@@ -749,10 +755,14 @@ export function computeLegDecomposition(
 
   const legs = buildCanonicalLegsByPortfolio(positions, overrides, strategyConfigs, dynamicAliases);
   const rows: LegDecompositionRow[] = [];
+  const legOccurrences = new Map<string, number>();
 
   for (const leg of legs) {
     const p = leg.position;
     const cat = leg.category;
+    const legIdentity = `${p.id}|${cat}`;
+    const occurrence = legOccurrences.get(legIdentity) ?? 0;
+    legOccurrences.set(legIdentity, occurrence + 1);
     const price = p.snapshot_price ?? p.current_price ?? 0;
     const quantity = p.quantity;
     const multiplier = 100;
@@ -823,6 +833,7 @@ export function computeLegDecomposition(
     // netting_total (o spot ignoto → fallback a MTM) → MTM pieno per tutte le gambe
 
     rows.push({
+      legKey: `${legIdentity}|${occurrence}`,
       positionId: p.id,
       category: cat,
       ticker,
