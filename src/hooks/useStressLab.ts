@@ -15,6 +15,7 @@ import { useGPHoldings, GPHoldingRow } from '@/hooks/useGPHoldings';
 import { resolveUnderlyingIdentity, buildDynamicAliasMap, normalizeText } from '@/lib/tickerIdentity';
 import { useFrozenUnderlyingPricesDetail } from '@/hooks/useFrozenUnderlyingPrices';
 import { resolveOptionSpot, SpotSource } from '@/lib/frozenUnderlyingPrices';
+import { buildStrikeBook, ListedStrikesRow } from '@/lib/strikeBookAsOf';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
@@ -129,6 +130,8 @@ export interface StressLabData {
   spotDate: string | null;
   /** Sottostanti di opzioni senza spot alla data (gambe escluse dallo stress). */
   missingSpotUnders: string[];
+  /** false = storico catene non disponibile: strike dall'ultima versione di ogni scadenza. */
+  strikesVersioned: boolean;
   /** Breakdown patrimonio per debug/UI */
   patrimonyBreakdown: {
     derivativesEUR: number;
@@ -675,33 +678,40 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     () => [...new Set(legs.filter((l) => l.cp === 'P' && l.q < 0 && l.u !== 'EURUSD').map((l) => l.u))].sort(),
     [legs],
   );
+  // Catene ALLA DATA dello snapshot (storico versionato, RPC listed_strikes_as_of): in
+  // Visualizzazione Storica servono anche le scadenze oggi già passate e la catena quotata
+  // quel giorno, non l'ultima sovrascrittura. Se lo storico non è disponibile si ripiega
+  // sulla tabella corrente (ultima versione per scadenza), segnalandolo.
+  const strikeDate = portfolio?.snapshot_date ?? null;
   const strikesQuery = useQuery({
-    queryKey: ['option-listed-strikes', strikeTickers.join(',')],
+    queryKey: ['option-listed-strikes-as-of', strikeTickers.join(','), strikeDate],
     enabled: strikeTickers.length > 0,
     staleTime: 30 * 60 * 1000,
-    queryFn: async () => {
+    queryFn: async (): Promise<{ rows: ListedStrikesRow[]; versioned: boolean }> => {
+      if (strikeDate) {
+        const { data, error } = await (supabase.rpc as any)('listed_strikes_as_of', {
+          p_tickers: strikeTickers,
+          p_date: strikeDate,
+        });
+        if (!error) return { rows: (data ?? []) as ListedStrikesRow[], versioned: true };
+        console.warn('[StressLab] listed_strikes_as_of non disponibile, uso catene correnti:', error.message);
+      }
       const { data, error } = await supabase
         .from('option_listed_strikes' as any)
         .select('ticker, expiry, put_strikes')
         .in('ticker', strikeTickers);
       if (error) {
         console.warn('[StressLab] option_listed_strikes:', error.message);
-        return [] as { ticker: string; expiry: string; put_strikes: number[] }[];
+        return { rows: [], versioned: false };
       }
-      return (data ?? []) as unknown as { ticker: string; expiry: string; put_strikes: number[] }[];
+      return { rows: (data ?? []) as unknown as ListedStrikesRow[], versioned: false };
     },
   });
-  const strikeBook: StrikeBook = useMemo(() => {
-    const b: StrikeBook = {};
-    for (const row of strikesQuery.data ?? []) {
-      const ks = (row.put_strikes ?? []).map(Number).filter((k) => k > 0);
-      if (ks.length < 2) continue;
-      const T = yearsToExpiry(row.expiry, snapshotRef);
-      if (T <= 0) continue;
-      (b[row.ticker.toUpperCase()] = b[row.ticker.toUpperCase()] || []).push({ T, exp: row.expiry, strikes: ks });
-    }
-    return b;
-  }, [strikesQuery.data, snapshotRef]);
+  const strikeBook: StrikeBook = useMemo(
+    () => buildStrikeBook(strikesQuery.data?.rows ?? [], snapshotRef),
+    [strikesQuery.data, snapshotRef],
+  );
+  const strikesVersioned = strikesQuery.data?.versioned ?? true;
 
   /* ---------- 10. Costruzione eq (stocks, ETF, commodity) ---------- */
 
@@ -908,5 +918,6 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     isHistorical,
     spotDate: portfolio?.snapshot_date ?? null,
     missingSpotUnders,
+    strikesVersioned,
   };
 }

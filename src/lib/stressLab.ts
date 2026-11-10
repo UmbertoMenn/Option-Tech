@@ -135,6 +135,8 @@ export interface StrikeChain {
   T: number;
   exp: string;
   strikes: number[];
+  /** Data di quotazione della catena (storico versionato). Assente = non versionata. */
+  asOf?: string;
 }
 export type StrikeBook = Record<string, StrikeChain[]>;
 /**

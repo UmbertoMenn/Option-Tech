@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { chainForRoll } from '@/lib/strikeBookAsOf';
 import {
   LineChart,
   Line,
@@ -959,6 +960,28 @@ export function StressLabContent({
           </span>
         </div>
       )}
+      {data.isHistorical && !data.strikesVersioned && (
+        <div
+          style={{
+            background: 'rgba(247,166,0,.08)',
+            border: `1px solid ${C.amber}`,
+            borderRadius: 8,
+            padding: '8px 12px',
+            marginBottom: 12,
+            fontSize: 12,
+            color: C.amber,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <AlertTriangle size={14} />
+          <span>
+            Archivio storico delle catene di strike non disponibile: il rolling usa l'ultima catena registrata per
+            ogni scadenza, non quella quotata al {fmtDateIt(data.spotDate)}.
+          </span>
+        </div>
+      )}
       {data.missingBetaTickers.length > 0 && (
         <div
           style={{
@@ -1546,8 +1569,10 @@ export function StressLabContent({
                   <br />
                   <b>Strike quotati</b>: la put di arrivo è scelta solo fra strike disponibili. Fonte, in ordine:
                   <br />
-                  • <b>reale</b>: strike quotati oggi sulla scadenza di arrivo (catene Yahoo salvate dall'aggiornamento
-                  prezzi; le mensili fino a +24 mesi dei sottostanti con put vendute si aggiornano ogni settimana);
+                  • <b>reale</b>: strike quotati alla <b>data dello snapshot</b> sulla scadenza di arrivo (catene Yahoo
+                  salvate dall'aggiornamento prezzi e archiviate per data di quotazione, comprese le scadenze oggi già
+                  passate; le mensili fino a +24 mesi dei sottostanti con put vendute si aggiornano ogni settimana). Se
+                  l'archivio non copre la data si usa la prima catena registrata dopo, indicata nel dettaglio;
                   <br />
                   • <b>estrapolato</b>: sotto lo strike più basso quotato oggi si prolunga il passo della parte bassa
                   della catena (dopo un crollo le borse listano nuovi strike con lo stesso schema);
@@ -3122,6 +3147,14 @@ export function StressLabContent({
                 const kFmt = fmtN(l.K, l.K < 5 ? 3 : 2);
                 const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
                 const header = `${l.u} ${isCall ? 'CALL' : 'PUT'} K${fmtN(l.K, l.K < 5 ? 3 : 0)} ${expS[1]}/${expS[0]} · q ${l.q}`;
+                const chainLbl = (u: string, toT: number, src?: string) => {
+                  if (src !== 'reale' && src !== 'estrapolato') return '';
+                  const ch = chainForRoll(strikeBook, u, toT);
+                  if (!ch?.asOf) return data.strikesVersioned ? '' : ', catena dell\'ultimo aggiornamento';
+                  return ch.asOf > (data.spotDate ?? '')
+                    ? `, catena quotata al ${fmtDateIt(ch.asOf)} — successiva allo snapshot, archivio non disponibile alla data`
+                    : `, catena quotata al ${fmtDateIt(ch.asOf)}`;
+                };
                 const srcK = data.spotSrc[l.u];
                 const spotSrcLbl = undersOverride[l.u]
                   ? 'modificato a mano'
@@ -3180,7 +3213,7 @@ export function StressLabContent({
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1})${e.itm ? ' [ITM]' : ''}${e.reducedDrop ? ' [DISCESA RIDOTTA: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza ammessa, strike più basso a credito]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1})${e.itm ? ' [ITM]' : ''}${e.reducedDrop ? ' [DISCESA RIDOTTA: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza ammessa, strike più basso a credito]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}${chainLbl(l.u, e.toT, e.kSrc)}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
                       (() => {
