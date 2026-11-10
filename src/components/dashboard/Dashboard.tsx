@@ -4,8 +4,9 @@ import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/Portfol
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting, compareNettingMethods } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
-import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
+import { useFrozenUnderlyingPrices } from '@/hooks/useFrozenUnderlyingPrices';
 import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
@@ -145,24 +146,10 @@ export function Dashboard() {
     isDeleting,
   } = useHistoricalData(portfolio?.id, viewMode);
 
-  // Prezzi CONGELATI dello snapshot corrente: la card di netting NON deve muoversi
-  // coi prezzi live. Prendo i prezzi fissati nel record storico della data corrente
-  // del portafoglio e li uso per il netting. Fallback ai prezzi live solo per i
-  // sottostanti non ancora congelati (es. snapshot non ancora ricalcolato): al primo
-  // ricalcolo dello snapshot vengono congelati e da lì in poi il valore è stabile.
-  const frozenUnderlyingPrices = useMemo(() => {
-    const currentDate = portfolio?.snapshot_date;
-    const currentEntry = currentDate
-      ? historicalData.find(h => h.snapshot_date === currentDate)
-      : null;
-    const frozenRaw = (currentEntry?.snapshot_underlying_prices ?? {}) as Record<string, number>;
-    const merged: Record<string, UnderlyingPrice> = {};
-    for (const [k, v] of Object.entries(underlyingPrices)) merged[k] = v;
-    for (const [k, px] of Object.entries(frozenRaw)) {
-      if (typeof px === 'number' && px > 0) merged[k] = { price: px, currency: 'USD' };
-    }
-    return merged;
-  }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
+  // Prezzi CONGELATI dello snapshot: la card di netting NON deve muoversi coi prezzi live.
+  // Fonte unica condivisa con Risk Analyzer e Stress Lab (fallback live solo nella vista
+  // corrente; in Visualizzazione Storica solo prezzi congelati di quella data).
+  const frozenUnderlyingPrices = useFrozenUnderlyingPrices(portfolio, underlyingPrices);
 
   const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs, dynamicAliases);
   // Il premio di mercato dei riacquisti aperti (call da rivendere) è patrimonio

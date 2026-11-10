@@ -10,10 +10,11 @@ import { useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
-import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings, GPHoldingRow } from '@/hooks/useGPHoldings';
 import { resolveUnderlyingIdentity, buildDynamicAliasMap, normalizeText } from '@/lib/tickerIdentity';
-import { useHistoricalData } from '@/hooks/useHistoricalData';
+import { useFrozenUnderlyingPricesDetail } from '@/hooks/useFrozenUnderlyingPrices';
+import { resolveOptionSpot, SpotSource } from '@/lib/frozenUnderlyingPrices';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
@@ -119,6 +120,15 @@ export interface StressLabData {
   baselineUnders: StressUnderlyingMap;
   /** Strike put quotati reali per sottostante (rolling) */
   strikeBook: StrikeBook;
+  /** Fonte dello spot per sottostante: snapshot del titolo, prezzo congelato alla data
+   *  snapshot, oppure live (solo vista corrente, sottostante non ancora congelato). */
+  spotSrc: Record<string, SpotSource>;
+  /** Visualizzazione Storica attiva (nessun prezzo live ammesso). */
+  isHistorical: boolean;
+  /** Data snapshot a cui sono riferiti spot, premi e scadenze (YYYY-MM-DD). */
+  spotDate: string | null;
+  /** Sottostanti di opzioni senza spot alla data (gambe escluse dallo stress). */
+  missingSpotUnders: string[];
   /** Breakdown patrimonio per debug/UI */
   patrimonyBreakdown: {
     derivativesEUR: number;
@@ -386,6 +396,16 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
   const { prices: underlyingPrices, isLoading: isLoadingPrices, isFetchingMissing } =
     useUnderlyingPrices(underlyingNamesForPrices);
 
+  /* ---------- 4b. Prezzi CONGELATI alla data snapshot (historical_data) ----------
+   * Fonte unica condivisa con Dashboard e Risk Analyzer. In Visualizzazione Storica
+   * NESSUN fallback live: lo spot di oggi non è lo spot della data visualizzata. */
+  const {
+    prices: frozenUnderlyingPrices,
+    frozenRaw,
+    isHistorical,
+    isLoading: isLoadingFrozen,
+  } = useFrozenUnderlyingPricesDetail(portfolio, underlyingPrices);
+
   /* ---------- 5. Beta + risk-free: ticker_fundamentals + on-demand fetch ---------- */
 
   const tickersKey = allTickers.join('|');
@@ -508,8 +528,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   /* ---------- 8. Mappa sottostanti unders (S, beta) ---------- */
 
-  const baselineUnders: StressUnderlyingMap = useMemo(() => {
+  const { baselineUnders, spotSrc, missingSpotUnders } = useMemo(() => {
     const m: StressUnderlyingMap = {};
+    const src: Record<string, SpotSource> = {};
+    const missing = new Set<string>();
 
     // a) PRIMA lo spot FROZEN dalle posizioni stock/etf/commodity (snapshot_price).
     //    È stabile (non cambia navigando) e COERENTE con i premi snapshot usati per
@@ -523,20 +545,26 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       const px = s.snapshot_price ?? s.current_price;
       if (typeof px === 'number' && px > 0 && !m[t]) {
         m[t] = { S: px, beta: betaMap[t] ?? DEFAULT_BETA_UNKNOWN };
+        src[t] = 'titolo';
       }
     });
 
-    // b) POI, SOLO per i sottostanti delle opzioni che NON sono detenuti come titolo
-    //    (nessuno snapshot disponibile), lo spot arriva dal price layer: è l'unica
-    //    fonte per quei nomi.
+    // b) POI, SOLO per i sottostanti delle opzioni che NON sono detenuti come titolo:
+    //    prezzo CONGELATO alla data snapshot (historical_data.snapshot_underlying_prices,
+    //    stessa chiave underlying||description usata al congelamento), coerente coi premi
+    //    snapshot delle gambe. Il prezzo live è ammesso SOLO nella vista corrente e solo
+    //    per i sottostanti non ancora congelati; in Visualizzazione Storica mai (prima lo
+    //    spot di oggi finiva sulle gambe di una data passata → spot/intrinseci/IV errati).
     derivatives.forEach((d) => {
       const key = getOptionUnderlyingKey(d);
       if (!key || m[key]) return;
-      const lookupName = d.underlying || d.description;
-      const cached = lookupName ? underlyingPrices[lookupName] : undefined;
-      const spot = cached?.price;
-      if (spot && spot > 0) {
-        m[key] = { S: spot, beta: betaMap[key] ?? DEFAULT_BETA_UNKNOWN };
+      const spot = resolveOptionSpot(d.underlying || d.description, frozenRaw, underlyingPrices, !isHistorical);
+      if (spot) {
+        m[key] = { S: spot.S, beta: betaMap[key] ?? DEFAULT_BETA_UNKNOWN };
+        src[key] = spot.src;
+        missing.delete(key);
+      } else {
+        missing.add(key);
       }
     });
 
@@ -558,9 +586,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
     // c) EUR/USD: lo "spot" è quante USD per 1 EUR = fx.USD
     m['EURUSD'] = { S: fx.USD, beta: 0 };
+    for (const k of missing) if (m[k]) missing.delete(k);
 
-    return m;
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker, resolveStockTicker]);
+    return { baselineUnders: m, spotSrc: src, missingSpotUnders: [...missing].sort() };
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, underlyingPrices, frozenRaw, isHistorical, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker, resolveStockTicker]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -795,21 +824,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     return { ...summary, totalValue: summary.totalValue + gpSummary.totalValue };
   }, [summary, gpSummary.totalValue]);
 
-  // (2) prezzi congelati dello snapshot corrente — identico a Dashboard.tsx
-  const { historicalData } = useHistoricalData(portfolio?.id);
-  const frozenUnderlyingPrices = useMemo(() => {
-    const currentDate = portfolio?.snapshot_date;
-    const currentEntry = currentDate
-      ? historicalData.find((h) => h.snapshot_date === currentDate)
-      : null;
-    const frozenRaw = (currentEntry?.snapshot_underlying_prices ?? {}) as Record<string, number>;
-    const merged: Record<string, UnderlyingPrice> = {};
-    for (const [k, v] of Object.entries(underlyingPrices)) merged[k] = v;
-    for (const [k, px] of Object.entries(frozenRaw)) {
-      if (typeof px === 'number' && px > 0) merged[k] = { price: px, currency: 'USD' };
-    }
-    return merged;
-  }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
+  // (2) prezzi congelati dello snapshot (frozenUnderlyingPrices, §4b) — identici a Dashboard.tsx
 
   const liveNetting = useDerivativeNetting(
     nettingPositions,
@@ -884,10 +899,14 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     ivWarnings,
     missingBetaTickers,
     isLoading:
-      isLoadingPortfolio || isLoadingPrices || betasQuery.isLoading || mappingsQuery.isLoading,
+      isLoadingPortfolio || isLoadingPrices || isLoadingFrozen || betasQuery.isLoading || mappingsQuery.isLoading,
     isFetchingBeta: fetchedBetasQuery.isFetching || isFetchingMissing,
     baselineUnders,
     patrimonyBreakdown,
     strikeBook,
+    spotSrc,
+    isHistorical,
+    spotDate: portfolio?.snapshot_date ?? null,
+    missingSpotUnders,
   };
 }

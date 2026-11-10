@@ -80,6 +80,9 @@ const sgn = (v: number, dec = 1) =>
 /** Strike: intero senza decimali, altrimenti i decimali necessari (57,5 · 1,125). */
 const fmtK = (v: number) =>
   Math.abs(v - Math.round(v)) < 1e-9 ? fmtN(v, 0) : fmtN(v, Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 ? 1 : v < 5 ? 3 : 2);
+/** Data snapshot YYYY-MM-DD → gg/mm/aaaa. */
+const fmtDateIt = (iso: string | null | undefined) =>
+  iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—';
 /** Chiave stabile (tra upload) di una put per la selezione del rolling ITM. */
 const itmLegKey = (l: { u: string; K: number; exp: string }) => `${l.u}|${l.K}|${l.exp}`;
 const pnlColor = (v: number) => (v > 0 ? C.up : v < 0 ? C.dn : C.mut);
@@ -335,6 +338,14 @@ export function StressLabContent({
    * legs/prezzi/netting. Conseguenza: rientrando nella pagina (remount) o facendo
    * refresh i numeri sono IDENTICI, perché derivano dallo stesso baseline. */
   const [undersOverride, setUndersOverride] = useState<StressUnderlyingMap>({});
+  // Gli override di spot/beta valgono per la data che si sta guardando: cambiando data
+  // (vista live ↔ storica, o un'altra data storica) si azzerano, altrimenti uno spot
+  // digitato su una data resterebbe applicato alle gambe di un'altra.
+  const [overrideDate, setOverrideDate] = useState(data.spotDate);
+  if (overrideDate !== data.spotDate) {
+    setOverrideDate(data.spotDate);
+    setUndersOverride({});
+  }
 
   const unders = useMemo<StressUnderlyingMap>(() => {
     const m: StressUnderlyingMap = { ...data.baselineUnders };
@@ -923,6 +934,31 @@ export function StressLabContent({
       </div>
 
       {/* WARNING BANNERS */}
+      {data.missingSpotUnders.length > 0 && (
+        <div
+          style={{
+            background: 'rgba(247,166,0,.08)',
+            border: `1px solid ${C.amber}`,
+            borderRadius: 8,
+            padding: '8px 12px',
+            marginBottom: 12,
+            fontSize: 12,
+            color: C.amber,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <AlertTriangle size={14} />
+          <span>
+            Spot non disponibile al {fmtDateIt(data.spotDate)} per {data.missingSpotUnders.length} sottostanti
+            {data.isHistorical ? ' (nessun prezzo congelato in quello snapshot; il prezzo di oggi non è usato)' : ''}
+            : le loro gambe sono escluse dallo stress —{' '}
+            <code style={{ fontFamily: MONO }}>{data.missingSpotUnders.slice(0, 8).join(', ')}</code>
+            {data.missingSpotUnders.length > 8 ? '…' : ''}
+          </span>
+        </div>
+      )}
       {data.missingBetaTickers.length > 0 && (
         <div
           style={{
@@ -3086,9 +3122,21 @@ export function StressLabContent({
                 const kFmt = fmtN(l.K, l.K < 5 ? 3 : 2);
                 const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
                 const header = `${l.u} ${isCall ? 'CALL' : 'PUT'} K${fmtN(l.K, l.K < 5 ? 3 : 0)} ${expS[1]}/${expS[0]} · q ${l.q}`;
+                const srcK = data.spotSrc[l.u];
+                const spotSrcLbl = undersOverride[l.u]
+                  ? 'modificato a mano'
+                  : srcK === 'titolo'
+                    ? `prezzo del titolo in portafoglio al ${fmtDateIt(data.spotDate)}`
+                    : srcK === 'congelato'
+                      ? `prezzo congelato al ${fmtDateIt(data.spotDate)}`
+                      : srcK === 'live'
+                        ? 'prezzo live (sottostante non ancora congelato nello snapshot)'
+                        : l.u === 'EURUSD'
+                          ? `cambio dello snapshot al ${fmtDateIt(data.spotDate)}`
+                          : '—';
                 const spotLine =
                   S0 != null
-                    ? `Spot ${fmtN(S0, 2)} → ${fmtN(S1 as number, 2)}  (β ${fmtN(betaL, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%)`
+                    ? `Spot ${fmtN(S0, 2)} → ${fmtN(S1 as number, 2)}  (β ${fmtN(betaL, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%)\nFonte spot: ${spotSrcLbl} · premio opzione: ${fmtN(l.px, 2)} allo stesso snapshot`
                     : '';
                 const intr = (S: number) =>
                   isCall ? `max(0, ${fmtN(S, 2)} − ${kFmt})` : `max(0, ${kFmt} − ${fmtN(S, 2)})`;
@@ -3321,7 +3369,10 @@ export function StressLabContent({
       >
         {showUnd ? '▾' : '▸'} spot e beta dei sottostanti (modificabili)
         <Info title="Da dove vengono spot e beta" w={340}>
-          Gli spot dei titoli in portafoglio vengono dai prezzi del giorno. I beta sono presi da{' '}
+          Gli spot sono quelli della <b>data dello snapshot</b> ({fmtDateIt(data.spotDate)}), coerenti coi premi
+          delle opzioni: per i titoli in portafoglio il loro prezzo nello snapshot, per gli altri sottostanti il
+          prezzo congelato a quella data. Nella vista corrente, un sottostante non ancora congelato usa il prezzo
+          live; in Visualizzazione Storica mai. I beta sono presi da{' '}
           <code>ticker_fundamentals</code> (sorgente Yahoo Finance/GuruFocus, refresh mensile). Modificare un
           beta qui aggiorna sia le opzioni sia la posizione in titoli ed è SOLO sessione corrente: per
           aggiornare il dato persistente, esegui un refresh dal pannello admin.
