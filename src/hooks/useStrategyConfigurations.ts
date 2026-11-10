@@ -3,10 +3,18 @@ import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
+import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId, usePortfolioContext } from '@/contexts/PortfolioContext';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
 import { useFullSnapshot } from '@/hooks/useFullSnapshot';
-import { recomputeLatestSnapshot } from '@/lib/uploadSnapshot';
+import { recomputeLatestSnapshot, recomputeHistoricalSnapshot } from '@/lib/uploadSnapshot';
+import { saveHistoricalStrategyConfigs } from '@/lib/fullSnapshot';
+import {
+  HistoricalConfig,
+  replaceHistoricalConfigs,
+  addHistoricalConfig,
+  removeHistoricalConfig,
+  cancelHistoricalOverride,
+} from '@/lib/historicalConfigEdit';
 import { shouldRecomputeAfterBatchSave } from '@/lib/strategyConfigGates';
 
 export interface PositionSignature {
@@ -102,9 +110,43 @@ export function useStrategyConfigurations() {
     : liveConfigurations;
   const isLoading = isHistoricalActive ? isSnapshotLoading : isLiveLoading;
 
+  /* ---------- Visualizzazione Storica: correzione delle config di QUELLA data ----------
+   * Le config congelate nello snapshot possono essere sbagliate (es. quantità non
+   * aggiornata dopo una seconda vendita). Le modifiche riscrivono solo
+   * portfolio_full_snapshots della data visualizzata e ne ricalcolano le metriche
+   * storiche; config live e altre date restano intatte. La data corrente si corregge
+   * dalla vista attuale (verrebbe ricongelata dalle config live). */
+  const { selectedPortfolio } = usePortfolioContext();
+  const histDate = fullSnapshot?.snapshot_date ?? null;
+  const histPortfolioId = fullSnapshot?.portfolio_id ?? null;
+  const editHistorical = async (next: (cur: HistoricalConfig[], nowIso: string) => HistoricalConfig[]) => {
+    if (!histDate || !histPortfolioId) throw new Error('Snapshot storico non caricato');
+    if (selectedPortfolio?.snapshot_date && selectedPortfolio.snapshot_date === histDate) {
+      throw new Error('È la data corrente del portafoglio: modifica le configurazioni dalla vista attuale');
+    }
+    const nowIso = new Date().toISOString();
+    const updated = next((fullSnapshot?.strategy_configurations ?? []) as HistoricalConfig[], nowIso);
+    await saveHistoricalStrategyConfigs(histPortfolioId, histDate, updated);
+    const recomputed = await recomputeHistoricalSnapshot(histPortfolioId, histDate);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['full-snapshot', histPortfolioId, histDate] }),
+      queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
+    ]);
+    if (!recomputed) {
+      toast.warning('Configurazioni salvate, ma il ricalcolo dei dati storici della data non è riuscito');
+    }
+  };
+  const newId = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `hist-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
   const upsertMutation = useMutation({
     mutationFn: async (params: UpsertConfigParams) => {
-      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
+      if (isHistoricalActive) {
+        await editHistorical((cur, now) => addHistoricalConfig(cur, params, histPortfolioId!, now, newId));
+        return null;
+      }
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('strategy_configurations')
@@ -125,6 +167,7 @@ export function useStrategyConfigurations() {
       return data;
     },
     onSuccess: () => {
+      if (isHistoricalActive) return;
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       if (portfolioId) {
         recomputeLatestSnapshot(portfolioId).then(() => {
@@ -134,13 +177,16 @@ export function useStrategyConfigurations() {
     },
     onError: (error) => {
       console.error('Failed to save strategy configuration:', error);
-      toast.error('Errore nel salvare la configurazione');
+      toast.error('Errore nel salvare la configurazione', { description: (error as Error)?.message });
     },
   });
 
   const upsertBatchMutation = useMutation({
     mutationFn: async (configs: UpsertConfigParams[]) => {
-      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
+      if (isHistoricalActive) {
+        await editHistorical((_cur, now) => replaceHistoricalConfigs(configs, histPortfolioId!, now, newId));
+        return;
+      }
       if (!portfolioId) throw new Error('No portfolio selected');
       
       // Full replacement is intentional: callers include untouched configs too.
@@ -169,6 +215,12 @@ export function useStrategyConfigurations() {
       if (error) throw error;
     },
     onSuccess: (_data, configs) => {
+      if (isHistoricalActive) {
+        toast.success(`Configurazione strategie corretta per lo snapshot del ${histDate ? histDate.split('-').reverse().join('/') : ''}`, {
+          description: 'Solo questa data: configurazioni attuali e altre date invariate.',
+        });
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Configurazione strategie salvata');
       if (portfolioId && shouldRecomputeAfterBatchSave(configs)) {
@@ -179,17 +231,21 @@ export function useStrategyConfigurations() {
     },
     onError: (error) => {
       console.error('Failed to batch save strategy configurations:', error);
-      toast.error('Errore nel salvare la configurazione');
+      toast.error('Errore nel salvare la configurazione', { description: (error as Error)?.message });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (configId: string) => {
-      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
+      if (isHistoricalActive) {
+        await editHistorical((cur, now) => removeHistoricalConfig(cur, configId, now));
+        return;
+      }
       const { error } = await supabase.from('strategy_configurations').delete().eq('id', configId);
       if (error) throw error;
     },
     onSuccess: () => {
+      if (isHistoricalActive) return;
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       if (portfolioId) {
         recomputeLatestSnapshot(portfolioId).then(() => {
@@ -206,7 +262,10 @@ export function useStrategyConfigurations() {
 
   const cancelOverrideMutation = useMutation({
     mutationFn: async (configId: string) => {
-      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
+      if (isHistoricalActive) {
+        await editHistorical((cur, now) => cancelHistoricalOverride(cur, configId, now));
+        return;
+      }
       const { error } = await supabase
         .from('strategy_configurations')
         .update({ config_locked: false, override_canceled_at: new Date().toISOString() })
@@ -214,7 +273,7 @@ export function useStrategyConfigurations() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
+      if (!isHistoricalActive) queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Override annullato: la strategia può essere riconciliata automaticamente');
     },
     onError: () => toast.error("Impossibile annullare l'override"),

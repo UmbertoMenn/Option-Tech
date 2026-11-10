@@ -12,7 +12,7 @@ import { calculateCurrencyExposure } from './currencyExposure';
 import { computeSinglePortfolioNetting } from '@/hooks/useDerivativeNetting';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { fetchLocalPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { saveFullSnapshot } from '@/lib/fullSnapshot';
+import { saveFullSnapshot, fetchFullSnapshot } from '@/lib/fullSnapshot';
 
 interface UploadSnapshotInput {
   portfolioId: string;
@@ -26,6 +26,66 @@ interface UploadSnapshotInput {
    * (odierni) risulterebbero sempre "successivi" alla snapshot date.
    */
   gpRefreshedInThisUpload?: boolean;
+}
+
+/** Metriche di historical_data che dipendono da posizioni + config strategie + prezzi congelati. */
+export interface ConfigDependentMetrics {
+  netting_total: number;
+  netting_ex_cc: number;
+  netting_ex_cc_np: number;
+  netting_intrinsic_b: number;
+  equity_exposure_pct: number;
+  usd_exposure_pct: number;
+}
+
+/**
+ * Calcolo puro (nessun I/O) delle metriche che cambiano con le configurazioni strategie:
+ * netting (totale, intrinseco A/B), esposizione azionaria, esposizione USD.
+ * Usato sia dall'upload/ricalcolo live sia dalla correzione delle config di uno snapshot storico.
+ */
+export function computeConfigDependentMetrics(input: {
+  positions: Position[];
+  overrides: DerivativeOverride[];
+  strategyConfigs: StrategyConfiguration[];
+  frozenPrices: Record<string, number>;
+  totalValue: number;
+  gpStockTotalValue: number;
+}): ConfigDependentMetrics {
+  const { positions, overrides, strategyConfigs, frozenPrices, totalValue, gpStockTotalValue } = input;
+  const underlyingPrices: Record<string, UnderlyingPrice> = {};
+  for (const [k, px] of Object.entries(frozenPrices)) underlyingPrices[k] = { price: px, currency: 'USD' };
+
+  const nettingResult = computeSinglePortfolioNetting(positions, overrides, underlyingPrices, strategyConfigs);
+  const nettingTotal = totalValue + nettingResult.totalNetting;
+  const nettingIntrinsicA = totalValue + nettingResult.nettingIntrinsicA;
+  const nettingIntrinsicB = totalValue + nettingResult.nettingIntrinsicB;
+
+  const derivatives = positions.filter((p) => p.asset_type === 'derivative');
+  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+  const riskAnalysis = analyzePortfolioRisk(positions, categories);
+  const equityNumerator = riskAnalysis.grandTotal + gpStockTotalValue;
+  const equityExposurePct = nettingTotal > 0 ? Math.max(0, Math.min(1, equityNumerator / nettingTotal)) : 0.6;
+
+  const currencyExposures = calculateCurrencyExposure(riskAnalysis);
+  const totalExposure = currencyExposures.reduce((sum, c) => sum + c.totalRisk, 0);
+  const usdExposure = currencyExposures.find((c) => c.currency === 'USD');
+  const usdExposurePct = totalExposure > 0 && usdExposure ? usdExposure.totalRisk / totalExposure : 0;
+
+  return {
+    netting_total: nettingTotal,
+    netting_ex_cc: nettingIntrinsicA, // mapped for compatibility
+    netting_ex_cc_np: nettingIntrinsicA, // Netting Intrinseco (A)
+    netting_intrinsic_b: nettingIntrinsicB,
+    equity_exposure_pct: equityExposurePct,
+    usd_exposure_pct: usdExposurePct,
+  };
+}
+
+/** Valore delle posizioni non derivate allo snapshot (come in total_value). */
+export function nonDerivativeSnapshotValue(positions: Position[]): number {
+  return positions
+    .filter((p) => p.asset_type !== 'derivative')
+    .reduce((sum, p) => sum + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
 }
 
 export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValue, gpRefreshedInThisUpload }: UploadSnapshotInput): Promise<void> {
@@ -44,9 +104,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
     const positions = positionsRaw as unknown as Position[];
 
     // 2. Calculate total_value (non-derivative snapshot values + cash + GP)
-    const positionsValue = positions
-      .filter(p => p.asset_type !== 'derivative')
-      .reduce((sum, p) => sum + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
+    const positionsValue = nonDerivativeSnapshotValue(positions);
     
     // Fetch GP total value — but include it in the snapshot ONLY if the GP
     // is aligned with the portfolio snapshot date. Otherwise the GP belongs
@@ -156,32 +214,9 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       }
     }
 
-    // Mappa nel formato atteso dal netting
-    const underlyingPrices: Record<string, UnderlyingPrice> = {};
-    for (const [k, px] of Object.entries(frozen)) {
-      underlyingPrices[k] = { price: px, currency: 'USD' };
-    }
-
-    // 4. Compute netting — con le strategy configs E i prezzi CONGELATI (fissi)
-    const nettingResult = computeSinglePortfolioNetting(
-      positions,
-      overrides,
-      underlyingPrices,
-      strategyConfigs,
-    );
-    const nettingTotal = totalValue + nettingResult.totalNetting;
-    const nettingIntrinsicA = totalValue + nettingResult.nettingIntrinsicA;
-    const nettingIntrinsicB = totalValue + nettingResult.nettingIntrinsicB;
-
-    // 6. Compute equity exposure — formula allineata al Risk Analyzer:
-    //    numeratore = grandTotal (stock+ETF+commodity+naked put+leap+strategie+sintetiche CC/DR-CC)
-    //                 + valore stock delle GP allineate alla snapshot date
-    //    denominatore = netting_total (NON total_value)
-    const derivatives = positions.filter(p => p.asset_type === 'derivative');
-    const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
-    const riskAnalysis = analyzePortfolioRisk(positions, categories);
-
-    // Stock GP allineate alla data snapshot (stessa logica temporale del gpTotalValue)
+    // 4-7. Netting (config + prezzi CONGELATI), esposizione azionaria e USD.
+    //      Esposizione azionaria — formula allineata al Risk Analyzer:
+    //      numeratore = grandTotal + stock GP allineate alla data; denominatore = netting_total.
     const { data: gpStocksRaw } = await supabase
       .from('gp_holdings')
       .select('asset_type, market_value')
@@ -191,19 +226,14 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
           .filter((h: any) => h.asset_type === 'stock')
           .reduce((sum: number, h: any) => sum + Number(h.market_value || 0), 0)
       : 0;
-
-    const equityNumerator = riskAnalysis.grandTotal + gpStockTotalValue;
-    const equityExposurePct = nettingTotal > 0
-      ? Math.max(0, Math.min(1, equityNumerator / nettingTotal))
-      : 0.6;
-
-    // 7. Compute USD exposure
-    const currencyExposures = calculateCurrencyExposure(riskAnalysis);
-    const totalExposure = currencyExposures.reduce((sum, c) => sum + c.totalRisk, 0);
-    const usdExposure = currencyExposures.find(c => c.currency === 'USD');
-    const usdExposurePct = totalExposure > 0 && usdExposure
-      ? usdExposure.totalRisk / totalExposure
-      : 0;
+    const metrics = computeConfigDependentMetrics({
+      positions,
+      overrides,
+      strategyConfigs,
+      frozenPrices: frozen,
+      totalValue,
+      gpStockTotalValue,
+    });
 
     // 8. Upsert into historical_data
     const { error } = await supabase
@@ -212,12 +242,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         portfolio_id: portfolioId,
         snapshot_date: snapshotDate,
         total_value: totalValue,
-        netting_total: nettingTotal,
-        netting_ex_cc: nettingIntrinsicA, // mapped for compatibility
-        netting_ex_cc_np: nettingIntrinsicA, // Netting Intrinseco (A)
-        netting_intrinsic_b: nettingIntrinsicB,
-        equity_exposure_pct: equityExposurePct,
-        usd_exposure_pct: usdExposurePct,
+        ...metrics,
         snapshot_underlying_prices: frozen as unknown as Record<string, number>,
         deposits: Number(existingSnap?.deposits ?? 0),
         average_balance: Number(existingSnap?.average_balance ?? 0),
@@ -234,9 +259,9 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         portfolioId,
         snapshotDate,
         totalValue: Math.round(totalValue),
-        nettingTotal: Math.round(nettingTotal),
-        equityExposurePct: (equityExposurePct * 100).toFixed(1) + '%',
-        usdExposurePct: (usdExposurePct * 100).toFixed(1) + '%',
+        nettingTotal: Math.round(metrics.netting_total),
+        equityExposurePct: (metrics.equity_exposure_pct * 100).toFixed(1) + '%',
+        usdExposurePct: (metrics.usd_exposure_pct * 100).toFixed(1) + '%',
       });
     }
   } catch (err) {
@@ -292,5 +317,59 @@ export async function recomputeLatestSnapshot(portfolioId: string): Promise<void
     console.log('[recomputeLatestSnapshot] Recomputed snapshot for', portfolioId, 'date', snapshotDate);
   } catch (err) {
     console.error('[recomputeLatestSnapshot] Unexpected error:', err);
+  }
+}
+
+/**
+ * Ricalcola le metriche di historical_data di una data STORICA dopo la correzione delle
+ * sue configurazioni strategie. Lavora SOLO sui dati congelati di quella data (snapshot
+ * completo + prezzi congelati in historical_data): non legge posizioni/config live e non
+ * ricongela lo snapshot. Aggiorna solo i campi che dipendono dalle config (netting,
+ * esposizioni); total_value, depositi e prezzi congelati restano invariati.
+ */
+export async function recomputeHistoricalSnapshot(portfolioId: string, snapshotDate: string): Promise<boolean> {
+  try {
+    const snap = await fetchFullSnapshot(portfolioId, snapshotDate);
+    if (!snap) return false;
+    const { data: hist, error: histErr } = await supabase
+      .from('historical_data')
+      .select('total_value, snapshot_underlying_prices')
+      .eq('portfolio_id', portfolioId)
+      .eq('snapshot_date', snapshotDate)
+      .maybeSingle();
+    if (histErr || !hist) {
+      console.error('[recomputeHistoricalSnapshot] historical_data mancante:', histErr?.message);
+      return false;
+    }
+    const totalValue = Number(hist.total_value ?? 0);
+    // GP inclusa nel total_value di quella data? (stessa regola di allineamento dell'upload,
+    // ricostruita dal valore salvato: ciò che eccede posizioni + cash è la GP)
+    const gpIncluded = totalValue - nonDerivativeSnapshotValue(snap.positions) - snap.cash_value > 0.5;
+    const gpStockTotalValue = gpIncluded
+      ? (snap.gp_holdings || [])
+          .filter((h: any) => h.asset_type === 'stock')
+          .reduce((sum: number, h: any) => sum + Number(h.market_value || 0), 0)
+      : 0;
+    const metrics = computeConfigDependentMetrics({
+      positions: snap.positions,
+      overrides: snap.derivative_overrides,
+      strategyConfigs: snap.strategy_configurations,
+      frozenPrices: (hist.snapshot_underlying_prices as Record<string, number>) || {},
+      totalValue,
+      gpStockTotalValue,
+    });
+    const { error } = await supabase
+      .from('historical_data')
+      .update(metrics)
+      .eq('portfolio_id', portfolioId)
+      .eq('snapshot_date', snapshotDate);
+    if (error) {
+      console.error('[recomputeHistoricalSnapshot] Update failed:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[recomputeHistoricalSnapshot] Unexpected error:', err);
+    return false;
   }
 }

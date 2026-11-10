@@ -15,6 +15,7 @@ import { Position } from '@/types/portfolio';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { GPHoldingRow } from '@/hooks/useGPHoldings';
+import { configsToFreeze, historicalConfigsEditedAt, HistoricalConfig } from '@/lib/historicalConfigEdit';
 
 export interface FullSnapshot {
   portfolio_id: string;
@@ -26,6 +27,8 @@ export interface FullSnapshot {
   cash_value: number;
   gp_total_value: number | null;
   restricted_cash_value?: number | null;
+  /** Data (ISO) dell'ultima correzione manuale delle config di questo snapshot, o null. */
+  configs_edited_at?: string | null;
 }
 
 /**
@@ -53,13 +56,26 @@ export async function saveFullSnapshot(
       return;
     }
 
+    // Config corrette a mano in Visualizzazione Storica: un ricongelamento della data
+    // (re-upload / ricalcolo) non le sovrascrive con le config live.
+    const { data: existing } = await supabase
+      .from('portfolio_full_snapshots')
+      .select('strategy_configurations')
+      .eq('portfolio_id', portfolioId)
+      .eq('snapshot_date', snapshotDate)
+      .maybeSingle();
+    const frozenConfigs = configsToFreeze(
+      (existing?.strategy_configurations ?? null) as unknown as HistoricalConfig[] | null,
+      cfgRes.data ?? [],
+    );
+
     const { error } = await supabase
       .from('portfolio_full_snapshots')
       .upsert({
         portfolio_id: portfolioId,
         snapshot_date: snapshotDate,
         positions: (posRes.data ?? []) as unknown as never,
-        strategy_configurations: (cfgRes.data ?? []) as unknown as never,
+        strategy_configurations: frozenConfigs as unknown as never,
         derivative_overrides: (ovrRes.data ?? []) as unknown as never,
         gp_holdings: (gpRes.data ?? []) as unknown as never,
         cash_value: cashValue,
@@ -75,7 +91,7 @@ export async function saveFullSnapshot(
         portfolioId,
         snapshotDate,
         positions: (posRes.data ?? []).length,
-        configs: (cfgRes.data ?? []).length,
+        configs: frozenConfigs.length,
         overrides: (ovrRes.data ?? []).length,
         gpHoldings: (gpRes.data ?? []).length,
       });
@@ -108,7 +124,27 @@ export async function fetchFullSnapshot(
     cash_value: Number(data.cash_value ?? 0),
     gp_total_value: data.gp_total_value != null ? Number(data.gp_total_value) : null,
     restricted_cash_value: data.restricted_cash_value != null ? Number(data.restricted_cash_value) : null,
+    configs_edited_at: historicalConfigsEditedAt((data.strategy_configurations ?? []) as unknown as HistoricalConfig[]),
   };
+}
+
+/**
+ * Scrive le configurazioni strategie corrette di uno snapshot STORICO (solo quella data).
+ * Le config live e le altre date non vengono toccate.
+ */
+export async function saveHistoricalStrategyConfigs(
+  portfolioId: string,
+  snapshotDate: string,
+  configs: HistoricalConfig[],
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('portfolio_full_snapshots')
+    .update({ strategy_configurations: configs as unknown as never })
+    .eq('portfolio_id', portfolioId)
+    .eq('snapshot_date', snapshotDate)
+    .select('snapshot_date');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Snapshot storico non trovato o non modificabile');
 }
 
 /** Date disponibili per la visualizzazione storica (più recente prima). */

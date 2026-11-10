@@ -1072,9 +1072,17 @@ export function Derivatives() {
             </TooltipProvider>
           </div>
           {canOpenStrategyWizard(derivatives.length, strategyConfigs.length) && (
-            <Button variant="outline" size="sm" onClick={() => setWizardOpenPersisted(true)} className="relative">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setWizardOpenPersisted(true)}
+              className="relative"
+              title={isHistoricalView ? 'Corregge le configurazioni congelate in questo snapshot: solo questa data, configurazioni attuali invariate' : undefined}
+            >
               <Settings className="w-4 h-4 mr-2" />
-              {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
+              {isHistoricalView
+                ? 'Correggi strategie (solo questa data)'
+                : hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
               {needsWizard && (
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-orange-500" />
               )}

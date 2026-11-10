@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { History, X } from 'lucide-react';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 
 function formatDateIt(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
@@ -13,6 +14,8 @@ function formatDateIt(iso: string): string {
  */
 export function HistoricalViewBanner() {
   const { isHistoricalView, historicalViewDate, exitHistoricalView, selectedPortfolio } = usePortfolioContext();
+  const { snapshot } = useFullSnapshot();
+  const editedAt = snapshot?.configs_edited_at ?? null;
 
   if (!isHistoricalView || !historicalViewDate) return null;
 
@@ -23,6 +26,11 @@ export function HistoricalViewBanner() {
         <span>
           Visualizzazione storica{selectedPortfolio ? ` — ${selectedPortfolio.name}` : ''} al{' '}
           <strong>{formatDateIt(historicalViewDate)}</strong> · sola lettura
+          {editedAt ? (
+            <span title="Le configurazioni strategie congelate in questo snapshot sono state corrette a mano (solo questa data).">
+              {' '}· configurazioni strategie corrette il {new Date(editedAt).toLocaleDateString('it-IT')}
+            </span>
+          ) : null}
         </span>
         <Button
           size="sm"
