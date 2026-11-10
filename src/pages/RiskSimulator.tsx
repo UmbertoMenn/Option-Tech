@@ -1551,7 +1551,7 @@ export function StressLabContent({
                   impostato, con orizzonte e vol distribuiti lungo il percorso. A ogni step, se lo spot arriva entro
                   il <b>trigger</b> dallo strike, la put viene ricomprata e se ne vende un'altra così:
                   <br />
-                  Si rollano <b>solo put OTM</b>: una put già ITM oggi non viene rollata, e la put di arrivo è
+                  Si rollano <b>solo put OTM</b>: una put già ITM allo snapshot non viene rollata, e la put di arrivo è
                   sempre sotto lo spot.
                   <br />
                   1) <b>scadenza</b>: la più vicina (di mese in mese, fino al cap) che offre un candidato. Cap:{' '}
@@ -1818,11 +1818,11 @@ export function StressLabContent({
                     >
                       Put ITM · {rollStats.itmSel}/{itmCandidates.length} selezionate
                       <Info title="Rolling delle put già ITM" w={420}>
-                        Le put vendute idonee già <b>ITM</b> oggi (spot ≤ strike) si rollano solo se{' '}
+                        Le put vendute idonee già <b>ITM</b> allo snapshot (spot ≤ strike) si rollano solo se{' '}
                         <b>selezionate</b> (casella nel dettaglio per gamba, o i pulsanti qui accanto), con regole
                         dedicate e <b>anche a debito</b>:
                         <br />
-                        1) <b>trigger</b>: lo spot perde almeno la % impostata rispetto allo spot di oggi (dopo un roll,
+                        1) <b>trigger</b>: lo spot perde almeno la % impostata rispetto allo spot dello snapshot (dopo un roll,
                         rispetto allo spot di quel roll). 0% = roll al primo passo;
                         <br />
                         2) <b>strike di arrivo</b>: almeno la discesa minima ITM sotto lo strike corrente, anche se
@@ -1884,7 +1884,7 @@ export function StressLabContent({
                     accent={C.amber}
                     info={
                       <Info title="Trigger delle put ITM" w={300}>
-                        Il roll scatta quando lo spot scende di almeno questa % rispetto allo spot di oggi (o dello
+                        Il roll scatta quando lo spot scende di almeno questa % rispetto allo spot dello snapshot (o dello
                         spot all'ultimo roll). 0% = roll immediato al primo passo del percorso.
                       </Info>
                     }
@@ -3206,14 +3206,25 @@ export function StressLabContent({
                   rr.rolls && rr.rolls.length
                     ? `P ${fmtK(rr.finalK ?? l.K)} · ${arrExpS ? `${arrExpS[2]}/${arrExpS[1]}/${arrExpS[0]}` : '—'}`
                     : '';
+                // In Visualizzazione Storica i tempi sono dalla data dello snapshot, non da oggi.
+                const fromLbl = data.isHistorical ? `dal ${fmtDateIt(data.spotDate)}` : 'da oggi';
+                const rollExps: string[] = [];
+                {
+                  let e0 = l.exp;
+                  for (const e of rr.rolls ?? []) {
+                    const nx = rolledExpiryISO(e0, e.fromT, e.toT);
+                    rollExps.push(nx ? fmtDateIt(nx) : '—');
+                    if (nx) e0 = nx;
+                  }
+                }
                 const rollLines =
                   rr.rolls && rr.rolls.length
                     ? `ROLLING (${-(rr.rollQ ?? 0)} di ${-l.q} contratti):\n` +
-                      `  PUT DI ARRIVO: ${arrLbl} (${Math.round((rr.finalT ?? 0) * 365.25)} gg da oggi, era ${Math.round(l.T * 365.25)} gg)\n` +
+                      `  PUT DI ARRIVO: ${arrLbl} (${Math.round((rr.finalT ?? 0) * 365.25)} gg ${fromLbl}, era ${Math.round(l.T * 365.25)} gg)\n` +
                       rr.rolls
                         .map(
                           (e, k) =>
-                            `  ${k + 1})${e.itm ? ' [ITM]' : ''}${e.reducedDrop ? ' [DISCESA RIDOTTA: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza ammessa, strike più basso a credito]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${fmtN(e.fromT * 12, 1)} mesi da oggi) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}${chainLbl(l.u, e.toT, e.kSrc)}] (scad. ${fmtN(e.toT * 12, 1)} mesi da oggi) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
+                            `  ${k + 1})${e.itm ? ' [ITM]' : ''}${e.reducedDrop ? ' [DISCESA RIDOTTA: nessuna scadenza entro il cap dava la discesa minima a credito → ultima scadenza ammessa, strike più basso a credito]' : ''} mercato ${sgn(e.d, 1)}% spot ${fmtN(e.S, 2)}: ricompro P${fmtN(e.fromK, 2)} (scad. ${k === 0 ? fmtDateIt(l.exp) : rollExps[k - 1]}, ${fmtN(e.fromT * 12, 1)} mesi ${fromLbl}) a ${fmtN(e.buy, 2)} → vendo P${fmtK(e.toK)} [strike ${e.kSrc ?? 'regola'}${chainLbl(l.u, e.toT, e.kSrc)}] (scad. ${rollExps[k]}, ${fmtN(e.toT * 12, 1)} mesi ${fromLbl}) a ${fmtN(e.sell, 2)}  netto ${sgn(e.sell - e.buy, 2)}`,
                         )
                         .join('\n') +
                       (() => {
@@ -3700,7 +3711,7 @@ function ExpiryCard({
       style={{ display: 'flex', flexDirection: 'column', ...style }}
       info={
         <Info title="Scadenza media del portafoglio derivati" w={380}>
-          Media delle scadenze (giorni da <b>oggi</b>) delle opzioni <b>vendute</b>, pesata per il{' '}
+          Media delle scadenze (giorni dalla <b>data dello snapshot</b>: oggi nella vista corrente, la data scelta in Visualizzazione Storica) delle opzioni <b>vendute</b>, pesata per il{' '}
           <b>nozionale</b> di ogni gamba (contratti × moltiplicatore × strike). Put e call vendute separate;
           le gambe comprate non entrano.
           <br />
