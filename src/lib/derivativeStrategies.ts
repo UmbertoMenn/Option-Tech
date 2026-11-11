@@ -1975,8 +1975,13 @@ function collapseShortTokens(text: string): string {
  * Gets the canonical company key for any variation
  */
 export function getCanonicalKey(text: string): string | null {
-  const normalized = normalizeForMatching(text);
-  
+  const normalized = normalizeForMatching(text || '');
+  // Testo vuoto (es. ticker null → '') non identifica nulla: senza questa guardia
+  // `alias.includes('')` è sempre vero e restituiva ALPHABET, collegando le opzioni
+  // GOOGLE a ogni posizione senza ticker (ETF UCITS di silvias, Banca Sella): le call
+  // ITM applicavano il cap CC all'ETF e la put lunga lo "proteggeva".
+  if (!normalized) return null;
+
   for (const [canonical, aliases] of Object.entries(SPECIAL_ALIASES)) {
     for (const alias of aliases) {
       const normalizedAlias = normalizeForMatching(alias);
